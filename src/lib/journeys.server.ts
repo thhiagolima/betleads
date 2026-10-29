@@ -18,6 +18,11 @@ import { resolveJourneyWorkerScope } from "./journey-worker-scope";
 import { channelBudget, type Admission } from "./rate-limit/channel-budget.server";
 import { captureServerException } from "./observability/sentry.server";
 import {
+  MAX_PLATFORM_HOLDS,
+  PLATFORM_HOLD_MS,
+  journeyPlatformFailure,
+} from "./journey-platform-failure";
+import {
   createClaimingSource,
   createTimeBudget,
   runBoundedPool,
@@ -654,6 +659,8 @@ type ChannelGate = {
 };
 
 const SEND_CHANNELS = new Set(["sms", "email", "voice"]);
+/** A step held for lack of house balance comes back after this, so a recharge resumes it. */
+const NO_BALANCE_RETRY_MS = 15 * 60_000;
 
 /**
  * I2: admits a claimed item against the channel budget BEFORE the expensive
@@ -700,6 +707,12 @@ async function deliverStep(
   gate: ChannelGate,
 ): Promise<void> {
   const channel = step.step_type;
+  // The wallet already refused this house in this run: wait without reserving
+  // or calling the provider again (one wallet check per house per run).
+  if (ctx.noBalanceTenants.has(enrollment.tenant_id)) {
+    await holdForBalance(enrollment, ctx, channel, null);
+    return;
+  }
   const house = await loadHouseLinks(enrollment.tenant_id);
   const reservation = await reserveDelivery(enrollment, step, journey);
   // ENV-02: this step already has a sent execution (e.g. a previous attempt
@@ -1039,8 +1052,10 @@ type DispatchCounters = {
   leaseLost: number;
   /** SMS items held back (no attempt consumed) because the provider breaker is open. */
   providerSuspended: number;
-  /** Steps skipped because the house wallet had no balance (PG3 decision 6). */
-  skippedNoBalance: number;
+  /** Steps held on the same position because the house wallet had no balance. */
+  deferredNoBalance: number;
+  /** Steps held on the same position because the platform failed before sending. */
+  platformHeld: number;
 };
 
 /**
@@ -1065,6 +1080,10 @@ type DispatchContext = {
   executions: Map<string, string>;
   /** `${tenant_id}:${channel}` -> epoch ms until which its budget is exhausted. */
   exhausted: Map<string, number>;
+  /** Houses whose wallet refused a send in this run: their paid steps wait without reserving. */
+  noBalanceTenants: Set<string>;
+  /** `${tenant_id}:${reason}` platform failures already reported to Sentry in this run. */
+  platformReported: Set<string>;
   sms: SmsRunGate;
 };
 
@@ -1110,10 +1129,16 @@ type ClaimedRow = { id: string; tenant_id: string; step_type?: string | null };
 
 type ProviderDeferrals = { step_position: number; loop_iteration: number; count: number };
 
-/** Consecutive no-cost defers of the enrollment's CURRENT step (resets on a new step/loop). */
-function nextNoCostDeferral(enrollment: Record<string, unknown>): ProviderDeferrals {
+/**
+ * Consecutive no-cost defers of the enrollment's CURRENT step (resets on a new
+ * step/loop), kept in metadata[key]: `provider_deferrals` or `platform_holds`.
+ */
+function nextNoCostDeferral(
+  enrollment: Record<string, unknown>,
+  key: "provider_deferrals" | "platform_holds" = "provider_deferrals",
+): ProviderDeferrals {
   const metadata = (enrollment.metadata ?? {}) as Record<string, unknown>;
-  const previous = metadata.provider_deferrals as Partial<ProviderDeferrals> | undefined;
+  const previous = metadata[key] as Partial<ProviderDeferrals> | undefined;
   const position = Number(enrollment.current_position ?? 0);
   const loop = Number(enrollment.loop_iteration ?? 0);
   const sameStep = previous?.step_position === position && previous?.loop_iteration === loop;
@@ -1155,6 +1180,52 @@ async function finishOwnExecution(
 }
 
 /**
+ * The house wallet has no balance: the enrollment waits on the SAME step and
+ * comes back in NO_BALANCE_RETRY_MS, so a recharge resumes the journey where it
+ * stopped (skipping lost the first message of 11.6k betgreen enrollments on
+ * 2026-10-27). No attempt consumed. Time-sensitive steps (PIX, saque) still
+ * exit as `stale_message` once past max_delay_minutes.
+ * `refusal` is the wallet's message when this item was actually refused (its
+ * execution goes back to `retrying` and the house is alerted); null when the
+ * item is held because another item of the house was refused in this run.
+ */
+async function holdForBalance(
+  enrollment: EnrollmentRow,
+  ctx: DispatchContext,
+  channel: string | null,
+  refusal: string | null,
+) {
+  ctx.counters.deferredNoBalance++;
+  ctx.noBalanceTenants.add(enrollment.tenant_id);
+  const retryAt = new Date(Date.now() + NO_BALANCE_RETRY_MS).toISOString();
+  if (refusal !== null) {
+    await finishOwnExecution(ctx, enrollment.id, {
+      status: "retrying",
+      provider: "wallet",
+      error: refusal.slice(0, 1000),
+      completed_at: new Date().toISOString(),
+    });
+  }
+  // attempts intentionally unchanged.
+  await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt });
+  await event(enrollment, "step_deferred", {
+    channel,
+    step_position: Number(enrollment.current_position ?? 0),
+    reason: "saldo_insuficiente",
+    retry_at: retryAt,
+    attempt_consumed: false,
+  });
+  if (refusal === null) return;
+  // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
+  await notifyNoBalance(enrollment.tenant_id).catch((alertError: unknown) =>
+    console.error("[journey dispatcher] no balance alert failed", {
+      tenantId: enrollment.tenant_id,
+      error: alertError instanceof Error ? alertError.message : String(alertError),
+    }),
+  );
+}
+
+/**
  * Error path for one item (B1 / ENV-04):
  * - defer   (provider answered 429/5xx/402...): reschedule WITHOUT consuming an
  *           attempt, at most MAX_NO_COST_DEFERS times in a row per step; after
@@ -1165,10 +1236,10 @@ async function finishOwnExecution(
  *           execution stays `claimed`, so reserve_journey_delivery answers
  *           `in_flight` for 15 min; the item waits 15 min and an attempt is
  *           consumed; at max_attempts the enrollment fails.
- * - skip    (the HOUSE's wallet had no balance, PG3 decision 6): the step
- *           is skipped with reason `saldo_insuficiente` and the journey
- *           advances to the next step now. No retry, no attempt consumed;
- *           the house gets the hourly "Saldo insuficiente" alert.
+ * - skip    (the HOUSE's wallet had no balance): holdForBalance. The step
+ *           waits on the same position and is retried in 15 min, no attempt
+ *           consumed; the house gets the hourly "Saldo insuficiente" alert.
+ *           (Replaces PG3 decision 6, which skipped to the next step.)
  * - fail    : the journey's max_attempts/backoff policy; a misconfigured
  *           provider (missing credentials) is also reported to Sentry.
  */
@@ -1192,32 +1263,11 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
   const enrollment = enrollmentRaw as EnrollmentRow & Record<string, unknown>;
 
   if (decision.kind === "skip") {
-    ctx.counters.skippedNoBalance++;
-    const position = Number(enrollment.current_position ?? 0);
-    await finishOwnExecution(ctx, row.id, {
-      status: "skipped",
-      provider: "wallet",
-      error: message.slice(0, 1000),
-      completed_at: nowIso(),
-    });
-    await release(enrollment, ctx, {
-      status: "active",
-      current_position: position + 1,
-      next_run_at: nowIso(),
-      attempts: 0,
-    });
-    await event(enrollment, "step_skipped", {
-      channel: error instanceof ProviderSendError ? error.channel : (row.step_type ?? null),
-      step_position: position,
-      reason: "saldo_insuficiente",
-      attempt_consumed: false,
-    });
-    // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
-    await notifyNoBalance(row.tenant_id).catch((alertError: unknown) =>
-      console.error("[journey dispatcher] no balance alert failed", {
-        tenantId: row.tenant_id,
-        error: alertError instanceof Error ? alertError.message : String(alertError),
-      }),
+    await holdForBalance(
+      enrollment,
+      ctx,
+      error instanceof ProviderSendError ? error.channel : (row.step_type ?? null),
+      message,
     );
     return;
   }
@@ -1289,6 +1339,53 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
       return;
     }
     // Cap reached: from now on the failure costs an attempt (below).
+  }
+
+  // P0.1b: the platform failed before anything was sent (Short.io, send log,
+  // schema, provider credentials). Hold the step instead of failing the player.
+  const platformReason =
+    decision.kind === "fail" ? journeyPlatformFailure(error, decision.reason) : null;
+  if (platformReason) {
+    const holds = nextNoCostDeferral(enrollment, "platform_holds");
+    if (holds.count <= MAX_PLATFORM_HOLDS) {
+      ctx.counters.platformHeld++;
+      const retryAt = new Date(Date.now() + PLATFORM_HOLD_MS).toISOString();
+      await finishOwnExecution(ctx, row.id, {
+        status: "retrying",
+        error: message.slice(0, 1000),
+        completed_at: nowIso(),
+      });
+      // attempts intentionally unchanged.
+      await release(enrollment, ctx, {
+        status: "waiting",
+        next_run_at: retryAt,
+        metadata: {
+          ...((enrollment.metadata ?? {}) as Record<string, unknown>),
+          platform_holds: holds,
+        },
+      });
+      await event(enrollment, "step_deferred", {
+        reason: "platform_error",
+        platform_reason: platformReason,
+        error: message.slice(0, 500),
+        retry_at: retryAt,
+        attempt_consumed: false,
+        platform_holds: holds.count,
+      });
+      // One report per house and reason per run, not one per player.
+      const reportKey = `${row.tenant_id}:${platformReason}`;
+      if (!ctx.platformReported.has(reportKey)) {
+        ctx.platformReported.add(reportKey);
+        captureServerException(error, {
+          job: "journey_dispatch",
+          tenantId: row.tenant_id,
+          tags: { reason: platformReason },
+          fingerprint: ["journey-platform-hold", platformReason],
+        });
+      }
+      return;
+    }
+    // Cap reached: the normal attempts policy decides (below).
   }
 
   const policy = await retryPolicy(enrollment.journey_id);
@@ -1443,10 +1540,13 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       outcomeUnknown: 0,
       leaseLost: 0,
       providerSuspended: 0,
-      skippedNoBalance: 0,
+      deferredNoBalance: 0,
+      platformHeld: 0,
     },
     executions: new Map(),
     exhausted: new Map(),
+    noBalanceTenants: new Set(),
+    platformReported: new Set(),
     sms: newSmsRunGate(workerId),
   };
   const owned = new Set<string>();
@@ -1627,7 +1727,8 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       outcomeUnknown: ctx.counters.outcomeUnknown,
       leaseLost: ctx.counters.leaseLost,
       providerSuspended: ctx.counters.providerSuspended,
-      skippedNoBalance: ctx.counters.skippedNoBalance,
+      deferredNoBalance: ctx.counters.deferredNoBalance,
+      platformHeld: ctx.counters.platformHeld,
       smsBreaker: ctx.sms.gates.modeOf(PLATFORM_SMS_BREAKER_KEY),
       stopReason,
       scannerSeparated: true,

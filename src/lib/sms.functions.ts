@@ -68,6 +68,7 @@ import {
   refundForDelivery,
 } from "./billing/wallet.server";
 import { countSmsSegments, toGsm7Text } from "./sms-segments";
+import { captureServerException } from "@/lib/observability/sentry.server";
 import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 import { externalListBlockedVariables, externalListVariablesError } from "./campaign-external-list";
 import {
@@ -975,6 +976,10 @@ export async function sendSmsInternal(args: {
       errorSummary ?? `SMS nao aceito pelo provedor: HTTP ${r.status}`,
     );
   }
+  // Once the provider accepted the SMS (and the wallet was charged), failing to
+  // write the log must not turn into an error: callers would retry and send it
+  // again (28/10/2026, missing provider_account_id column: 709 attempts for 292
+  // journey items). Reported instead; a refused send still throws.
   const messageLogId = await logSend({
     to: normalized,
     content: preparedContent,
@@ -998,6 +1003,14 @@ export async function sendSmsInternal(args: {
     tenant_id: billingTenantId ?? args.tenantId ?? null,
     billed_units: creditReserved ? billedUnits : null,
     provider_account_id: r.providerAccountId,
+  }).catch((logError: unknown) => {
+    if (!r.ok) throw logError;
+    captureServerException(logError, {
+      job: "sms_send_log",
+      tenantId: billingTenantId ?? args.tenantId ?? undefined,
+      tags: { reason: "log_after_accepted" },
+    });
+    return null;
   });
   if (messageLogId && trackedDispatchIds.length > 0) {
     const { error: dispatchLogError } = await (supabaseAdmin as any)
