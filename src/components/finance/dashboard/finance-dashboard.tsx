@@ -15,7 +15,7 @@ import {
   type GroupPeriod,
 } from "@/components/group/group-period-bar";
 import { GroupScoreboard } from "@/components/group/group-scoreboard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   getFinanceDashboard,
@@ -25,6 +25,7 @@ import {
 
 import { FINANCE_DASHBOARD_QUERY_KEY } from "@/components/finance/query-keys";
 
+import { periodLabel } from "./display";
 import { KpiBlocks } from "./kpi-blocks";
 import { PendingBanner } from "./pending-banner";
 import { ProfitTrendChart, trendChartTitle, type TrendMetric } from "./profit-trend-chart";
@@ -35,13 +36,25 @@ import { sendsBetleadsNote } from "./sends-block";
 import { TenantProfitTable } from "./tenant-profit-table";
 import { WaterfallChart } from "./waterfall-chart";
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** A painel card: 18px title on the left, an optional label on the right. */
+function Section({
+  title,
+  aside,
+  children,
+}: {
+  title?: string;
+  aside?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="px-4 pb-4 sm:px-5 sm:pb-5">{children}</CardContent>
+    <Card className="min-w-0 rounded-[14px] p-5 sm:p-6">
+      {title && (
+        <div className="mb-3.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 className="text-lg font-semibold leading-tight">{title}</h2>
+          {aside && <span className="text-[13px] text-muted-foreground">{aside}</span>}
+        </div>
+      )}
+      {children}
     </Card>
   );
 }
@@ -63,7 +76,7 @@ function DashboardBody({
   return (
     // One TooltipProvider for every TermTooltip of the painel.
     <TooltipProvider delayDuration={150}>
-      <div className="space-y-4">
+      <div className="space-y-8">
         <PendingBanner
           scopeKind={dashboard.scope.kind}
           tenants={tenants}
@@ -77,7 +90,10 @@ function DashboardBody({
           roiReference={dashboard.roiReference}
           houseCount={multi ? tenants.length : undefined}
         />
-        <Section title={multi ? "Do depósito ao lucro (somado)" : "Do depósito ao lucro"}>
+        <Section
+          title={multi ? "Do depósito ao lucro (somado)" : "Do depósito ao lucro"}
+          aside={periodLabel(dashboard.range)}
+        >
           <WaterfallChart
             steps={dashboard.waterfall}
             withoutFee={totals.current.betleadsFee === null}
@@ -90,8 +106,9 @@ function DashboardBody({
           exemptHouse={dashboard.exemptHouse}
           betleadsNote={sendsBetleadsNote(dashboard.range.from, dashboard.betleadsSince)}
         />
-        <Section title={trendChartTitle(multi, trendMetric)}>
+        <Section>
           <ProfitTrendChart
+            title={trendChartTitle(multi, trendMetric)}
             months={dashboard.months}
             tenants={tenants}
             stacked={multi}

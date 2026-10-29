@@ -51,7 +51,7 @@ function FinanceiroPage() {
     <div className="space-y-6 max-w-6xl">
       <PageHeader
         title="Financeiro"
-        subtitle="Fechamento mensal da casa: anúncios, GGR, taxas e resultado caixa."
+        subtitle="Resultado da casa: o que entrou, o que saiu e quanto sobrou."
         icon={<Wallet className="h-5 w-5 text-primary-foreground" />}
       />
 
