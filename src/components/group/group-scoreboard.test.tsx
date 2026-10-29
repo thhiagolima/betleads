@@ -175,3 +175,15 @@ describe("GroupScoreboard GGR column", () => {
     expect(html).toContain("GGR (Perdas na casa)");
   });
 });
+
+describe("GroupScoreboard one name per number", () => {
+  it("labels the cash-result column as Lucro líquido, not Resultado", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+      />,
+    );
+    expect(html).toContain("Lucro líquido");
+    expect(html).not.toContain("Resultado");
+  });
+});

@@ -17,6 +17,7 @@ import {
   formatRatio,
   GGR_COLUMN_LABEL,
 } from "@/components/finance/format";
+import { FINANCE_TERMS } from "@/components/finance/definitions";
 import {
   defaultValidThrough,
   MONTHLY_GGR_COLUMN_NOTE,
@@ -260,7 +261,7 @@ export function FinanceMonthView({
               <TableHead>Depósitos FTD</TableHead>
               <TableHead>Depósitos totais</TableHead>
               <TableHead>Saques</TableHead>
-              <TableHead>Net bruto</TableHead>
+              <TableHead>{FINANCE_TERMS.net.label}</TableHead>
               <TableHead className={MANUAL_CELL}>
                 {GGR_COLUMN_LABEL}
                 {usingMonthlyGgr && (
@@ -269,7 +270,7 @@ export function FinanceMonthView({
                   </span>
                 )}
               </TableHead>
-              <TableHead>Resultado caixa</TableHead>
+              <TableHead>{FINANCE_TERMS.cashResult.label}</TableHead>
               <TableHead>ROI caixa</TableHead>
             </TableRow>
           </TableHeader>
@@ -405,11 +406,15 @@ export function FinanceMonthView({
           <p className="font-medium">{formatBRL(summary.movementFee)}</p>
         </div>
         <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Taxa GGR</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            {FINANCE_TERMS.ggrFee.label}
+          </p>
           <p className="font-medium">{formatBRL(summary.ggrFee)}</p>
         </div>
         <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Outros custos</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            {FINANCE_TERMS.otherCosts.label}
+          </p>
           <p className="font-medium">{formatBRL(summary.otherCosts)}</p>
         </div>
         <div>
@@ -422,7 +427,9 @@ export function FinanceMonthView({
           {betleadsNote && <p className="text-xs text-muted-foreground">{betleadsNote}</p>}
         </div>
         <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Resultado do mês</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            {FINANCE_TERMS.cashResult.label}
+          </p>
           <p className="text-lg font-semibold">{formatBRL(summary.cashResult)}</p>
         </div>
       </div>

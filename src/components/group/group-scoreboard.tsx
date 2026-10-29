@@ -15,6 +15,7 @@ import {
   formatRatio,
   GGR_COLUMN_LABEL,
 } from "@/components/finance/format";
+import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { pctChange, ppChange } from "@/lib/finance/calc";
 import type { GoalEvaluation, GoalMetric, GoalStatus, PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
@@ -52,7 +53,7 @@ const CORE_COLUMNS: ColumnDef[] = [
   { key: "ftds", label: "FTDs", goalMetric: "ftds", format: "int", pick: (s) => s.ftds },
   { key: "costPerFtd", label: "Custo/FTD", goalMetric: "cost_per_ftd", format: "money", pick: (s) => s.costPerFtd, invert: true },
   { key: "net", label: "Net", goalMetric: "net", format: "money", pick: (s) => s.net },
-  { key: "cashResult", label: "Resultado", goalMetric: "cash_result", format: "money", pick: (s) => s.cashResult },
+  { key: "cashResult", label: FINANCE_TERMS.cashResult.label, goalMetric: "cash_result", format: "money", pick: (s) => s.cashResult },
   { key: "roi", label: "ROI", goalMetric: "roi", format: "ratio", pick: (s) => s.roi },
 ];
 

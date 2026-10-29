@@ -10,6 +10,8 @@ import {
   formatPp,
   formatRatio,
 } from "@/components/finance/format";
+import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
+import { TermTooltip } from "@/components/finance/term-tooltip";
 import { pctChange, ppChange } from "@/lib/finance/calc";
 import type { PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
@@ -20,6 +22,8 @@ type KpiKey =
 type Kpi = {
   key: KpiKey;
   label: string;
+  /** The FINANCE_TERMS entry this card's number maps to, if any; renders a TermTooltip next to the title. */
+  term?: TermKey;
   format: "money" | "int" | "ratio";
   pick: (summary: PeriodSummary) => number | null;
   highlight?: boolean;
@@ -30,12 +34,20 @@ type Kpi = {
 const KPIS: Kpi[] = [
   {
     key: "cashResult",
-    label: "Lucro líquido",
+    label: FINANCE_TERMS.cashResult.label,
+    term: "cashResult",
     format: "money",
     pick: (s) => s.cashResult,
     highlight: true,
   },
-  { key: "roi", label: "Retorno (ROI)", format: "ratio", pick: (s) => s.roi, highlight: true },
+  {
+    key: "roi",
+    label: FINANCE_TERMS.roi.label,
+    term: "roi",
+    format: "ratio",
+    pick: (s) => s.roi,
+    highlight: true,
+  },
   {
     key: "adSpend",
     label: "Investido em anúncios",
@@ -52,7 +64,13 @@ const KPIS: Kpi[] = [
     pick: (s) => s.withdrawalAmount,
     invert: true,
   },
-  { key: "net", label: "Net (depósitos − saques)", format: "money", pick: (s) => s.net },
+  {
+    key: "net",
+    label: FINANCE_TERMS.net.label,
+    term: "net",
+    format: "money",
+    pick: (s) => s.net,
+  },
   { key: "ftds", label: "FTDs", format: "int", pick: (s) => s.ftds },
   {
     key: "costPerFtd",
@@ -120,7 +138,10 @@ export function KpiCards({
           kpi.highlight ? "border-primary/50 bg-primary/5" : "border-border/40",
         )}
       >
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          {label}
+          {kpi.term && <TermTooltip term={kpi.term} />}
+        </p>
         <p className={cn("font-semibold", kpi.highlight ? "text-2xl" : "text-xl")}>
           {formatValue(kpi.format, value)}
         </p>
