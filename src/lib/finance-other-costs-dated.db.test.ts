@@ -277,6 +277,53 @@ describe("tenant_finance_other_costs dated", () => {
     expect((await series(leap)).map((row) => row.cost_date)).toEqual(["2028-01-31", "2028-02-29"]);
   });
 
+  it("a series anchored on the 31st yields Feb 28 then Mar 31 (no drift)", async () => {
+    const origin = await addCost("2027-01-31", { repeat: true });
+    expect(await materialize("2027-02-28")).toBe(1);
+    // The anchor stays the series' earliest day (31), not February's 28.
+    expect(await materialize("2027-03-30")).toBe(0);
+    expect(await materialize("2027-03-31")).toBe(1);
+    expect((await series(origin)).map((row) => row.cost_date)).toEqual([
+      "2027-01-31",
+      "2027-02-28",
+      "2027-03-31",
+    ]);
+  });
+
+  it("a back-dated series creates every missing month up to today's", async () => {
+    const origin = await addCost("2026-08-12", { repeat: true });
+    expect(await materialize("2026-10-12")).toBe(2);
+    expect((await series(origin)).map((row) => row.cost_date)).toEqual([
+      "2026-08-12",
+      "2026-09-12",
+      "2026-10-12",
+    ]);
+    // Before the current month's day, only the past months are created.
+    const later = await addCost("2026-07-20", { repeat: true });
+    expect(await materialize("2026-10-19")).toBe(2);
+    expect((await series(later)).map((row) => row.cost_date)).toEqual([
+      "2026-07-20",
+      "2026-08-20",
+      "2026-09-20",
+    ]);
+    expect(await materialize("2026-10-19")).toBe(0);
+  });
+
+  it("a skipped month (valor 0) does not carry 0 into the next copy", async () => {
+    const origin = await addCost("2026-08-05", { repeat: true });
+    expect(await materialize("2026-09-05")).toBe(1);
+    await db.query(
+      `update public.tenant_finance_other_costs set valor = 0 where series_id = $1 and month = '2026-09-01'`,
+      [origin],
+    );
+    expect(await materialize("2026-10-05")).toBe(1);
+    expect((await series(origin)).map((row) => [row.cost_date, row.valor])).toEqual([
+      ["2026-08-05", "1500.00"],
+      ["2026-09-05", "0.00"],
+      ["2026-10-05", "1500.00"],
+    ]);
+  });
+
   it("running twice creates nothing new", async () => {
     const origin = await addCost("2026-09-10", { repeat: true });
     expect(await materialize("2026-10-10")).toBe(1);

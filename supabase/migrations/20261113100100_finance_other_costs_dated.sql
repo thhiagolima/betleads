@@ -9,9 +9,9 @@
 --   * series_id: null for a lone cost; a repeating cost and its monthly
 --     copies share it (the first one's id). One row per series and month.
 --
--- finance_materialize_recurring_costs copies the latest row of each repeating
--- series into the current month (São Paulo) on the series' original day,
--- clamped to the month's last day; it runs daily with pg_cron.
+-- finance_materialize_recurring_costs fills each repeating series up to the
+-- current month (São Paulo) on the series' anchor day, clamped to each
+-- month's last day; it runs daily with pg_cron.
 
 alter table public.tenant_finance_other_costs
   add column if not exists cost_date date,
@@ -67,10 +67,14 @@ create trigger tenant_finance_other_costs_sync_dates
   before insert or update on public.tenant_finance_other_costs
   for each row execute function public.tenant_finance_other_costs_sync_dates();
 
--- One copy per repeating series for _today's month, once _today reaches the
--- target day (the original day of month, clamped to the month's last day).
--- Only a series whose latest row repeats and lies in an earlier month is
--- copied; the unique (series_id, month) index makes reruns no-ops.
+-- For each series whose latest row repeats, one copy per missing month,
+-- from the month after that row up to _today's month; each lands on the
+-- series' anchor day (the day of its earliest cost_date, so a clamped
+-- February never drifts the next months), clamped to that month's last day,
+-- and is created only once _today reaches it. A copy takes descricao and
+-- categoria from the latest row and valor from the latest row with valor > 0
+-- (a month skipped with valor 0 does not carry 0 forward). The unique
+-- (series_id, month) index makes reruns no-ops.
 create or replace function public.finance_materialize_recurring_costs(
   _today date default (now() at time zone 'America/Sao_Paulo')::date
 )
@@ -81,25 +85,39 @@ set search_path = public
 as $$
 declare
   v_month date := date_trunc('month', _today::timestamp)::date;
-  v_last date := (date_trunc('month', _today::timestamp) + interval '1 month - 1 day')::date;
   v_count integer;
 begin
   insert into public.tenant_finance_other_costs
     (tenant_id, month, cost_date, descricao, valor, categoria, repeat_monthly, series_id, created_by)
-  select latest.tenant_id, v_month, target.day, latest.descricao, latest.valor, latest.categoria,
-         true, latest.series_id, null
+  select latest.tenant_id, target.month, target.day, latest.descricao,
+         coalesce(priced.valor, latest.valor), latest.categoria, true, latest.series_id, null
     from (
       select distinct on (c.series_id) c.*
         from public.tenant_finance_other_costs c
        where c.series_id is not null
        order by c.series_id, c.cost_date desc, c.created_at desc
     ) latest
-    left join public.tenant_finance_other_costs origin on origin.id = latest.series_id
+    join (
+      select c.series_id, extract(day from min(c.cost_date))::int as day
+        from public.tenant_finance_other_costs c
+       where c.series_id is not null
+       group by c.series_id
+    ) anchor on anchor.series_id = latest.series_id
+    left join (
+      select distinct on (c.series_id) c.series_id, c.valor
+        from public.tenant_finance_other_costs c
+       where c.series_id is not null and c.valor > 0
+       order by c.series_id, c.cost_date desc, c.created_at desc
+    ) priced on priced.series_id = latest.series_id
+    cross join lateral generate_series(
+      (latest.month + interval '1 month')::date, v_month, interval '1 month'
+    ) as g(month_start)
     cross join lateral (
-      select least(
-        v_month + (extract(day from coalesce(origin.cost_date, latest.cost_date))::int - 1),
-        v_last
-      ) as day
+      select g.month_start::date as month,
+             least(
+               g.month_start::date + (anchor.day - 1),
+               (g.month_start + interval '1 month - 1 day')::date
+             ) as day
     ) target
    where latest.repeat_monthly
      and latest.month < v_month

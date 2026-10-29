@@ -34,6 +34,15 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -94,6 +103,51 @@ export function CostDateLabel({
         </span>
       )}
     </span>
+  );
+}
+
+export type DeleteMode = "delete" | "skip_month" | "end_series";
+
+/** Deleting a repeating row asks whether to skip only this month or end the repetition. */
+export const asksRepeatChoice = (cost: { repeatMonthly: boolean }) => cost.repeatMonthly;
+
+/** A month skipped with "Excluir só este mês": the repeating row kept with valor 0. */
+export const isSkippedCost = (cost: { repeatMonthly: boolean; valor: number }) =>
+  cost.repeatMonthly && cost.valor === 0;
+
+export function deleteToast(mode: DeleteMode): string {
+  if (mode === "end_series") return "Repetição encerrada";
+  if (mode === "skip_month") return "Mês pulado";
+  return "Custo removido";
+}
+
+/** The Valor cell: the amount, or "pulado neste mês" for a skipped month. */
+export function CostValueLabel({ valor, skipped }: { valor: number; skipped: boolean }) {
+  if (skipped) {
+    return <span className="text-xs italic text-muted-foreground">pulado neste mês</span>;
+  }
+  return <>{formatBRL(valor)}</>;
+}
+
+/** The two answers when a repeating row is deleted. */
+export function RepeatDeleteChoices({
+  disabled,
+  onSkipMonth,
+  onEndSeries,
+}: {
+  disabled: boolean;
+  onSkipMonth: () => void;
+  onEndSeries: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row">
+      <Button type="button" variant="outline" disabled={disabled} onClick={onSkipMonth}>
+        Excluir só este mês (continua nos próximos)
+      </Button>
+      <Button type="button" variant="destructive" disabled={disabled} onClick={onEndSeries}>
+        Encerrar a repetição
+      </Button>
+    </div>
   );
 }
 
@@ -352,15 +406,22 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
     onError: (error: Error) => toast.error(error.message),
   });
 
+  const [askingDeleteId, setAskingDeleteId] = useState<string | null>(null);
   const remove = useMutation({
-    mutationFn: (id: string) => removeFn({ data: { tenantId, id } }),
-    onSuccess: (_result, id) => {
-      toast.success("Custo removido");
+    mutationFn: ({ id, mode }: { id: string; mode: DeleteMode }) =>
+      removeFn({ data: { tenantId, id, mode } }),
+    onSuccess: (_result, { id, mode }) => {
+      toast.success(deleteToast(mode));
+      setAskingDeleteId(null);
       if (editingId === id) resetForm();
       refresh();
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const requestDelete = (cost: { id: string; repeatMonthly: boolean }) => {
+    if (asksRepeatChoice(cost)) setAskingDeleteId(cost.id);
+    else remove.mutate({ id: cost.id, mode: "delete" });
+  };
 
   if (query.isLoading || !query.data) {
     return <div className="h-24 animate-pulse rounded-lg border border-border/40" />;
@@ -405,12 +466,14 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
                       canRemove={canEdit}
                       disabled={remove.isPending}
                       isDemo={isDemo}
-                      onRemove={() => remove.mutate(cost.id)}
+                      onRemove={() => requestDelete(cost)}
                     />
                   )}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">{cost.categoria}</TableCell>
-                <TableCell className="whitespace-nowrap">{formatBRL(cost.valor)}</TableCell>
+                <TableCell className="whitespace-nowrap">
+                  <CostValueLabel valor={cost.valor} skipped={isSkippedCost(cost)} />
+                </TableCell>
                 {canEdit && (
                   <TableCell>
                     <div className="flex items-center gap-1">
@@ -433,7 +496,7 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
                           size="icon"
                           className="h-7 w-7 text-destructive hover:text-destructive"
                           disabled={isDemo || remove.isPending}
-                          onClick={() => remove.mutate(cost.id)}
+                          onClick={() => requestDelete(cost)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -456,6 +519,33 @@ export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
           </TableBody>
         </Table>
       </div>
+      <AlertDialog
+        open={askingDeleteId !== null}
+        onOpenChange={(open) => {
+          if (!open) setAskingDeleteId(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir custo recorrente</AlertDialogTitle>
+            <AlertDialogDescription>
+              Este custo se repete todo mês. Excluir só este mês ou encerrar a repetição?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <RepeatDeleteChoices
+            disabled={remove.isPending}
+            onSkipMonth={() =>
+              askingDeleteId && remove.mutate({ id: askingDeleteId, mode: "skip_month" })
+            }
+            onEndSeries={() =>
+              askingDeleteId && remove.mutate({ id: askingDeleteId, mode: "end_series" })
+            }
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={remove.isPending}>Cancelar</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {otherCosts.length > 0 && (
         <p className="text-sm text-muted-foreground">
           Total do mês: <span className="font-medium text-foreground">{formatBRL(total)}</span>

@@ -239,26 +239,24 @@ describe("house financial month", () => {
       dayRow(HOUSE_A, "2026-10-01", { deposit_amount: 500, ad_spend: 100, ggr: 50 }),
       dayRow(HOUSE_A, "2026-10-02", { deposit_amount: 200 }),
     );
-    fake.admin
-      .rows("tenant_finance_other_costs")
-      .push(
-        {
-          id: "c1",
-          tenant_id: HOUSE_A,
-          month: "2026-10-01",
-          cost_date: "2026-10-01",
-          descricao: "CRM",
-          valor: 30,
-        },
-        {
-          id: "c2",
-          tenant_id: HOUSE_A,
-          month: "2026-09-01",
-          cost_date: "2026-09-01",
-          descricao: "SMS",
-          valor: 99,
-        },
-      );
+    fake.admin.rows("tenant_finance_other_costs").push(
+      {
+        id: "c1",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        cost_date: "2026-10-01",
+        descricao: "CRM",
+        valor: 30,
+      },
+      {
+        id: "c2",
+        tenant_id: HOUSE_A,
+        month: "2026-09-01",
+        cost_date: "2026-09-01",
+        descricao: "SMS",
+        valor: 99,
+      },
+    );
     fake.admin
       .rows("tenant_finance_rates")
       .push({ tenant_id: HOUSE_A, valid_from: "2026-10-10", ggr_fee_pct: 15, movement_fee_pct: 2 });
@@ -824,6 +822,86 @@ describe("house financial month: Betleads cost and categories", () => {
 
     await deleteOtherCostFor(ctxFor(ADMIN_A), { tenantId: HOUSE_A, id: "s3" });
     expect(stored(series)?.repeat_monthly).toBe(false);
+  });
+
+  it('"só este mês" keeps a repeating row with valor 0 and the series goes on', async () => {
+    const series = "00000000-0000-4000-8000-00000000f002";
+    fake.admin.rows("tenant_finance_other_costs").push(
+      {
+        id: series,
+        tenant_id: HOUSE_A,
+        month: "2026-09-01",
+        cost_date: "2026-09-05",
+        descricao: "Equipe",
+        valor: 100,
+        categoria: "Equipe",
+        repeat_monthly: true,
+        series_id: series,
+      },
+      {
+        id: "s2",
+        tenant_id: HOUSE_A,
+        month: "2026-10-01",
+        cost_date: "2026-10-05",
+        descricao: "Equipe",
+        valor: 100,
+        categoria: "Equipe",
+        repeat_monthly: true,
+        series_id: series,
+      },
+    );
+    const stored = (id: string) =>
+      fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === id);
+
+    await deleteOtherCostFor(ctxFor(ADMIN_A), { tenantId: HOUSE_A, id: "s2", mode: "skip_month" });
+    expect(stored("s2")).toMatchObject({ valor: 0, repeat_monthly: true, series_id: series });
+    expect(stored(series)?.repeat_monthly).toBe(true);
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(month.otherCosts).toEqual([
+      expect.objectContaining({ id: "s2", valor: 0, repeatMonthly: true }),
+    ]);
+    expect(month.summary.otherCosts).toBe(0);
+
+    // Only a repeating row can skip a month.
+    fake.admin.rows("tenant_finance_other_costs").push({
+      id: "lone",
+      tenant_id: HOUSE_A,
+      month: "2026-10-01",
+      cost_date: "2026-10-06",
+      descricao: "Avulso",
+      valor: 10,
+      categoria: null,
+      repeat_monthly: false,
+      series_id: null,
+    });
+    await expect(
+      deleteOtherCostFor(ctxFor(ADMIN_A), { tenantId: HOUSE_A, id: "lone", mode: "skip_month" }),
+    ).rejects.toThrow("Só um custo recorrente pode pular um mês");
+  });
+
+  it('"encerrar a repetição" removes the row and stops the series, even from an older row', async () => {
+    const series = "00000000-0000-4000-8000-00000000f003";
+    const row = (id: string, costDate: string) => ({
+      id,
+      tenant_id: HOUSE_A,
+      month: `${costDate.slice(0, 7)}-01`,
+      cost_date: costDate,
+      descricao: "Equipe",
+      valor: 100,
+      categoria: "Equipe",
+      repeat_monthly: true,
+      series_id: series,
+    });
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(row(series, "2026-08-05"), row("e2", "2026-09-05"), row("e3", "2026-10-05"));
+    await deleteOtherCostFor(ctxFor(ADMIN_A), { tenantId: HOUSE_A, id: "e2", mode: "end_series" });
+    const rows = fake.admin.rows("tenant_finance_other_costs");
+    expect(rows.find((r) => r.id === "e2")).toBeUndefined();
+    expect(rows.find((r) => r.id === "e3")?.repeat_monthly).toBe(false);
   });
 });
 

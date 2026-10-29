@@ -7,7 +7,12 @@ import {
   CategoryCommand,
   CostDateLabel,
   CostDateRepeatFields,
+  CostValueLabel,
   DuplicateBetleadsNote,
+  RepeatDeleteChoices,
+  asksRepeatChoice,
+  deleteToast,
+  isSkippedCost,
   costDateBounds,
   defaultCostDate,
   isCostDateAllowed,
@@ -153,5 +158,32 @@ describe("FinanceOtherCosts", () => {
     const monthly = renderToStaticMarkup(<CostDateLabel costDate="2026-10-05" repeatMonthly />);
     expect(monthly).toContain("05/10");
     expect(monthly).toContain("todo mês");
+  });
+
+  it("deleting a repeating row asks: only this month, or end the repetition", () => {
+    expect(asksRepeatChoice({ repeatMonthly: true })).toBe(true);
+    expect(asksRepeatChoice({ repeatMonthly: false })).toBe(false);
+
+    const html = renderToStaticMarkup(
+      <RepeatDeleteChoices disabled={false} onSkipMonth={() => {}} onEndSeries={() => {}} />,
+    );
+    expect(html).toContain("Excluir só este mês (continua nos próximos)");
+    expect(html).toContain("Encerrar a repetição");
+
+    expect(deleteToast("end_series")).toBe("Repetição encerrada");
+    expect(deleteToast("skip_month")).toBe("Mês pulado");
+    expect(deleteToast("delete")).toBe("Custo removido");
+  });
+
+  it('a skipped month (repeating, valor 0) shows "pulado neste mês" instead of the value', () => {
+    expect(isSkippedCost({ repeatMonthly: true, valor: 0 })).toBe(true);
+    expect(isSkippedCost({ repeatMonthly: true, valor: 10 })).toBe(false);
+    expect(isSkippedCost({ repeatMonthly: false, valor: 0 })).toBe(false);
+
+    const skipped = renderToStaticMarkup(<CostValueLabel valor={0} skipped />);
+    expect(skipped).toContain("pulado neste mês");
+    const normal = renderToStaticMarkup(<CostValueLabel valor={1500} skipped={false} />);
+    expect(normal).not.toContain("pulado");
+    expect(normal).toContain("1.500,00");
   });
 });
