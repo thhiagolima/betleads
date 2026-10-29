@@ -29,7 +29,12 @@ import {
   getInfobipDomain,
   requestInfobipVerification,
 } from "@/lib/domain-providers/infobip-domains.server";
-import { resolveInfobipAccount } from "@/lib/provider-accounts.server";
+import {
+  DEFAULT_INFOBIP_ACCOUNT_ID,
+  infobipAccountById,
+  resolveInfobipAccount,
+  type InfobipAccount,
+} from "@/lib/provider-accounts.server";
 
 export type TenantDomain = {
   id: string;
@@ -63,6 +68,8 @@ type DomainRow = {
   removed_at: string | null;
   created_by?: string | null;
   created_at: string;
+  /** Infobip account holding an e-mail domain; null = the platform account. */
+  provider_account_id?: string | null;
 };
 
 function rowToDomain(row: DomainRow): TenantDomain {
@@ -227,6 +234,7 @@ export async function addTenantDomain(input: {
   // persisted (otherwise it becomes an orphan at the provider with no local
   // row). Record it as the row's last_error instead.
   let createVerifyError: string | null = null;
+  let providerAccountId: string | null = null;
   try {
     if (input.kind === "shortener") {
       try {
@@ -244,6 +252,7 @@ export async function addTenantDomain(input: {
     } else {
       // The domain lives in the house's e-mail account (default: platform).
       const account = await resolveInfobipAccount(input.tenantId, "email");
+      providerAccountId = account.id;
       try {
         provider = await createInfobipDomain(hostname, account);
       } catch (err) {
@@ -281,6 +290,7 @@ export async function addTenantDomain(input: {
     last_error: createVerifyError,
     removed_at: null,
     created_by: input.userId,
+    provider_account_id: providerAccountId,
   };
 
   let saved: DomainRow;
@@ -311,6 +321,36 @@ export async function addTenantDomain(input: {
   return rowToDomain(saved);
 }
 
+/**
+ * Registers an e-mail domain in the house's new Infobip account (adopting it
+ * if this account already has it: the row proves the house owns it) and
+ * removes it from the account it was in, best effort: a domain left behind
+ * there is never used again (resolveSender only accepts domains of the
+ * house's current account).
+ */
+async function migrateEmailDomain(
+  row: DomainRow,
+  fromAccountId: string,
+  to: InfobipAccount,
+): Promise<ProviderDomain> {
+  let provider: ProviderDomain;
+  try {
+    provider = await createInfobipDomain(row.hostname, to);
+  } catch (err) {
+    if (!(err instanceof DomainProviderError) || err.code !== "ALREADY_EXISTS") throw err;
+    provider = await getInfobipDomain(row.hostname, to);
+  }
+  console.info(
+    `[tenant-domains] e-mail domain ${row.hostname} moved from account ${fromAccountId} to ${to.id}`,
+  );
+  try {
+    await deleteInfobipDomain(row.hostname, await infobipAccountById(fromAccountId, "email"));
+  } catch (err) {
+    toAdminProviderMessage(err, `remove ${row.hostname} from previous account ${fromAccountId}`);
+  }
+  return provider;
+}
+
 export async function refreshTenantDomain(
   domainId: string,
   opts?: { requestVerify?: boolean },
@@ -321,6 +361,8 @@ export async function refreshTenantDomain(
   const now = new Date().toISOString();
   let provider: ProviderDomain;
   let providerIdToStore = row.provider_domain_id;
+  let accountToStore = row.provider_account_id ?? null;
+  let migrateVerifyError: string | null = null;
 
   try {
     if (row.kind === "shortener") {
@@ -336,11 +378,25 @@ export async function refreshTenantDomain(
       }
     } else {
       const account = await resolveInfobipAccount(row.tenant_id, "email");
-      if (opts?.requestVerify) {
-        await requestInfobipVerification(row.hostname, account);
+      const domainAccountId = row.provider_account_id ?? DEFAULT_INFOBIP_ACCOUNT_ID;
+      if (domainAccountId !== account.id) {
+        // The house moved to another e-mail account: register the domain
+        // there. Its DKIM changes, so it stays pending until the house
+        // publishes the new DNS records.
+        provider = await migrateEmailDomain(row, domainAccountId, account);
+        try {
+          await requestInfobipVerification(row.hostname, account);
+        } catch (err) {
+          migrateVerifyError = toAdminProviderMessage(err, `verify request for ${row.hostname}`);
+        }
+      } else {
+        if (opts?.requestVerify) {
+          await requestInfobipVerification(row.hostname, account);
+        }
+        provider = await getInfobipDomain(row.hostname, account);
       }
-      provider = await getInfobipDomain(row.hostname, account);
       providerIdToStore = provider.providerDomainId;
+      accountToStore = account.id;
     }
   } catch (err) {
     const message = toAdminProviderMessage(err, `refresh ${row.kind} domain ${row.hostname}`);
@@ -363,8 +419,9 @@ export async function refreshTenantDomain(
     provider_state: provider.providerState,
     dns_records: provider.dnsRecords,
     provider_domain_id: providerIdToStore,
+    provider_account_id: accountToStore,
     last_checked_at: now,
-    last_error: null,
+    last_error: migrateVerifyError,
     verified_at: isVerified ? (wasVerified ? row.verified_at : now) : null,
   };
   if (losingDefault) update.is_default = false;
@@ -567,7 +624,11 @@ export async function purgeTenantDomain(domainId: string): Promise<void> {
         await deleteShortioDomain(row.provider_domain_id);
       }
     } else {
-      await deleteInfobipDomain(row.hostname, await resolveInfobipAccount(row.tenant_id, "email"));
+      // Deleted from the account it is registered in, not the house's current one.
+      await deleteInfobipDomain(
+        row.hostname,
+        await infobipAccountById(row.provider_account_id, "email"),
+      );
     }
   } catch (err) {
     throw new Error(toAdminProviderMessage(err, `purge ${row.kind} domain ${row.hostname}`));

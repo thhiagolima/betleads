@@ -59,6 +59,9 @@ vi.mock("./dispatch-rate.server", () => ({
 }));
 vi.mock("./house-links.server", () => ({ loadHouseLinks: vi.fn(async () => ({})) }));
 vi.mock("./sms-provider-breaker.server", () => ({
+  BREAKER_CACHE_MS: 5_000,
+  PLATFORM_SMS_BREAKER_KEY: "sms",
+  smsBreakerKey: vi.fn(() => "sms"),
   acquireSmsSendGate: vi.fn(async () => ({ mode: "closed" as const })),
   releaseSmsProbe: vi.fn(async () => undefined),
   cachedSmsBreaker: vi.fn(() => ({

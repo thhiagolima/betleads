@@ -6,13 +6,9 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
 import { assertSuperAdmin } from "@/lib/provider-governance.server";
-import { smsSuspendedMessage } from "@/lib/sms-provider-breaker.server";
-import {
-  envInfobipAccount,
-  envShortBrasilAccount,
-  infobipConfigured,
-  shortBrasilConfigured,
-} from "@/lib/provider-accounts.server";
+import { PLATFORM_SMS_BREAKER_KEY, smsSuspendedMessage } from "@/lib/sms-provider-breaker.server";
+import { channelConfiguredFor } from "@/lib/provider-accounts.server";
+import { smsBreakerKeyForTenant } from "@/lib/sms-account-gates.server";
 
 const channelSchema = z.enum(["sms", "email", "voice"]);
 export type ObservabilityChannel = z.infer<typeof channelSchema>;
@@ -150,11 +146,6 @@ export function summarizeChannelDelivery(channel: ObservabilityChannel, rows: St
     if (deliveredStates.has(status)) delivered += 1;
   }
   return { total: rows.length, failed, delivered };
-}
-
-function providerConfigured(channel: ObservabilityChannel) {
-  if (channel === "sms") return shortBrasilConfigured(envShortBrasilAccount());
-  return infobipConfigured(envInfobipAccount());
 }
 
 async function auditOperation(args: {
@@ -308,11 +299,29 @@ export const getChannelObservability = createServerFn({ method: "GET" })
       const pauseRows = pauses.data ?? [];
       const rateRows = (rates.data ?? []) as RateRow[];
       const runRows = (runs.data ?? []) as RunRow[];
+      // This house's provider accounts: its SMS breaker row ('sms' for the
+      // platform account, 'sms:<id>' for its own) and what is configured.
+      const [smsBreakerKey, ...configuredList] = await Promise.all([
+        smsBreakerKeyForTenant(tenantId),
+        channelConfiguredFor(tenantId, "sms"),
+        channelConfiguredFor(tenantId, "email"),
+        channelConfiguredFor(tenantId, "voice"),
+      ]);
+      const configuredBy = {
+        sms: configuredList[0],
+        email: configuredList[1],
+        voice: configuredList[2],
+      };
+      // The channel-wide throttle only comes from the platform SMS account.
+      const onPlatformSms = smsBreakerKey === PLATFORM_SMS_BREAKER_KEY;
 
       const channels = (["sms", "email", "voice"] as const).map((channel) => {
         const aliases = channelAliases[channel];
         const pause = pauseRows.find((row) => aliases.includes(row.channel));
-        const providerRate = rateRows.find((row) => aliases.includes(row.channel));
+        const providerRate =
+          channel === "sms" && !onPlatformSms
+            ? undefined
+            : rateRows.find((row) => aliases.includes(row.channel));
         const lastRun = runRows.find((row) => aliases.includes(row.channel));
         const workerDelayMinutes = lastRun
           ? Math.max(0, Math.floor((Date.now() - new Date(lastRun.started_at).getTime()) / 60_000))
@@ -320,9 +329,11 @@ export const getChannelObservability = createServerFn({ method: "GET" })
         const backoffActive = providerRate?.backoff_until
           ? new Date(providerRate.backoff_until).getTime() > Date.now()
           : false;
-        const configured = providerConfigured(channel);
+        const configured = configuredBy[channel];
         const breaker = providerBreakerView(
-          breakerRows.find((row) => aliases.includes(row.channel)),
+          breakerRows.find((row) =>
+            channel === "sms" ? row.channel === smsBreakerKey : aliases.includes(row.channel),
+          ),
         );
         const providerError =
           breaker?.message ?? (backoffActive ? (providerRate?.last_provider_error ?? null) : null);

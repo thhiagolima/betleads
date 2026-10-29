@@ -45,6 +45,7 @@ import {
   noteSmsProviderSuccess,
   reportSmsProviderAccountFailure,
   reportUnknownSmsProviderRefusal,
+  smsBreakerKey,
 } from "./sms-provider-breaker.server";
 import { findAcceptedDeliveryKeys, type CampaignDb } from "./campaign-recipients.server";
 import {
@@ -445,7 +446,12 @@ async function sendChunk(
     const accountReason = smsProviderAccountReason(call.status, call.body);
     if (accountReason) {
       const reason = summarizeProviderError(call.status, call.body);
-      await reportSmsProviderAccountFailure({ reason: accountReason, error: reason, sendStartedAt });
+      await reportSmsProviderAccountFailure({
+        reason: accountReason,
+        error: reason,
+        sendStartedAt,
+        key: smsBreakerKey(account.id),
+      });
       return wholeChunkFailed(reason, true, "provider_account", accountReason === "no_balance");
     }
     if (call.status === 429) {
@@ -465,13 +471,14 @@ async function sendChunk(
 
   const map = mapping.accepted;
   const lote = loteId(call.body);
-  if (map.size > 0) await noteSmsProviderSuccess(sendStartedAt);
+  if (map.size > 0) await noteSmsProviderSuccess(sendStartedAt, smsBreakerKey(account.id));
   if (mapping.accountRejected.size > 0) {
     const first = chunk.find((p) => mapping.accountRejected.has(p.item.deliveryKey));
     await reportSmsProviderAccountFailure({
       reason: "auth",
       error: first ? (mapping.rejected.get(first.item.deliveryKey) ?? "Short Brasil 101/505") : "Short Brasil 101/505",
       sendStartedAt,
+      key: smsBreakerKey(account.id),
     });
   }
   const ok = chunk.filter((p) => map.has(p.item.deliveryKey));

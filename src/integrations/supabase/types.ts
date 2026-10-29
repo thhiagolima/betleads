@@ -6783,6 +6783,7 @@ export type Database = {
           kind: string
           last_checked_at: string | null
           last_error: string | null
+          provider_account_id: string | null
           provider_domain_id: string | null
           provider_state: string | null
           removed_at: string | null
@@ -6802,6 +6803,7 @@ export type Database = {
           kind: string
           last_checked_at?: string | null
           last_error?: string | null
+          provider_account_id?: string | null
           provider_domain_id?: string | null
           provider_state?: string | null
           removed_at?: string | null
@@ -6821,6 +6823,7 @@ export type Database = {
           kind?: string
           last_checked_at?: string | null
           last_error?: string | null
+          provider_account_id?: string | null
           provider_domain_id?: string | null
           provider_state?: string | null
           removed_at?: string | null

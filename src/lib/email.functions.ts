@@ -4,7 +4,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { assertSuperAdmin, tenantChannelHealth } from "@/lib/provider-governance.server";
-import { envInfobipAccount, infobipConfigured } from "@/lib/provider-accounts.server";
+import { channelConfiguredFor } from "@/lib/provider-accounts.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
@@ -74,8 +74,10 @@ export function summarizeProviderError(
 
 export const getEmailProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const health = tenantChannelHealth(infobipConfigured(envInfobipAccount()));
+  .handler(async ({ context }) => {
+    // The caller's house account; without a resolvable house, the platform one.
+    const tenantId = await resolveCurrentTenantId(context.supabase).catch(() => null);
+    const health = tenantChannelHealth(await channelConfiguredFor(tenantId, "email"));
     return { ...health, configured: health.available };
   });
 

@@ -38,6 +38,7 @@ import {
   readSmsBreaker,
   reportSmsProviderAccountFailure,
   reportUnknownSmsProviderRefusal,
+  smsBreakerKey,
   smsSuspendedMessage,
 } from "./sms-provider-breaker.server";
 import type { LinkTrackingContext } from "./shortio.server";
@@ -70,12 +71,12 @@ import { countSmsSegments, toGsm7Text } from "./sms-segments";
 import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 import { externalListBlockedVariables, externalListVariablesError } from "./campaign-external-list";
 import {
-  envShortBrasilAccount,
+  channelConfiguredFor,
   ProviderAccountUnavailableError,
   resolveSmsAccount,
-  shortBrasilConfigured,
   type ShortBrasilAccount,
 } from "./provider-accounts.server";
+import { smsBreakerKeyForTenant } from "./sms-account-gates.server";
 
 // Mantém a tentativa abaixo do timeout de uma server function. Sem isso, uma
 // conexão TCP bloqueada pelo provedor pode deixar o envio preso indefinidamente.
@@ -934,19 +935,22 @@ export async function sendSmsInternal(args: {
   const isTemporary =
     !r.ok && !demoBlockedAtTransport && (r.status === 0 || r.status === 429 || r.status >= 500);
   // Account-level refusal (101/505, HTTP 401/402/403): not the lead's fault.
-  // Opens the SMS circuit breaker; workers defer without consuming attempts.
+  // Opens the circuit breaker of the account that sent; workers defer the
+  // houses on that account without consuming attempts.
   const accountReason =
     !r.ok && r.errorKind === null && r.status > 0
       ? smsProviderAccountReason(r.status, r.body)
       : null;
+  const breakerKey = smsBreakerKey(r.providerAccountId);
   if (accountReason) {
     await reportSmsProviderAccountFailure({
       reason: accountReason,
       error: errorSummary ?? `HTTP ${r.status}`,
       sendStartedAt,
+      key: breakerKey,
     });
   } else if (r.ok) {
-    await noteSmsProviderSuccess(sendStartedAt);
+    await noteSmsProviderSuccess(sendStartedAt, breakerKey);
   }
   if (!r.ok && creditReserved && billingTenantId) {
     await refundSmsCredit(
@@ -1005,6 +1009,8 @@ export async function sendSmsInternal(args: {
         errorKind: (accountReason
           ? "provider_account"
           : (r.errorKind ?? null)) as ProviderErrorKind | null,
+        /** Account that refused; null = the platform account or none. */
+        providerAccountId: r.providerAccountId,
       };
 }
 
@@ -1012,8 +1018,10 @@ export async function sendSmsInternal(args: {
 
 export const smsProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const health = tenantChannelHealth(shortBrasilConfigured(envShortBrasilAccount()));
+  .handler(async ({ context }) => {
+    // The caller's house account; without a resolvable house, the platform one.
+    const tenantId = await resolveCurrentTenantId(context.supabase).catch(() => null);
+    const health = tenantChannelHealth(await channelConfiguredFor(tenantId, "sms"));
     return { ...health, configured: health.available };
   });
 
@@ -1374,11 +1382,16 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       temporary?: boolean;
     }[] = [];
     const concurrency = 5;
-    // SMS circuit breaker: while the provider refuses the account, nothing is
-    // sent here; recipients stay pending for the campaign worker (same key).
-    const breaker = await readSmsBreaker({ force: true });
+    // SMS circuit breaker of the house's account: while the provider refuses
+    // it, nothing is sent here; recipients stay pending for the campaign
+    // worker (same key).
+    const breakerKey = await smsBreakerKeyForTenant(tenantId);
+    const breaker =
+      breakerKey === null
+        ? null
+        : await readSmsBreaker({ force: true, key: breakerKey });
     let providerSuspended: string | null =
-      breaker.state === "closed" ? null : smsSuspendedMessage(breaker);
+      !breaker || breaker.state === "closed" ? null : smsSuspendedMessage(breaker);
     for (let i = 0; i < targets.length; i += concurrency) {
       const batch = targets.slice(i, i + concurrency);
       const batchResults = await Promise.all(
@@ -1412,7 +1425,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             deliveryKey: await campaignDeliveryKey(immediateCampaign.id, t.playerId),
           });
           if (!r.ok && (r as { errorKind?: unknown }).errorKind === "provider_account") {
-            providerSuspended = smsSuspendedMessage(cachedSmsBreaker());
+            providerSuspended = smsSuspendedMessage(cachedSmsBreaker(breakerKey ?? undefined));
           }
           return {
             phone: t.phone,

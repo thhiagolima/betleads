@@ -294,6 +294,46 @@ export async function resolveChannelAccount(
   return accountFromRow(row, channel);
 }
 
+/**
+ * Conta Infobip pelo id (ex.: a conta onde um domínio de e-mail foi
+ * cadastrado). null/id padrão = conta padrão da plataforma.
+ */
+export async function infobipAccountById(
+  accountId: string | null | undefined,
+  channel: "email" | "voice",
+): Promise<InfobipAccount> {
+  if (!accountId || accountId === DEFAULT_INFOBIP_ACCOUNT_ID) return envInfobipAccount();
+  const snap = await currentSnapshot();
+  const row = snap?.accounts.get(accountId);
+  if (!row) {
+    throw new ProviderAccountUnavailableError(`A conta de provedor ${accountId} não existe mais.`);
+  }
+  const account = await accountFromRow(row, channel);
+  if (account.provider !== "infobip") {
+    throw new ProviderAccountUnavailableError(`A conta "${account.label}" não é Infobip.`);
+  }
+  return account;
+}
+
+/**
+ * O canal da casa tem uma conta utilizável e configurada (status exibido à
+ * casa; nunca expõe nome de fornecedor). Conta indisponível = false.
+ */
+export async function channelConfiguredFor(
+  tenantId: string | null | undefined,
+  channel: ProviderChannel,
+): Promise<boolean> {
+  try {
+    const account = await resolveChannelAccount(tenantId, channel);
+    return account.provider === "short_brasil"
+      ? channel === "sms" && shortBrasilConfigured(account)
+      : channel !== "sms" && infobipConfigured(account);
+  } catch (error) {
+    if (error instanceof ProviderAccountUnavailableError) return false;
+    throw error;
+  }
+}
+
 /** Conta de SMS da casa. Hoje só Short Brasil envia SMS. */
 export async function resolveSmsAccount(
   tenantId: string | null | undefined,

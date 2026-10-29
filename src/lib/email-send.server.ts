@@ -10,6 +10,21 @@ import {
   prepareTrackedEmailHtml,
   type LinkTrackingContext,
 } from "./shortio.server";
+import {
+  DEFAULT_INFOBIP_ACCOUNT_ID,
+  ProviderAccountUnavailableError,
+  resolveInfobipAccount,
+} from "./provider-accounts.server";
+
+/** The house's current e-mail account id; null when its own account is unavailable. */
+async function currentEmailAccountId(tenantId: string): Promise<string | null> {
+  try {
+    return (await resolveInfobipAccount(tenantId, "email")).id;
+  } catch (error) {
+    if (error instanceof ProviderAccountUnavailableError) return null;
+    throw error;
+  }
+}
 
 export type SendEmailInput = {
   to: string;
@@ -330,13 +345,27 @@ export async function resolveSender(input: {
   if (domainIds.length === 0) return senderId ? blockStale() : null;
   const { data: domains, error: domainError } = await supabaseAdmin
     .from("tenant_domains")
-    .select("id, removed_at")
+    .select("id, removed_at, provider_account_id")
     .in("id", domainIds)
     .eq("tenant_id", tenantId)
     .eq("kind", "email")
     .eq("status", "verified");
   if (domainError) throw new Error(domainError.message);
-  const verified = new Set((domains ?? []).filter((d) => !d.removed_at).map((d) => d.id));
+  // A domain verified in another Infobip account (the house's e-mail account
+  // changed and the domain is not migrated yet) cannot send through the
+  // current one. An unavailable house account is not filtered here: the send
+  // itself fails as misconfigured.
+  const currentAccountId = await currentEmailAccountId(tenantId);
+  const verified = new Set(
+    (domains ?? [])
+      .filter((d) => !d.removed_at)
+      .filter(
+        (d) =>
+          currentAccountId === null ||
+          (d.provider_account_id ?? DEFAULT_INFOBIP_ACCOUNT_ID) === currentAccountId,
+      )
+      .map((d) => d.id),
+  );
   const usable = candidates
     .filter((s) => s.domain_id && verified.has(s.domain_id))
     .sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));

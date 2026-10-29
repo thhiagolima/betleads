@@ -216,7 +216,10 @@ import {
   removeTenantDomain,
   setDefaultTenantDomain,
 } from "./tenant-domains.server";
-import { DEFAULT_INFOBIP_ACCOUNT_ID } from "./provider-accounts.server";
+import {
+  __resetProviderAccountsCacheForTests,
+  DEFAULT_INFOBIP_ACCOUNT_ID,
+} from "./provider-accounts.server";
 
 /** A house without its own e-mail account uses the platform Infobip account. */
 const DEFAULT_INFOBIP = expect.objectContaining({ id: DEFAULT_INFOBIP_ACCOUNT_ID });
@@ -1007,5 +1010,106 @@ describe("findDomainUsages", () => {
 
     expect(usages.campaigns).toEqual([{ id: "email-1", name: "Campanha remetente" }]);
     expect(usages.journeys).toEqual([{ id: "journey-1", name: "Jornada email" }]);
+  });
+});
+
+describe("e-mail domains per provider account", () => {
+  const OWN = "55555555-5555-4555-8555-555555555555";
+  const OWN_ACCOUNT = expect.objectContaining({ id: OWN });
+  // An extra 'env' account: same env credentials, its own id (no encryption needed).
+  const ownAccountRow = {
+    id: OWN,
+    provider: "infobip",
+    label: "Infobip casa A",
+    channels: ["email"],
+    credentials_source: "env",
+    credentials_encrypted: null,
+    config: {},
+    status: "active",
+  };
+  const pendingInDns = {
+    providerDomainId: "ib-own-1",
+    providerState: "inactive",
+    status: "pending",
+    dnsRecords: [{ type: "TXT", name: "own._domainkey", value: "k=rsa", verified: false }],
+  };
+
+  beforeEach(() => __resetProviderAccountsCacheForTests());
+
+  it("a domain added for a house on its own account is registered and recorded there", async () => {
+    seed({
+      provider_accounts: [ownAccountRow],
+      tenant_channel_providers: [{ tenant_id: TENANT_A, channel: "email", provider_account_id: OWN }],
+    });
+    mocks.createInfobipDomain.mockResolvedValue(pendingInDns);
+
+    await addTenantDomain({ tenantId: TENANT_A, kind: "email", rawHostname: "mail.example.com", userId: USER_ID });
+
+    expect(mocks.createInfobipDomain).toHaveBeenCalledWith("mail.example.com", OWN_ACCOUNT);
+    expect(tables.tenant_domains[0]).toMatchObject({ provider_account_id: OWN });
+  });
+
+  it("refresh after the house moved to its own account registers the domain there (pending: new DKIM) and removes it from the old one", async () => {
+    seed({
+      provider_accounts: [ownAccountRow],
+      tenant_channel_providers: [{ tenant_id: TENANT_A, channel: "email", provider_account_id: OWN }],
+      tenant_domains: [
+        domainRow({
+          kind: "email",
+          hostname: "mail.example.com",
+          status: "verified",
+          verified_at: new Date().toISOString(),
+          provider_account_id: null, // registered in the platform account
+        }),
+      ],
+    });
+    mocks.createInfobipDomain.mockResolvedValue(pendingInDns);
+
+    const result = await refreshTenantDomain("dom-1");
+
+    expect(mocks.createInfobipDomain).toHaveBeenCalledWith("mail.example.com", OWN_ACCOUNT);
+    expect(mocks.requestInfobipVerification).toHaveBeenCalledWith("mail.example.com", OWN_ACCOUNT);
+    expect(mocks.deleteInfobipDomain).toHaveBeenCalledWith("mail.example.com", DEFAULT_INFOBIP);
+    expect(result.status).toBe("pending");
+    expect(tables.tenant_domains[0]).toMatchObject({
+      provider_account_id: OWN,
+      provider_domain_id: "ib-own-1",
+    });
+  });
+
+  it("refresh adopts the domain when the new account already has it", async () => {
+    seed({
+      provider_accounts: [ownAccountRow],
+      tenant_channel_providers: [{ tenant_id: TENANT_A, channel: "email", provider_account_id: OWN }],
+      tenant_domains: [domainRow({ kind: "email", hostname: "mail.example.com", provider_account_id: null })],
+    });
+    mocks.createInfobipDomain.mockRejectedValue(new DomainProviderError("ALREADY_EXISTS", 400, "exists"));
+    mocks.getInfobipDomain.mockResolvedValue(pendingInDns);
+    mocks.deleteInfobipDomain.mockRejectedValue(new DomainProviderError("UNAVAILABLE", 503, "down"));
+
+    const result = await refreshTenantDomain("dom-1");
+
+    expect(mocks.getInfobipDomain).toHaveBeenCalledWith("mail.example.com", OWN_ACCOUNT);
+    // Removing it from the old account is best effort.
+    expect(result.status).toBe("pending");
+    expect(tables.tenant_domains[0]).toMatchObject({ provider_account_id: OWN });
+  });
+
+  it("purge deletes the domain from the account it is registered in, not the house's current one", async () => {
+    seed({
+      provider_accounts: [ownAccountRow],
+      tenant_domains: [
+        domainRow({
+          kind: "email",
+          hostname: "mail.example.com",
+          removed_at: new Date().toISOString(),
+          provider_account_id: OWN,
+        }),
+      ],
+    });
+
+    await purgeTenantDomain("dom-1");
+
+    expect(mocks.deleteInfobipDomain).toHaveBeenCalledWith("mail.example.com", OWN_ACCOUNT);
   });
 });
