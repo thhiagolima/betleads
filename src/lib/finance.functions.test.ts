@@ -931,6 +931,106 @@ describe("house financial month: Betleads cost and categories", () => {
   });
 });
 
+describe("other costs: the repeat toggle drives the series", () => {
+  const series = "00000000-0000-4000-8000-00000000f010";
+  const row = (id: string, costDate: string, repeat = true) => ({
+    id,
+    tenant_id: HOUSE_A,
+    month: `${costDate.slice(0, 7)}-01`,
+    cost_date: costDate,
+    descricao: "Equipe",
+    valor: 100,
+    categoria: "Equipe",
+    repeat_monthly: repeat,
+    series_id: series,
+  });
+  const stored = (id: string) =>
+    fake.admin.rows("tenant_finance_other_costs").find((r) => r.id === id);
+  const save = (id: string, costDate: string, repeatMonthly: boolean) =>
+    saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      id,
+      costDate,
+      descricao: "Equipe",
+      valor: 100,
+      categoria: "Equipe",
+      repeatMonthly,
+    });
+
+  it("turning repeat off on an older row stops the series' newest row", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(row(series, "2026-08-05"), row("r9", "2026-09-05"), row("r10", "2026-10-05"));
+
+    await save("r9", "2026-09-05", false);
+    expect(stored("r9")?.repeat_monthly).toBe(false);
+    expect(stored("r10")?.repeat_monthly).toBe(false);
+    expect(stored(series)?.repeat_monthly).toBe(true);
+  });
+
+  it("turning repeat on for an ended series restarts it from the newest row", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(
+        row(series, "2026-08-05", false),
+        row("r9", "2026-09-05", false),
+        row("r10", "2026-10-05", false),
+      );
+
+    await save("r9", "2026-09-05", true);
+    expect(stored("r9")?.repeat_monthly).toBe(true);
+    expect(stored("r10")?.repeat_monthly).toBe(true);
+  });
+
+  it("saving without changing the toggle leaves the newest row alone", async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(row(series, "2026-08-05"), row("r9", "2026-09-05"), row("r10", "2026-10-05", false));
+
+    await save("r9", "2026-09-05", true);
+    expect(stored("r10")?.repeat_monthly).toBe(false);
+  });
+
+  it('"encerrar" stops the newest row before deleting, so a failed delete cannot resume the series', async () => {
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(row(series, "2026-08-05"), row("r9", "2026-09-05"), row("r10", "2026-10-05"));
+    const calls: string[] = [];
+    const client = fake.admin.client as unknown as { from: (table: string) => unknown };
+    const realFrom = client.from.bind(client);
+    const spy = vi.spyOn(client, "from").mockImplementation((table: string) => {
+      const builder = realFrom(table) as Record<string, (...args: unknown[]) => unknown>;
+      if (table !== "tenant_finance_other_costs") return builder;
+      const wrap = (name: "update" | "delete") => {
+        const original = builder[name].bind(builder);
+        builder[name] = (...args: unknown[]) => {
+          calls.push(name);
+          if (name === "delete") {
+            return { eq: () => ({ eq: async () => ({ data: null, error: { message: "boom" } }) }) };
+          }
+          return original(...args);
+        };
+      };
+      wrap("update");
+      wrap("delete");
+      return builder;
+    });
+    try {
+      // Deleting the newest row itself: it is stopped first, then the delete fails.
+      await expect(
+        deleteOtherCostFor(ctxFor(ADMIN_A), { tenantId: HOUSE_A, id: "r10", mode: "end_series" }),
+      ).rejects.toThrow("boom");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls[0]).toBe("update");
+    expect(calls).toContain("delete");
+    // The row survived the failed delete, but no longer repeats; nor does the one before.
+    expect(stored("r10")?.repeat_monthly).toBe(false);
+    expect(stored("r9")?.repeat_monthly).toBe(false);
+  });
+});
+
 describe("manual entries", () => {
   it("saveFinanceDays rejects future dates", async () => {
     await expect(

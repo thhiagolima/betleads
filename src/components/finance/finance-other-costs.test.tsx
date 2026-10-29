@@ -168,7 +168,7 @@ describe("FinanceOtherCosts", () => {
       <RepeatDeleteChoices disabled={false} onSkipMonth={() => {}} onEndSeries={() => {}} />,
     );
     expect(html).toContain("Excluir só este mês (continua nos próximos)");
-    expect(html).toContain("Encerrar a repetição");
+    expect(html).toContain("Excluir este e encerrar a repetição");
 
     expect(deleteToast("end_series")).toBe("Repetição encerrada");
     expect(deleteToast("skip_month")).toBe("Mês pulado");

@@ -145,7 +145,7 @@ export function RepeatDeleteChoices({
         Excluir só este mês (continua nos próximos)
       </Button>
       <Button type="button" variant="destructive" disabled={disabled} onClick={onEndSeries}>
-        Encerrar a repetição
+        Excluir este e encerrar a repetição
       </Button>
     </div>
   );

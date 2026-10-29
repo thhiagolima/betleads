@@ -554,10 +554,36 @@ async function getOtherCost(tenantId: string, id: string) {
   return { ...data, valor: num(data.valor) };
 }
 
+/** The newest rows (by cost_date) of a series, newest first; `limit` rows at most. */
+async function newestSeriesRows(tenantId: string, seriesId: string, limit: number) {
+  const { data, error } = await db()
+    .from<OtherCostRow[]>("tenant_finance_other_costs")
+    .select(OTHER_COST_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .eq("series_id", seriesId)
+    .order("cost_date", { ascending: false })
+    .range(0, limit - 1);
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+async function setRepeatMonthly(tenantId: string, ids: string[], repeatMonthly: boolean) {
+  if (!ids.length) return;
+  const { error } = await db()
+    .from("tenant_finance_other_costs")
+    .update({ repeat_monthly: repeatMonthly, updated_at: new Date().toISOString() })
+    .in("id", ids)
+    .eq("tenant_id", tenantId);
+  if (error) throw new Error(error.message);
+}
+
 /**
  * Creates or edits an other cost dated `costDate` (not in the future). A new
  * cost with repeatMonthly starts a series (series_id = its id); turning
- * repeat on for a cost without a series starts one from it.
+ * repeat on for a cost without a series starts one from it. The daily copy
+ * repeats a series' newest row, so changing "Repetir todo mês" on any row of
+ * a series applies the change to the newest row too (first): turning it off
+ * on September stops November, turning it on for an ended series restarts it.
  */
 export async function saveOtherCostFor(
   ctx: ServerContext,
@@ -601,6 +627,13 @@ export async function saveOtherCostFor(
         : error.message,
     );
 
+  if (before?.series_id && before.repeat_monthly !== repeatMonthly) {
+    const [newest] = await newestSeriesRows(data.tenantId, before.series_id, 1);
+    if (newest && newest.id !== before.id && newest.repeat_monthly !== repeatMonthly) {
+      await setRepeatMonthly(data.tenantId, [newest.id], repeatMonthly);
+    }
+  }
+
   if (data.id) {
     const { error } = await db()
       .from("tenant_finance_other_costs")
@@ -642,7 +675,9 @@ export const saveOtherCost = createServerFn({ method: "POST" })
  * - "skip_month" (a repeating row only): keeps it with valor 0, so this month
  *   costs nothing and the series goes on ("pulado neste mês").
  * - "end_series": removes the row and stops the repeat on the series' newest
- *   remaining row ("Encerrar a repetição").
+ *   remaining row ("Excluir este e encerrar a repetição").
+ * The repeat is stopped before the delete: if the delete then fails, the
+ * daily copy (finance_materialize_recurring_costs) cannot resume the series.
  */
 export const deleteOtherCostInput = z.object({
   tenantId: dbUuid(),
@@ -682,38 +717,34 @@ export async function deleteOtherCostFor(
     return { ok: true };
   }
 
+  // The daily copy (finance_materialize_recurring_costs) repeats a series'
+  // newest row: removing that row must not bring it back the next morning,
+  // so the row newest once it is gone stops repeating; "end_series" stops it
+  // (and the row itself) in any case. Stopped first, deleted after.
+  if (before.series_id) {
+    // One row per series and month: the newest other than this one is in the top two.
+    const remaining = (await newestSeriesRows(data.tenantId, before.series_id, 2)).find(
+      (row) => row.id !== before.id,
+    );
+    const stopRemaining =
+      remaining?.repeat_monthly === true &&
+      (mode === "end_series" || remaining.cost_date < before.cost_date);
+    await setRepeatMonthly(
+      data.tenantId,
+      [
+        ...(stopRemaining && remaining ? [remaining.id] : []),
+        ...(mode === "end_series" && before.repeat_monthly ? [before.id] : []),
+      ],
+      false,
+    );
+  }
+
   const { error } = await db()
     .from("tenant_finance_other_costs")
     .delete()
     .eq("id", data.id)
     .eq("tenant_id", data.tenantId);
   if (error) throw new Error(error.message);
-
-  // The daily copy (finance_materialize_recurring_costs) repeats a series'
-  // newest row: removing that row must not bring it back the next morning,
-  // so the row now newest stops repeating; "end_series" stops it in any case.
-  if (before.series_id) {
-    const { data: rest, error: restError } = await db()
-      .from<OtherCostRow[]>("tenant_finance_other_costs")
-      .select(OTHER_COST_COLUMNS)
-      .eq("tenant_id", data.tenantId)
-      .eq("series_id", before.series_id)
-      .order("cost_date", { ascending: false })
-      .range(0, 0);
-    if (restError) throw new Error(restError.message);
-    const newest = rest?.[0];
-    const stop =
-      newest?.repeat_monthly === true &&
-      (mode === "end_series" || newest.cost_date < before.cost_date);
-    if (newest && stop) {
-      const { error: stopError } = await db()
-        .from("tenant_finance_other_costs")
-        .update({ repeat_monthly: false, updated_at: new Date().toISOString() })
-        .eq("id", newest.id)
-        .eq("tenant_id", data.tenantId);
-      if (stopError) throw new Error(stopError.message);
-    }
-  }
 
   await auditTenant({
     tenantId: data.tenantId,
