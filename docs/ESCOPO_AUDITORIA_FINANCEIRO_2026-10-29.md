@@ -159,7 +159,7 @@ O que já existe nos dados e não aparece:
 
 ## 4. Decisões (respondidas em 29/10/2026)
 
-1. **Custo do provedor:** voz **R$ 0,034 por 30 s**, e-mail **R$ 0,004 por e-mail** (SMS segue R$ 0,059). Esses valores precisam ser cadastrados na tabela de preços (`billing_price_book.provider_unit_cost`) com vigência a partir do cadastro. Os registros já gravados na carteira continuam com o custo vazio, então o custo de voz e e-mail das casas isentas só aparece a partir dessa data.
+1. **Custo do provedor:** voz **R$ 0,034 por 30 s**, e-mail **R$ 0,0004 por e-mail** (SMS segue R$ 0,059). Esses valores precisam ser cadastrados na tabela de preços (`billing_price_book.provider_unit_cost`) com vigência a partir do cadastro. Os registros já gravados na carteira continuam com o custo vazio, então o custo de voz e e-mail das casas isentas só aparece a partir dessa data.
 2. **Retorno do CRM:** mostrar **as duas** receitas, a direta (clique → depósito) e a influenciada (regra da Central de Resultados), cada uma com o seu retorno (receita ÷ custo de envio).
 3. **Mensalidade:** continua entrando **só em mês fechado** (e no preset "Mês"). Nos outros períodos, o card da mensalidade diz que ela entra no fechamento do mês.
 4. **Outros custos:** cada custo tem data. **Nem todos repetem**: a opção "Repetir todo mês" é por custo e vem desligada.
