@@ -40,7 +40,7 @@ import { sendTestSms } from "@/lib/sms.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 import { getBillingPrices } from "@/lib/billing/billing.functions";
-import { countSmsSegments } from "@/lib/sms-segments";
+import { countSmsSegments, toGsm7Text } from "@/lib/sms-segments";
 import { brl } from "@/lib/format";
 
 type Channel = "sms" | "email" | "voice";
@@ -105,7 +105,7 @@ export function IndividualSmsDialog({
   // Billing counts segments on the final rendered text (variables replaced,
   // links shortened), never the raw template -- a {nome} like "João" or an
   // emoji can push GSM-7 into UCS-2 and double the segment count.
-  const parts = countSmsSegments(preview).segments;
+  const parts = countSmsSegments(toGsm7Text(preview)).segments;
   const pricesQuery = useQuery({
     queryKey: ["billing-prices"],
     queryFn: () => getPrices(),

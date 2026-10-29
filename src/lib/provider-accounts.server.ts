@@ -137,11 +137,17 @@ let snapshot: Snapshot | null = null;
 let loading: Promise<Snapshot | null> | null = null;
 const decrypted = new Map<string, Promise<ProviderAccount>>();
 
-export function __resetProviderAccountsCacheForTests() {
+/**
+ * Drops this instance's snapshot (after a super admin change). Other server
+ * instances pick the change up within PROVIDER_ACCOUNTS_CACHE_MS.
+ */
+export function invalidateProviderAccountsCache() {
   snapshot = null;
   loading = null;
   decrypted.clear();
 }
+
+export const __resetProviderAccountsCacheForTests = invalidateProviderAccountsCache;
 
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -292,6 +298,67 @@ export async function resolveChannelAccount(
     );
   }
   return accountFromRow(row, channel);
+}
+
+/**
+ * Conta pelo id lida direto do banco (sem cache), qualquer status ou canal:
+ * usada pelo super admin para testar a conexão de uma conta.
+ */
+export async function loadProviderAccountForAdmin(accountId: string): Promise<ProviderAccount> {
+  if (accountId === DEFAULT_SHORT_BRASIL_ACCOUNT_ID) return envShortBrasilAccount();
+  if (accountId === DEFAULT_INFOBIP_ACCOUNT_ID) return envInfobipAccount();
+  const { data, error } = await db()
+    .from("provider_accounts")
+    .select("id, provider, label, channels, credentials_source, credentials_encrypted, config, status")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const row = data as AccountRow | null;
+  if (!row) throw new ProviderAccountUnavailableError("Conta de provedor não encontrada.");
+  if (row.credentials_source === "env") {
+    return { ...envAccountFor(row.provider), id: row.id, label: row.label };
+  }
+  return buildDbAccount(row);
+}
+
+/**
+ * Conta Infobip pelo id (ex.: a conta onde um domínio de e-mail foi
+ * cadastrado). null/id padrão = conta padrão da plataforma.
+ */
+export async function infobipAccountById(
+  accountId: string | null | undefined,
+  channel: "email" | "voice",
+): Promise<InfobipAccount> {
+  if (!accountId || accountId === DEFAULT_INFOBIP_ACCOUNT_ID) return envInfobipAccount();
+  const snap = await currentSnapshot();
+  const row = snap?.accounts.get(accountId);
+  if (!row) {
+    throw new ProviderAccountUnavailableError(`A conta de provedor ${accountId} não existe mais.`);
+  }
+  const account = await accountFromRow(row, channel);
+  if (account.provider !== "infobip") {
+    throw new ProviderAccountUnavailableError(`A conta "${account.label}" não é Infobip.`);
+  }
+  return account;
+}
+
+/**
+ * O canal da casa tem uma conta utilizável e configurada (status exibido à
+ * casa; nunca expõe nome de fornecedor). Conta indisponível = false.
+ */
+export async function channelConfiguredFor(
+  tenantId: string | null | undefined,
+  channel: ProviderChannel,
+): Promise<boolean> {
+  try {
+    const account = await resolveChannelAccount(tenantId, channel);
+    return account.provider === "short_brasil"
+      ? channel === "sms" && shortBrasilConfigured(account)
+      : channel !== "sms" && infobipConfigured(account);
+  } catch (error) {
+    if (error instanceof ProviderAccountUnavailableError) return false;
+    throw error;
+  }
 }
 
 /** Conta de SMS da casa. Hoje só Short Brasil envia SMS. */

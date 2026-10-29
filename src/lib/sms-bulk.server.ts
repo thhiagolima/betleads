@@ -45,6 +45,7 @@ import {
   noteSmsProviderSuccess,
   reportSmsProviderAccountFailure,
   reportUnknownSmsProviderRefusal,
+  smsBreakerKey,
 } from "./sms-provider-breaker.server";
 import { findAcceptedDeliveryKeys, type CampaignDb } from "./campaign-recipients.server";
 import {
@@ -61,7 +62,7 @@ import {
   summarizeProviderError,
   toShortBrasilCell,
 } from "./sms.functions";
-import { countSmsSegments } from "./sms-segments";
+import { countSmsSegments, toGsm7Text } from "./sms-segments";
 import {
   envShortBrasilAccount,
   ProviderAccountUnavailableError,
@@ -445,7 +446,12 @@ async function sendChunk(
     const accountReason = smsProviderAccountReason(call.status, call.body);
     if (accountReason) {
       const reason = summarizeProviderError(call.status, call.body);
-      await reportSmsProviderAccountFailure({ reason: accountReason, error: reason, sendStartedAt });
+      await reportSmsProviderAccountFailure({
+        reason: accountReason,
+        error: reason,
+        sendStartedAt,
+        key: smsBreakerKey(account.id),
+      });
       return wholeChunkFailed(reason, true, "provider_account", accountReason === "no_balance");
     }
     if (call.status === 429) {
@@ -465,13 +471,14 @@ async function sendChunk(
 
   const map = mapping.accepted;
   const lote = loteId(call.body);
-  if (map.size > 0) await noteSmsProviderSuccess(sendStartedAt);
+  if (map.size > 0) await noteSmsProviderSuccess(sendStartedAt, smsBreakerKey(account.id));
   if (mapping.accountRejected.size > 0) {
     const first = chunk.find((p) => mapping.accountRejected.has(p.item.deliveryKey));
     await reportSmsProviderAccountFailure({
       reason: "auth",
       error: first ? (mapping.rejected.get(first.item.deliveryKey) ?? "Short Brasil 101/505") : "Short Brasil 101/505",
       sendStartedAt,
+      key: smsBreakerKey(account.id),
     });
   }
   const ok = chunk.filter((p) => map.has(p.item.deliveryKey));
@@ -864,7 +871,8 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
     CREDIT_CONCURRENCY,
     async ({ c, k }) => {
       const link = links[k];
-      const content = link.ok ? link.content : c.item.content;
+      // GSM-7 form: one accent would switch the whole SMS to UCS-2 (see toGsm7Text).
+      const content = toGsm7Text(link.ok ? link.content : c.item.content);
       const dispatchIds = link.ok ? link.links.map((l) => l.dispatchId) : [];
       // Segments counted on the FINAL content (post-link), never the template text.
       const billedUnits = Math.max(1, countSmsSegments(content).segments);

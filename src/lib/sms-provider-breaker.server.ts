@@ -1,8 +1,8 @@
-// SMS provider circuit breaker (incident 15/10/2026).
+// SMS provider circuit breaker (incident 15/10/2026), one per provider account.
 //
-// One Short Brasil account serves every tenant, so an account-level refusal
-// (101 auth / 505 no balance / HTTP 401/402/403, errorKind `provider_account`)
-// means NO lead can be sent. Instead of burning each lead's attempts:
+// An account-level refusal (101 auth / 505 no balance / HTTP 401/402/403,
+// errorKind `provider_account`) means NO lead of the houses on that account
+// can be sent. Instead of burning each lead's attempts:
 //
 //   closed    : sends go out normally.
 //   open      : no worker sends SMS; journey items stay waiting (no attempt
@@ -14,11 +14,13 @@
 //               with a doubled backoff.
 //
 // State lives in public.provider_circuit_breakers (migration
-// 20261015123000_sms_provider_breaker.sql); every transition is one RPC that
-// locks the single row, so concurrent workers/processes cannot double-open,
-// double-probe or double-alert. Reporting happens in sendSmsInternal and in the
-// bulk sender, so every SMS path (journeys, flows, campaigns, manual/test
-// sends) feeds the breaker; the dispatchers only ask `acquireSmsSendGate`.
+// 20261015123000_sms_provider_breaker.sql), one row per breaker key: 'sms' for
+// the platform account, 'sms:<provider_account_id>' for a house's own account
+// (smsBreakerKey). Every transition is one RPC that locks that row, so
+// concurrent workers/processes cannot double-open, double-probe or
+// double-alert. Reporting happens in sendSmsInternal and in the bulk sender,
+// so every SMS path (journeys, flows, campaigns, manual/test sends) feeds the
+// breaker of the account that sent; the dispatchers ask SmsAccountGates.
 //
 // Fail-open: if the RPCs are missing (migration not applied) or the DB call
 // fails, the breaker reads as closed; account errors are still deferred
@@ -28,9 +30,20 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { pingHeartbeat } from "@/lib/observability/job-monitor.server";
 import { captureServerMessage } from "@/lib/observability/sentry.server";
 import type { ProviderAccountReason } from "@/lib/rate-limit/transport-errors";
+import { DEFAULT_SHORT_BRASIL_ACCOUNT_ID } from "@/lib/provider-accounts.server";
 
 export const SMS_PROVIDER_JOB = "sms_provider";
-const CHANNEL = "sms";
+/** Breaker key of the platform SMS account (the original single row). */
+export const PLATFORM_SMS_BREAKER_KEY = "sms";
+
+/** Breaker key of the account that sends a house's SMS. */
+export function smsBreakerKey(accountId: string | null | undefined): string {
+  return !accountId || accountId === DEFAULT_SHORT_BRASIL_ACCOUNT_ID
+    ? PLATFORM_SMS_BREAKER_KEY
+    : `sms:${accountId}`;
+}
+
+const isPlatformKey = (key: string) => key === PLATFORM_SMS_BREAKER_KEY;
 /** Cached state is trusted for this long before a success re-checks the DB. */
 export const BREAKER_CACHE_MS = 5_000;
 /** A probe holder that vanished is replaced after this long. */
@@ -73,17 +86,17 @@ type BreakerDb = {
 
 const db = () => supabaseAdmin as unknown as BreakerDb;
 
-let cached: { snapshot: BreakerSnapshot; at: number } = { snapshot: CLOSED, at: 0 };
+const cache = new Map<string, { snapshot: BreakerSnapshot; at: number }>();
 let warnedUnavailable = false;
 
 /** Test hook. */
 export function __resetSmsBreakerCacheForTests() {
-  cached = { snapshot: CLOSED, at: 0 };
+  cache.clear();
   warnedUnavailable = false;
 }
 
-function remember(snapshot: BreakerSnapshot) {
-  cached = { snapshot, at: Date.now() };
+function remember(key: string, snapshot: BreakerSnapshot) {
+  cache.set(key, { snapshot, at: Date.now() });
 }
 
 function unavailable(where: string, message: string) {
@@ -104,22 +117,26 @@ function asState(value: unknown): BreakerState {
 }
 
 /** Last known state without touching the DB (may be up to BREAKER_CACHE_MS old, or never loaded). */
-export function cachedSmsBreaker(): BreakerSnapshot {
-  return cached.snapshot;
+export function cachedSmsBreaker(key: string = PLATFORM_SMS_BREAKER_KEY): BreakerSnapshot {
+  return cache.get(key)?.snapshot ?? CLOSED;
 }
 
 /** Reads the breaker row (cached for BREAKER_CACHE_MS unless `force`). Never throws. */
-export async function readSmsBreaker(opts: { force?: boolean } = {}): Promise<BreakerSnapshot> {
-  if (!opts.force && Date.now() - cached.at < BREAKER_CACHE_MS) return cached.snapshot;
+export async function readSmsBreaker(
+  opts: { force?: boolean; key?: string } = {},
+): Promise<BreakerSnapshot> {
+  const key = opts.key ?? PLATFORM_SMS_BREAKER_KEY;
+  const cached = cache.get(key);
+  if (!opts.force && cached && Date.now() - cached.at < BREAKER_CACHE_MS) return cached.snapshot;
   try {
     const { data, error } = await db()
       .from("provider_circuit_breakers")
       .select("state,reason,last_error,first_opened_at,backoff_until,probe_started_at")
-      .eq("channel", CHANNEL)
+      .eq("channel", key)
       .maybeSingle();
     if (error) {
       unavailable("read", error.message);
-      remember(CLOSED);
+      remember(key, CLOSED);
       return CLOSED;
     }
     const row = (data ?? null) as Record<string, unknown> | null;
@@ -139,8 +156,8 @@ export async function readSmsBreaker(opts: { force?: boolean } = {}): Promise<Br
                   ).toISOString()
                 : str(row?.backoff_until),
           };
-    remember(snapshot);
-    if (state === "closed") void pingHeartbeat(SMS_PROVIDER_JOB, true);
+    remember(key, snapshot);
+    if (state === "closed" && isPlatformKey(key)) void pingHeartbeat(SMS_PROVIDER_JOB, true);
     return snapshot;
   } catch (error) {
     unavailable("read", error instanceof Error ? error.message : String(error));
@@ -177,15 +194,22 @@ export function reportUnknownSmsProviderRefusal(body: unknown, now = Date.now())
   }
 }
 
-function alertOpen(snapshot: BreakerSnapshot, firstTime: boolean) {
+function alertOpen(key: string, snapshot: BreakerSnapshot, firstTime: boolean) {
+  // A house's own account names itself; the platform account keeps the
+  // original text (and alone drives the sms_provider heartbeat).
+  const account = isPlatformKey(key) ? "" : ` (conta ${key.slice("sms:".length)})`;
   captureServerMessage(
     firstTime
-      ? `Envio de SMS suspenso: provedor recusou a conta (${describeBreakerReason(snapshot.reason)})`
-      : `Envio de SMS continua suspenso: provedor recusa a conta (${describeBreakerReason(snapshot.reason)})`,
+      ? `Envio de SMS suspenso${account}: provedor recusou a conta (${describeBreakerReason(snapshot.reason)})`
+      : `Envio de SMS continua suspenso${account}: provedor recusa a conta (${describeBreakerReason(snapshot.reason)})`,
     "error",
     {
       job: SMS_PROVIDER_JOB,
-      tags: { breaker_state: snapshot.state, reason: snapshot.reason ?? "unknown" },
+      tags: {
+        breaker_state: snapshot.state,
+        reason: snapshot.reason ?? "unknown",
+        breaker_key: key,
+      },
       extra: {
         since: snapshot.since,
         retry_at: snapshot.retryAt,
@@ -193,21 +217,25 @@ function alertOpen(snapshot: BreakerSnapshot, firstTime: boolean) {
       },
     },
   );
-  void pingHeartbeat(SMS_PROVIDER_JOB, false);
+  if (isPlatformKey(key)) void pingHeartbeat(SMS_PROVIDER_JOB, false);
 }
 
 /**
  * An SMS send got an account-level refusal. Opens (or, for a failed probe,
- * reopens with a doubled backoff) the breaker and alerts. Never throws.
+ * reopens with a doubled backoff) the breaker of that account and alerts.
+ * Never throws.
  */
 export async function reportSmsProviderAccountFailure(args: {
   reason: ProviderAccountReason;
   error: string;
   sendStartedAt: Date;
+  /** smsBreakerKey of the account that sent; default: the platform account. */
+  key?: string;
 }): Promise<BreakerSnapshot> {
+  const key = args.key ?? PLATFORM_SMS_BREAKER_KEY;
   try {
     const { data, error } = await db().rpc("provider_breaker_report_failure", {
-      p_channel: CHANNEL,
+      p_channel: key,
       p_reason: args.reason,
       p_error: args.error.slice(0, 800),
       p_send_started_at: args.sendStartedAt.toISOString(),
@@ -224,15 +252,17 @@ export async function reportSmsProviderAccountFailure(args: {
       since: str(row?.first_opened_at),
       retryAt: str(row?.backoff_until),
     };
-    remember(snapshot);
+    remember(key, snapshot);
     if (row?.opened === true) {
       console.error("[sms-breaker] opened", {
+        key,
         reason: args.reason,
         openCount: row?.open_count ?? null,
         retryAt: snapshot.retryAt,
       });
     }
-    if (row?.alert_due === true) alertOpen(snapshot, Number(row?.open_count ?? 0) === 1 && row?.opened === true);
+    if (row?.alert_due === true)
+      alertOpen(key, snapshot, Number(row?.open_count ?? 0) === 1 && row?.opened === true);
     return snapshot;
   } catch (error) {
     unavailable("report_failure", error instanceof Error ? error.message : String(error));
@@ -245,12 +275,15 @@ export async function reportSmsProviderAccountFailure(args: {
  * be) not closed, so the normal path costs at most one cached read every
  * BREAKER_CACHE_MS. Never throws.
  */
-export async function noteSmsProviderSuccess(sendStartedAt: Date): Promise<void> {
+export async function noteSmsProviderSuccess(
+  sendStartedAt: Date,
+  key: string = PLATFORM_SMS_BREAKER_KEY,
+): Promise<void> {
   try {
-    const snapshot = await readSmsBreaker();
+    const snapshot = await readSmsBreaker({ key });
     if (snapshot.state === "closed") return;
     const { data, error } = await db().rpc("provider_breaker_report_success", {
-      p_channel: CHANNEL,
+      p_channel: key,
       p_send_started_at: sendStartedAt.toISOString(),
     });
     if (error) {
@@ -259,17 +292,18 @@ export async function noteSmsProviderSuccess(sendStartedAt: Date): Promise<void>
     }
     const row = firstRow(data);
     if (row?.closed === true) {
-      remember(CLOSED);
+      remember(key, CLOSED);
       const since = str(row?.first_opened_at);
-      console.info("[sms-breaker] closed: provider accepted a send", { since });
+      console.info("[sms-breaker] closed: provider accepted a send", { key, since });
       captureServerMessage("Envio de SMS normalizado: provedor voltou a aceitar", "info", {
         job: SMS_PROVIDER_JOB,
+        tags: { breaker_key: key },
         extra: { since, reason: str(row?.reason) },
       });
-      void pingHeartbeat(SMS_PROVIDER_JOB, true);
+      if (isPlatformKey(key)) void pingHeartbeat(SMS_PROVIDER_JOB, true);
     } else {
       // Someone else closed it, or this success predates the last reopen.
-      await readSmsBreaker({ force: true });
+      await readSmsBreaker({ force: true, key });
     }
   } catch (error) {
     unavailable("report_success", error instanceof Error ? error.message : String(error));
@@ -281,13 +315,16 @@ export async function noteSmsProviderSuccess(sendStartedAt: Date): Promise<void>
  * item; it must call `releaseSmsProbe` if it ends without reaching the
  * provider. Never throws (fail-open).
  */
-export async function acquireSmsSendGate(holder: string): Promise<SmsSendGate> {
+export async function acquireSmsSendGate(
+  holder: string,
+  key: string = PLATFORM_SMS_BREAKER_KEY,
+): Promise<SmsSendGate> {
   // Common path: one cheap read; the locking RPC only runs while not closed.
-  const current = await readSmsBreaker({ force: true });
+  const current = await readSmsBreaker({ force: true, key });
   if (current.state === "closed") return { mode: "closed" };
   try {
     const { data, error } = await db().rpc("provider_breaker_acquire", {
-      p_channel: CHANNEL,
+      p_channel: key,
       p_holder: holder,
       p_probe_ttl_seconds: BREAKER_PROBE_TTL_SECONDS,
     });
@@ -298,7 +335,7 @@ export async function acquireSmsSendGate(holder: string): Promise<SmsSendGate> {
     const row = firstRow(data);
     const decision = row?.decision;
     if (decision !== "open" && decision !== "probe") {
-      remember(CLOSED);
+      remember(key, CLOSED);
       return { mode: "closed" };
     }
     const snapshot: BreakerSnapshot = {
@@ -308,8 +345,8 @@ export async function acquireSmsSendGate(holder: string): Promise<SmsSendGate> {
       since: str(row?.first_opened_at),
       retryAt: str(row?.retry_at),
     };
-    remember(snapshot);
-    if (row?.alert_due === true) alertOpen(snapshot, false);
+    remember(key, snapshot);
+    if (row?.alert_due === true) alertOpen(key, snapshot, false);
     return decision === "probe" ? { mode: "probe", holder, snapshot } : { mode: "open", snapshot };
   } catch (error) {
     unavailable("acquire", error instanceof Error ? error.message : String(error));
@@ -318,14 +355,17 @@ export async function acquireSmsSendGate(holder: string): Promise<SmsSendGate> {
 }
 
 /** The probe holder finished without a provider verdict: let the next worker probe. */
-export async function releaseSmsProbe(holder: string): Promise<void> {
+export async function releaseSmsProbe(
+  holder: string,
+  key: string = PLATFORM_SMS_BREAKER_KEY,
+): Promise<void> {
   try {
     const { error } = await db().rpc("provider_breaker_release_probe", {
-      p_channel: CHANNEL,
+      p_channel: key,
       p_holder: holder,
     });
     if (error) unavailable("release_probe", error.message);
-    await readSmsBreaker({ force: true });
+    await readSmsBreaker({ force: true, key });
   } catch (error) {
     unavailable("release_probe", error instanceof Error ? error.message : String(error));
   }

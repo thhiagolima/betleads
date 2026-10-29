@@ -62,6 +62,8 @@ export type ExpertLeadSheet = {
   claim: { expertNome: string; expiresAt: string; minha: boolean } | null;
   retornosPendentes: Array<{ id: string; dueDate: string; nota: string | null }>;
   podeAssumir: boolean;
+  /** Janela de crédito por clique da casa (`expert_settings.click_window_hours`). */
+  janelaHoras: number;
 };
 
 // ------------------------------------------------------------- masking

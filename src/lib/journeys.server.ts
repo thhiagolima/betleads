@@ -32,15 +32,8 @@ import {
   ProviderSendError,
   classifyProviderFailure,
 } from "./rate-limit/provider-errors.server";
-import {
-  BREAKER_CACHE_MS,
-  acquireSmsSendGate,
-  breakerRetryAt,
-  cachedSmsBreaker,
-  readSmsBreaker,
-  releaseSmsProbe,
-  type SmsSendGate,
-} from "./sms-provider-breaker.server";
+import { PLATFORM_SMS_BREAKER_KEY, breakerRetryAt } from "./sms-provider-breaker.server";
+import { SmsAccountGates } from "./sms-account-gates.server";
 import { resolveDispatchWorkerConfig } from "./rate-limit/worker-config";
 import { brtDayStart } from "./tz";
 import { listDemoTenantIds } from "./tenant-access.server";
@@ -1051,19 +1044,15 @@ type DispatchCounters = {
 };
 
 /**
- * This run's view of the global SMS provider circuit breaker.
+ * This run's view of the SMS provider circuit breakers, one per provider
+ * account (SmsAccountGates). For the houses on an account:
  *   closed : SMS items are sent.
  *   open   : SMS items are not claimed (p_exclude) / handed back untouched.
  *   probe  : this worker holds the half-open probe: exactly ONE SMS item is
- *            sent (probeItem); the others wait for its verdict.
+ *            sent; the others wait for its verdict.
  */
 type SmsRunGate = {
-  mode: SmsSendGate["mode"];
-  holder: string;
-  probeItem: string | null;
-  heldProbe: boolean;
-  retryAt: string | null;
-  checkedAt: number;
+  gates: SmsAccountGates;
   /** Tenants of this run's scope, loaded only when SMS must be excluded from claims. */
   tenantIds: string[] | null;
 };
@@ -1080,42 +1069,12 @@ type DispatchContext = {
 };
 
 function newSmsRunGate(holder: string): SmsRunGate {
-  return {
-    mode: "closed",
-    holder,
-    probeItem: null,
-    heldProbe: false,
-    retryAt: null,
-    checkedAt: 0,
-    tenantIds: null,
-  };
+  return { gates: new SmsAccountGates(holder), tenantIds: null };
 }
 
-function applySmsGate(ctx: DispatchContext, decision: SmsSendGate) {
-  ctx.sms.mode = decision.mode;
-  ctx.sms.retryAt = decision.mode === "closed" ? null : decision.snapshot.retryAt;
-  ctx.sms.checkedAt = Date.now();
-  if (decision.mode === "probe") ctx.sms.heldProbe = true;
-}
-
-/** Re-asks the global breaker (another process may have opened/closed it). */
-async function refreshSmsGate(ctx: DispatchContext, force = false) {
-  // While our probe is in flight its verdict decides; nothing else may send.
-  if (ctx.sms.probeItem) return;
-  if (!force && Date.now() - ctx.sms.checkedAt < BREAKER_CACHE_MS) return;
-  // Claimed before awaiting so concurrent pool slots do not all re-ask at once.
-  ctx.sms.checkedAt = Date.now();
-  applySmsGate(ctx, await acquireSmsSendGate(ctx.sms.holder));
-}
-
-/** SMS must not be sent by this run right now (open, or our single probe is taken). */
-function smsBlocked(ctx: DispatchContext): boolean {
-  return ctx.sms.mode === "open" || (ctx.sms.mode === "probe" && ctx.sms.probeItem !== null);
-}
-
-/** p_exclude keys that keep SMS items out of the claim while SMS is blocked. */
+/** p_exclude keys that keep SMS items of houses on a blocked account out of the claim. */
 async function smsExcludeKeys(ctx: DispatchContext, scopeTenantIds: string[]): Promise<string[]> {
-  if (!smsBlocked(ctx)) return [];
+  if (ctx.sms.gates.blockedKeys().size === 0) return [];
   if (!ctx.sms.tenantIds) {
     if (scopeTenantIds.length) {
       ctx.sms.tenantIds = scopeTenantIds;
@@ -1128,45 +1087,22 @@ async function smsExcludeKeys(ctx: DispatchContext, scopeTenantIds: string[]): P
       ctx.sms.tenantIds = ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
     }
   }
-  return (ctx.sms.tenantIds ?? []).map((tenantId) => `${tenantId}:sms`);
+  const blocked = await ctx.sms.gates.blockedTenants(ctx.sms.tenantIds ?? []);
+  return blocked.map((tenantId) => `${tenantId}:sms`);
 }
 
 /**
- * Admission of one claimed SMS item against the breaker. Returns false when
- * the item was handed back untouched (no attempt, no execution, next_run_at
- * kept); the claim RPC then excludes SMS for the rest of this run.
+ * Admission of one claimed SMS item against the breaker of its house's
+ * account. Returns false when the item was handed back untouched (no
+ * attempt, no execution, next_run_at kept); the claim RPC then excludes the
+ * houses on that account for the rest of this run.
  */
 async function admitSmsItem(row: ClaimedRow, ctx: DispatchContext): Promise<boolean> {
-  await refreshSmsGate(ctx);
-  if (ctx.sms.mode === "closed") return true;
-  if (ctx.sms.mode === "probe" && ctx.sms.probeItem === null) {
-    ctx.sms.probeItem = row.id;
-    console.warn("[journey dispatcher] sms breaker half-open: probing with one item", {
-      enrollmentId: row.id,
-      workerId: ctx.workerId,
-    });
-    return true;
-  }
+  const admission = await ctx.sms.gates.admit(row.tenant_id, row.id);
+  if (admission.mode !== "open") return true;
   ctx.counters.providerSuspended++;
   await release({ id: row.id } as EnrollmentRow, ctx, {});
   return false;
-}
-
-/** After the probe item: learn the verdict (closed / reopened / still ours). */
-async function settleSmsProbe(row: ClaimedRow, ctx: DispatchContext) {
-  if (ctx.sms.probeItem !== row.id) return;
-  ctx.sms.probeItem = null;
-  const snapshot = await readSmsBreaker({ force: true });
-  ctx.sms.checkedAt = Date.now();
-  if (snapshot.state === "closed") {
-    ctx.sms.mode = "closed";
-    ctx.sms.retryAt = null;
-  } else if (snapshot.state === "open") {
-    ctx.sms.mode = "open";
-    ctx.sms.retryAt = snapshot.retryAt;
-  }
-  // Still half_open: the probe never got a provider verdict (exit, consent,
-  // per-lead error...): the next SMS item of this run probes instead.
 }
 
 /** step_type is the current step's channel (claim RPC since I2; may be absent). */
@@ -1291,20 +1227,13 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     // get the same answer. No attempt consumed, no failure, no defer cap: the
     // item waits for the breaker (sendSmsInternal already reported it).
     ctx.counters.providerSuspended++;
-    if (
-      error instanceof ProviderSendError &&
-      error.channel === "sms" &&
-      ctx.sms.probeItem !== row.id
-    ) {
-      ctx.sms.mode = "open";
-      ctx.sms.checkedAt = Date.now();
-    }
-    const snapshot = cachedSmsBreaker();
-    const retryAt = breakerRetryAt(
-      snapshot.state === "closed" ? null : snapshot,
-      decision.retryAfterMs,
-    );
-    ctx.sms.retryAt = retryAt;
+    const sms = error instanceof ProviderSendError && error.channel === "sms";
+    // Only the house's own account stops; the probe item's verdict is read
+    // by settle() after it.
+    if (sms) await ctx.sms.gates.markOpen(row.tenant_id, row.id);
+    const retryAt = sms
+      ? await ctx.sms.gates.retryAt(row.tenant_id, decision.retryAfterMs)
+      : breakerRetryAt(null, decision.retryAfterMs);
     await finishOwnExecution(ctx, row.id, {
       status: "retrying",
       error: message.slice(0, 1000),
@@ -1551,8 +1480,9 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     const { error: sweepError } = await db.rpc("sweep_journey_exits", { p_limit: 1000 });
     if (sweepError) console.error("[journeys] exit sweep failed", sweepError.message);
     run.progress({ queue_before: queueBefore ?? 0 });
-    // Global SMS provider breaker: while open, SMS items are not claimed.
-    await refreshSmsGate(ctx, true);
+    // Platform SMS account's breaker up front: while it is open, SMS items of
+    // the houses on it are not claimed. Other accounts are learned per item.
+    await ctx.sms.gates.refresh(PLATFORM_SMS_BREAKER_KEY);
 
     keeper = startLeaseKeeper({
       intervalMs: config.renewIntervalMs,
@@ -1648,7 +1578,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
         } catch (error) {
           await handleItemFailure(row, ctx, error);
         } finally {
-          await settleSmsProbe(row, ctx);
+          await ctx.sms.gates.settle(row.id);
           if (gate && !gate.keepPermit) await channelBudget.release(gate.admission);
           owned.delete(row.id);
           ctx.executions.delete(row.id);
@@ -1671,8 +1601,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     const stopReason =
       outcome === "hard_deadline"
         ? "hard_deadline"
-        : ctx.sms.mode !== "closed" &&
-            (ctx.sms.mode === "open" || ctx.counters.providerSuspended > 0)
+        : ctx.sms.gates.blockedKeys().size > 0 || ctx.counters.providerSuspended > 0
           ? "provider_unavailable"
           : claimingSource.claimed === 0
             ? "queue_empty"
@@ -1699,7 +1628,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       leaseLost: ctx.counters.leaseLost,
       providerSuspended: ctx.counters.providerSuspended,
       skippedNoBalance: ctx.counters.skippedNoBalance,
-      smsBreaker: ctx.sms.mode,
+      smsBreaker: ctx.sms.gates.modeOf(PLATFORM_SMS_BREAKER_KEY),
       stopReason,
       scannerSeparated: true,
     };
@@ -1723,7 +1652,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     }
     await keeper?.stop();
     // A probe we took but never resolved goes back so the next worker can probe.
-    if (ctx.sms.heldProbe && ctx.sms.mode === "probe") await releaseSmsProbe(workerId);
+    await ctx.sms.gates.release();
     const { error: slotReleaseError } = await db.rpc("release_journey_dispatcher_slot", {
       p_slot: slot,
       p_holder: workerId,

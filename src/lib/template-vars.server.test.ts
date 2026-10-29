@@ -67,3 +67,15 @@ describe("renderTemplate — fallback de {link_*} desconhecido", () => {
     expect(renderTemplate("Olá {nome}", vars, HOUSE)).toBe("Olá Carol Silva");
   });
 });
+
+describe("renderTemplate — chaves duplas", () => {
+  it("{{token}} é substituído sem sobrar chave no texto", () => {
+    const vars = buildPlayerVariables(PLAYER, HOUSE);
+    expect(renderTemplate("{{nome}}, saque pago!", vars, HOUSE)).toBe("Carol Silva, saque pago!");
+    expect(renderTemplate("Oi {{primeiro_nome}} / {nome}", vars, HOUSE)).toBe("Oi Carol / Carol Silva");
+  });
+
+  it("{{token}} desconhecido é preservado como estava", () => {
+    expect(renderTemplate("Oi {{inexistente}}", {})).toBe("Oi {{inexistente}}");
+  });
+});

@@ -34,6 +34,7 @@ import { EmailDomainNotVerifiedError, resolveSender, STALE_SENDER_MESSAGE } from
 import { runCampaignSend } from "./email.functions";
 import { campaignSenderColumn, campaignShortDomainColumn } from "./campaign-refs.server";
 import { legacyEmailBlockSenderConfig } from "./journeys.shared";
+import { __resetProviderAccountsCacheForTests } from "./provider-accounts.server";
 
 const TENANT = "00000000-0000-4000-8000-0000000000a1";
 const OTHER = "00000000-0000-4000-8000-0000000000b2";
@@ -137,6 +138,40 @@ describe("resolveSender", () => {
     await expect(resolveSender({ tenantId: TENANT, senderId: requested })).resolves.toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+  });
+
+  it("ignores domains verified in another provider account than the house's current e-mail account", async () => {
+    // The house moved to its own Infobip account; mail.casa.bet is still
+    // registered in the platform account (not migrated yet).
+    const OWN = "55555555-5555-4555-8555-555555555555";
+    fake.db.rows("provider_accounts").push({
+      id: OWN,
+      provider: "infobip",
+      label: "Infobip casa",
+      channels: ["email"],
+      credentials_source: "env",
+      credentials_encrypted: null,
+      config: {},
+      status: "active",
+    });
+    fake.db
+      .rows("tenant_channel_providers")
+      .push({ tenant_id: TENANT, channel: "email", provider_account_id: OWN });
+    fake.db
+      .rows("tenant_domains")
+      .push(
+        domain({ id: DOM_VERIFIED, hostname: "mail.casa.bet" }),
+        domain({ id: DOM_VERIFIED_2, hostname: "promo.casa.bet", provider_account_id: OWN }),
+      );
+    seedSenders();
+    __resetProviderAccountsCacheForTests();
+    try {
+      await expect(resolveSender({ tenantId: TENANT })).resolves.toMatchObject({
+        senderId: S_PROMO,
+      });
+    } finally {
+      __resetProviderAccountsCacheForTests();
+    }
   });
 
   it("blocks an explicit legacy sender (no domain_id), even when it is the default", async () => {
