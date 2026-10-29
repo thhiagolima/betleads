@@ -1,7 +1,8 @@
 // KPI cards of the Financeiro painel (spec §5.3): three highlighted (Lucro
-// líquido, ROI, Anúncios) and three supporting (Net, FTDs, Custo por FTD),
-// each with its variation vs the compared window. ROI varies in percentage
-// points; the cost-shaped cards (Anúncios, Custo por FTD) invert the color.
+// líquido, ROI, Anúncios) and five supporting (Depósitos, Saques, Net, FTDs,
+// Custo por FTD), each with its variation vs the compared window. ROI varies
+// in percentage points; the cards where going up is bad (Anúncios, Saques,
+// Custo por FTD) invert the color.
 import {
   formatBRL,
   formatInt,
@@ -13,7 +14,8 @@ import { pctChange, ppChange } from "@/lib/finance/calc";
 import type { PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
-type KpiKey = "cashResult" | "roi" | "adSpend" | "net" | "ftds" | "costPerFtd";
+type KpiKey =
+  "cashResult" | "roi" | "adSpend" | "deposits" | "withdrawals" | "net" | "ftds" | "costPerFtd";
 
 type Kpi = {
   key: KpiKey;
@@ -40,6 +42,14 @@ const KPIS: Kpi[] = [
     format: "money",
     pick: (s) => s.adSpend,
     highlight: true,
+    invert: true,
+  },
+  { key: "deposits", label: "Depósitos", format: "money", pick: (s) => s.depositAmount },
+  {
+    key: "withdrawals",
+    label: "Saques",
+    format: "money",
+    pick: (s) => s.withdrawalAmount,
     invert: true,
   },
   { key: "net", label: "Net (depósitos − saques)", format: "money", pick: (s) => s.net },
@@ -96,32 +106,37 @@ export function KpiCards({
   /** Group/all scope: shown as "Lucro líquido (N casas)". */
   houseCount?: number;
 }) {
+  const renderCard = (kpi: Kpi) => {
+    const value = kpi.pick(current);
+    const label =
+      kpi.key === "cashResult" && houseCount !== undefined && houseCount > 1
+        ? `${kpi.label} (${houseCount} casas)`
+        : kpi.label;
+    return (
+      <div
+        key={kpi.key}
+        data-kpi={kpi.key}
+        className={cn(
+          "rounded-lg border p-3",
+          kpi.highlight ? "border-primary/50 bg-primary/5" : "border-border/40",
+        )}
+      >
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className={cn("font-semibold", kpi.highlight ? "text-2xl" : "text-xl")}>
+          {formatValue(kpi.format, value)}
+        </p>
+        <Variation kpi={kpi} current={value} previous={kpi.pick(previous)} />
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        {KPIS.map((kpi) => {
-          const value = kpi.pick(current);
-          const label =
-            kpi.key === "cashResult" && houseCount !== undefined && houseCount > 1
-              ? `${kpi.label} (${houseCount} casas)`
-              : kpi.label;
-          return (
-            <div
-              key={kpi.key}
-              data-kpi={kpi.key}
-              className={cn(
-                "rounded-lg border p-3",
-                kpi.highlight ? "border-primary/50 bg-primary/5" : "border-border/40",
-              )}
-            >
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
-              <p className={cn("font-semibold", kpi.highlight ? "text-2xl" : "text-xl")}>
-                {formatValue(kpi.format, value)}
-              </p>
-              <Variation kpi={kpi} current={value} previous={kpi.pick(previous)} />
-            </div>
-          );
-        })}
+      <div data-kpi-row="highlight" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {KPIS.filter((kpi) => kpi.highlight).map(renderCard)}
+      </div>
+      <div data-kpi-row="support" className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {KPIS.filter((kpi) => !kpi.highlight).map(renderCard)}
       </div>
       {current.otherCosts === null && (
         <p data-note="no-other-costs" className="text-xs text-muted-foreground">
