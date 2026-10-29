@@ -23,7 +23,7 @@
 - Writes refuse the demo house (`assertTenantNotDemo`). Read = `finance_can_view`. Write = `finance_can_edit_values`.
 - New SQL functions are `stable security definer`, `set search_path = public`, and executable by `service_role` only (`revoke all … from public, anon, authenticated; grant execute … to service_role`).
 - Every new RPC goes through `planRpcChunks`/`RPC_ROW_BUDGET` (`src/lib/finance/finance-data.server.ts`) so no response reaches the PostgREST 1000-row cap. Pass the per-house-per-day row count honestly. For example, sends by channel is ≤ 3 rows per house per day.
-- Migrations: `supabase/migrations/20261113100000_finance_sends_activity.sql` and `supabase/migrations/20261113100100_finance_other_costs_dated.sql`. Both must be applied in prod **before** the deploy. Applying them is not part of this plan.
+- Migrations: `supabase/migrations/20261114100000_finance_sends_activity.sql` and `supabase/migrations/20261114100100_finance_other_costs_dated.sql`. Both must be applied in prod **before** the deploy. Applying them is not part of this plan.
 - Verification before handing off: `npm test`, `npm run typecheck`, `npm run lint` (0 errors), `npm run build`.
 
 ## Review Focus
@@ -39,7 +39,7 @@
 ### Task 1: SQL — sends by channel and daily activity
 
 **Files:**
-- Create: `supabase/migrations/20261113100000_finance_sends_activity.sql`
+- Create: `supabase/migrations/20261114100000_finance_sends_activity.sql`
 - Test: `src/lib/finance-sends-activity.db.test.ts` (follow `src/lib/finance-exempt-provider-cost.db.test.ts`)
 
 **Interfaces:**
@@ -174,7 +174,7 @@
 ### Task 4: Outros custos with date and optional monthly repeat
 
 **Files:**
-- Create: `supabase/migrations/20261113100100_finance_other_costs_dated.sql`
+- Create: `supabase/migrations/20261114100100_finance_other_costs_dated.sql`
 - Test: `src/lib/finance-other-costs-dated.db.test.ts`
 - Modify: `src/lib/finance/finance-data.server.ts`, `src/lib/finance.functions.ts` (`saveOtherCost`, month view), `src/lib/finance-dashboard.functions.ts`, `src/lib/finance/calc.ts` (only if `otherCosts` becomes non-null), `scripts/demo/seed-demo-finance.mjs` (+ its db test)
 

@@ -1,4 +1,4 @@
-// SQL test for supabase/migrations/20261113100100_finance_other_costs_dated.sql:
+// SQL test for supabase/migrations/20261114100100_finance_other_costs_dated.sql:
 // tenant_finance_other_costs gains cost_date (backfilled from month),
 // repeat_monthly and series_id; finance_materialize_recurring_costs copies a
 // repeating cost into the next month on the same day (clamped to the month's
@@ -16,7 +16,7 @@ const migration = (name: string) =>
 const MIGRATION_GROUPS = migration("20261101100000_tenant_groups.sql");
 const MIGRATION_FINANCE = migration("20261101100100_tenant_finance.sql");
 // pg_cron is a stand-in schema here, not an extension.
-const MIGRATION_DATED = migration("20261113100100_finance_other_costs_dated.sql").replace(
+const MIGRATION_DATED = migration("20261114100100_finance_other_costs_dated.sql").replace(
   /create extension[^;]*;/gi,
   "",
 );

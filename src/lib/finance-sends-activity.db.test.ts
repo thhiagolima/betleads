@@ -1,5 +1,5 @@
 // SQL test for
-// supabase/migrations/20261113100000_finance_sends_activity.sql:
+// supabase/migrations/20261114100000_finance_sends_activity.sql:
 //   - finance_send_usage: one row per house x Sao Paulo day x item over
 //     usage_reservation/usage_refund wallet_ledger rows (same window filter
 //     and distinct-tenant handling as finance_betleads_usage,
@@ -22,7 +22,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const MIGRATION = readFileSync(
-  resolve(__dirname, "../..", "supabase/migrations/20261113100000_finance_sends_activity.sql"),
+  resolve(__dirname, "../..", "supabase/migrations/20261114100000_finance_sends_activity.sql"),
   "utf8",
 );
 
