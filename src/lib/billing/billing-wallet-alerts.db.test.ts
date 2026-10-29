@@ -35,6 +35,9 @@ const WALLET_MIGRATION = readMigration("supabase/migrations/20261022100100_billi
 const ALERTS_MIGRATION = readMigration(
   "supabase/migrations/20261024100100_billing_wallet_alerts.sql",
 );
+const RUNWAY_MIGRATION = readMigration(
+  "supabase/migrations/20261115100000_billing_runway_alert_candidates.sql",
+);
 
 // Paying (non-exempt) houses added here: the shared seed's pixpgf/pixreals/
 // forrandobet become plano 'interno' (exempt) in the price-book migration.
@@ -90,6 +93,7 @@ beforeAll(async () => {
   await db.exec(PRICE_BOOK_MIGRATION);
   await db.exec(WALLET_MIGRATION);
   await db.exec(ALERTS_MIGRATION);
+  await db.exec(RUNWAY_MIGRATION);
   // The price-book migration also makes the demo house 'interno'; put it back
   // on a paying plan so the demo filter is tested on its own.
   await db.exec(
@@ -395,6 +399,101 @@ describe("billing_low_balance_candidates", () => {
     await expect(
       as({ "test.super": "on" }, () =>
         db.query("select * from public.billing_low_balance_candidates(null, 500)"),
+      ),
+    ).rejects.toThrow(/forbidden/);
+  });
+});
+
+// P0.5: supabase/migrations/20261115100000_billing_runway_alert_candidates.sql
+describe("billing_runway_alert_candidates", () => {
+  const NOW = "2026-10-29T15:00:00.000Z";
+  const hoursBefore = (hours: number) => new Date(Date.parse(NOW) - hours * 3600_000).toISOString();
+
+  async function ledger(tenant: string, entryType: string, amount: number, at: string) {
+    await db.query(
+      `insert into public.wallet_ledger (tenant_id, entry_type, item, units, amount, balance_after, created_at)
+       values ($1, $2, 'sms', 1, $3, 0, $4)`,
+      [tenant, entryType, amount, at],
+    );
+  }
+
+  async function runway(after: string | null = null, limit = 500, hours: number | null = 24) {
+    return asService(async () => {
+      await setClock(NOW);
+      const { rows } = await db.query<{
+        tenant_id: string;
+        tenant_name: string;
+        balance: string;
+        spend_24h: string;
+        runway_hours: string;
+      }>("select * from public.billing_runway_alert_candidates($1::uuid, $2::int, $3::numeric)", [
+        after,
+        limit,
+        hours,
+      ]);
+      return rows;
+    });
+  }
+
+  it("lists a house above its threshold whose balance lasts less than 24 h (betgreen on 29/10)", async () => {
+    await setBalance(NORMAL, 552);
+    await ledger(NORMAL, "usage_reservation", -1090.32, hoursBefore(5));
+    // Plenty of balance for its pace: about 10 days.
+    await setBalance(OTHER, 1000);
+    await ledger(OTHER, "usage_reservation", -100, hoursBefore(2));
+    // Balance but no spend in 24 h: no runway to speak of.
+    await setBalance(THIRD, 50);
+
+    const rows = await runway();
+    expect(rows.map((row) => row.tenant_id)).toEqual([NORMAL]);
+    expect(Number(rows[0].balance)).toBe(552);
+    expect(Number(rows[0].spend_24h)).toBeCloseTo(1090.32, 2);
+    expect(Number(rows[0].runway_hours)).toBe(12.2);
+    expect(rows[0].tenant_name).toBe("casa-normal");
+  });
+
+  it("nets refunds and ignores spend older than 24 h", async () => {
+    await setBalance(NORMAL, 100);
+    await ledger(NORMAL, "usage_reservation", -300, hoursBefore(1));
+    await ledger(NORMAL, "usage_refund", 200, hoursBefore(1));
+    await ledger(NORMAL, "usage_reservation", -5000, hoursBefore(30));
+    // Net 100 in 24 h: R$ 100 lasts exactly 24 h, not below it.
+    expect(await runway()).toEqual([]);
+    await ledger(NORMAL, "usage_reservation", -1, hoursBefore(1));
+    const rows = await runway();
+    expect(Number(rows[0].spend_24h)).toBe(101);
+  });
+
+  it("never lists a suspended, exempt or billing-locked house, nor one at zero balance", async () => {
+    await setBalance(SUSPENDED, 10);
+    await ledger(SUSPENDED, "usage_reservation", -100, hoursBefore(1));
+    await setBalance(LEGACY_INTERNO, 10);
+    await ledger(LEGACY_INTERNO, "usage_reservation", -100, hoursBefore(1));
+    await setBalance(OTHER, 10);
+    await ledger(OTHER, "usage_reservation", -100, hoursBefore(1));
+    await db.exec(
+      `insert into public.tenant_billing (tenant_id, access_state) values ('${OTHER}', 'frozen')`,
+    );
+    await ledger(THIRD, "usage_reservation", -100, hoursBefore(1));
+    expect(await runway()).toEqual([]);
+  });
+
+  it("honours _hours and pages by tenant_id", async () => {
+    await setBalance(NORMAL, 40);
+    await ledger(NORMAL, "usage_reservation", -240, hoursBefore(1)); // 4 h
+    await setBalance(OTHER, 200);
+    await ledger(OTHER, "usage_reservation", -240, hoursBefore(1)); // 20 h
+    expect((await runway(null, 500, 6)).map((row) => row.tenant_id)).toEqual([NORMAL]);
+    expect((await runway(null, 1, 24)).map((row) => row.tenant_id)).toEqual([NORMAL]);
+    expect((await runway(NORMAL, 1, 24)).map((row) => row.tenant_id)).toEqual([OTHER]);
+  });
+
+  it("rejects bad arguments and is service_role only", async () => {
+    await expect(runway(null, 0)).rejects.toThrow(/invalid_limit/);
+    await expect(runway(null, 500, 0)).rejects.toThrow(/invalid_hours/);
+    await expect(
+      as({ "test.super": "on" }, () =>
+        db.query("select * from public.billing_runway_alert_candidates(null, 500, 24)"),
       ),
     ).rejects.toThrow(/forbidden/);
   });

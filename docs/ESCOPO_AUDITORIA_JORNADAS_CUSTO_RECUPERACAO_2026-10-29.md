@@ -258,6 +258,25 @@ Critério de ordem:
   tela da casa.
 - **Aceite:** a betgreen com R$ 742 e gasto de R$ 960 por dia recebe o alerta de menos de
   24h.
+- **Caso real (29/10, 16h):** a betgreen tinha R$ 552 de saldo e R$ 1.090 de gasto em 24h,
+  cerca de 12 horas de autonomia, e nenhum alerta, porque o saldo estava acima de R$ 200.
+- **Status: implementado no branch `fix/wallet-runway-alert`** (falta aplicar a migração e
+  fazer o deploy):
+  - Migração `20261115100000_billing_runway_alert_candidates.sql`, **só aditiva**: a função
+    `billing_runway_alert_candidates(_after, _limit, _hours)` calcula o gasto líquido em 24h
+    (reservas menos estornos do `wallet_ledger`) e a autonomia, com os mesmos filtros do
+    alerta de limite.
+  - `sendLowBalanceAlerts` roda primeiro a varredura por autonomia:
+    - abaixo de 24h, e-mail `low_runway` "Seu saldo na BetLeads dura cerca de N horas", uma
+      vez a cada 24h;
+    - abaixo de 6h, `low_runway_urgent`, a cada 6h.
+    A casa coberta por essa varredura não recebe também o e-mail de limite. Se a varredura
+    falhar (por exemplo, função ainda não criada), o alerta de limite continua normal.
+  - Corrigido o texto do e-mail de "Saldo insuficiente", que ainda dizia que as jornadas
+    "pulam" envios.
+  - **Ainda não feito:** o aviso de autonomia na tela da casa (`walletBalanceNotice`), que
+    precisaria do gasto em 24h no `wallet_summary`. O e-mail continua restrito à janela de
+    08h às 20h, como os demais alertas de billing.
 
 ### P1 — Controle de leads e de custo para a casa
 

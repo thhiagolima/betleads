@@ -12,6 +12,10 @@
 //   Task 7's 'no_balance' alert)
 //   (`billing_low_balance_candidates`) gets at most one e-mail per 24 h, to
 //   its admins/owners/gestores, only inside the 08:00-20:00 Brasília window.
+//   The sweep first runs the runway alert (P0.5): a house whose balance lasts
+//   less than 24 h at the last 24 h's pace (`billing_runway_alert_candidates`)
+//   gets "Seu saldo dura cerca de N horas" (once per 24 h; under 6 h, once per
+//   6 h) and skips the threshold e-mail.
 // - `notifyNoBalance` (Task 7) is called by the senders (journeys, SMS/e-mail
 //   flows, call flows) when the house wallet refused a send: at most one
 //   "Saldo insuficiente" e-mail per hour per house ('no_balance', '1 hour').
@@ -32,7 +36,7 @@ import {
   sendPlatformEmail,
 } from "./billing-emails.server";
 
-export type WalletAlertKind = "low_balance" | "no_balance";
+export type WalletAlertKind = "low_balance" | "no_balance" | "low_runway" | "low_runway_urgent";
 
 /** Postgres interval text, e.g. '24 hours' or '1 hour'. */
 export type WalletAlertInterval = string;
@@ -129,18 +133,32 @@ async function alertOneHouse(candidate: LowBalanceCandidate, now: Date): Promise
   if (!(await claimWalletAlert(tenantId, LOW_BALANCE_ALERT_KIND, LOW_BALANCE_ALERT_INTERVAL))) {
     return false;
   }
-  const recipients = await getPayerEmails(tenantId);
-  if (recipients.length === 0) return false;
-
   const { subject, html } = lowBalanceEmail(
     candidate.tenant_name?.trim() || "sua casa",
     Number(candidate.balance),
     Number(candidate.low_balance_threshold),
   );
   const day = brtDayKey(now);
+  return emailPayers(
+    tenantId,
+    subject,
+    html,
+    (index) => `wallet-alert:${LOW_BALANCE_ALERT_KIND}:${tenantId}:${day}:${index}`,
+  );
+}
+
+/** E-mails the house's payers; true when at least one recipient was accepted. */
+async function emailPayers(
+  tenantId: string,
+  subject: string,
+  html: string,
+  keyFor: (index: number) => string,
+): Promise<boolean> {
+  const recipients = await getPayerEmails(tenantId);
+  if (recipients.length === 0) return false;
   let accepted = 0;
   for (const [index, to] of recipients.entries()) {
-    const idempotencyKey = `wallet-alert:${LOW_BALANCE_ALERT_KIND}:${tenantId}:${day}:${index}`;
+    const idempotencyKey = keyFor(index);
     try {
       const result = await sendPlatformEmail({ to, subject, html, idempotencyKey });
       if (result.ok) accepted += 1;
@@ -175,7 +193,16 @@ export async function sendLowBalanceAlerts(opts: { now?: Date } = {}): Promise<n
   const now = opts.now ?? new Date();
   if (!isWithinBillingEmailWindow(now)) return 0;
 
-  let sent = 0;
+  // P0.5: the runway alert runs first; a house it covers does not also get
+  // the threshold e-mail. Its failure never blocks the threshold alert.
+  let runway: RunwaySweep = { sent: 0, covered: new Set() };
+  try {
+    runway = await sendLowRunwayAlerts(now);
+  } catch (err) {
+    console.error("[wallet-alerts] runway sweep failed", { error: errorMessage(err) });
+  }
+
+  let sent = runway.sent;
   let after: string | null = null;
   // Keyset paging (`_after` = last tenant_id seen) so the list is never
   // silently capped at PostgREST's 1000 rows. The guard only stops an
@@ -189,6 +216,7 @@ export async function sendLowBalanceAlerts(opts: { now?: Date } = {}): Promise<n
     const page: LowBalanceCandidate[] = result.data ?? [];
 
     for (const candidate of page) {
+      if (runway.covered.has(candidate.tenant_id)) continue;
       try {
         if (await alertOneHouse(candidate, now)) sent += 1;
       } catch (err) {
@@ -203,6 +231,111 @@ export async function sendLowBalanceAlerts(opts: { now?: Date } = {}): Promise<n
     after = page[page.length - 1].tenant_id;
   }
   return sent;
+}
+
+// ---------------------------------------------------------------------------
+// Runway alert (P0.5)
+// ---------------------------------------------------------------------------
+
+/** Below this many hours of balance at the last 24 h's pace, the house is warned. */
+export const RUNWAY_ALERT_HOURS = 24;
+/** Below this, the warning is urgent and may repeat every RUNWAY_URGENT_ALERT_INTERVAL. */
+export const RUNWAY_URGENT_HOURS = 6;
+export const RUNWAY_ALERT_KIND: WalletAlertKind = "low_runway";
+export const RUNWAY_ALERT_INTERVAL: WalletAlertInterval = "24 hours";
+export const RUNWAY_URGENT_ALERT_KIND: WalletAlertKind = "low_runway_urgent";
+export const RUNWAY_URGENT_ALERT_INTERVAL: WalletAlertInterval = "6 hours";
+
+type RunwayCandidate = {
+  tenant_id: string;
+  tenant_name: string | null;
+  balance: number | string;
+  spend_24h: number | string;
+  runway_hours: number | string;
+};
+
+type RunwaySweep = { sent: number; covered: Set<string> };
+
+function runwayText(hours: number): string {
+  if (hours < 1) return "menos de 1 hora";
+  const rounded = Math.round(hours);
+  return rounded === 1 ? "cerca de 1 hora" : `cerca de ${rounded} horas`;
+}
+
+function lowRunwayEmail(houseName: string, balance: number, spend24h: number, hours: number) {
+  const subject = `Seu saldo na BetLeads dura ${runwayText(hours)}`;
+  const body =
+    `No ritmo das últimas 24 horas (${moneyText(spend24h)} em envios), o saldo de ` +
+    `${moneyText(balance)} da casa ${escapeHtml(houseName)} dura ${runwayText(hours)}. ` +
+    "Quando acabar, SMS e voz param: as jornadas ficam pausadas e as campanhas de SMS " +
+    "ficam paradas até você adicionar créditos. Recarregue antes para não interromper os envios.";
+  const html = `<!doctype html>
+<html>
+  <body style="margin:0; padding:24px; background:#f5f5f5; font-family:Arial,Helvetica,sans-serif;">
+    <div style="max-width:480px; margin:0 auto; background:#ffffff; border-radius:8px; padding:24px; color:#1f2937;">
+      <p style="font-size:16px; line-height:1.5; margin:0 0 20px;">${body}</p>
+      <p style="text-align:center; margin:0;">
+        <a href="${PLAN_CREDITS_URL}" style="background:#2563eb; color:#ffffff; padding:12px 24px; border-radius:6px; text-decoration:none; font-weight:bold; display:inline-block;">Abrir Plano e créditos</a>
+      </p>
+    </div>
+  </body>
+</html>`;
+  return { subject, html };
+}
+
+async function alertRunwayHouse(candidate: RunwayCandidate, now: Date): Promise<boolean> {
+  const tenantId = candidate.tenant_id;
+  const hours = Number(candidate.runway_hours);
+  const urgent = hours < RUNWAY_URGENT_HOURS;
+  const kind = urgent ? RUNWAY_URGENT_ALERT_KIND : RUNWAY_ALERT_KIND;
+  const interval = urgent ? RUNWAY_URGENT_ALERT_INTERVAL : RUNWAY_ALERT_INTERVAL;
+  if (!(await claimWalletAlert(tenantId, kind, interval))) return false;
+  const { subject, html } = lowRunwayEmail(
+    candidate.tenant_name?.trim() || "sua casa",
+    Number(candidate.balance),
+    Number(candidate.spend_24h),
+    hours,
+  );
+  // Hour-level key: an urgent alert may legitimately repeat the same day.
+  const slot = now.toISOString().slice(0, 13);
+  return emailPayers(
+    tenantId,
+    subject,
+    html,
+    (index) => `wallet-alert:${kind}:${tenantId}:${slot}:${index}`,
+  );
+}
+
+/**
+ * Houses whose balance lasts less than RUNWAY_ALERT_HOURS at the last 24 h's
+ * pace (`billing_runway_alert_candidates`). `covered` holds every candidate,
+ * alerted now or within the claim interval, so the threshold sweep skips it.
+ */
+async function sendLowRunwayAlerts(now: Date): Promise<RunwaySweep> {
+  const sweep: RunwaySweep = { sent: 0, covered: new Set() };
+  let after: string | null = null;
+  for (let guard = 0; guard < 10_000; guard += 1) {
+    const result: DbResult<RunwayCandidate[]> = await rpcDb().rpc<RunwayCandidate[]>(
+      "billing_runway_alert_candidates",
+      { _after: after, _limit: CANDIDATES_PAGE_SIZE, _hours: RUNWAY_ALERT_HOURS },
+    );
+    if (result.error) throw new Error(result.error.message);
+    const page: RunwayCandidate[] = result.data ?? [];
+    for (const candidate of page) {
+      sweep.covered.add(candidate.tenant_id);
+      try {
+        if (await alertRunwayHouse(candidate, now)) sweep.sent += 1;
+      } catch (err) {
+        console.error("[wallet-alerts] runway alert failed", {
+          tenantId: candidate.tenant_id,
+          error: errorMessage(err),
+        });
+      }
+    }
+    if (page.length < CANDIDATES_PAGE_SIZE) break;
+    after = page[page.length - 1].tenant_id;
+  }
+  return sweep;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +383,7 @@ function noBalanceEmail(houseName: string, balance: number) {
   const body =
     `O saldo de créditos da casa ${escapeHtml(houseName)} não cobre mais alguns envios. ` +
     `O saldo atual é de ${moneyText(balance)}. ` +
-    "SMS e voz precisam de saldo: jornadas e automações pulam esses envios e campanhas de SMS ficam pausadas até você adicionar créditos. " +
+    "SMS e voz precisam de saldo: as jornadas ficam pausadas e retomam sozinhas, e as campanhas de SMS ficam paradas até você adicionar créditos. " +
     "O e-mail continua dentro da franquia mensal gratuita.";
   const html = `<!doctype html>
 <html>
