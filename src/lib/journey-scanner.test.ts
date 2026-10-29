@@ -50,9 +50,23 @@ afterEach(() => {
 });
 
 describe("journey scanner eligibility", () => {
-  it("accepts historical registrations when start_after is absent", () => {
-    const result = matchJourneyScanPlayer(journey(), player(), new Map());
-    expect(result).toEqual({
+  it("P0.3: an old registration does not enter as new (default max age 168 h)", () => {
+    expect(matchJourneyScanPlayer(journey(), player(), new Map()).matches).toBe(false);
+    const recent = new Date(Date.now() - 3 * 86400_000).toISOString();
+    expect(matchJourneyScanPlayer(journey(), player({ created_at: recent }), new Map())).toEqual({
+      matches: true,
+      occurrence: recent,
+    });
+  });
+
+  it("P0.3: max_event_age_hours overrides the default; 0 accepts historical registrations", () => {
+    const tenDaysAgo = new Date(Date.now() - 10 * 86400_000).toISOString();
+    const p = player({ created_at: tenDaysAgo });
+    expect(matchJourneyScanPlayer(journey(), p, new Map()).matches).toBe(false);
+    const longer = journey({ trigger_config: { max_event_age_hours: 720 } });
+    expect(matchJourneyScanPlayer(longer, p, new Map()).matches).toBe(true);
+    const unlimited = journey({ trigger_config: { max_event_age_hours: 0 } });
+    expect(matchJourneyScanPlayer(unlimited, player(), new Map())).toEqual({
       matches: true,
       occurrence: "2026-01-01T00:00:00.000Z",
     });
@@ -67,14 +81,14 @@ describe("journey scanner eligibility", () => {
     expect(result.matches).toBe(false);
   });
 
-  it("accepts historical first deposits when start_after is absent", () => {
-    const result = matchJourneyScanPlayer(
-      journey({ trigger_type: "primeiro_deposito" }),
-      player({ ftd_em: "2026-01-10T10:00:00.000Z" }),
-      new Map(),
-    );
+  it("P0.3: only first deposits from the last 72 h enter by default", () => {
+    const ftd = journey({ trigger_type: "primeiro_deposito" });
+    const old = player({ ftd_em: "2026-01-10T10:00:00.000Z" });
+    expect(matchJourneyScanPlayer(ftd, old, new Map()).matches).toBe(false);
+    const recent = new Date(Date.now() - 86400_000).toISOString();
+    const result = matchJourneyScanPlayer(ftd, player({ ftd_em: recent }), new Map());
     expect(result.matches).toBe(true);
-    expect(result.occurrence).toBe("2026-01-10T10:00:00.000Z");
+    expect(result.occurrence).toBe(recent);
   });
 
   it("requires a financial occurrence for pending PIX journeys", () => {

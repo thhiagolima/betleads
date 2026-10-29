@@ -227,6 +227,17 @@ Critério de ordem:
   - O editor mostra o campo com o padrão já preenchido.
 - **Aceite:** um jogador cadastrado há 30 dias sem FTD não entra em "Cadastrou e não
   depositou" com o padrão.
+- **Status: implementado no branch `fix/journeys-p0-event-age`** (falta deploy):
+  - `eventMaxAgeHours` e `eventYoungEnough` (`journey-policy.ts`), com padrões de 168h para
+    cadastro, 72h para primeiro depósito e 24h para saque. `trigger_config.max_event_age_hours`
+    sobrescreve o padrão, e `0` desliga o limite. PIX continua com o seu `expire_hours`.
+  - Aplicado no scanner (`matchJourneyScanPlayer` e `financialOccurrences`), que atende os
+    três caminhos de entrada: scanner completo, webhook e cruzamento.
+  - **Só vale para a entrada.** A verificação antes de cada etapa (`matchFinancialTrigger`)
+    não mudou, então quem já está na jornada não é cortado quando o evento envelhece.
+  - Editor: o campo "Só entra quem… nas últimas (horas)" aparece para os três gatilhos.
+  - **Não mexe nas matrículas já abertas** (por exemplo, a base importada da betgreen). Elas
+    terminam pelo limite de repetições do P0.2b.
 
 #### P0.4 Carga do histórico só com confirmação explícita
 - **Hoje:** uma jornada de evento sem `start_after` matricula todo o histórico, e o

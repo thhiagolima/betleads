@@ -36,6 +36,7 @@ import {
 } from "@/components/house-config/composer-notices";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { supabase } from "@/integrations/supabase/client";
+import { eventMaxAgeHours } from "@/lib/journey-policy";
 import { MAX_LOOPS_LIMIT, endStepMaxLoops, type JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -122,6 +123,12 @@ const HOLDOUT_OPTIONS: Option[] = [
   { value: "5", label: "5% não recebem mensagens" },
   { value: "10", label: "10% não recebem mensagens" },
 ];
+/** Triggers whose entry event has a max age (P0.3), with the field's wording. */
+const EVENT_AGE_LABELS: Record<string, string> = {
+  cadastrados_sem_deposito: "Só entra quem se cadastrou nas últimas (horas)",
+  primeiro_deposito: "Só entra quem fez o 1º depósito nas últimas (horas)",
+  saque_pago: "Só entra saque pago nas últimas (horas)",
+};
 const FAMILY_NONE = "none";
 const FAMILY_OPTIONS: Option[] = [
   { value: FAMILY_NONE, label: "Sem família" },
@@ -806,6 +813,32 @@ export function JourneyEditor({
               onChange={(level) => setTriggerConfig((current) => ({ ...current, level }))}
               options={LEVEL_OPTIONS}
               placeholder="Selecione o nível"
+            />
+          </Field>
+        )}
+        {trigger in EVENT_AGE_LABELS && (
+          <Field
+            id="event-max-age"
+            label={EVENT_AGE_LABELS[trigger]}
+            hint="Evita tratar a base antiga como evento novo. 0 tira o limite."
+            className="border-t border-border pt-4 sm:max-w-md"
+          >
+            <Input
+              id="event-max-age"
+              className="h-10"
+              type="number"
+              min={0}
+              max={8760}
+              value={String(eventMaxAgeHours(trigger, triggerConfig) ?? 0)}
+              onChange={(event) =>
+                setTriggerConfig((current) => ({
+                  ...current,
+                  max_event_age_hours: Math.min(
+                    8760,
+                    Math.max(0, Math.trunc(Number(event.target.value) || 0)),
+                  ),
+                }))
+              }
             />
           </Field>
         )}

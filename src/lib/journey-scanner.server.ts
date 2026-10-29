@@ -4,6 +4,8 @@ import { startJobRun, type JobRunHandle } from "./observability/job-monitor.serv
 import { captureServerException } from "./observability/sentry.server";
 import {
   audienceMatches,
+  eventMaxAgeHours,
+  eventYoungEnough,
   inactivityBandConfig,
   journeyEntryKey,
   pixExpiryHours,
@@ -114,10 +116,11 @@ async function financialOccurrences(journey: Journey, players: Player[]) {
         : query.eq("status", "pendente").ilike("metodo", "%pix%");
     if (startAt != null) query = query.gte("created_at", new Date(startAt).toISOString());
     // D-6: a pending PIX older than the expiry no longer drives the journey.
+    // P0.3: neither does a withdrawal older than max_event_age_hours.
     const expiryHours =
       journey.trigger_type === "pix_gerado_nao_pago"
         ? pixExpiryHours(journey.trigger_config)
-        : null;
+        : eventMaxAgeHours(journey.trigger_type, journey.trigger_config);
     if (expiryHours != null)
       query = query.gte("created_at", new Date(Date.now() - expiryHours * 3600_000).toISOString());
     const { data, error } = await query;
@@ -139,7 +142,10 @@ export function matchJourneyScanPlayer(
   if (journey.trigger_type === "cadastrados_sem_deposito") {
     const occurredAt = Date.parse(player.created_at);
     return {
-      matches: !player.ftd_em && (startAt == null || occurredAt >= startAt),
+      matches:
+        !player.ftd_em &&
+        (startAt == null || occurredAt >= startAt) &&
+        eventYoungEnough(journey.trigger_type, journey.trigger_config, occurredAt),
       occurrence: player.created_at,
     };
   }
@@ -149,7 +155,8 @@ export function matchJourneyScanPlayer(
       matches:
         Number.isFinite(occurredAt) &&
         player.ftd_em != null &&
-        (startAt == null || occurredAt >= startAt),
+        (startAt == null || occurredAt >= startAt) &&
+        eventYoungEnough(journey.trigger_type, journey.trigger_config, occurredAt),
       occurrence: String(player.ftd_em ?? "missing_first_deposit"),
     };
   }

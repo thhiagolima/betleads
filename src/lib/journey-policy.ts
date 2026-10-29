@@ -117,6 +117,46 @@ export function inactivityBandConfig(
 }
 
 /**
+ * Default max age (hours) of the event that ENTERS a journey (P0.3). Without
+ * it an imported base enters as new: betgreen's "Cadastrou e não depositou"
+ * enrolled 5,280 players, 4,800 of them signed up 7 days to 2 months before,
+ * and sent them "Bem-vindo, seu cadastro foi concluído".
+ */
+const DEFAULT_EVENT_MAX_AGE_HOURS: Record<string, number> = {
+  cadastrados_sem_deposito: 168,
+  primeiro_deposito: 72,
+  saque_pago: 24,
+};
+
+/**
+ * Only events younger than this enter the journey. Entry only: an enrollment
+ * already in the journey is not cut when its event ages.
+ * `trigger_config.max_event_age_hours` overrides the default; 0 disables.
+ * PIX keeps its own `expire_hours` (pixExpiryHours).
+ */
+export function eventMaxAgeHours(
+  triggerType: string,
+  triggerConfig: Record<string, unknown> | null | undefined,
+): number | null {
+  const configured = Number(triggerConfig?.max_event_age_hours);
+  if (triggerConfig && "max_event_age_hours" in triggerConfig && Number.isFinite(configured)) {
+    return configured > 0 ? configured : null;
+  }
+  return DEFAULT_EVENT_MAX_AGE_HOURS[triggerType] ?? null;
+}
+
+/** True when the event at `occurredAt` (epoch ms) is still young enough to enter. */
+export function eventYoungEnough(
+  triggerType: string,
+  triggerConfig: Record<string, unknown> | null | undefined,
+  occurredAt: number,
+  now = Date.now(),
+): boolean {
+  const maxAge = eventMaxAgeHours(triggerType, triggerConfig);
+  return maxAge == null || now - occurredAt <= maxAge * 3600_000;
+}
+
+/**
  * A pending PIX stops driving its journey after this many hours (D-6).
  * `trigger_config.expire_hours` overrides the 72 h default; 0 disables.
  */
