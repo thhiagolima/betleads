@@ -42,6 +42,8 @@ let goalDayRows: Row[];
 let usageRows: Row[];
 let feeRows: Row[];
 let sinceRows: Row[];
+/** Houses billing_tenant_exempt reports as exempt (finance_tenants_exempt). */
+let exemptTenants: Set<string>;
 let financeDaysCalls: Row[];
 
 function dayRow(tenantId: string, date: string, overrides: Row = {}): Row {
@@ -119,6 +121,7 @@ beforeEach(() => {
   usageRows = [];
   feeRows = [];
   sinceRows = [];
+  exemptTenants = new Set();
   financeDaysCalls = [];
 
   const isSuper = (u: unknown) => u === SUPER;
@@ -204,6 +207,15 @@ beforeEach(() => {
           String(row.month) >= String(args._from_month) &&
           String(row.month) <= String(args._to_month),
       ),
+    ),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_tenants_exempt", (args) => ({
+    data: capped(
+      [...new Set(args._tenants as string[])].map((id) => ({
+        tenant_id: id,
+        exempt: exemptTenants.has(id),
+      })),
     ),
     error: null,
   }));
@@ -340,6 +352,74 @@ describe("Betleads cost", () => {
       ...last7Days,
     });
     expect(week.duplicateBetleadsCosts).toBe(0);
+  });
+
+  it("tenant scope of an exempt house labels the line as provider cost", async () => {
+    exemptTenants.add(HOUSE_A);
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 });
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+
+    const line = dashboard.costs.find((l) => l.key === "betleads");
+    expect(line).toMatchObject({
+      label: "Custo de envio (provedor)",
+      amount: 7.5,
+      auto: true,
+    });
+    expect(dashboard.tenants[0].exempt).toBe(true);
+  });
+
+  it("tenant scope of a paying house keeps the Betleads label", async () => {
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 });
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+
+    expect(dashboard.costs.find((l) => l.key === "betleads")?.label).toBe("Betleads");
+    expect(dashboard.tenants[0].exempt).toBe(false);
+  });
+
+  it("group scope keeps the Betleads label even with an exempt house", async () => {
+    exemptTenants.add(HOUSE_A);
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 },
+      { tenant_id: HOUSE_B, metric_date: "2026-10-20", amount: 2.5 },
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+
+    expect(dashboard.costs.find((l) => l.key === "betleads")).toMatchObject({
+      label: "Betleads",
+      amount: 10,
+    });
+    expect(dashboard.tenants.map((row) => [row.nome, row.exempt])).toEqual([
+      ["Casa A", true],
+      ["Casa B", false],
+    ]);
+  });
+
+  it("the month view says whether the house is exempt", async () => {
+    exemptTenants.add(HOUSE_A);
+    const exempt = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(exempt.betleadsExempt).toBe(true);
+
+    exemptTenants.clear();
+    const paying = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(paying.betleadsExempt).toBe(false);
   });
 
   it("a house without since never flags duplicates", async () => {

@@ -84,6 +84,7 @@ export type OtherCostRow = {
 export type BetleadsUsageRow = { tenant_id: string; metric_date: string; amount: number | string };
 export type BetleadsFeeRow = { tenant_id: string; month: string; amount: number | string };
 export type BetleadsSinceRow = { tenant_id: string; since: string };
+export type TenantExemptRow = { tenant_id: string; exempt: boolean };
 export type MonthlyGgrRow = {
   tenant_id: string;
   month: string;
@@ -311,6 +312,19 @@ export async function fetchBetleadsSince(tenantIds: string[]) {
     ),
   );
   return parts.flat();
+}
+
+/**
+ * Whether each house is exempt now (billing_tenant_exempt): its Betleads cost
+ * is the provider cost (finance_betleads_usage) and is labelled as such.
+ */
+export async function fetchTenantsExempt(tenantIds: string[]): Promise<Map<string, boolean>> {
+  const parts = await Promise.all(
+    chunk(tenantIds, RPC_ROW_BUDGET).map((ids) =>
+      rpcRows<TenantExemptRow>("finance_tenants_exempt", { _tenants: ids }),
+    ),
+  );
+  return new Map(parts.flat().map((row) => [row.tenant_id, row.exempt === true]));
 }
 
 const MONTHLY_GGR_COLUMNS = "tenant_id,month,ggr,valid_through";

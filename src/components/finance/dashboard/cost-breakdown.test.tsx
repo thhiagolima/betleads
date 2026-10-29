@@ -38,6 +38,26 @@ describe("CostBreakdown", () => {
     expect(html).toContain("n.a."); // Equipe has no previous
   });
 
+  it("shows the provider-cost label of an exempt house with the automático badge", () => {
+    const html = renderToStaticMarkup(
+      <CostBreakdown
+        costs={[
+          {
+            key: "betleads",
+            label: "Custo de envio (provedor)",
+            amount: 12.5,
+            previous: null,
+            auto: true,
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Custo de envio (provedor)");
+    expect(html).toContain("automático");
+    expect(html).not.toContain(">Betleads<");
+  });
+
   it("renders an empty state when there are no costs", () => {
     const html = renderToStaticMarkup(<CostBreakdown costs={[]} />);
 

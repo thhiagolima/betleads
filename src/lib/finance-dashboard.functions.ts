@@ -30,6 +30,7 @@ import {
   fetchBetleadsFees,
   fetchBetleadsSince,
   fetchBetleadsUsage,
+  fetchTenantsExempt,
   fetchFinanceDays,
   fetchGoalDays,
   fetchMonthlyGgr,
@@ -77,6 +78,8 @@ export type DashboardTenantRow = {
   current: PeriodSummary;
   previous: PeriodSummary;
   goals: GoalEvaluation[];
+  /** The house is exempt now: its Betleads cost is the provider cost of its sends. */
+  exempt: boolean;
   /** Past dates in the current window missing GGR or Anúncios (today left out). */
   pendingDates: string[];
   /**
@@ -298,7 +301,7 @@ export async function getFinanceDashboardFor(
   ].sort();
   const feeMonths = tenantIds.length ? allCostMonths : [];
 
-  const [dayRows, goalRows, costRows, usageRows, feeRows, sinceRows, monthlyRows] =
+  const [dayRows, goalRows, costRows, usageRows, feeRows, sinceRows, monthlyRows, exemptByTenant] =
     await Promise.all([
       span ? fetchFinanceDays(tenantIds, span) : Promise.resolve([]),
       current && tenantIds.length ? fetchGoalDays(tenantIds, current) : Promise.resolve([]),
@@ -311,6 +314,9 @@ export async function getFinanceDashboardFor(
       span
         ? fetchMonthlyGgr(tenantIds, monthStartOf(span.from), monthStartOf(span.to))
         : Promise.resolve([]),
+      tenantIds.length
+        ? fetchTenantsExempt(tenantIds)
+        : Promise.resolve(new Map<string, boolean>()),
     ]);
 
   // A monthly GGR total is split over its month's days from the 1st, so when
@@ -421,6 +427,7 @@ export async function getFinanceDashboardFor(
       goals: current
         ? evaluateGoals(goalRowsByTenant.get(tenant.id) ?? [], currentSummary, current)
         : [],
+      exempt: exemptByTenant.get(tenant.id) ?? false,
       pendingDates,
       ggrUpdatedThrough: monthlyGgrPendingThrough(pendingDays, allocationsOf(tenant.id)),
     };
@@ -493,6 +500,11 @@ export async function getFinanceDashboardFor(
         currentCategories,
         previousCategories,
         ggrFeePct,
+        // Group/all scope sums exempt and paying houses: keep "Betleads".
+        {
+          exemptHouse:
+            data.scope.kind === "tenant" && (exemptByTenant.get(data.scope.tenantId) ?? false),
+        },
       )
     : [];
 

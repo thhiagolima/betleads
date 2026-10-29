@@ -26,7 +26,7 @@ import {
 } from "@/components/finance/finance-monthly-ggr";
 import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
 import { num } from "@/lib/format";
-import { averageFilledAdSpend, presetRange } from "@/lib/finance/calc";
+import { averageFilledAdSpend, betleadsCostLabel, presetRange } from "@/lib/finance/calc";
 import type { FinanceDay } from "@/lib/finance/types";
 import { getTenantFinanceMonth, saveFinanceDays, setMonthlyGgr } from "@/lib/finance.functions";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
@@ -409,7 +409,9 @@ export function FinanceMonthView({
           <p className="font-medium">{formatBRL(summary.otherCosts)}</p>
         </div>
         <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Betleads</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            {betleadsCostLabel(data.betleadsExempt)}
+          </p>
           <p className="font-medium">
             {formatBRL(summary.betleadsUsage + (summary.betleadsFee ?? 0))}
           </p>

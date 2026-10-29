@@ -224,10 +224,20 @@ function formatPctNoTrailingZeros(pct: number): string {
 }
 
 /**
+ * The label of a house's Betleads cost. An exempt house (billing_tenant_exempt)
+ * pays nothing for sends, so its line is what the provider charged
+ * (finance_betleads_usage reports units × provider_unit_cost for it).
+ */
+export function betleadsCostLabel(exemptHouse: boolean): string {
+  return exemptHouse ? "Custo de envio (provedor)" : "Betleads";
+}
+
+/**
  * Cost breakdown shown next to the period summary: the computed lines
  * (Anúncios, Taxa de GGR, Taxa de movimentação, Betleads) plus one line per
  * manually entered cost category. Only Betleads is `auto` (the "automático"
- * tag): Anúncios is typed in and the fees follow it. Sorted by amount descending; a line with
+ * tag): Anúncios is typed in and the fees follow it. `exemptHouse` (only for a
+ * single exempt house) relabels the Betleads line, see betleadsCostLabel. Sorted by amount descending; a line with
  * amount 0 and no previous amount (0 or null) is dropped as noise.
  */
 export function costBreakdown(
@@ -236,6 +246,7 @@ export function costBreakdown(
   categories: Record<string, number>,
   previousCategories: Record<string, number> | null,
   ggrFeePct: number | null,
+  options?: { exemptHouse?: boolean },
 ): CostLine[] {
   const ggrLabel =
     ggrFeePct === null ? "Taxa de GGR" : `Taxa de GGR (${formatPctNoTrailingZeros(ggrFeePct)})`;
@@ -264,7 +275,7 @@ export function costBreakdown(
     },
     {
       key: "betleads",
-      label: "Betleads",
+      label: betleadsCostLabel(options?.exemptHouse ?? false),
       amount: round2(current.betleadsUsage + (current.betleadsFee ?? 0)),
       previous: previous ? round2(previous.betleadsUsage + (previous.betleadsFee ?? 0)) : null,
       auto: true,

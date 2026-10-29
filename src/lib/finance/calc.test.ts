@@ -3,6 +3,7 @@ import fixtureDays from "./__fixtures__/pixreals-outubro.json";
 import {
   allocateMonthlyGgr,
   averageFilledAdSpend,
+  betleadsCostLabel,
   compareRange,
   computeDay,
   costBreakdown,
@@ -426,6 +427,23 @@ describe("costBreakdown", () => {
     expect(betleadsLine?.amount).toBe(10);
     // Ferramentas (0, no previous) is dropped.
     expect(lines.some((l) => l.key === "category:Ferramentas")).toBe(false);
+  });
+
+  it("labels the Betleads line as provider cost for an exempt house", () => {
+    const current = summaryWith({ betleadsUsage: 12.5 });
+    const previous = summaryWith({ betleadsUsage: 10 });
+
+    const exempt = costBreakdown(current, previous, {}, null, null, { exemptHouse: true });
+    const line = exempt.find((l) => l.key === "betleads");
+    expect(line?.label).toBe("Custo de envio (provedor)");
+    expect(line?.auto).toBe(true);
+    expect(line?.amount).toBe(12.5);
+    expect(line?.previous).toBe(10);
+
+    const paying = costBreakdown(current, previous, {}, null, null, { exemptHouse: false });
+    expect(paying.find((l) => l.key === "betleads")?.label).toBe("Betleads");
+    expect(betleadsCostLabel(true)).toBe("Custo de envio (provedor)");
+    expect(betleadsCostLabel(false)).toBe("Betleads");
   });
 
   it("labels the GGR line without a rate when ggrFeePct is null", () => {

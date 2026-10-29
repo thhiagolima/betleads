@@ -176,6 +176,10 @@ beforeEach(() => {
     data: sinceRows.filter((row) => ofTenants(row, args)),
     error: null,
   }));
+  fake.admin.onRpc("finance_tenants_exempt", (args) => ({
+    data: (args._tenants as string[]).map((id) => ({ tenant_id: id, exempt: false })),
+    error: null,
+  }));
 
   fake.admin
     .rows("tenants")

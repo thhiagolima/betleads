@@ -28,6 +28,7 @@ import {
   fetchBetleadsFees,
   fetchBetleadsSince,
   fetchBetleadsUsage,
+  fetchTenantsExempt,
   fetchFinanceDays,
   fetchGoalDays,
   fetchMonthlyGgr,
@@ -151,6 +152,7 @@ export async function getTenantFinanceMonthFor(
     sinceRows,
     usedCategoriesRes,
     monthlyRows,
+    exemptByTenant,
   ] = await Promise.all([
     range ? fetchFinanceDays([tenantId], range) : Promise.resolve([]),
     range ? fetchGoalDays([tenantId], range) : Promise.resolve([]),
@@ -174,6 +176,7 @@ export async function getTenantFinanceMonthFor(
       .eq("tenant_id", tenantId)
       .not("categoria", "is", null),
     fetchMonthlyGgr([tenantId], monthStart, monthStart),
+    fetchTenantsExempt([tenantId]),
   ]);
   if (costsRes.error) throw new Error(costsRes.error.message);
   if (ratesRes.error) throw new Error(ratesRes.error.message);
@@ -236,6 +239,8 @@ export async function getTenantFinanceMonthFor(
     categories,
     /** First day with Betleads consumption (spec §7.2): months before it have no usage data. */
     betleadsSince: since,
+    /** The house is exempt now: its Betleads cost is the provider cost ("Custo de envio (provedor)"). */
+    betleadsExempt: exemptByTenant.get(tenantId) ?? false,
     rates: {
       current: {
         ggrFeePct: current.ggrFeePct,
