@@ -1,7 +1,7 @@
 # Financeiro — auditoria e escopo do redesign do painel
 
 **Data:** 29/10/2026
-**Status:** Proposto
+**Status:** Proposto (decisões da §4 tomadas em 29/10)
 **Base:** o que está no `main` em `b831d56`: painel de resultado, GGR do mês, custo do provedor para casas isentas, dias sempre calculados e cards de depósitos e saques. Os specs de origem são `superpowers/specs/2026-10-24-grupos-de-casas-design.md` e `superpowers/specs/2026-10-27-financeiro-painel-design.md`.
 
 ## 1. Por que este documento
@@ -111,7 +111,7 @@ O que já existe nos dados e não aparece:
 
 - `finance_betleads_usage` passa a devolver o custo **por canal** (`item`), com a quantidade (`units`) por dia.
 - A mensalidade vira uma linha própria, **"Mensalidade"**, separada de **"Envios"**.
-- Casa isenta: custo do provedor por canal. **Pré-requisito:** cadastrar o custo do provedor de voz e de e-mail na tabela de preços (§4, pergunta 1). Enquanto não houver, o card do canal mostra "custo do provedor não cadastrado" em vez de R$ 0.
+- Casa isenta: custo do provedor por canal. **Pré-requisito:** cadastrar o custo do provedor de voz e de e-mail na tabela de preços (§4.1). Enquanto não houver, o card do canal mostra "custo do provedor não cadastrado" em vez de R$ 0.
 
 ### 3.4 Lançamentos: lista de dias e modal do dia
 
@@ -129,7 +129,7 @@ O que já existe nos dados e não aparece:
 - Cada custo ganha uma **data** (padrão: hoje) e passa a entrar em qualquer período que contenha essa data, como os demais custos.
 - Opção **"Repetir todo mês"** para custos fixos: cria o lançamento do mês seguinte no mesmo dia, e ele pode ser editado ou removido.
 - Os lançamentos antigos sem data ficam no dia 1 do mês. Hoje não existe nenhum em produção.
-- Com isso, a nota "Resultado sem outros custos do mês" deixa de existir. A mensalidade segue a regra própria da §4, pergunta 3.
+- Com isso, a nota "Resultado sem outros custos do mês" deixa de existir. A mensalidade segue só em mês fechado (§4.3).
 
 ### 3.6 Clareza (vale para tudo)
 
@@ -151,19 +151,19 @@ O que já existe nos dados e não aparece:
 
 | Fase | Entrega | Depende de |
 |---|---|---|
-| F1 | Custo por canal e mensalidade separada (§3.3), envios nos dias, nomes únicos (§3.6) | pergunta 1 |
+| F1 | Custo por canal e mensalidade separada (§3.3), envios nos dias, nomes únicos (§3.6) | cadastrar custo do provedor (§4.1) |
 | F2 | Outros custos com data e recorrência (§3.5) | — |
 | F3 | Lançamentos em lista com modal do dia (§3.4) | F1 |
 | F4 | Painel com cascata e blocos de KPIs (§3.2) | F1, F2 |
 | F5 | KPIs do CRM e da Meta no Financeiro, referência para o ROI | F4 |
 
-## 4. Perguntas em aberto
+## 4. Decisões (respondidas em 29/10/2026)
 
-1. **Custo do provedor de voz e de e-mail.** Quanto a Infobip cobra por 30 s de voz e por e-mail? Sem isso, o custo desses canais nas casas isentas fica em branco.
-2. **Retorno do CRM.** Qual visão usar no Financeiro: a receita **direta** (clique → depósito), a **influenciada** (regra de 72 h da Central de Resultados) ou as duas?
-3. **Mensalidade em períodos menores que o mês.** Ratear por dia (R$ 4.000 ÷ dias do mês) ou continuar entrando só em mês fechado?
-4. **Recorrência de outros custos.** Basta "repetir todo mês", ou também é preciso semanal ou anual?
-5. **Referência do ROI.** Meta da casa, média das casas do grupo ou o mês anterior?
+1. **Custo do provedor:** voz **R$ 0,0035 por 30 s**, e-mail **R$ 0,0004 por e-mail** (SMS segue R$ 0,059). Esses valores precisam ser cadastrados na tabela de preços (`billing_price_book.provider_unit_cost`) com vigência a partir do cadastro. Os registros já gravados na carteira continuam com o custo vazio, então o custo de voz e e-mail das casas isentas só aparece a partir dessa data.
+2. **Retorno do CRM:** mostrar **as duas** receitas, a direta (clique → depósito) e a influenciada (regra da Central de Resultados), cada uma com o seu retorno (receita ÷ custo de envio).
+3. **Mensalidade:** continua entrando **só em mês fechado** (e no preset "Mês"). Nos outros períodos, o card da mensalidade diz que ela entra no fechamento do mês.
+4. **Outros custos:** cada custo tem data. **Nem todos repetem**: a opção "Repetir todo mês" é por custo e vem desligada.
+5. **Referência do ROI:** o **mês anterior** (mesma regra de comparação do painel: o mês em andamento é comparado até o mesmo dia).
 
 ## 5. Fora do escopo
 
