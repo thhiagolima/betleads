@@ -32,28 +32,31 @@ describe("ResultBand", () => {
     expect(roi).toContain("Retorno (ROI)");
     expect(roi).toContain("115,0%");
     expect(roi).toContain("mês anterior: 80,0%");
-    expect(roi).toContain("+15,0 p.p.");
     expect(roi).toContain('aria-label="Como calculamos"');
 
     const profit = card(html, "cashResult");
     expect(profit).toContain("Lucro líquido");
     expect(profit).toContain("▲ 15,0%");
     expect(profit).toContain("text-emerald-400");
+    expect(profit).toContain("text-[40px]");
+    expect(profit).toContain("bg-emerald-500/");
 
     const margin = card(html, "margin");
     expect(margin).toContain("Margem");
     expect(margin).toContain("50,0%");
-    expect(margin).toContain("+0,0 p.p.");
+    expect(margin).toContain("lucro ÷ net");
 
     const ads = card(html, "adSpend");
     expect(ads).toContain("Anúncios");
     expect(ads).toContain("R$ 1.000,00");
+    expect(ads).toContain("text-[30px]");
+    expect(html).not.toContain("n.a.");
   });
 
-  it("shows n.a. for the reference when the previous month has no ROI, and red when ads rise", () => {
+  it("red when ads rise, and the house count on the profit label", () => {
     const html = render(
       <ResultBand
-        current={summary({ adSpend: 1200 })}
+        current={summary({ adSpend: 1200, roi: 0.5, cashResult: -10 })}
         previous={summary({ adSpend: 1000 })}
         kpis={{ current: kpis(), previous: kpis() }}
         roiReference={{ roi: null, range: { from: "2026-09-01", to: "2026-09-30" } }}
@@ -65,6 +68,28 @@ describe("ResultBand", () => {
     expect(card(html, "adSpend")).toContain("▲ 20,0%");
     expect(card(html, "adSpend")).toContain("text-rose-400");
     expect(card(html, "cashResult")).toContain("Lucro líquido (3 casas)");
-    expect(html).toContain("sm:grid-cols-2");
+    expect(card(html, "cashResult")).toContain("bg-rose-500/");
+    expect(html).toContain("lg:grid-cols-[1.6fr_1fr_1fr_1fr]");
+  });
+
+  it("hides variations without a previous period and gives the reasons", () => {
+    const html = render(
+      <ResultBand
+        current={summary({ cashResult: -72.06, adSpend: 0, roi: null, pendingDays: 28 })}
+        previous={summary()}
+        kpis={{ current: kpis({ margin: -0.122 }), previous: kpis() }}
+        roiReference={{ roi: null, range: { from: "2026-09-01", to: "2026-09-30" } }}
+      />,
+    );
+
+    expect(html).not.toContain("n.a.");
+    expect(html).not.toContain("▲");
+    expect(html).not.toContain("▼");
+    expect(card(html, "cashResult")).toContain("Sem mês anterior para comparar");
+    const roi = card(html, "roi");
+    expect(roi).toContain("—");
+    expect(roi).toContain("Sem anúncios no período");
+    expect(roi).not.toContain("mês anterior");
+    expect(card(html, "adSpend")).toContain("Nenhum dia lançado");
   });
 });
