@@ -4,6 +4,7 @@ import {
   audienceMatches,
   activationTriggerConfig,
   defaultEntryScope,
+  INCLUDE_BASE_START_AFTER,
   eventMaxAgeHours,
   eventYoungEnough,
   inactivityUpperBoundHours,
@@ -209,6 +210,19 @@ describe("activation entry scope (E-02)", () => {
       config,
     );
     expect(activationTriggerConfig("inactivity", config, undefined, now)).toEqual(config);
+  });
+
+  it("P0.4: including the base on an event trigger without start_after sets an explicit start", () => {
+    expect(activationTriggerConfig("cadastrados_sem_deposito", {}, "include_base", now)).toEqual({
+      start_after: INCLUDE_BASE_START_AFTER,
+    });
+    expect(
+      activationTriggerConfig("cashback_pago", { start_after: "" }, "include_base", now),
+    ).toEqual({
+      start_after: INCLUDE_BASE_START_AFTER,
+    });
+    // Without a scope nothing is added here: the database trigger stamps the activation time.
+    expect(activationTriggerConfig("cadastrados_sem_deposito", {}, undefined, now)).toEqual({});
   });
 });
 

@@ -249,6 +249,28 @@ Critério de ordem:
   - O scanner trata a falta de `start_after` como `new_only`.
 - **Aceite:** nenhum caminho (tela, API, duplicação ou edição) consegue matricular a base
   inteira sem confirmação registrada em `tenant_audit_logs`.
+- **Achado na implementação:** as jornadas das casas novas foram ativadas em 26/10 por um
+  **script fora do repositório**, que gravou direto no banco (`journey_events.detail.source =
+  'copy_from_sorte_alta'`) e não passou pelo diálogo de escopo. Nas 8 casas, PIX e Saque
+  ficaram com `start_after`, mas "Cadastrou e não depositou" e "Cashback" não, e carregaram a
+  base inteira. Uma checagem só no servidor da aplicação não teria impedido isso.
+- **Status: implementado no branch `fix/journeys-entry-scope`** (falta aplicar a migração e
+  fazer o deploy):
+  - Migração `20261115100100_journeys_default_start_after.sql`: o trigger `BEFORE INSERT OR
+    UPDATE OF status` em `journeys` grava `start_after` com a hora da ativação quando uma
+    jornada de evento passa a `active` sem ele. Vale para qualquer caminho, inclusive
+    scripts. Gatilhos de estado (inatividade, nível) e jornadas que já estavam ativas não
+    mudam.
+  - `activationTriggerConfig`: "Incluir a base atual" numa jornada de evento sem
+    `start_after` grava `INCLUDE_BASE_START_AFTER` (1970-01-01), uma escolha explícita que
+    fica registrada no `journey_events` (`entry_scope`) com o usuário. O limite de idade do
+    P0.3 continua valendo.
+  - Diferente do aceite original: a confirmação fica em `journey_events` (com
+    `actor_user_id`), não em `tenant_audit_logs`, e o servidor não recusa a ativação; o
+    padrão seguro passa a ser "só novos".
+  - **Ainda não feito:** a estimativa do diálogo (`journey_eligible_lead_count`) ignora o
+    limite de idade do P0.3, então mostra mais jogadores do que de fato entram nos gatilhos
+    de evento. As 16 jornadas já ativas sem `start_after` (Cadastrou e Cashback) não mudam.
 
 #### P0.5 Alerta de saldo por autonomia
 - **Hoje:** `low_balance_threshold` fixo de R$ 200 e e-mail de hora em hora só depois

@@ -259,6 +259,11 @@ export function defaultEntryScope(triggerType: string): JourneyEntryScope {
  * (`start_after`). "include_base" lifts a previous `start_after` only for
  * state triggers (inactivity bands); on event triggers it is kept, because
  * removing it would replay past PIX, withdrawals or sign-ups.
+ *
+ * P0.4: an event journey activated without `start_after` gets the activation
+ * time from the `journeys_default_start_after` trigger, so loading the base
+ * needs an explicit start: "include_base" on an event trigger with none sets
+ * INCLUDE_BASE_START_AFTER (the entry max age of P0.3 still applies).
  */
 export function activationTriggerConfig(
   triggerType: string,
@@ -272,8 +277,14 @@ export function activationTriggerConfig(
     const { start_after: _startAfter, ...rest } = config;
     return rest;
   }
+  if (scope === "include_base" && !String(config.start_after ?? "")) {
+    return { ...config, start_after: INCLUDE_BASE_START_AFTER };
+  }
   return config;
 }
+
+/** Explicit "whole base" start for an event journey (see activationTriggerConfig). */
+export const INCLUDE_BASE_START_AFTER = "1970-01-01T00:00:00.000Z";
 
 /** Whether a player belongs to the journey's audience (entry and every step, E-06). */
 export function audienceMatches(
