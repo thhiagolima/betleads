@@ -124,6 +124,15 @@ describe("getExpertLeadSheetFor", () => {
     expect(sheet.claim).toBeNull();
     expect(sheet.retornosPendentes).toEqual([]);
     expect(sheet.podeAssumir).toBe(true);
+    expect(sheet.janelaHoras).toBe(72);
+  });
+
+  it("janelaHoras comes from the house expert_settings", async () => {
+    seedPlayer();
+    fake.admin.rows("expert_settings").push({ tenant_id: TENANT, click_window_hours: 48 });
+    fake.admin.rows("expert_settings").push({ tenant_id: "outra-casa", click_window_hours: 12 });
+    const sheet = await getExpertLeadSheetFor(CTX, { playerId: PLAYER });
+    expect(sheet.janelaHoras).toBe(48);
   });
 
   it("ticketMedio = totalDepositado / depositos", async () => {
