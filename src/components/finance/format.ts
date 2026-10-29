@@ -46,6 +46,11 @@ export function formatInt(value: number | null | undefined): string {
   return new Intl.NumberFormat("pt-BR").format(value);
 }
 
+/** A count with its noun: "20 depósitos", "1 saque". */
+export function formatCount(value: number, singular: string, plural: string): string {
+  return `${formatInt(value)} ${value === 1 ? singular : plural}`;
+}
+
 /** A difference in percentage points (ROI vs ROI), signed: "+12,3 p.p.". */
 export function formatPp(value: number | null | undefined): string {
   if (value === null || value === undefined) return NA;

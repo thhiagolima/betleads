@@ -51,7 +51,33 @@ function buttonTag(html: string, label: string): string {
   return html.slice(open, html.indexOf(">", open) + 1);
 }
 
+const activity = {
+  depositCount: 20,
+  depositorCount: 15,
+  withdrawalCount: 1,
+  generatedPixCount: 25,
+  crmSent: 0,
+  crmClicks: 0,
+  crmDirectConversions: 0,
+  crmDirectRevenue: 0,
+  crmInfluencedRevenue: 0,
+  adImpressions: 0,
+  adClicks: 0,
+};
+
 describe("DayModalContent", () => {
+  it("shows the deposit and withdrawal counts as a muted second line", () => {
+    const html = renderToStaticMarkup(<DayModalContent {...props({ activity })} />);
+    expect(html).toContain("R$ 2.000,00");
+    expect(html).toContain(">20 depósitos<");
+    expect(html).toContain(">1 saque<");
+    expect(html).not.toContain("(20)");
+    expect(html).not.toContain("(1)");
+
+    const without = renderToStaticMarkup(<DayModalContent {...props()} />);
+    expect(without).not.toContain("depósitos<");
+  });
+
   it("shows the three sections, per-channel sends and a disabled Próximo dia on today", () => {
     const html = renderToStaticMarkup(<DayModalContent {...props()} />);
 

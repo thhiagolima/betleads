@@ -10,7 +10,7 @@
 // Relies on a TooltipProvider above it (the dashboard root).
 
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
-import { formatBRL, formatInt, formatPct } from "@/components/finance/format";
+import { formatBRL, formatCount, formatInt, formatPct } from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
 import type { FinanceKpis, PeriodSummary, SendLine } from "@/lib/finance/types";
 
@@ -83,8 +83,7 @@ function KpiRowView({ row, hasPrevious }: { row: KpiRow; hasPrevious: boolean })
   );
 }
 
-const count = (value: number, singular: string, plural: string) =>
-  `${formatInt(value)} ${value === 1 ? singular : plural}`;
+const count = formatCount;
 
 export function KpiBlocks({
   totals,

@@ -8,7 +8,7 @@
 // wait for it instead of asking.
 // A Sheet on a phone, a Dialog from `sm` up. Read-only (group manager, demo
 // house) shows values only.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -26,7 +26,7 @@ import {
 import { SendCostAmount } from "@/components/finance/dashboard/sends-block";
 import { DayStatusChip } from "@/components/finance/day-list";
 import { FINANCE_TERMS } from "@/components/finance/definitions";
-import { formatBRL, formatInt, GGR_COLUMN_LABEL } from "@/components/finance/format";
+import { formatBRL, formatCount, formatInt, GGR_COLUMN_LABEL } from "@/components/finance/format";
 import {
   MONTHLY_GGR_COLUMN_NOTE,
   type MonthlyGgrCurrent,
@@ -125,17 +125,24 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Figure({ label, children }: { label: ReactNode; children: ReactNode }) {
+function Figure({
+  label,
+  detail,
+  children,
+}: {
+  label: ReactNode;
+  /** Small muted second line under the value (e.g. "20 depósitos"). */
+  detail?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="min-w-0">
       <dt className="text-[11px] text-muted-foreground">{label}</dt>
       <dd className="truncate text-sm font-medium tabular-nums">{children}</dd>
+      {detail && <dd className="truncate text-xs text-muted-foreground">{detail}</dd>}
     </div>
   );
 }
-
-const withCount = (amount: number, count: number | undefined) =>
-  count === undefined ? formatBRL(amount) : `${formatBRL(amount)} (${formatInt(count)})`;
 
 const Pending = () => <span className="text-xs italic text-muted-foreground">pendente</span>;
 
@@ -179,11 +186,21 @@ export function DayModalContent({
             <Figure label="Cadastros">{formatInt(day.registrations)}</Figure>
             <Figure label="FTDs">{formatInt(day.ftds)}</Figure>
             <Figure label="Valor de FTD">{formatBRL(day.ftdDepositAmount)}</Figure>
-            <Figure label="Depósitos">
-              {withCount(day.depositAmount, activity?.depositCount)}
+            <Figure
+              label="Depósitos"
+              detail={
+                activity ? formatCount(activity.depositCount, "depósito", "depósitos") : undefined
+              }
+            >
+              {formatBRL(day.depositAmount)}
             </Figure>
-            <Figure label="Saques">
-              {withCount(day.withdrawalAmount, activity?.withdrawalCount)}
+            <Figure
+              label="Saques"
+              detail={
+                activity ? formatCount(activity.withdrawalCount, "saque", "saques") : undefined
+              }
+            >
+              {formatBRL(day.withdrawalAmount)}
             </Figure>
             <Figure
               label={
@@ -740,6 +757,14 @@ export function DayModal({
     />
   ) : null;
   const description = "Números do CRM, o que você lança e o resultado do dia.";
+  // On open, focus the dialog itself rather than its first focusable element
+  // (a "como calculamos" (i), whose tooltip would open over the figures).
+  // Tab still moves through the fields from there.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const focusContent = (event: Event) => {
+    event.preventDefault();
+    contentRef.current?.focus();
+  };
 
   const confirmDiscard = (
     <AlertDialog
@@ -775,7 +800,11 @@ export function DayModal({
     return (
       <>
         <Dialog open={open} onOpenChange={onOpenChange}>
-          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogContent
+            ref={contentRef}
+            onOpenAutoFocus={focusContent}
+            className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"
+          >
             <DialogHeader>
               <DialogTitle>{title}</DialogTitle>
               <DialogDescription className="sr-only">{description}</DialogDescription>
@@ -792,6 +821,8 @@ export function DayModal({
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
+          ref={contentRef}
+          onOpenAutoFocus={focusContent}
           side="bottom"
           className="h-[100dvh] overflow-y-auto overflow-x-hidden px-4 pb-6 pt-5"
         >

@@ -4,11 +4,21 @@ import {
   betleadsMissingNote,
   betleadsUsageNote,
   formatBRL,
+  formatCount,
   formatPct,
   formatPp,
   formatRatio,
   monthLabel,
 } from "./format";
+
+describe("formatCount", () => {
+  it("counts with the singular for one and pt-BR separators", () => {
+    expect(formatCount(20, "depósito", "depósitos")).toBe("20 depósitos");
+    expect(formatCount(1, "saque", "saques")).toBe("1 saque");
+    expect(formatCount(0, "saque", "saques")).toBe("0 saques");
+    expect(formatCount(1234, "depósito", "depósitos")).toBe("1.234 depósitos");
+  });
+});
 
 describe("formatBRL", () => {
   it("formats money with two decimals and no NBSP", () => {
