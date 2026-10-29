@@ -36,7 +36,7 @@ import {
 } from "@/components/house-config/composer-notices";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { supabase } from "@/integrations/supabase/client";
-import type { JourneyStepInput } from "@/lib/journeys.shared";
+import { MAX_LOOPS_LIMIT, endStepMaxLoops, type JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -371,6 +371,9 @@ export function JourneyEditor({
     typeof initialLoopToPosition === "number" && initialEndIndex > initialLoopToPosition
       ? initialEndIndex - initialLoopToPosition
       : null;
+  const [maxLoops, setMaxLoops] = useState(() =>
+    endStepMaxLoops(enabledSteps[initialEndIndex]?.config),
+  );
   const [steps, setSteps] = useState<Step[]>(() => enabledSteps.flatMap(initialStep));
 
   // Unsaved changes: Ativar on a draft saves first; on a paused journey it warns.
@@ -392,6 +395,7 @@ export function JourneyEditor({
     reentry,
     exitRules,
     steps,
+    maxLoops,
   ]);
   const [savedSignature, setSavedSignature] = useState(signature);
   const dirty = signature !== savedSignature;
@@ -529,7 +533,7 @@ export function JourneyEditor({
                 step_type: "end",
                 config:
                   loopTailLength !== null && body.length >= loopTailLength
-                    ? { loop_to_position: body.length - loopTailLength }
+                    ? { loop_to_position: body.length - loopTailLength, max_loops: maxLoops }
                     : {},
               },
             ],
@@ -1068,10 +1072,33 @@ export function JourneyEditor({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <p className="rounded-lg border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground">
-          Fim da jornada
-          {loopTailLength !== null && ` · volta às últimas ${loopTailLength} etapa(s) em loop`}
-        </p>
+        <div className="space-y-3 rounded-lg border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground">
+          <p>
+            Fim da jornada
+            {loopTailLength !== null && ` · volta às últimas ${loopTailLength} etapa(s) em loop`}
+          </p>
+          {loopTailLength !== null && (
+            <Field
+              id="max-loops"
+              label="Repetir o loop no máximo"
+              hint={`Depois de ${maxLoops} repetição(ões) a jornada termina para o jogador. Máximo ${MAX_LOOPS_LIMIT}.`}
+            >
+              <Input
+                id="max-loops"
+                className="h-10 max-w-32"
+                type="number"
+                min={0}
+                max={MAX_LOOPS_LIMIT}
+                value={maxLoops}
+                onChange={(e) =>
+                  setMaxLoops(
+                    Math.min(MAX_LOOPS_LIMIT, Math.max(0, Math.trunc(Number(e.target.value) || 0))),
+                  )
+                }
+              />
+            </Field>
+          )}
+        </div>
       </EditorSection>
 
       <EditorSection

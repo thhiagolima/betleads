@@ -22,6 +22,7 @@ import {
   PLATFORM_HOLD_MS,
   journeyPlatformFailure,
 } from "./journey-platform-failure";
+import { endStepMaxLoops } from "./journeys.shared";
 import {
   createClaimingSource,
   createTimeBudget,
@@ -518,7 +519,11 @@ async function executeEnrollment(
     const run = await execution(enrollment, step, null);
     await finishExecution(run.id, { status: "sent", executed_at: new Date().toISOString() });
     const loopToPosition = Number(step.config.loop_to_position);
-    if (Number.isInteger(loopToPosition) && loopToPosition >= 0 && loopToPosition < step.position) {
+    const hasLoop =
+      Number.isInteger(loopToPosition) && loopToPosition >= 0 && loopToPosition < step.position;
+    const loopsDone = Number(enrollment.loop_iteration ?? 0);
+    const maxLoops = endStepMaxLoops(step.config);
+    if (hasLoop && loopsDone < maxLoops) {
       const { data: loopTarget } = await db
         .from("journey_steps")
         .select("id")
@@ -530,23 +535,29 @@ async function executeEnrollment(
       await release(enrollment, ctx, {
         status: "active",
         current_position: loopToPosition,
-        loop_iteration: Number(enrollment.loop_iteration ?? 0) + 1,
+        loop_iteration: loopsDone + 1,
         next_run_at: new Date().toISOString(),
         attempts: 0,
       });
       await event(enrollment, "loop_restarted", {
         step_position: step.position,
         loop_to_position: loopToPosition,
-        loop_iteration: Number(enrollment.loop_iteration ?? 0) + 1,
+        loop_iteration: loopsDone + 1,
+        max_loops: maxLoops,
       });
       return;
     }
+    // P0.2b: a loop repeats at most max_loops times (default DEFAULT_MAX_LOOPS).
+    const exitReason = hasLoop ? "max_loops" : "end_step";
     await release(enrollment, ctx, {
       status: "completed",
       completed_at: new Date().toISOString(),
-      exit_reason: "end_step",
+      exit_reason: exitReason,
     });
-    await event(enrollment, "completed", { step_position: step.position });
+    await event(enrollment, "completed", {
+      step_position: step.position,
+      ...(hasLoop ? { reason: exitReason, loop_iteration: loopsDone, max_loops: maxLoops } : {}),
+    });
     return;
   }
 

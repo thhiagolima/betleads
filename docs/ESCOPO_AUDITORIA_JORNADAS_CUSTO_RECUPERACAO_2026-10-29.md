@@ -195,6 +195,28 @@ Critério de ordem:
     próximo depósito que mudar o nível abre uma nova.
 - **Aceite:** um jogador parado em Prata recebe no máximo 7 + 2 × 2 = 11 SMS da jornada,
   e não uma série sem fim.
+- **Achado na implementação, o problema não é só de nível.** Todos os modelos principais
+  repetem sem fim (produção, 29/10):
+
+  | Gatilho | Jornadas com loop | Matrículas abertas | Com 2+ voltas |
+  |---|---|---|---|
+  | Inatividade (Esfriando, Dormindo, 30 dias) | 27 | 14.747 | 1.337 |
+  | Cadastrou e não depositou | 9 | 7.321 | 43 |
+  | Nível | 45 | 1.292 | 40 |
+  | PIX gerado | 9 | 388 | 5 |
+
+  "30 dias sem depósito" e "Cadastrou e não depositou" não têm saída natural: quem nunca
+  deposita recebia SMS a cada 48h para sempre.
+- **Status: implementado no branch `fix/journeys-p0-loops`** (falta deploy):
+  - O limite fica no passo de fim, `end.config.max_loops`, ao lado de `loop_to_position`,
+    e não em `entry_rules`. Vale para **qualquer** jornada com repetição.
+  - Sem valor configurado, o padrão é `DEFAULT_MAX_LOOPS = 2` (`journeys.shared.ts`).
+    Isso vale de imediato para todas as jornadas existentes. O máximo é 50; não existe
+    "repetir para sempre".
+  - Ao atingir o limite, a matrícula termina como `completed` com `exit_reason='max_loops'`.
+    Matrículas que já passaram de 2 voltas terminam na próxima vez que chegarem ao fim.
+  - Editor: o campo "Repetir o loop no máximo" aparece quando a jornada tem repetição.
+  - **Ainda não feito:** a saída por depósito nas jornadas de nível (decisão de produto).
 
 #### P0.3 Idade máxima do evento de entrada
 - **Hoje:** `journey-scanner.server.ts:138-144`. `cadastrados_sem_deposito` só é limitado

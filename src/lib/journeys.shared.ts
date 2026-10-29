@@ -59,6 +59,9 @@ const voiceConfigSchema = z.object({
     .default(86400),
 });
 
+/** Upper bound for an end step's `max_loops`: there is no "repeat forever". */
+export const MAX_LOOPS_LIMIT = 50;
+
 export const journeyStepInputSchema = z.discriminatedUnion("step_type", [
   z.object({
     step_type: z.literal("wait"),
@@ -85,9 +88,26 @@ export const journeyStepInputSchema = z.discriminatedUnion("step_type", [
     label: z.string().trim().max(120).optional(),
     config: z.object({
       loop_to_position: z.number().int().min(0).optional(),
+      max_loops: z.number().int().min(0).max(MAX_LOOPS_LIMIT).optional(),
     }),
   }),
 ]);
+
+/**
+ * Repetitions of a journey's loop per enrollment when the end step does not
+ * say otherwise. Loops used to run forever: a player who never deposits got
+ * the "Cadastrou e não depositou" tail every 48 h indefinitely (P0.2b,
+ * docs/ESCOPO_AUDITORIA_JORNADAS_CUSTO_RECUPERACAO_2026-10-29.md).
+ */
+export const DEFAULT_MAX_LOOPS = 2;
+
+/** How many times an end step sends the enrollment back to its loop target. */
+export function endStepMaxLoops(config: Record<string, unknown> | null | undefined): number {
+  const value = Number(config?.max_loops);
+  return Number.isInteger(value) && value >= 0 && value <= MAX_LOOPS_LIMIT
+    ? value
+    : DEFAULT_MAX_LOOPS;
+}
 
 export const journeyInputSchema = z.object({
   name: z.string().trim().min(1).max(120),

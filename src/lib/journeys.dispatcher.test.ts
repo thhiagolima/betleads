@@ -785,6 +785,64 @@ describe("runJourneyDispatcher", () => {
     expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
   });
 
+  describe("end step loop cap (P0.2b)", () => {
+    function seedLoop(loopIteration: number, endConfig: Record<string, unknown>) {
+      seed(["e1"]);
+      fake.tables.journey_steps.push({
+        id: "step-1",
+        journey_id: JOURNEY,
+        position: 1,
+        step_type: "end",
+        is_enabled: true,
+        config: endConfig,
+      });
+      Object.assign(fake.tables.journey_enrollments[0], {
+        current_position: 1,
+        loop_iteration: loopIteration,
+      });
+    }
+
+    it("below the cap the end step sends the enrollment back to the loop target", async () => {
+      seedLoop(1, { loop_to_position: 0 });
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({
+        status: "active",
+        current_position: 0,
+        loop_iteration: 2,
+      });
+      expect(fake.tables.journey_events.at(-1)).toMatchObject({
+        event_type: "loop_restarted",
+        detail: expect.objectContaining({ loop_iteration: 2, max_loops: 2 }),
+      });
+    });
+
+    it("at the default cap (2) the enrollment completes with exit_reason max_loops", async () => {
+      seedLoop(2, { loop_to_position: 0 });
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({ status: "completed", exit_reason: "max_loops" });
+      expect(fake.tables.journey_events.at(-1)).toMatchObject({
+        event_type: "completed",
+        detail: expect.objectContaining({ reason: "max_loops", max_loops: 2 }),
+      });
+    });
+
+    it("max_loops 0 never repeats; a higher max_loops keeps looping", async () => {
+      seedLoop(0, { loop_to_position: 0, max_loops: 0 });
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({ status: "completed", exit_reason: "max_loops" });
+
+      seedLoop(5, { loop_to_position: 0, max_loops: 10 });
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({ status: "active", loop_iteration: 6 });
+    });
+
+    it("an end step without a loop still completes as end_step", async () => {
+      seedLoop(0, {});
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({ status: "completed", exit_reason: "end_step" });
+    });
+  });
+
   it("permanent provider errors still consume attempts", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({ ok: false, status: 400, error: "numero invalido" });
