@@ -58,6 +58,56 @@ describe("KpiBlocks", () => {
     expect(html).toContain("sm:grid-cols-2");
   });
 
+  it("gives each block a title and a one-line description", () => {
+    const html = renderBlocks({});
+    expect(block(html, "movement")).toContain("Dinheiro que entrou e saiu da casa.");
+    expect(block(html, "acquisition")).toContain("Quanto custou trazer jogadores.");
+    expect(block(html, "ggr")).toContain("Perdas na casa e a taxa cobrada sobre elas.");
+    expect(block(html, "sends")).toContain("Custo dos envios e o que eles trouxeram de volta.");
+  });
+
+  it("groups rows under small headings, Net as the emphasized total", () => {
+    const html = renderBlocks({});
+    const movement = block(html, "movement");
+    expect(movement).toContain(">Comportamento<");
+    expect(movement.indexOf('data-kpi="net"')).toBeLessThan(movement.indexOf(">Comportamento<"));
+    expect(movement.indexOf(">Comportamento<")).toBeLessThan(
+      movement.indexOf('data-kpi="ticketMedio"'),
+    );
+    expect(row(html, "net")).toContain('data-total="true"');
+
+    const acquisition = block(html, "acquisition");
+    expect(acquisition).toContain(">Custo por jogador<");
+    expect(acquisition.indexOf('data-kpi="ftdMedio"')).toBeLessThan(
+      acquisition.indexOf(">Custo por jogador<"),
+    );
+    expect(row(html, "ftds")).toContain("primeiros depósitos");
+  });
+
+  it("shows — with the reason for a value that is missing for a known reason", () => {
+    const html = renderBlocks({
+      current: summary({ adSpend: 0, ggr: 0, pendingDays: 28, costPerRegistration: 0 }),
+    });
+    expect(row(html, "costPerRegistration")).toContain("—");
+    expect(row(html, "costPerRegistration")).toContain("sem anúncios");
+    expect(row(html, "costPerRegistration")).not.toContain("R$ 0,00");
+    expect(row(html, "costPerFtd")).toContain("sem anúncios");
+    expect(row(html, "ggr")).toContain("—");
+    expect(row(html, "ggr")).toContain("não lançado");
+    expect(row(html, "ggrShareOfDeposits")).toContain("—");
+    expect(row(html, "ggrShareOfDeposits")).not.toContain("n.a.");
+  });
+
+  it("hides every variation when the previous period has no data", () => {
+    const html = renderBlocks({
+      current: summary({ depositAmount: 954, withdrawalAmount: 363, net: 591 }),
+      previous: summary(),
+    });
+    expect(html).not.toContain("▲");
+    expect(html).not.toContain("▼");
+    expect(row(html, "deposits")).not.toContain("n.a.");
+  });
+
   it("KpiBlocks hides Meta KPIs when null and shows n.a. for null ratios", () => {
     const html = renderBlocks({});
     const acquisition = block(html, "acquisition");
@@ -71,6 +121,7 @@ describe("KpiBlocks", () => {
     expect(row(html, "withdrawalShare")).toContain("n.a.");
     expect(row(html, "pixConversion")).toContain("Pix gerado → pago");
     expect(row(html, "ggrShareOfDeposits")).toContain("n.a.");
+    expect(row(html, "pixConversion")).toContain("n.a.");
 
     const withMeta = renderBlocks({
       currentKpis: kpis({ cpm: 12.5, ctr: 0.02, costPerClick: 0.75 }),

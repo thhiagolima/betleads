@@ -1,23 +1,20 @@
 // "Envios e CRM" (spec §3.2.3, §3.3, §4.2): one row per channel (SMS, Voz,
-// E-mail) with quantity, cost, unit cost and the cost variation; the total
-// Envios; the CRM's direct and influenced revenue, each with its return
-// (revenue ÷ Envios). A channel whose provider cost is not registered says so
-// instead of showing R$ 0; the total then reads "R$ X + custo do provedor não
-// cadastrado" and the returns are marked "parcial". The notes about this block (no Betleads data
-// before a date, exempt house priced at provider cost) sit here, not in a
-// page footer (spec §3.6).
-import type { ReactNode } from "react";
+// E-mail) with quantity, cost, unit cost and the cost variation (tagged
+// "custo do provedor" in an exempt house); the emphasized Total de envios;
+// under "Retorno do CRM", the direct and influenced revenue, each with its
+// return (revenue ÷ Envios) as a multiple ("retorno 2,3×"). A channel whose
+// provider cost is not registered says so instead of showing R$ 0; the total
+// then reads "R$ X + custo do provedor não cadastrado" and the returns are
+// marked "parcial". The notes about this block (no Betleads data before a
+// date, exempt house priced at provider cost) sit in its muted footer, not
+// in a page footer (spec §3.6).
 
-import { FINANCE_TERMS } from "@/components/finance/definitions";
-import {
-  betleadsMissingNote,
-  formatBRL,
-  formatInt,
-  formatRatio,
-} from "@/components/finance/format";
+import { betleadsMissingNote, formatBRL, formatInt } from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
 import type { FinanceKpis, SendLine } from "@/lib/finance/types";
 
+import { formatMultiple } from "./display";
+import { KpiFooter, KpiRowShell, KpiSubheading } from "./kpi-row";
 import { Variation } from "./variation";
 
 export const MISSING_PROVIDER_COST = "custo do provedor não cadastrado";
@@ -68,62 +65,67 @@ function formatUnitCost(value: number) {
     .replace(/\s/g, " "); // pt-BR puts a no-break space after "R$"
 }
 
-function Row({
-  id,
-  label,
-  detail,
-  value,
-  variation,
-  strong,
-}: {
-  id: string;
-  label: ReactNode;
-  detail?: ReactNode;
-  value: ReactNode;
-  variation?: ReactNode;
-  strong?: boolean;
-}) {
+/** "retorno 2,3×" (+ "parcial"), or nothing when there is no return. */
+function returnLine(value: number | null, partial: boolean) {
+  if (value === null) return undefined;
   return (
-    <div
-      data-send={id}
-      className="flex items-start justify-between gap-3 border-b border-border/20 py-1.5 text-sm last:border-0"
-    >
-      <div className="min-w-0">
-        <p className={strong ? "font-medium" : undefined}>{label}</p>
-        {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
-      </div>
-      <div className="shrink-0 text-right">
-        <p className={strong ? "font-semibold" : undefined}>{value}</p>
-        {variation}
-      </div>
-    </div>
+    <>
+      retorno {formatMultiple(value)}
+      <Partial show={partial} />
+    </>
   );
 }
 
 export function SendsBlock({
   lines,
   kpis,
+  hasPrevious = true,
   exemptHouse,
   betleadsNote,
 }: {
   lines: SendLine[];
   kpis: { current: FinanceKpis; previous: FinanceKpis };
+  /** The compared period has data (periodHasData); variations hide otherwise. */
+  hasPrevious?: boolean;
   exemptHouse: boolean;
   /** sendsBetleadsNote(range.from, betleadsSince). */
   betleadsNote: string | null;
 }) {
   const { current, previous } = kpis;
+  const variation = (cur: number | null, prev: number | null, invert = false) => (
+    <Variation
+      className="mt-0.5 block"
+      current={cur}
+      previous={prev}
+      hasPrevious={hasPrevious}
+      invert={invert}
+    />
+  );
 
   return (
     <div>
       {lines.length === 0 && (
-        <p className="py-1.5 text-sm text-muted-foreground">Sem envios no período.</p>
+        <p className="border-t border-border/50 py-[13px] text-sm text-muted-foreground">
+          Sem envios no período.
+        </p>
       )}
       {lines.map((line) => (
-        <Row
+        <KpiRowShell
           key={line.item}
-          id={line.item}
-          label={line.label}
+          attrs={{ "data-send": line.item }}
+          label={
+            <span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              {line.label}
+              {exemptHouse && (
+                <span
+                  data-tag="provider-cost"
+                  className="rounded-full border border-border px-2 text-[11px] text-muted-foreground"
+                >
+                  custo do provedor
+                </span>
+              )}
+            </span>
+          }
           detail={
             <>
               {formatInt(line.units)} {line.unitLabel}
@@ -140,78 +142,45 @@ export function SendsBlock({
             )
           }
           variation={
-            line.missingCost ? undefined : (
-              <Variation current={line.amount} previous={line.previousAmount} invert />
-            )
+            line.missingCost ? undefined : variation(line.amount, line.previousAmount, true)
           }
         />
       ))}
-      <Row
-        id="total"
-        strong
+      <KpiRowShell
+        attrs={{ "data-send": "total" }}
+        total
         label={
           <>
-            {FINANCE_TERMS.sends.label}
+            Total de envios
             <TermTooltip term="sends" />
           </>
         }
         value={<SendCostAmount amount={current.sendCost} incomplete={current.sendCostIncomplete} />}
-        variation={<Variation current={current.sendCost} previous={previous.sendCost} invert />}
+        variation={variation(current.sendCost, previous.sendCost, true)}
       />
-      <Row
-        id="direct"
+      <KpiSubheading>Retorno do CRM</KpiSubheading>
+      <KpiRowShell
+        attrs={{ "data-send": "direct" }}
         label="Receita direta"
+        detail="clique → depósito"
         value={formatBRL(current.crmDirectRevenue)}
-        variation={
-          <Variation current={current.crmDirectRevenue} previous={previous.crmDirectRevenue} />
-        }
+        sub={returnLine(current.crmDirectReturn, current.sendCostIncomplete)}
+        variation={variation(current.crmDirectRevenue, previous.crmDirectRevenue)}
       />
-      <Row
-        id="direct-return"
-        label="Retorno direto"
-        value={
-          <>
-            {formatRatio(current.crmDirectReturn)}
-            <Partial show={current.sendCostIncomplete && current.crmDirectReturn !== null} />
-          </>
-        }
-        variation={
-          <Variation current={current.crmDirectReturn} previous={previous.crmDirectReturn} points />
-        }
-      />
-      <Row
-        id="influenced"
+      <KpiRowShell
+        attrs={{ "data-send": "influenced" }}
         label="Receita influenciada"
+        detail="regra da Central de Resultados"
         value={formatBRL(current.crmInfluencedRevenue)}
-        variation={
-          <Variation
-            current={current.crmInfluencedRevenue}
-            previous={previous.crmInfluencedRevenue}
-          />
-        }
-      />
-      <Row
-        id="influenced-return"
-        label="Retorno influenciado"
-        value={
-          <>
-            {formatRatio(current.crmInfluencedReturn)}
-            <Partial show={current.sendCostIncomplete && current.crmInfluencedReturn !== null} />
-          </>
-        }
-        variation={
-          <Variation
-            current={current.crmInfluencedReturn}
-            previous={previous.crmInfluencedReturn}
-            points
-          />
-        }
+        sub={returnLine(current.crmInfluencedReturn, current.sendCostIncomplete)}
+        variation={variation(current.crmInfluencedRevenue, previous.crmInfluencedRevenue)}
       />
       {(betleadsNote || exemptHouse) && (
-        <div className="space-y-1 pt-2 text-xs text-muted-foreground">
-          {betleadsNote && <p data-note="betleads">{betleadsNote}</p>}
-          {exemptHouse && <p data-note="exempt">{EXEMPT_HOUSE_NOTE}</p>}
-        </div>
+        <KpiFooter>
+          {exemptHouse && <span data-note="exempt">{EXEMPT_HOUSE_NOTE}.</span>}
+          {exemptHouse && betleadsNote && " "}
+          {betleadsNote && <span data-note="betleads">{betleadsNote}.</span>}
+        </KpiFooter>
       )}
     </div>
   );

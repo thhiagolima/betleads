@@ -1,17 +1,21 @@
 // Blocos de KPIs (spec §3.2.3): four titled blocks — Movimentação,
 // Aquisição, GGR and Envios e CRM (SendsBlock) — two per row from `sm` up,
-// one column on a phone. Each row has its variation vs the compared window;
+// one column on a phone. Each block has a title, a one-line description and
+// rows grouped under small headings; totals (Net) are emphasized. A row shows
+// its variation vs the compared window only when there is one to show;
 // ratios vary in percentage points and the cost-shaped rows (anúncios,
-// saques, custos) invert the color. The Meta KPIs (CPM, CTR, Custo por
-// clique) only show when the house has Meta data (not null). Relies on a
-// TooltipProvider above it (the dashboard root).
-import type { ReactNode } from "react";
+// saques, custos) invert the color. A value missing for a known reason reads
+// "—" plus the reason ("sem anúncios", "não lançado"). The Meta KPIs (CPM,
+// CTR, Custo por clique) only show when the house has Meta data (not null).
+// Relies on a TooltipProvider above it (the dashboard root).
 
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
 import { formatBRL, formatInt, formatPct } from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
 import type { FinanceKpis, PeriodSummary, SendLine } from "@/lib/finance/types";
 
+import { costPerPlayerReason, ggrNotLaunched, periodHasData } from "./display";
+import { KpiBlock, KpiFooter, KpiRowShell, KpiSubheading } from "./kpi-row";
 import { SendsBlock } from "./sends-block";
 import { Variation } from "./variation";
 
@@ -30,6 +34,10 @@ type KpiRow = {
   /** Secondary line under the label (e.g. the count next to an amount). */
   detail?: string;
   invert?: boolean;
+  /** Emphasized total row. */
+  total?: boolean;
+  /** The value is missing for a known reason: "—" plus `missing.reason`. */
+  missing?: { reason: string | null };
 };
 
 function formatDecimal(value: number | null) {
@@ -44,40 +52,34 @@ function formatValue(format: Format, value: number | null) {
   return formatInt(value);
 }
 
-function KpiRowView({ row }: { row: KpiRow }) {
+function KpiRowView({ row, hasPrevious }: { row: KpiRow; hasPrevious: boolean }) {
   return (
-    <div
-      data-kpi={row.key}
-      className="flex items-start justify-between gap-3 border-b border-border/20 py-1.5 text-sm last:border-0"
-    >
-      <div className="min-w-0">
-        <p>
+    <KpiRowShell
+      attrs={{ "data-kpi": row.key }}
+      total={row.total}
+      muted={!!row.missing}
+      label={
+        <>
           {row.label}
           {row.term && <TermTooltip term={row.term} />}
-        </p>
-        {row.detail && <p className="text-xs text-muted-foreground">{row.detail}</p>}
-      </div>
-      <div className="shrink-0 text-right">
-        <p>{formatValue(row.format, row.current)}</p>
-        <Variation
-          current={row.current}
-          previous={row.previous}
-          points={row.format === "pct"}
-          invert={row.invert}
-        />
-      </div>
-    </div>
-  );
-}
-
-function Block({ id, title, children }: { id: string; title: string; children: ReactNode }) {
-  return (
-    <section data-block={id} className="rounded-lg border border-border/40 p-3">
-      <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h3>
-      {children}
-    </section>
+        </>
+      }
+      detail={row.detail}
+      value={row.missing ? "—" : formatValue(row.format, row.current)}
+      sub={row.missing?.reason ?? undefined}
+      variation={
+        row.missing ? undefined : (
+          <Variation
+            className="mt-0.5 block"
+            current={row.current}
+            previous={row.previous}
+            hasPrevious={hasPrevious}
+            points={row.format === "pct"}
+            invert={row.invert}
+          />
+        )
+      }
+    />
   );
 }
 
@@ -99,6 +101,9 @@ export function KpiBlocks({
 }) {
   const { current: s, previous: ps } = totals;
   const { current: k, previous: pk } = kpis;
+  const hasPrevious = periodHasData(ps);
+  const noAds = costPerPlayerReason(s);
+  const ggrMissing = ggrNotLaunched(s);
 
   const movement: KpiRow[] = [
     {
@@ -110,20 +115,6 @@ export function KpiBlocks({
       detail: count(k.depositCount, "depósito", "depósitos"),
     },
     {
-      key: "depositorsPerDay",
-      label: "Depositantes por dia",
-      format: "decimal",
-      current: k.depositorsPerDay,
-      previous: pk.depositorsPerDay,
-    },
-    {
-      key: "ticketMedio",
-      label: "Ticket médio",
-      format: "money",
-      current: k.ticketMedio,
-      previous: pk.ticketMedio,
-    },
-    {
       key: "withdrawals",
       label: "Saques",
       format: "money",
@@ -131,6 +122,25 @@ export function KpiBlocks({
       previous: ps.withdrawalAmount,
       detail: count(k.withdrawalCount, "saque", "saques"),
       invert: true,
+    },
+    {
+      key: "net",
+      label: FINANCE_TERMS.net.label,
+      term: "net",
+      format: "money",
+      current: s.net,
+      previous: ps.net,
+      total: true,
+    },
+  ];
+
+  const behavior: KpiRow[] = [
+    {
+      key: "ticketMedio",
+      label: "Ticket médio",
+      format: "money",
+      current: k.ticketMedio,
+      previous: pk.ticketMedio,
     },
     {
       key: "saqueMedio",
@@ -141,12 +151,11 @@ export function KpiBlocks({
       invert: true,
     },
     {
-      key: "net",
-      label: FINANCE_TERMS.net.label,
-      term: "net",
-      format: "money",
-      current: s.net,
-      previous: ps.net,
+      key: "depositorsPerDay",
+      label: "Depositantes por dia",
+      format: "decimal",
+      current: k.depositorsPerDay,
+      previous: pk.depositorsPerDay,
     },
     {
       key: "withdrawalShare",
@@ -181,29 +190,20 @@ export function KpiBlocks({
       current: s.registrations,
       previous: ps.registrations,
     },
-    { key: "ftds", label: "FTDs", format: "int", current: s.ftds, previous: ps.ftds },
+    {
+      key: "ftds",
+      label: "FTDs",
+      detail: "primeiros depósitos",
+      format: "int",
+      current: s.ftds,
+      previous: ps.ftds,
+    },
     {
       key: "registrationToFtd",
       label: "Cadastro → FTD",
       format: "pct",
       current: k.registrationToFtd,
       previous: pk.registrationToFtd,
-    },
-    {
-      key: "costPerRegistration",
-      label: "Custo por cadastro",
-      format: "money",
-      current: s.costPerRegistration,
-      previous: ps.costPerRegistration,
-      invert: true,
-    },
-    {
-      key: "costPerFtd",
-      label: "Custo por FTD",
-      format: "money",
-      current: s.costPerFtd,
-      previous: ps.costPerFtd,
-      invert: true,
     },
     {
       key: "ftdMedio",
@@ -250,6 +250,27 @@ export function KpiBlocks({
       : []),
   ];
 
+  const costPerPlayer: KpiRow[] = [
+    {
+      key: "costPerRegistration",
+      label: "Custo por cadastro",
+      format: "money",
+      current: s.costPerRegistration,
+      previous: ps.costPerRegistration,
+      invert: true,
+      missing: noAds ? { reason: noAds } : undefined,
+    },
+    {
+      key: "costPerFtd",
+      label: "Custo por FTD",
+      format: "money",
+      current: s.costPerFtd,
+      previous: ps.costPerFtd,
+      invert: true,
+      missing: noAds ? { reason: noAds } : undefined,
+    },
+  ];
+
   const ggr: KpiRow[] = [
     {
       key: "ggr",
@@ -258,6 +279,7 @@ export function KpiBlocks({
       format: "money",
       current: s.ggr,
       previous: ps.ggr,
+      missing: ggrMissing ? { reason: "não lançado" } : undefined,
     },
     {
       key: "ggrFee",
@@ -274,35 +296,50 @@ export function KpiBlocks({
       format: "pct",
       current: k.ggrShareOfDeposits,
       previous: pk.ggrShareOfDeposits,
+      missing: ggrMissing ? { reason: null } : undefined,
     },
   ];
 
-  const rows = (list: KpiRow[]) => list.map((row) => <KpiRowView key={row.key} row={row} />);
+  const rows = (list: KpiRow[]) =>
+    list.map((row) => <KpiRowView key={row.key} row={row} hasPrevious={hasPrevious} />);
 
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-      <Block id="movement" title="Movimentação">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <KpiBlock
+        id="movement"
+        title="Movimentação"
+        description="Dinheiro que entrou e saiu da casa."
+      >
         {rows(movement)}
-      </Block>
-      <Block id="acquisition" title="Aquisição">
+        <KpiSubheading>Comportamento</KpiSubheading>
+        {rows(behavior)}
+      </KpiBlock>
+      <KpiBlock id="acquisition" title="Aquisição" description="Quanto custou trazer jogadores.">
         {rows(acquisition)}
-      </Block>
-      <Block id="ggr" title="GGR">
+        <KpiSubheading>Custo por jogador</KpiSubheading>
+        {rows(costPerPlayer)}
+      </KpiBlock>
+      <KpiBlock id="ggr" title="GGR" description="Perdas na casa e a taxa cobrada sobre elas.">
         {rows(ggr)}
         {s.ggrEstimated && (
-          <p data-note="ggr-estimated" className="pt-2 text-xs text-muted-foreground">
-            {GGR_ESTIMATED_NOTE}
-          </p>
+          <KpiFooter>
+            <span data-note="ggr-estimated">{GGR_ESTIMATED_NOTE}</span>
+          </KpiFooter>
         )}
-      </Block>
-      <Block id="sends" title="Envios e CRM">
+      </KpiBlock>
+      <KpiBlock
+        id="sends"
+        title="Envios e CRM"
+        description="Custo dos envios e o que eles trouxeram de volta."
+      >
         <SendsBlock
           lines={sends}
           kpis={kpis}
+          hasPrevious={hasPrevious}
           exemptHouse={exemptHouse}
           betleadsNote={betleadsNote}
         />
-      </Block>
+      </KpiBlock>
     </div>
   );
 }

@@ -99,7 +99,12 @@ export function ResultBand({
   );
 
   const adsMeta = hasVariation(current.adSpend, previous.adSpend, hasPrevious) ? (
-    <Variation current={current.adSpend} previous={previous.adSpend} hasPrevious={hasPrevious} invert />
+    <Variation
+      current={current.adSpend}
+      previous={previous.adSpend}
+      hasPrevious={hasPrevious}
+      invert
+    />
   ) : current.adSpend === 0 && current.pendingDays > 0 ? (
     "Nenhum dia lançado"
   ) : (
@@ -115,9 +120,7 @@ export function ResultBand({
         term="cashResult"
         value={formatBRL(current.cashResult)}
         valueClassName={signClass(current.cashResult)}
-        tint={
-          current.cashResult < 0 ? "negative" : current.cashResult > 0 ? "positive" : undefined
-        }
+        tint={current.cashResult < 0 ? "negative" : current.cashResult > 0 ? "positive" : undefined}
         meta={profitMeta}
       />
       <ResultCard

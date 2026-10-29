@@ -98,17 +98,23 @@ describe("SendsBlock", () => {
     expect(email).toContain("text-emerald-400");
 
     const total = row(html, "total");
-    expect(total).toContain("Envios");
+    expect(total).toContain("Total de envios");
     expect(total).toContain("R$ 1.442,00");
+    expect(total).toContain('data-total="true"');
     expect(total).toContain('aria-label="Como calculamos"');
 
-    expect(row(html, "direct")).toContain("Receita direta");
-    expect(row(html, "direct")).toContain("R$ 2.884,00");
-    expect(row(html, "direct-return")).toContain("Retorno direto");
-    expect(row(html, "direct-return")).toContain("200,0%");
-    expect(row(html, "influenced")).toContain("Receita influenciada");
-    expect(row(html, "influenced-return")).toContain("Retorno influenciado");
-    expect(row(html, "influenced-return")).toContain("500,0%");
+    expect(html).toContain(">Retorno do CRM<");
+    const direct = row(html, "direct");
+    expect(direct).toContain("Receita direta");
+    expect(direct).toContain("clique → depósito");
+    expect(direct).toContain("R$ 2.884,00");
+    expect(direct).toContain("retorno 2×");
+    const influenced = row(html, "influenced");
+    expect(influenced).toContain("Receita influenciada");
+    expect(influenced).toContain("regra da Central de Resultados");
+    expect(influenced).toContain("retorno 5×");
+    expect(html).not.toContain("200,0%");
+    expect(html).not.toContain("data-tag");
 
     expect(html).not.toContain(EXEMPT_HOUSE_NOTE);
     expect(html).not.toContain("Sem dado de custo Betleads");
@@ -128,7 +134,24 @@ describe("SendsBlock", () => {
     expect(html).toContain(EXEMPT_HOUSE_NOTE);
     expect(html).toContain("Sem dado de custo Betleads antes de out/2026");
     expect(html).toContain("Sem envios no período.");
-    expect(row(html, "direct-return")).toContain("n.a.");
+    expect(row(html, "direct")).not.toContain("retorno");
+    expect(html).not.toContain("n.a.");
+  });
+});
+
+describe("SendsBlock in an exempt house", () => {
+  it("tags each channel with the provider cost and keeps the notes in the footer", () => {
+    const html = render(
+      <SendsBlock
+        lines={lines.slice(0, 1)}
+        kpis={{ current: kpis({ sendCost: 1440 }), previous: kpis() }}
+        exemptHouse
+        betleadsNote={null}
+      />,
+    );
+    expect(row(html, "sms")).toContain('data-tag="provider-cost"');
+    expect(row(html, "sms")).toContain(">custo do provedor<");
+    expect(html).toContain(EXEMPT_HOUSE_NOTE);
   });
 });
 
@@ -155,9 +178,9 @@ describe("SendsBlock with a partial Envios", () => {
     const total = row(html, "total");
     expect(total).toContain("R$ 1.442,00");
     expect(total).toContain("+ custo do provedor não cadastrado");
-    expect(row(html, "direct-return")).toContain("parcial");
-    expect(row(html, "influenced-return")).toContain("parcial");
-    expect(row(html, "direct")).not.toContain("parcial");
+    expect(row(html, "direct")).toContain("parcial");
+    expect(row(html, "influenced")).toContain("parcial");
+    expect(row(html, "sms")).not.toContain("parcial");
   });
 
   it("a complete Envios has no partial marks", () => {
