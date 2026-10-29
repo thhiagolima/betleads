@@ -266,7 +266,24 @@ async function callShortBrasil(
       providerAccountId: null as string | null,
     };
   }
-  const account = resolved.account;
+  return postShortBrasilSingle(
+    resolved.account,
+    to,
+    renderSmsVariables(content, variables),
+    idempotencyKey,
+  );
+}
+
+/**
+ * One SMS through one Short Brasil account (no house guard, billing or log:
+ * callers own those). Also used by the super admin's connection test.
+ */
+export async function postShortBrasilSingle(
+  account: ShortBrasilAccount,
+  to: string,
+  message: string,
+  idempotencyKey: string = crypto.randomUUID(),
+) {
   const providerAccountId = account.id as string | null;
   const token = account.shortcodeToken;
   const { usuario, chave } = account;
@@ -286,7 +303,6 @@ async function callShortBrasil(
   }
   const credentialFp = await credentialFingerprint(token || usuario);
   let res: Response;
-  const message = renderSmsVariables(content, variables);
   const payload = token
     ? [{ external_id: idempotencyKey, number: toShortBrasilCell(to), message }]
     : { celular: toShortBrasilCell(to), mensagem: message, parceiroId: idempotencyKey };

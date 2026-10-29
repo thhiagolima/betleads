@@ -49,7 +49,22 @@ precisar.
   (migration `20261108100000_provider_accounts.sql`). Sem mudança de
   comportamento enquanto nenhuma casa tiver linha em `tenant_channel_providers`.
   O bulk de SMS já agrupa por conta.
-- **Fase 2: implementada** (branch `feat/provider-accounts-fase2`, migration
+- **Fase 3: implementada** (Admin → Integrações, abaixo das contas padrão):
+  - **Contas de provedor**: criar/editar (credenciais só de escrita, cifradas;
+    campo em branco mantém o valor), ativar/desativar (as duas contas padrão
+    são somente leitura) e **Testar**: Infobip consulta o saldo
+    (`/account/1/balance`); Short Brasil, sem consulta de saldo, envia 1 SMS de
+    teste para um celular informado (não cobrado da casa).
+  - **Provedor por casa**: por canal, "Padrão da plataforma" ou uma conta ativa
+    que atende o canal. Confirmação avisa que não há troca automática; no
+    e-mail, os domínios da casa são recadastrados na conta nova na hora e
+    voltam a `pending`.
+  - Regras no servidor (`provider-accounts-admin.server.ts`): só super admin;
+    Infobip só e-mail/voz (SMS é Fase 4), Short Brasil só SMS; não remove de
+    uma conta um canal que alguma casa usa; tudo em `admin_audit_logs` sem
+    credenciais. A troca vale na hora na instância que atendeu e em até 30 s
+    nas demais.
+- **Fase 2: implementada** (main `2933cc4`, migration
   `20261113100000_provider_accounts_runtime.sql`):
   - **Breaker de SMS por conta.** Chave `sms` = conta padrão (a linha de sempre,
     que também alimenta o heartbeat `sms_provider`); `sms:<provider_account_id>`
