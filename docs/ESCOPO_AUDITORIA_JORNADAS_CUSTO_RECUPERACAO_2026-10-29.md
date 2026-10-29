@@ -123,6 +123,31 @@ Critério de ordem:
   venceram.
 - **Aceite:** remover `SHORTIO_DOMAIN` num ambiente de teste deixa as matrículas em espera,
   e não encerradas. Ao restaurar, elas seguem da mesma etapa.
+- **Achado na implementação, possível SMS em dobro:** em `sendSmsInternal`, o registro
+  do envio (`logSend`) é gravado **depois** de o provedor aceitar o SMS e de a carteira
+  cobrar. Se essa gravação falhava, o erro "Falha ao registrar envio SMS" fazia a jornada
+  tentar de novo e reenviar. No incidente de 28/10 houve 709 tentativas para 292
+  matrículas. A carteira cobrou uma vez por jogador (292 reservas, R$ 10,64, por
+  idempotência), mas o provedor pode ter recebido o mesmo SMS até 3 vezes. Não dá para
+  confirmar pelo banco, porque nenhum envio da janela foi registrado.
+- **Status: implementado no branch `fix/journeys-p0-saldo`** (falta deploy):
+  - `sms.functions.ts`: com o SMS já aceito pelo provedor, a falha ao gravar o registro
+    vai para o Sentry (`log_after_accepted`) e o envio conta como feito, sem reenvio. Com o
+    SMS recusado, o erro continua.
+  - `journey-platform-failure.ts`: reconhece falha da plataforma (credencial de provedor
+    ausente, `SHORTIO_DOMAIN` ausente, Short.io fora do ar, registro de envio recusado,
+    coluna ou função inexistente). Isso só vale para decisões `fail`, e o classificador
+    compartilhado com campanhas e fluxos não muda.
+  - No dispatcher, falha da plataforma deixa a execução em `retrying` e a matrícula em
+    `waiting` na mesma etapa por 30 min, sem consumir tentativa, com
+    `metadata.platform_holds` e o evento `step_deferred` (`reason='platform_error'`,
+    `platform_reason`). O Sentry recebe um aviso por casa e motivo por rodada. O teto é de
+    144 retenções por etapa (3 dias); depois disso vale a política normal de tentativas.
+  - Novo contador no dispatcher: `platformHeld`.
+  - **Mudança de comportamento:** credencial de provedor ausente (`misconfigured`) não
+    consome mais tentativa; a matrícula fica retida até corrigir.
+  - **Ainda não feito:** o alerta em `system_alerts` para a casa e a ferramenta de
+    reprocessamento das matrículas já encerradas (depende da decisão sobre o histórico).
 
 #### P0.2 Separar mensagem transacional de marketing no limite de contatos
 - **Hoje:**

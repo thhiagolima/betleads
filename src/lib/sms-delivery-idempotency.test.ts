@@ -198,24 +198,27 @@ describe("SMS delivery idempotency (ENV-02)", () => {
     expect(state.smsLogs).toHaveLength(1);
   });
 
-  it("accepted but the send log failed: the retry reuses the same charge", async () => {
+  it("accepted but the send log failed: still reported as sent, so nobody retries and resends it", async () => {
     const fetchMock = providerAccepts();
     vi.stubGlobal("fetch", fetchMock);
     state.failNextLogInsert = true;
 
-    await expect(send()).rejects.toThrow(/Falha ao registrar envio SMS/);
-    const retry = await send();
+    const first = await send();
 
-    expect(retry.ok).toBe(true);
-    // Nothing local proves the first acceptance, so the provider is called again
-    // with the same external_id, but billing stays at a single credit.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const body = JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body));
-    expect(body[0].external_id).toBe(KEY);
+    expect(first.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(charged()).toBe(1);
     expect(state.ledger.map((row) => row.idempotency_key)).toEqual([
       `sms-reserve:delivery:${KEY}`,
     ]);
+  });
+
+  it("rejected and the send log failed: still an error (nothing was sent)", async () => {
+    vi.stubGlobal("fetch", providerRejects());
+    state.failNextLogInsert = true;
+
+    await expect(send()).rejects.toThrow(/Falha ao registrar envio SMS/);
+    expect(charged()).toBe(0);
   });
 
   it("rejected and refunded: the retry is charged again under the next generation", async () => {

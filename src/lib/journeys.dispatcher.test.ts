@@ -571,7 +571,7 @@ describe("runJourneyDispatcher", () => {
     expect(fake.tables.journey_step_executions[0].status).toBe("failed");
   });
 
-  it("missing provider credentials fail the item and are reported (no defer loop)", async () => {
+  it("missing provider credentials hold the item as a platform failure (no attempt consumed) and are reported", async () => {
     seed(["e1"]);
     sentry.captureServerException.mockClear();
     sms.sendSmsInternal.mockResolvedValue({
@@ -582,9 +582,9 @@ describe("runJourneyDispatcher", () => {
       errorKind: "misconfigured",
     });
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ failed: 1, rescheduled: 0, outcomeUnknown: 0 });
-    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
-    expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+    expect(result).toMatchObject({ failed: 0, rescheduled: 0, outcomeUnknown: 0, platformHeld: 1 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 1, current_position: 0 });
+    expect(fake.tables.journey_step_executions[0].status).toBe("retrying");
     expect(sentry.captureServerException).toHaveBeenCalledTimes(1);
   });
 
@@ -792,6 +792,55 @@ describe("runJourneyDispatcher", () => {
     expect(result).toMatchObject({ failed: 1, rescheduled: 0 });
     expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
     expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+  });
+
+  it("platform failure before sending (no Short.io domain): held on the same step for 30 min, no attempt consumed, reported once per house", async () => {
+    // One item at a time: the second item sees the first report.
+    vi.stubEnv("JOURNEYS_DISPATCH_CONCURRENCY", "1");
+    seed(["e1", "e2"]);
+    sms.sendSmsInternal.mockRejectedValue(
+      new Error("SHORTIO_DOMAIN não configurado para este tenant"),
+    );
+    const before = Date.now();
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0, platformHeld: 2 });
+    for (const id of ["e1", "e2"]) {
+      const row = enrollment(id);
+      expect(row).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
+      expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
+        before + 30 * 60_000 - 1_000,
+      );
+      expect(row.metadata).toMatchObject({ platform_holds: { step_position: 0, count: 1 } });
+    }
+    expect(fake.tables.journey_step_executions[0].status).toBe("retrying");
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_deferred",
+      detail: expect.objectContaining({
+        reason: "platform_error",
+        platform_reason: "shortio_not_configured",
+        attempt_consumed: false,
+      }),
+    });
+    expect(sentry.captureServerException).toHaveBeenCalledTimes(1);
+  });
+
+  it("platform holds are capped: past the cap the normal attempts policy applies", async () => {
+    seed(["e1"]);
+    fake.tables.journey_enrollments[0].metadata = {
+      platform_holds: { step_position: 0, loop_iteration: 0, count: 144 },
+    };
+    sms.sendSmsInternal.mockRejectedValue(new Error("Falha ao criar link Short.io: HTTP 503"));
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, platformHeld: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
+  });
+
+  it("an error that may be the player's keeps the normal attempts policy", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockRejectedValue(new Error("Jogador da jornada não encontrado"));
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, platformHeld: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
   });
 
   it("a house locked for the monthly fee: the item fails final, no retry scheduled", async () => {
