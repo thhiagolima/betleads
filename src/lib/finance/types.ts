@@ -128,6 +128,8 @@ export type SendLine = {
 };
 
 export type FinanceKpis = {
+  depositCount: number; // Σ DayActivity.depositCount
+  withdrawalCount: number; // Σ DayActivity.withdrawalCount
   margin: number | null; // cashResult / net
   ticketMedio: number | null; // depositAmount / depositCount
   saqueMedio: number | null; // withdrawalAmount / withdrawalCount

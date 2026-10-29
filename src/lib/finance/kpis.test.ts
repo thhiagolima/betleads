@@ -90,6 +90,8 @@ describe("computeKpis divides correctly", () => {
     expect(kpis.ticketMedio).toBe(250);
     expect(kpis.registrationToFtd).toBe(0.25);
     expect(kpis.margin).toBeCloseTo(0.1, 6);
+    expect(kpis.depositCount).toBe(4);
+    expect(kpis.withdrawalCount).toBe(0);
   });
 
   it("saqueMedio, withdrawalShare, pixConversion, ftdMedio, ggrShareOfDeposits, cpm/ctr/costPerClick", () => {
@@ -220,6 +222,11 @@ describe("sendLines orders channels, computes unit cost and flags missing provid
     const lines = sendLines([usage("sms", 1000, 80, 200)], null);
     expect(lines[0].missingCost).toBe(true);
     expect(lines[0].unitCost).toBeNull();
+  });
+
+  it("keeps a sub-cent unit cost (e-mail at R$ 0,0004) instead of rounding it to R$ 0", () => {
+    const lines = sendLines([usage("email", 1000, 0.4)], null);
+    expect(lines[0].unitCost).toBe(0.0004);
   });
 
   it("unitCost is null when units is 0", () => {

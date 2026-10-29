@@ -1,4 +1,4 @@
-import type { PeriodSummary } from "@/lib/finance/types";
+import type { FinanceKpis, PeriodSummary } from "@/lib/finance/types";
 
 /** A zeroed PeriodSummary for the dashboard component tests. */
 export function summary(overrides: Partial<PeriodSummary> = {}): PeriodSummary {
@@ -25,6 +25,32 @@ export function summary(overrides: Partial<PeriodSummary> = {}): PeriodSummary {
     betleadsUsage: 0,
     betleadsFee: null,
     ggrEstimated: false,
+    ...overrides,
+  };
+}
+
+/** A zeroed FinanceKpis (ratios null) for the dashboard component tests. */
+export function kpis(overrides: Partial<FinanceKpis> = {}): FinanceKpis {
+  return {
+    depositCount: 0,
+    withdrawalCount: 0,
+    margin: null,
+    ticketMedio: null,
+    saqueMedio: null,
+    depositorsPerDay: null,
+    withdrawalShare: null,
+    pixConversion: null,
+    registrationToFtd: null,
+    ftdMedio: null,
+    ggrShareOfDeposits: null,
+    cpm: null,
+    ctr: null,
+    costPerClick: null,
+    sendCost: 0,
+    crmDirectRevenue: 0,
+    crmInfluencedRevenue: 0,
+    crmDirectReturn: null,
+    crmInfluencedReturn: null,
     ...overrides,
   };
 }

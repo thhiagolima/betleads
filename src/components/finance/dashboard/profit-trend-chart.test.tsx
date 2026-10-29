@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { betleadsMissingNote } from "@/components/finance/format";
 import type { MonthPoint } from "@/lib/finance/types";
 
-import { ProfitTrendChart } from "./profit-trend-chart";
+import { ProfitTrendChart, trendValue } from "./profit-trend-chart";
 
 const point = (month: string, betleadsMissing: boolean): MonthPoint => ({
   month,
@@ -38,5 +38,25 @@ describe("ProfitTrendChart Betleads note", () => {
 
   it("has no note when no month misses Betleads data", () => {
     expect(render("2026-09-01", false)).not.toContain("Sem dado de custo Betleads");
+  });
+});
+
+describe("ProfitTrendChart metric toggle", () => {
+  it("offers Lucro líquido | Net | Depósitos, Lucro líquido first and pressed", () => {
+    const html = render("2026-09-01", false);
+    const lucro = html.indexOf(">Lucro líquido</button>");
+    const net = html.indexOf(">Net</button>");
+    const deposits = html.indexOf(">Depósitos</button>");
+    expect(lucro).toBeGreaterThan(-1);
+    expect(net).toBeGreaterThan(lucro);
+    expect(deposits).toBeGreaterThan(net);
+    expect(html).toContain('aria-pressed="true"');
+  });
+
+  it("reads each metric from the MonthPoint fields", () => {
+    const p = point("2026-10", false);
+    expect(trendValue(p, "cashResult")).toBe(100);
+    expect(trendValue(p, "net")).toBe(200);
+    expect(trendValue(p, "depositAmount")).toBe(300);
   });
 });

@@ -23,6 +23,14 @@ const SEND_ITEM_UNIT_LABEL: Record<SendItem, string> = {
   email: "e-mails",
 };
 
+/**
+ * Unit costs go below a cent (e-mail at R$ 0,0004), so they keep four
+ * decimals; round2 would show them as R$ 0.
+ */
+function round4(x: number): number {
+  return Math.round(x * 10000) / 10000;
+}
+
 /** A ratio whose denominator is 0 is null, never Infinity or NaN. */
 function ratio(numerator: number, denominator: number): number | null {
   return denominator === 0 ? null : numerator / denominator;
@@ -69,7 +77,7 @@ export function sendLines(current: SendUsage[], previous: SendUsage[] | null): S
         unitLabel: SEND_ITEM_UNIT_LABEL[item],
         units: usage.units,
         amount: usage.amount,
-        unitCost: usage.units > 0 && !missingCost ? round2(usage.amount / usage.units) : null,
+        unitCost: usage.units > 0 && !missingCost ? round4(usage.amount / usage.units) : null,
         previousAmount: previous === null ? null : (previousByItem.get(item) ?? null),
         missingCost,
       },
@@ -92,6 +100,8 @@ export function computeKpis(
   const costPerClick = hasImpressions ? ratio(summary.adSpend, activity.adClicks) : null;
 
   return {
+    depositCount: activity.depositCount,
+    withdrawalCount: activity.withdrawalCount,
     margin: ratio(summary.cashResult, summary.net),
     ticketMedio: ratio(summary.depositAmount, activity.depositCount),
     saqueMedio: ratio(summary.withdrawalAmount, activity.withdrawalCount),

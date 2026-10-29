@@ -449,7 +449,7 @@ describe("house financial month: Betleads cost and categories", () => {
         unitLabel: "blocos de 30 s",
         units: 10,
         amount: 0.34,
-        unitCost: 0.03,
+        unitCost: 0.034,
         previousAmount: null,
         missingCost: false,
       },

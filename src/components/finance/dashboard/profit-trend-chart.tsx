@@ -4,6 +4,10 @@
 // house (byTenant). CHART_SERIES has five hues and a hue is never cycled, so
 // past four houses the smaller ones fold into "Outras casas". The tooltip
 // shows the month's lucro, anúncios and ROI from the MonthPoint totals.
+// A toggle switches the metric (spec §3.2.4): Lucro líquido | Net |
+// Depósitos. Only the profit is split by house (byTenant), so Net and
+// Depósitos are one bar per month in every scope.
+import { useState } from "react";
 import {
   Bar,
   BarChart,
@@ -32,6 +36,20 @@ import {
   chartTooltipStyle,
 } from "@/lib/chart-theme";
 import type { MonthPoint } from "@/lib/finance/types";
+import { cn } from "@/lib/utils";
+
+export type TrendMetric = "cashResult" | "net" | "depositAmount";
+
+const METRICS: { key: TrendMetric; label: string }[] = [
+  { key: "cashResult", label: "Lucro líquido" },
+  { key: "net", label: "Net" },
+  { key: "depositAmount", label: "Depósitos" },
+];
+
+/** The month's value for the picked metric. */
+export function trendValue(point: MonthPoint, metric: TrendMetric): number {
+  return point[metric];
+}
 
 const MAX_NAMED_HOUSES = 4;
 const OTHERS_KEY = "__outras";
@@ -66,7 +84,9 @@ function MonthTooltip({ active, payload }: { active?: boolean; payload?: Tooltip
         {point.inProgress && " · em andamento"}
         {point.incomplete && " · incompleto"}
       </p>
-      <p>Lucro: {formatBRL(point.cashResult)}</p>
+      <p>Lucro líquido: {formatBRL(point.cashResult)}</p>
+      <p>Net: {formatBRL(point.net)}</p>
+      <p>Depósitos: {formatBRL(point.depositAmount)}</p>
       <p>Anúncios: {formatBRL(point.adSpend)}</p>
       <p>ROI: {formatRatio(point.roi)}</p>
     </div>
@@ -86,6 +106,8 @@ export function ProfitTrendChart({
   stacked: boolean;
   betleadsSince: string | null;
 }) {
+  const [metric, setMetric] = useState<TrendMetric>("cashResult");
+
   if (!months.length) {
     return (
       <p className="flex h-48 items-center justify-center text-sm text-muted-foreground">
@@ -94,10 +116,17 @@ export function ProfitTrendChart({
     );
   }
 
+  // Only the profit has a per-house split.
+  const byHouse = stacked && metric === "cashResult";
+  const metricLabel = METRICS.find((item) => item.key === metric)?.label ?? "";
   const { series, namedIds } = stackSeries(months, tenants);
   const data = months.map((point) => {
-    const row: Record<string, unknown> = { ...point, label: monthLabel(point.month) };
-    if (stacked) {
+    const row: Record<string, unknown> = {
+      ...point,
+      label: monthLabel(point.month),
+      value: trendValue(point, metric),
+    };
+    if (byHouse) {
       let others = 0;
       for (const tenant of tenants) {
         const value = point.byTenant[tenant.id] ?? 0;
@@ -113,9 +142,27 @@ export function ProfitTrendChart({
 
   return (
     <div className="space-y-2">
+      <div className="flex flex-wrap gap-1" role="group" aria-label="Métrica do gráfico">
+        {METRICS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            aria-pressed={metric === item.key}
+            onClick={() => setMetric(item.key)}
+            className={cn(
+              "rounded-md border px-2.5 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              metric === item.key
+                ? "border-primary/60 bg-primary/10 text-foreground"
+                : "border-border/40 text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} stackOffset={stacked ? "sign" : undefined}>
+          <BarChart data={data} stackOffset={byHouse ? "sign" : undefined}>
             <CartesianGrid {...chartGridProps} />
             <XAxis dataKey="label" {...chartAxisProps} />
             <YAxis
@@ -128,7 +175,7 @@ export function ProfitTrendChart({
               content={<MonthTooltip />}
               cursor={{ fill: "var(--color-secondary)", opacity: 0.5 }}
             />
-            {stacked ? (
+            {byHouse ? (
               <>
                 <Legend {...chartLegendProps} />
                 {series.map((item) => (
@@ -144,11 +191,13 @@ export function ProfitTrendChart({
                 ))}
               </>
             ) : (
-              <Bar dataKey="cashResult" name="Lucro líquido" radius={[4, 4, 0, 0]}>
+              <Bar dataKey="value" name={metricLabel} radius={[4, 4, 0, 0]}>
                 {months.map((point) => (
                   <Cell
                     key={point.month}
-                    fill={point.cashResult < 0 ? CHART_COLORS.danger : CHART_COLORS.primary}
+                    fill={
+                      trendValue(point, metric) < 0 ? CHART_COLORS.danger : CHART_COLORS.primary
+                    }
                     fillOpacity={point.inProgress ? 0.45 : 1}
                     stroke={point.incomplete ? CHART_COLORS.warning : undefined}
                     strokeDasharray={point.incomplete ? "4 3" : undefined}

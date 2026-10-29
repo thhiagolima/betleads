@@ -4,7 +4,7 @@
 // too, which Radix's default trigger doesn't reliably do on touch.
 //
 // Relies on a TooltipProvider higher up the tree (one per page/section, not
-// one per tooltip) — see the root of KpiCards and GroupScoreboard.
+// one per tooltip) — see the root of the finance dashboard and GroupScoreboard.
 import { useState } from "react";
 import { Info } from "lucide-react";
 

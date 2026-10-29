@@ -1,5 +1,6 @@
-// "Lucro por casa" (spec §6): one row per house of a group or of "Todas as
-// casas", with Lucro, ROI, Anúncios and the profit variation. Sortable by
+// "Lucro por casa" (spec §6, §3.2.5): one row per house of a group or of
+// "Todas as casas", with Lucro, Margem, ROI, Anúncios, Envios and the profit
+// variation. Sortable by
 // header (desc first, asc on the second click, nulls always last); a row
 // click opens the house's painel.
 import { useMemo, useState } from "react";
@@ -14,20 +15,29 @@ export type TenantProfitRow = {
   nome: string;
   current: PeriodSummary;
   previous: PeriodSummary;
+  /** Lucro líquido ÷ net; null when net is 0. */
+  margin: number | null;
+  /** Envios of the current window. */
+  sendCost: number;
 };
 
-export type TenantProfitColumn = "nome" | "cashResult" | "roi" | "adSpend" | "profitChange";
+export type TenantProfitColumn =
+  "nome" | "cashResult" | "margin" | "roi" | "adSpend" | "sendCost" | "profitChange";
 
 const COLUMNS: { key: TenantProfitColumn; label: string }[] = [
   { key: "nome", label: "Casa" },
   { key: "cashResult", label: "Lucro" },
+  { key: "margin", label: "Margem" },
   { key: "roi", label: "ROI" },
   { key: "adSpend", label: "Anúncios" },
+  { key: "sendCost", label: "Envios" },
   { key: "profitChange", label: "Δ lucro" },
 ];
 
 function numericValue(row: TenantProfitRow, column: Exclude<TenantProfitColumn, "nome">) {
   if (column === "profitChange") return pctChange(row.current.cashResult, row.previous.cashResult);
+  if (column === "margin") return row.margin;
+  if (column === "sendCost") return row.sendCost;
   return row.current[column];
 }
 
@@ -87,7 +97,7 @@ export function TenantProfitTable({
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border/40">
-      <table className="w-full min-w-[32rem] text-sm">
+      <table className="w-full min-w-[42rem] text-sm">
         <thead>
           <tr className="border-b border-border/40 text-xs uppercase text-muted-foreground">
             {COLUMNS.map((column) => (
@@ -136,12 +146,14 @@ export function TenantProfitTable({
               >
                 {formatBRL(row.current.cashResult)}
               </td>
+              <td className="whitespace-nowrap px-3 py-2 text-right">{formatPct(row.margin)}</td>
               <td className="whitespace-nowrap px-3 py-2 text-right">
                 {formatRatio(row.current.roi)}
               </td>
               <td className="whitespace-nowrap px-3 py-2 text-right">
                 {formatBRL(row.current.adSpend)}
               </td>
+              <td className="whitespace-nowrap px-3 py-2 text-right">{formatBRL(row.sendCost)}</td>
               <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
                 <ProfitChange row={row} />
               </td>
