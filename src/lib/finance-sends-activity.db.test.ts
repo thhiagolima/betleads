@@ -114,7 +114,7 @@ const SCHEMA = `
     metric_date date NOT NULL,
     impressions bigint NOT NULL DEFAULT 0,
     clicks bigint NOT NULL DEFAULT 0,
-    link_clicks bigint NULL
+    link_clicks bigint NOT NULL DEFAULT 0
   );
 `;
 
@@ -292,7 +292,7 @@ describe("finance_activity_days", () => {
         (tenant_id, provider, metric_date, impressions, clicks, link_clicks)
       values
         ('${PAYING}', 'meta', '2026-11-05', 1000, 40, 30),
-        ('${PAYING}', 'meta', '2026-11-05', 500, 10, null),
+        ('${PAYING}', 'meta', '2026-11-05', 500, 10, 0),
         ('${PAYING}', 'google', '2026-11-05', 9999, 9999, 9999);
     `);
 
@@ -310,12 +310,31 @@ describe("finance_activity_days", () => {
         crm_direct_conversions: 3,
         crm_direct_revenue: 75,
         crm_influenced_revenue: 30,
-        // meta row 1 has link_clicks=30 (used), row 2 has link_clicks=null
-        // so falls back to clicks=10; google is excluded.
+        // meta row 1 has link_clicks=30 (used), row 2 has link_clicks=0 (the
+        // not-null default, like prod) so falls back to clicks=10; google
+        // is excluded.
         ad_impressions: 1500,
         ad_clicks: 40,
       },
     ]);
+  });
+
+  it("ad_clicks falls back to clicks only when link_clicks is 0", async () => {
+    const tenant = "00000000-0000-4000-8000-00000000f0a3";
+    await db.query(`insert into public.tenants (id, nome, plano) values ('${tenant}', 'Casa Clicks', 'crm_unico')`);
+    await db.exec(`
+      insert into public.marketing_ad_metrics_daily
+        (tenant_id, provider, metric_date, impressions, clicks, link_clicks)
+      values
+        ('${tenant}', 'meta', '2026-11-07', 100, 7, 0),
+        ('${tenant}', 'meta', '2026-11-07', 100, 9, 5);
+    `);
+
+    const rows = await activityDaysRows([tenant], "2026-11-07", "2026-11-07");
+    // link_clicks=0, clicks=7 -> falls back to 7; link_clicks=5, clicks=9 ->
+    // uses 5 (nullif(0, 0) is null so coalesce falls back; nullif(5, 0) is
+    // 5 so coalesce keeps it). Total: 7 + 5 = 12.
+    expect(rows[0].ad_clicks).toBe(12);
   });
 
   it("duplicate tenant ids do not double rows", async () => {

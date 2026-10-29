@@ -126,7 +126,7 @@ as $$
       tenant_id,
       metric_date,
       sum(impressions) as ad_impressions,
-      sum(coalesce(link_clicks, clicks)) as ad_clicks
+      sum(coalesce(nullif(link_clicks, 0), clicks)) as ad_clicks
     from public.marketing_ad_metrics_daily
     where provider = 'meta'
       and tenant_id = any(_tenants)
