@@ -81,25 +81,29 @@ describe("day-entry", () => {
 
   it("leaveDayPlan saves before moving and confirms before discarding", () => {
     const clean = { dayDirty: false, costDirty: false };
-    expect(leaveDayPlan("move", clean)).toEqual({ save: false, confirm: false });
-    expect(leaveDayPlan("close", clean)).toEqual({ save: false, confirm: false });
+    expect(leaveDayPlan("move", clean)).toEqual({ save: false, confirm: false, blocked: false });
+    expect(leaveDayPlan("close", clean)).toEqual({ save: false, confirm: false, blocked: false });
     // Moving saves the typed day and goes on; only the unsent cost form is discarded.
     expect(leaveDayPlan("move", { dayDirty: true, costDirty: false })).toEqual({
       save: true,
       confirm: false,
+      blocked: false,
     });
     expect(leaveDayPlan("move", { dayDirty: true, costDirty: true })).toEqual({
       save: true,
       confirm: true,
+      blocked: false,
     });
     // Closing never saves: anything typed asks "Descartar alterações?".
     expect(leaveDayPlan("close", { dayDirty: true, costDirty: false })).toEqual({
       save: false,
       confirm: true,
+      blocked: false,
     });
     expect(leaveDayPlan("close", { dayDirty: false, costDirty: true })).toEqual({
       save: false,
       confirm: true,
+      blocked: false,
     });
   });
 
@@ -119,5 +123,36 @@ describe("day-entry", () => {
     expect(last.label).toBe("Lucro líquido");
     expect(last.end).toBeCloseTo(result.summary.cashResult);
     expect(result.steps.find((s) => s.key === "category:Equipe")?.start).toBeDefined();
+    expect(result.sendCostIncomplete).toBe(false);
+    expect(result.steps.find((s) => s.key === "sends")?.label).toBe("Envios");
+  });
+
+  it("dayResult flags a send without provider cost: Envios (parcial)", () => {
+    const result = dayResult(
+      day(),
+      [
+        { item: "sms", units: 100, amount: 12, missingCostUnits: 0 },
+        { item: "voice_30s", units: 4, amount: 0, missingCostUnits: 4 },
+      ],
+      [],
+    );
+    expect(result.sendCostIncomplete).toBe(true);
+    expect(result.steps.find((s) => s.key === "sends")?.label).toBe("Envios (parcial)");
+    expect(result.steps.at(-1)?.end).toBeCloseTo(result.summary.cashResult);
+  });
+
+  it("leaveDayPlan blocks leaving while a save is in flight (no discard question)", () => {
+    for (const kind of ["move", "close"] as const) {
+      expect(leaveDayPlan(kind, { dayDirty: true, costDirty: true, saving: true })).toEqual({
+        save: false,
+        confirm: false,
+        blocked: true,
+      });
+    }
+    expect(leaveDayPlan("close", { dayDirty: true, costDirty: false, saving: false })).toEqual({
+      save: false,
+      confirm: true,
+      blocked: false,
+    });
   });
 });

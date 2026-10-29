@@ -6,12 +6,13 @@
 // and the month summary. `dia` in the URL opens the modal on that day.
 // Reused read-only by /grupo/casa with `readOnly`; the demo house is
 // read-only too.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
+import { SendCostAmount } from "@/components/finance/dashboard/sends-block";
 import { betleadsUsageNote, formatBRL } from "@/components/finance/format";
 import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { currentMonth, metaFillEntries, todaySaoPaulo } from "@/components/finance/day-entry";
@@ -24,6 +25,8 @@ import {
   type MonthlyGgrFormValue,
 } from "@/components/finance/finance-monthly-ggr";
 import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
+import { round2 } from "@/lib/finance/calc";
+import type { PeriodSummary } from "@/lib/finance/types";
 import { getTenantFinanceMonth, saveFinanceDays, setMonthlyGgr } from "@/lib/finance.functions";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
@@ -218,41 +221,63 @@ export function FinanceMonthView({
         onDateChange={openDay}
       />
 
-      <div className="grid gap-2 rounded-lg border border-border/40 bg-background/30 p-4 text-sm sm:grid-cols-2 lg:grid-cols-5">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            {FINANCE_TERMS.movementFee.label}
-          </p>
-          <p className="font-medium">{formatBRL(summary.movementFee)}</p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            {FINANCE_TERMS.ggrFee.label}
-          </p>
-          <p className="font-medium">{formatBRL(summary.ggrFee)}</p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            {FINANCE_TERMS.otherCosts.label}
-          </p>
-          <p className="font-medium">{formatBRL(summary.otherCosts)}</p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            Envios e mensalidade
-          </p>
-          <p className="font-medium">
-            {formatBRL(summary.betleadsUsage + (summary.betleadsFee ?? 0))}
-          </p>
-          {betleadsNote && <p className="text-xs text-muted-foreground">{betleadsNote}</p>}
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            {FINANCE_TERMS.cashResult.label}
-          </p>
-          <p className="text-lg font-semibold">{formatBRL(summary.cashResult)}</p>
-        </div>
-      </div>
+      <MonthSummary
+        summary={summary}
+        sendCostIncomplete={data.sendCostIncomplete}
+        betleadsNote={betleadsNote}
+      />
+    </div>
+  );
+}
+
+function SummaryTile({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+  return (
+    <div data-tile={id}>
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The month summary under the day list: one tile per cost (Envios and
+ * Mensalidade apart, each under its own term) and the Lucro líquido. A
+ * partial Envios (a send without provider cost) says so instead of reading as
+ * a complete total.
+ */
+export function MonthSummary({
+  summary,
+  sendCostIncomplete,
+  betleadsNote,
+}: {
+  summary: PeriodSummary;
+  sendCostIncomplete: boolean;
+  /** betleadsUsageNote(month, betleadsSince): no usage data before a date. */
+  betleadsNote: string | null;
+}) {
+  return (
+    <div className="grid gap-2 rounded-lg border border-border/40 bg-background/30 p-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
+      <SummaryTile id="movementFee" label={FINANCE_TERMS.movementFee.label}>
+        <p className="font-medium">{formatBRL(summary.movementFee)}</p>
+      </SummaryTile>
+      <SummaryTile id="ggrFee" label={FINANCE_TERMS.ggrFee.label}>
+        <p className="font-medium">{formatBRL(summary.ggrFee)}</p>
+      </SummaryTile>
+      <SummaryTile id="otherCosts" label={FINANCE_TERMS.otherCosts.label}>
+        <p className="font-medium">{formatBRL(summary.otherCosts)}</p>
+      </SummaryTile>
+      <SummaryTile id="sends" label={FINANCE_TERMS.sends.label}>
+        <p className="font-medium">
+          <SendCostAmount amount={round2(summary.betleadsUsage)} incomplete={sendCostIncomplete} />
+        </p>
+        {betleadsNote && <p className="text-xs text-muted-foreground">{betleadsNote}</p>}
+      </SummaryTile>
+      <SummaryTile id="fee" label={FINANCE_TERMS.fee.label}>
+        <p className="font-medium">{formatBRL(round2(summary.betleadsFee ?? 0))}</p>
+      </SummaryTile>
+      <SummaryTile id="cashResult" label={FINANCE_TERMS.cashResult.label}>
+        <p className="text-lg font-semibold">{formatBRL(summary.cashResult)}</p>
+      </SummaryTile>
     </div>
   );
 }

@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { round2, summarize } from "@/lib/finance/calc";
-import { sendLines } from "@/lib/finance/kpis";
+import { hasMissingSendCost, sendLines } from "@/lib/finance/kpis";
 import {
   FIXED_COST_CATEGORIES,
   categoryKey,
@@ -277,6 +277,11 @@ export async function getTenantFinanceMonthFor(
     activityByDay,
     /** One line per channel for the month (no comparison: previousAmount is null). */
     monthSends: sendLines(monthSendUsage, null),
+    /**
+     * Some send of the month has no provider cost registered: its Envios is
+     * partial (each day's flag comes from its sendsByDay, see dayResult).
+     */
+    sendCostIncomplete: hasMissingSendCost(monthSendUsage),
     /** First day with Betleads consumption (spec §7.2): months before it have no usage data. */
     betleadsSince: since,
     /** The house is exempt now: its Betleads cost is the provider cost ("Custo de envio (provedor)"). */

@@ -357,6 +357,32 @@ describe("house financial month: Betleads cost and categories", () => {
     expect(month.summary.cashResult).toBe(1000 - 100 - 15 - 300);
   });
 
+  it("month view flags a partial Envios (a send without provider cost) for the month", async () => {
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-05", amount: 10 });
+    const complete = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(complete.sendCostIncomplete).toBe(false);
+
+    usageRows.push({
+      tenant_id: HOUSE_A,
+      metric_date: "2026-10-06",
+      item: "voice_30s",
+      units: 4,
+      amount: 0,
+      missing_cost_units: 4,
+    });
+    const partial = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(partial.sendCostIncomplete).toBe(true);
+    expect(partial.sendsByDay["2026-10-06"]).toEqual([
+      { item: "voice_30s", units: 4, amount: 0, missingCostUnits: 4 },
+    ]);
+  });
+
   it("month view exposes sends and activity by day", async () => {
     financeDayRows.push(
       dayRow(HOUSE_A, "2026-10-05", { deposit_amount: 1000, ad_spend: 100, ggr: 0 }),

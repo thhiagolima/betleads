@@ -37,5 +37,34 @@ describe("DayList", () => {
     // One name per number: the full labels.
     expect(html).toContain("Net (depósitos − saques)");
     expect(html).toContain("Lucro líquido");
+    expect(html).not.toContain("custo do provedor não cadastrado");
+  });
+
+  it("an Envios cell with a send lacking provider cost says so instead of a bare R$ 0", () => {
+    const day = computeDay({
+      date: "2026-10-05",
+      registrations: 0,
+      ftds: 0,
+      ftdDepositAmount: 0,
+      depositAmount: 500,
+      withdrawalAmount: 0,
+      adSpend: 0,
+      adSpendSuggested: null,
+      ggr: 0,
+      ggrFeePct: 0,
+      movementFeePct: 0,
+    });
+    const html = renderToStaticMarkup(
+      <DayList
+        days={[day]}
+        sendsByDay={{
+          "2026-10-05": [{ item: "voice_30s", units: 4, amount: 0, missingCostUnits: 4 }],
+        }}
+        otherCosts={[]}
+        onOpen={() => {}}
+      />,
+    );
+    expect(html).toContain("custo do provedor não cadastrado");
+    expect(html).not.toContain("R$ 0,00");
   });
 });

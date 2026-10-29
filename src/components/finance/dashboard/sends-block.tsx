@@ -2,7 +2,8 @@
 // E-mail) with quantity, cost, unit cost and the cost variation; the total
 // Envios; the CRM's direct and influenced revenue, each with its return
 // (revenue ÷ Envios). A channel whose provider cost is not registered says so
-// instead of showing R$ 0. The notes about this block (no Betleads data
+// instead of showing R$ 0; the total then reads "R$ X + custo do provedor não
+// cadastrado" and the returns are marked "parcial". The notes about this block (no Betleads data
 // before a date, exempt house priced at provider cost) sit here, not in a
 // page footer (spec §3.6).
 import type { ReactNode } from "react";
@@ -30,6 +31,29 @@ export const EXEMPT_HOUSE_NOTE = "Casa isenta: custo do provedor (situação atu
 export function sendsBetleadsNote(rangeFrom: string, betleadsSince: string | null): string | null {
   if (betleadsSince !== null && rangeFrom >= betleadsSince) return null;
   return betleadsMissingNote(betleadsSince);
+}
+
+const AMBER = "text-xs text-amber-500 dark:text-amber-300";
+
+/**
+ * An Envios amount that never reads as a real R$ 0 when a provider cost is
+ * missing: "R$ X + custo do provedor não cadastrado", or only the text when
+ * nothing has a cost.
+ */
+export function SendCostAmount({ amount, incomplete }: { amount: number; incomplete: boolean }) {
+  if (!incomplete) return <>{formatBRL(amount)}</>;
+  if (amount === 0) return <span className={AMBER}>{MISSING_PROVIDER_COST}</span>;
+  return (
+    <>
+      {formatBRL(amount)} <span className={AMBER}>+ {MISSING_PROVIDER_COST}</span>
+    </>
+  );
+}
+
+/** "parcial" next to a value computed over a partial Envios. */
+function Partial({ show }: { show: boolean }) {
+  if (!show) return null;
+  return <span className={`ml-1 ${AMBER}`}>parcial</span>;
 }
 
 /** A unit cost keeps up to four decimals (e-mail costs R$ 0,0004). */
@@ -131,7 +155,7 @@ export function SendsBlock({
             <TermTooltip term="sends" />
           </>
         }
-        value={formatBRL(current.sendCost)}
+        value={<SendCostAmount amount={current.sendCost} incomplete={current.sendCostIncomplete} />}
         variation={<Variation current={current.sendCost} previous={previous.sendCost} invert />}
       />
       <Row
@@ -145,7 +169,12 @@ export function SendsBlock({
       <Row
         id="direct-return"
         label="Retorno direto"
-        value={formatRatio(current.crmDirectReturn)}
+        value={
+          <>
+            {formatRatio(current.crmDirectReturn)}
+            <Partial show={current.sendCostIncomplete && current.crmDirectReturn !== null} />
+          </>
+        }
         variation={
           <Variation current={current.crmDirectReturn} previous={previous.crmDirectReturn} points />
         }
@@ -164,7 +193,12 @@ export function SendsBlock({
       <Row
         id="influenced-return"
         label="Retorno influenciado"
-        value={formatRatio(current.crmInfluencedReturn)}
+        value={
+          <>
+            {formatRatio(current.crmInfluencedReturn)}
+            <Partial show={current.sendCostIncomplete && current.crmInfluencedReturn !== null} />
+          </>
+        }
         variation={
           <Variation
             current={current.crmInfluencedReturn}

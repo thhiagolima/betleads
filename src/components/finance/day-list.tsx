@@ -3,8 +3,11 @@
 // Net, Envios and Lucro líquido. A row opens the day modal (day-modal.tsx).
 // No table: on a phone each row wraps into two lines, so nothing scrolls
 // sideways.
+import type { ReactNode } from "react";
+
 import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { dayLabel, dayResult, dayStatus, type DayStatus } from "@/components/finance/day-entry";
+import { SendCostAmount } from "@/components/finance/dashboard/sends-block";
 import { formatBRL } from "@/components/finance/format";
 import type { FinanceDay, SendUsage } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
@@ -79,7 +82,11 @@ export function DayList({
       <ul className="divide-y divide-border/40">
         {days.map((day) => {
           const costs = otherCosts.filter((cost) => cost.costDate === day.date);
-          const { summary, sendCost } = dayResult(day, sendsByDay[day.date], costs);
+          const { summary, sendCost, sendCostIncomplete } = dayResult(
+            day,
+            sendsByDay[day.date],
+            costs,
+          );
           return (
             <li key={day.date}>
               <button
@@ -97,7 +104,11 @@ export function DayList({
                   <DayStatusChip status={dayStatus(day, usingMonthlyGgr)} />
                 </span>
                 <DayFigure label={FINANCE_TERMS.net.label} value={summary.net} />
-                <DayFigure label={FINANCE_TERMS.sends.label} value={sendCost} />
+                <DayFigure
+                  label={FINANCE_TERMS.sends.label}
+                  value={sendCost}
+                  display={<SendCostAmount amount={sendCost} incomplete={sendCostIncomplete} />}
+                />
                 <DayFigure
                   label={FINANCE_TERMS.cashResult.label}
                   value={summary.cashResult}
@@ -119,11 +130,14 @@ function DayFigure({
   value,
   strong = false,
   negative = false,
+  display,
 }: {
   label: string;
   value: number;
   strong?: boolean;
   negative?: boolean;
+  /** Replaces the plain formatted value (e.g. a partial Envios). */
+  display?: ReactNode;
 }) {
   return (
     <span className="min-w-0 sm:text-right">
@@ -135,7 +149,7 @@ function DayFigure({
           negative && "text-destructive",
         )}
       >
-        {formatBRL(value)}
+        {display ?? formatBRL(value)}
       </span>
     </span>
   );

@@ -4,7 +4,7 @@
 // nos dias vazios" entries and the day's result (sends and other costs of
 // that day taken off its cash result, plus the waterfall).
 import { presetRange, round2, summarize } from "@/lib/finance/calc";
-import { waterfallSteps } from "@/lib/finance/kpis";
+import { hasMissingSendCost, waterfallSteps } from "@/lib/finance/kpis";
 import type { FinanceDay, PeriodSummary, SendUsage, WaterfallStep } from "@/lib/finance/types";
 
 export type DayStatus =
@@ -70,14 +70,17 @@ export function metaFillEntries(
  * What leaving the open day does. Moving to another day saves the typed
  * Anúncios/GGR first (and stays on a save error); closing never saves, so
  * anything typed asks "Descartar alterações?". A cost typed but not added is
- * lost either way, so it always asks.
+ * lost either way, so it always asks. While a save is in flight (`saving`)
+ * leaving is blocked: the values are about to be saved, so asking to discard
+ * them would be wrong; the modal waits until the save is done.
  */
 export function leaveDayPlan(
   kind: "move" | "close",
-  state: { dayDirty: boolean; costDirty: boolean },
-): { save: boolean; confirm: boolean } {
-  if (kind === "move") return { save: state.dayDirty, confirm: state.costDirty };
-  return { save: false, confirm: state.dayDirty || state.costDirty };
+  state: { dayDirty: boolean; costDirty: boolean; saving?: boolean },
+): { save: boolean; confirm: boolean; blocked: boolean } {
+  if (state.saving) return { save: false, confirm: false, blocked: true };
+  if (kind === "move") return { save: state.dayDirty, confirm: state.costDirty, blocked: false };
+  return { save: false, confirm: state.dayDirty || state.costDirty, blocked: false };
 }
 
 /** Σ amount of a day's sends (R$). */
@@ -87,20 +90,35 @@ export function daySendCost(sends: SendUsage[] | undefined): number {
 
 export type DayCost = { valor: number; categoria: string };
 
-/** The day's Lucro líquido and its waterfall: its sends and other costs taken off. */
+/**
+ * The day's Lucro líquido and its waterfall: its sends and other costs taken
+ * off. `sendCostIncomplete`: some send of the day has no provider cost
+ * registered, so its Envios (and the result) are partial.
+ */
 export function dayResult(
   day: FinanceDay,
   sends: SendUsage[] | undefined,
   costs: DayCost[],
-): { summary: PeriodSummary; sendCost: number; steps: WaterfallStep[] } {
+): {
+  summary: PeriodSummary;
+  sendCost: number;
+  sendCostIncomplete: boolean;
+  steps: WaterfallStep[];
+} {
   const sendCost = daySendCost(sends);
+  const sendCostIncomplete = hasMissingSendCost(sends);
   const categories: Record<string, number> = {};
   for (const cost of costs) {
     categories[cost.categoria] = round2((categories[cost.categoria] ?? 0) + cost.valor);
   }
   const otherCosts = round2(costs.reduce((total, cost) => total + cost.valor, 0));
   const summary = summarize([day], otherCosts, undefined, { usage: sendCost, fee: null });
-  return { summary, sendCost, steps: waterfallSteps(summary, sendCost, categories) };
+  return {
+    summary,
+    sendCost,
+    sendCostIncomplete,
+    steps: waterfallSteps(summary, sendCost, categories, { sendCostIncomplete }),
+  };
 }
 
 /** "28/10 · ter" */

@@ -100,6 +100,22 @@ describe("DayModalContent", () => {
     expect(buttonTag(html, "Editar em Outros custos")).toMatch(/ disabled=""/);
   });
 
+  it("a channel without provider cost never reads R$ 0,00 (sem custo)", () => {
+    const html = renderToStaticMarkup(
+      <DayModalContent
+        {...props({
+          sends: [
+            { item: "sms", units: 1000, amount: 59, missingCostUnits: 0 },
+            { item: "voice_30s", units: 4, amount: 0, missingCostUnits: 4 },
+          ],
+        })}
+      />,
+    );
+    expect(html).not.toContain("(sem custo)");
+    expect(html).toContain("custo do provedor não cadastrado");
+    expect(html).toContain("Envios (parcial)");
+  });
+
   it("links the day's costs to Outros custos when editable", () => {
     const html = renderToStaticMarkup(<DayModalContent {...props({ onEditCosts: () => {} })} />);
     expect(html).toContain("Editar em Outros custos");

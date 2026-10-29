@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { SendLine } from "@/lib/finance/types";
 
-import { EXEMPT_HOUSE_NOTE, SendsBlock, sendsBetleadsNote } from "./sends-block";
+import { EXEMPT_HOUSE_NOTE, SendCostAmount, SendsBlock, sendsBetleadsNote } from "./sends-block";
 import { kpis } from "./test-fixtures";
 
 const render = (node: ReactNode) => renderToStaticMarkup(<TooltipProvider>{node}</TooltipProvider>);
@@ -129,6 +129,62 @@ describe("SendsBlock", () => {
     expect(html).toContain("Sem dado de custo Betleads antes de out/2026");
     expect(html).toContain("Sem envios no período.");
     expect(row(html, "direct-return")).toContain("n.a.");
+  });
+});
+
+describe("SendsBlock with a partial Envios", () => {
+  it("the total says the provider cost is missing and the CRM returns are partial", () => {
+    const html = render(
+      <SendsBlock
+        lines={lines}
+        kpis={{
+          current: kpis({
+            sendCost: 1442,
+            sendCostIncomplete: true,
+            crmDirectRevenue: 2884,
+            crmDirectReturn: 2,
+            crmInfluencedRevenue: 7210,
+            crmInfluencedReturn: 5,
+          }),
+          previous: kpis({ sendCost: 1204, crmDirectReturn: 1.5 }),
+        }}
+        exemptHouse={false}
+        betleadsNote={null}
+      />,
+    );
+    const total = row(html, "total");
+    expect(total).toContain("R$ 1.442,00");
+    expect(total).toContain("+ custo do provedor não cadastrado");
+    expect(row(html, "direct-return")).toContain("parcial");
+    expect(row(html, "influenced-return")).toContain("parcial");
+    expect(row(html, "direct")).not.toContain("parcial");
+  });
+
+  it("a complete Envios has no partial marks", () => {
+    const html = render(
+      <SendsBlock
+        lines={[]}
+        kpis={{ current: kpis({ sendCost: 10, crmDirectReturn: 2 }), previous: kpis() }}
+        exemptHouse={false}
+        betleadsNote={null}
+      />,
+    );
+    expect(html).not.toContain("parcial");
+    expect(html).not.toContain("custo do provedor não cadastrado");
+  });
+});
+
+describe("SendCostAmount", () => {
+  it("R$ X alone, R$ X + the missing-cost text, or only the text at R$ 0", () => {
+    expect(renderToStaticMarkup(<SendCostAmount amount={7} incomplete={false} />)).toBe(
+      "R$ 7,00",
+    );
+    const partial = renderToStaticMarkup(<SendCostAmount amount={7} incomplete />);
+    expect(partial).toContain("R$ 7,00");
+    expect(partial).toContain("+ custo do provedor não cadastrado");
+    const none = renderToStaticMarkup(<SendCostAmount amount={0} incomplete />);
+    expect(none).not.toContain("R$");
+    expect(none).toContain("custo do provedor não cadastrado");
   });
 });
 

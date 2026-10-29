@@ -3,7 +3,9 @@
 // GGR and the day's other costs) and "Resultado do dia" (the day's waterfall,
 // previewing the typed values). "Salvar" saves this day only; "Dia anterior"
 // and "Próximo dia" walk the month up to today, saving a typed day first;
-// closing with something unsaved asks "Descartar alterações?" (leaveDayPlan).
+// closing with something unsaved asks "Descartar alterações?" (leaveDayPlan);
+// while a save is in flight (until the month is refetched) closing and moving
+// wait for it instead of asking.
 // A Sheet on a phone, a Dialog from `sm` up. Read-only (group manager, demo
 // house) shows values only.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -21,6 +23,7 @@ import {
   neighborDays,
   todaySaoPaulo,
 } from "@/components/finance/day-entry";
+import { SendCostAmount } from "@/components/finance/dashboard/sends-block";
 import { DayStatusChip } from "@/components/finance/day-list";
 import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { formatBRL, formatInt, GGR_COLUMN_LABEL } from "@/components/finance/format";
@@ -213,10 +216,7 @@ export function DayModalContent({
                       </span>
                     </span>
                     <span className="tabular-nums">
-                      {formatBRL(line.amount)}
-                      {line.missingCost && (
-                        <span className="ml-1 text-xs text-muted-foreground">(sem custo)</span>
-                      )}
+                      <SendCostAmount amount={line.amount} incomplete={line.missingCost} />
                     </span>
                   </li>
                 ))}
@@ -444,6 +444,7 @@ function DayCostForm({
   date,
   categories,
   onDirtyChange,
+  onSavingChange,
 }: {
   tenantId: string;
   month: string;
@@ -451,6 +452,8 @@ function DayCostForm({
   categories: string[];
   /** Something typed and not added yet (asked about before it is lost). */
   onDirtyChange: (dirty: boolean) => void;
+  /** The add is in flight (the modal does not close meanwhile). */
+  onSavingChange: (saving: boolean) => void;
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveOtherCost);
@@ -479,10 +482,13 @@ function DayCostForm({
       setDescricao("");
       setValor("");
       setRepeatMonthly(false);
-      void invalidateFinanceAfterSave(qc, tenantId, month);
+      // Returned: the save stays pending until the month is refetched.
+      return invalidateFinanceAfterSave(qc, tenantId, month);
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const saving = save.isPending;
+  useEffect(() => onSavingChange(saving), [saving, onSavingChange]);
 
   return (
     <div className="flex flex-wrap items-end gap-2 pt-1">
@@ -542,12 +548,13 @@ export type DayModalData = {
   monthlyGgr: MonthlyGgrCurrent;
 };
 
-type DirtyState = { dayDirty: boolean; costDirty: boolean };
-const CLEAN: DirtyState = { dayDirty: false, costDirty: false };
+type DirtyState = { dayDirty: boolean; costDirty: boolean; saving: boolean };
+const CLEAN: DirtyState = { dayDirty: false, costDirty: false, saving: false };
 
 /**
- * Runs `proceed` per leaveDayPlan: at once, or after "Descartar alterações?".
- * `proceed(save)` tells a move whether to save the day first.
+ * Runs `proceed` per leaveDayPlan: at once, after "Descartar alterações?",
+ * or not at all while a save is in flight. `proceed(save)` tells a move
+ * whether to save the day first.
  */
 type LeaveGuard = (kind: "move" | "close", proceed: (save: boolean) => void) => void;
 
@@ -579,16 +586,12 @@ function DayModalBody({
   const [adSpend, setAdSpend] = useState(() => moneyString(day.adSpend));
   const [ggr, setGgr] = useState(() => moneyString(day.ggr));
   const [costDirty, setCostDirty] = useState(false);
+  const [costSaving, setCostSaving] = useState(false);
 
   const parsedAdSpend = parseMoneyInput(adSpend);
   const parsedGgr = parseMoneyInput(ggr);
   const dirty =
     !readOnly && (parsedAdSpend !== day.adSpend || (!usingMonthlyGgr && parsedGgr !== day.ggr));
-
-  useEffect(() => {
-    onDirtyChange({ dayDirty: dirty, costDirty: !readOnly && costDirty });
-  }, [dirty, costDirty, readOnly, onDirtyChange]);
-  useEffect(() => () => onDirtyChange(CLEAN), [onDirtyChange]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -601,11 +604,19 @@ function DayModalBody({
     },
     onSuccess: () => {
       toast.success("Dia salvo");
-      void invalidateFinanceAfterSave(qc, tenantId, month);
+      // Returned: the save stays pending until the month is refetched, so
+      // the day is never seen as unsaved in between.
+      return invalidateFinanceAfterSave(qc, tenantId, month);
     },
     // A failed save (also the one before a move) shows the error and stays on the day.
     onError: (error: Error) => toast.error(error.message),
   });
+  const saving = save.isPending || costSaving;
+
+  useEffect(() => {
+    onDirtyChange({ dayDirty: dirty, costDirty: !readOnly && costDirty, saving });
+  }, [dirty, costDirty, saving, readOnly, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(CLEAN), [onDirtyChange]);
 
   const neighbors = neighborDays(
     data.days.map((d) => d.date),
@@ -638,7 +649,7 @@ function DayModalBody({
       onPrev={() => moveTo(neighbors.prev)}
       onNext={() => moveTo(neighbors.next)}
       onSave={() => save.mutate()}
-      saving={save.isPending}
+      saving={saving}
       dirty={dirty}
       onEditCosts={onEditCosts && (() => guard("close", () => onEditCosts()))}
       costForm={
@@ -648,6 +659,7 @@ function DayModalBody({
           date={day.date}
           categories={data.categories}
           onDirtyChange={setCostDirty}
+          onSavingChange={setCostSaving}
         />
       }
     />
@@ -679,7 +691,11 @@ export function DayModal({
   const onDirtyChange = useCallback(
     (next: DirtyState) =>
       setDirtyState((prev) =>
-        prev.dayDirty === next.dayDirty && prev.costDirty === next.costDirty ? prev : next,
+        prev.dayDirty === next.dayDirty &&
+        prev.costDirty === next.costDirty &&
+        prev.saving === next.saving
+          ? prev
+          : next,
       ),
     [],
   );
@@ -688,6 +704,8 @@ export function DayModal({
 
   const guard: LeaveGuard = (kind, proceed) => {
     const plan = leaveDayPlan(kind, dirtyState);
+    // A save in flight: nothing to discard yet; stay until it is done.
+    if (plan.blocked) return;
     if (plan.confirm) setPending(() => () => proceed(plan.save));
     else proceed(plan.save);
   };
