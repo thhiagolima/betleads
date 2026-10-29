@@ -293,10 +293,16 @@ describe("Betleads cost", () => {
     expect(month.totals.current.betleadsFee).toBe(4000);
     expect(month.totals.current.cashResult).toBe(900 - 110.5 - 4000);
     expect(month.totals.previous.betleadsFee).toBe(3000);
-    expect(month.costs.find((line) => line.key === "betleads")).toEqual({
-      key: "betleads",
-      label: "Betleads",
-      amount: 4110.5,
+    expect(month.costs.find((line) => line.key === "sends")).toMatchObject({
+      key: "sends",
+      label: "Envios",
+      amount: 110.5,
+      auto: true,
+    });
+    expect(month.costs.find((line) => line.key === "fee")).toEqual({
+      key: "fee",
+      label: "Mensalidade",
+      amount: 4000,
       previous: 3000,
       auto: true,
     });
@@ -354,7 +360,7 @@ describe("Betleads cost", () => {
     expect(week.duplicateBetleadsCosts).toBe(0);
   });
 
-  it("tenant scope of an exempt house labels the line as provider cost", async () => {
+  it("tenant scope of an exempt house still uses the Envios line", async () => {
     exemptTenants.add(HOUSE_A);
     usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 });
 
@@ -363,16 +369,16 @@ describe("Betleads cost", () => {
       ...last7Days,
     });
 
-    const line = dashboard.costs.find((l) => l.key === "betleads");
+    const line = dashboard.costs.find((l) => l.key === "sends");
     expect(line).toMatchObject({
-      label: "Custo de envio (provedor)",
+      label: "Envios",
       amount: 7.5,
       auto: true,
     });
     expect(dashboard.tenants[0].exempt).toBe(true);
   });
 
-  it("tenant scope of a paying house keeps the Betleads label", async () => {
+  it("tenant scope of a paying house uses the Envios line too", async () => {
     usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 });
 
     const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
@@ -380,11 +386,11 @@ describe("Betleads cost", () => {
       ...last7Days,
     });
 
-    expect(dashboard.costs.find((l) => l.key === "betleads")?.label).toBe("Betleads");
+    expect(dashboard.costs.find((l) => l.key === "sends")?.label).toBe("Envios");
     expect(dashboard.tenants[0].exempt).toBe(false);
   });
 
-  it("group scope keeps the Betleads label even with an exempt house", async () => {
+  it("group scope sums Envios across an exempt and a paying house", async () => {
     exemptTenants.add(HOUSE_A);
     usageRows.push(
       { tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 },
@@ -396,8 +402,8 @@ describe("Betleads cost", () => {
       ...last7Days,
     });
 
-    expect(dashboard.costs.find((l) => l.key === "betleads")).toMatchObject({
-      label: "Betleads",
+    expect(dashboard.costs.find((l) => l.key === "sends")).toMatchObject({
+      label: "Envios",
       amount: 10,
     });
     expect(dashboard.tenants.map((row) => [row.nome, row.exempt])).toEqual([

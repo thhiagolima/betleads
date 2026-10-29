@@ -3,7 +3,6 @@ import fixtureDays from "./__fixtures__/pixreals-outubro.json";
 import {
   allocateMonthlyGgr,
   averageFilledAdSpend,
-  betleadsCostLabel,
   compareRange,
   computeDay,
   costBreakdown,
@@ -398,7 +397,7 @@ describe("costBreakdown", () => {
     ...overrides,
   });
 
-  it("orders by amount, labels the GGR rate, marks Betleads auto, drops empty lines", () => {
+  it("orders by amount, labels the GGR rate, marks Envios and Mensalidade auto, drops empty lines", () => {
     const current = summaryWith({
       adSpend: 100,
       ggrFee: 50,
@@ -415,34 +414,40 @@ describe("costBreakdown", () => {
       "ggr_fee",
       "category:Equipe",
       "movement_fee",
-      "betleads",
+      "sends",
+      "fee",
     ]);
     expect(lines.find((l) => l.key === "ggr_fee")?.label).toBe("Taxa de GGR (16%)");
-    const betleadsLine = lines.find((l) => l.key === "betleads");
-    expect(betleadsLine?.label).toBe("Betleads");
-    expect(betleadsLine?.auto).toBe(true);
-    // Only the Betleads line is "automático"; Anúncios and the fees are not.
-    expect(lines.filter((l) => l.auto).map((l) => l.key)).toEqual(["betleads"]);
-    expect(betleadsLine?.amount).toBe(10);
+    const sendsLine = lines.find((l) => l.key === "sends");
+    expect(sendsLine?.label).toBe("Envios");
+    expect(sendsLine?.auto).toBe(true);
+    expect(sendsLine?.amount).toBe(10);
+    const feeLine = lines.find((l) => l.key === "fee");
+    expect(feeLine?.label).toBe("Mensalidade");
+    expect(feeLine?.auto).toBe(true);
+    expect(feeLine?.amount).toBe(0);
+    // Only Envios and Mensalidade are "automático"; Anúncios and the fees are not.
+    expect(lines.filter((l) => l.auto).map((l) => l.key)).toEqual(["sends", "fee"]);
     // Ferramentas (0, no previous) is dropped.
     expect(lines.some((l) => l.key === "category:Ferramentas")).toBe(false);
   });
 
-  it("labels the Betleads line as provider cost for an exempt house", () => {
-    const current = summaryWith({ betleadsUsage: 12.5 });
-    const previous = summaryWith({ betleadsUsage: 10 });
+  it("drops Mensalidade only when the fee (current and previous) is null", () => {
+    const openWindow = summaryWith({ betleadsFee: null });
+    expect(costBreakdown(openWindow, null, {}, null, null).some((l) => l.key === "fee")).toBe(
+      false,
+    );
 
-    const exempt = costBreakdown(current, previous, {}, null, null, { exemptHouse: true });
-    const line = exempt.find((l) => l.key === "betleads");
-    expect(line?.label).toBe("Custo de envio (provedor)");
-    expect(line?.auto).toBe(true);
-    expect(line?.amount).toBe(12.5);
-    expect(line?.previous).toBe(10);
+    // A closed month with an actual R$ 0 invoice still shows the line.
+    const zeroFee = summaryWith({ betleadsFee: 0 });
+    const zeroLines = costBreakdown(zeroFee, null, {}, null, null);
+    expect(zeroLines.find((l) => l.key === "fee")).toMatchObject({ amount: 0, previous: null });
 
-    const paying = costBreakdown(current, previous, {}, null, null, { exemptHouse: false });
-    expect(paying.find((l) => l.key === "betleads")?.label).toBe("Betleads");
-    expect(betleadsCostLabel(true)).toBe("Custo de envio (provedor)");
-    expect(betleadsCostLabel(false)).toBe("Betleads");
+    // Kept when only the previous window had a fee.
+    const previousClosed = summaryWith({ betleadsFee: null });
+    const previousFee = summaryWith({ betleadsFee: 500 });
+    const lines = costBreakdown(previousClosed, previousFee, {}, null, null);
+    expect(lines.find((l) => l.key === "fee")).toMatchObject({ amount: 0, previous: 500 });
   });
 
   it("labels the GGR line without a rate when ggrFeePct is null", () => {

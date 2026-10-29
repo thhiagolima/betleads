@@ -5,11 +5,11 @@ import type { CostLine } from "@/lib/finance/types";
 
 import { CostBreakdown } from "./cost-breakdown";
 
-// costBreakdown() (calc.ts) sets auto: true only on the Betleads line.
+// costBreakdown() (calc.ts) sets auto: true only on the Envios/Mensalidade lines.
 const costs: CostLine[] = [
   { key: "ad_spend", label: "Anúncios", amount: 44100, previous: 31300, auto: false },
   { key: "ggr_fee", label: "Taxa de GGR (16%)", amount: 22050, previous: 20100, auto: false },
-  { key: "betleads", label: "Betleads", amount: 5200, previous: 5000, auto: true },
+  { key: "sends", label: "Betleads", amount: 5200, previous: 5000, auto: true },
   { key: "category:Equipe", label: "Equipe", amount: 1200, previous: null, auto: false },
 ];
 
@@ -43,7 +43,7 @@ describe("CostBreakdown", () => {
       <CostBreakdown
         costs={[
           {
-            key: "betleads",
+            key: "sends",
             label: "Custo de envio (provedor)",
             amount: 12.5,
             previous: null,

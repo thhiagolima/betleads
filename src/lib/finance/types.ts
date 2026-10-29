@@ -82,7 +82,7 @@ export type BetleadsCost = { usage: number; fee: number | null };
 
 /** A row of the cost breakdown shown next to the period summary. */
 export type CostLineKey =
-  "ad_spend" | "ggr_fee" | "movement_fee" | "betleads" | `category:${string}`;
+  "ad_spend" | "ggr_fee" | "movement_fee" | "sends" | "fee" | `category:${string}`;
 
 export type CostLine = {
   key: CostLineKey;
@@ -90,6 +90,68 @@ export type CostLine = {
   amount: number;
   previous: number | null;
   auto: boolean;
+};
+
+export type SendItem = "sms" | "voice_30s" | "email";
+
+export type SendUsage = {
+  item: SendItem;
+  units: number;
+  amount: number;
+  missingCostUnits: number;
+};
+
+export type DayActivity = {
+  depositCount: number;
+  depositorCount: number;
+  withdrawalCount: number;
+  generatedPixCount: number;
+  crmSent: number;
+  crmClicks: number;
+  crmDirectConversions: number;
+  crmDirectRevenue: number;
+  crmInfluencedRevenue: number;
+  adImpressions: number;
+  adClicks: number;
+};
+
+export type SendLine = {
+  item: SendItem;
+  label: string;
+  unitLabel: string;
+  units: number;
+  amount: number;
+  unitCost: number | null;
+  previousAmount: number | null;
+  missingCost: boolean;
+};
+
+export type FinanceKpis = {
+  margin: number | null; // cashResult / net
+  ticketMedio: number | null; // depositAmount / depositCount
+  saqueMedio: number | null; // withdrawalAmount / withdrawalCount
+  depositorsPerDay: number | null; // Σ depositorCount / days
+  withdrawalShare: number | null; // withdrawalAmount / depositAmount
+  pixConversion: number | null; // depositCount / generatedPixCount
+  registrationToFtd: number | null; // ftds / registrations
+  ftdMedio: number | null; // ftdDepositAmount / ftds
+  ggrShareOfDeposits: number | null; // ggr / depositAmount
+  cpm: number | null;
+  ctr: number | null;
+  costPerClick: number | null; // only when adImpressions > 0, else null
+  sendCost: number; // Σ SendUsage.amount
+  crmDirectRevenue: number;
+  crmInfluencedRevenue: number;
+  crmDirectReturn: number | null; // crmDirectRevenue / sendCost
+  crmInfluencedReturn: number | null; // crmInfluencedRevenue / sendCost
+};
+
+export type WaterfallStep = {
+  key: string;
+  label: string;
+  kind: "start" | "down" | "up" | "subtotal" | "total";
+  start: number;
+  end: number;
 };
 
 /** One point of the monthly cashResult series (filled by a server function in a later task). */

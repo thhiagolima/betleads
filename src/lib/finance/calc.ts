@@ -224,21 +224,14 @@ function formatPctNoTrailingZeros(pct: number): string {
 }
 
 /**
- * The label of a house's Betleads cost. An exempt house (billing_tenant_exempt)
- * pays nothing for sends, so its line is what the provider charged
- * (finance_betleads_usage reports units × provider_unit_cost for it).
- */
-export function betleadsCostLabel(exemptHouse: boolean): string {
-  return exemptHouse ? "Custo de envio (provedor)" : "Betleads";
-}
-
-/**
  * Cost breakdown shown next to the period summary: the computed lines
- * (Anúncios, Taxa de GGR, Taxa de movimentação, Betleads) plus one line per
- * manually entered cost category. Only Betleads is `auto` (the "automático"
- * tag): Anúncios is typed in and the fees follow it. `exemptHouse` (only for a
- * single exempt house) relabels the Betleads line, see betleadsCostLabel. Sorted by amount descending; a line with
- * amount 0 and no previous amount (0 or null) is dropped as noise.
+ * (Anúncios, Taxa de GGR, Taxa de movimentação, Envios, Mensalidade) plus one
+ * line per manually entered cost category. Envios and Mensalidade are `auto`
+ * (the "automático" tag): Anúncios is typed in and the fees follow it.
+ * Sorted by amount descending; a line with amount 0 and no previous amount (0
+ * or null) is dropped as noise — except Mensalidade, which is only dropped
+ * when the fee (current and previous) is null, i.e. the window never closed
+ * a billed month: a closed month with an actual R$ 0 invoice still shows.
  */
 export function costBreakdown(
   current: PeriodSummary,
@@ -246,12 +239,11 @@ export function costBreakdown(
   categories: Record<string, number>,
   previousCategories: Record<string, number> | null,
   ggrFeePct: number | null,
-  options?: { exemptHouse?: boolean },
 ): CostLine[] {
   const ggrLabel =
     ggrFeePct === null ? "Taxa de GGR" : `Taxa de GGR (${formatPctNoTrailingZeros(ggrFeePct)})`;
 
-  const lines: CostLine[] = [
+  const baseLines: CostLine[] = [
     {
       key: "ad_spend",
       label: "Anúncios",
@@ -274,16 +266,16 @@ export function costBreakdown(
       auto: false,
     },
     {
-      key: "betleads",
-      label: betleadsCostLabel(options?.exemptHouse ?? false),
-      amount: round2(current.betleadsUsage + (current.betleadsFee ?? 0)),
-      previous: previous ? round2(previous.betleadsUsage + (previous.betleadsFee ?? 0)) : null,
+      key: "sends",
+      label: "Envios",
+      amount: current.betleadsUsage,
+      previous: previous?.betleadsUsage ?? null,
       auto: true,
     },
   ];
 
   for (const [name, amount] of Object.entries(categories)) {
-    lines.push({
+    baseLines.push({
       key: `category:${name}`,
       label: name,
       amount,
@@ -292,9 +284,22 @@ export function costBreakdown(
     });
   }
 
-  return lines
-    .filter((line) => !(line.amount === 0 && (line.previous === null || line.previous === 0)))
-    .sort((a, b) => b.amount - a.amount);
+  const filtered = baseLines.filter(
+    (line) => !(line.amount === 0 && (line.previous === null || line.previous === 0)),
+  );
+
+  const feeDroppable = current.betleadsFee === null && (previous?.betleadsFee ?? null) === null;
+  if (!feeDroppable) {
+    filtered.push({
+      key: "fee",
+      label: "Mensalidade",
+      amount: round2(current.betleadsFee ?? 0),
+      previous: previous ? round2(previous.betleadsFee ?? 0) : null,
+      auto: true,
+    });
+  }
+
+  return filtered.sort((a, b) => b.amount - a.amount);
 }
 
 /** Daily average of Anúncios over the days that have it filled (spec §5); null when none. */

@@ -494,18 +494,7 @@ export async function getFinanceDashboardFor(
   const ggrFeePct = rateDay ? rateDay.ggrFeePct : null;
 
   const costs = tenantIds.length
-    ? costBreakdown(
-        totals.current,
-        totals.previous,
-        currentCategories,
-        previousCategories,
-        ggrFeePct,
-        // Group/all scope sums exempt and paying houses: keep "Betleads".
-        {
-          exemptHouse:
-            data.scope.kind === "tenant" && (exemptByTenant.get(data.scope.tenantId) ?? false),
-        },
-      )
+    ? costBreakdown(totals.current, totals.previous, currentCategories, previousCategories, ggrFeePct)
     : [];
 
   // Spec §7.3: a manual cost that looks like a Betleads charge is flagged only
