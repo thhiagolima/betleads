@@ -91,6 +91,11 @@ const CONFIG_FIELDS: Record<
   infobip: [
     { key: "base_url", label: "URL base", placeholder: "https://xxxxx.api.infobip.com" },
     {
+      key: "sms_from",
+      label: "Remetente do SMS (opcional: número ou nome aprovado na Infobip)",
+      placeholder: "Em branco = remetente padrão da conta",
+    },
+    {
       key: "voice_from",
       label: "Número de origem das ligações (voz)",
       placeholder: "5511999990000",
@@ -421,15 +426,14 @@ function AccountDialog({
                 </label>
               ))}
             </div>
-            {provider === "infobip" && (
-              <p className="text-meta text-muted-foreground">
-                SMS pela Infobip ainda não é suportado.
-              </p>
-            )}
           </div>
 
           {CONFIG_FIELDS[provider]
-            .filter((field) => field.key !== "voice_from" || channels.includes("voice"))
+            .filter(
+              (field) =>
+                (field.key !== "voice_from" || channels.includes("voice")) &&
+                (field.key !== "sms_from" || channels.includes("sms")),
+            )
             .map((field) => (
               <div key={field.key} className="space-y-1">
                 <Label htmlFor={`cfg-${field.key}`}>{field.label}</Label>

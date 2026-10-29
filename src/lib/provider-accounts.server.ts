@@ -47,9 +47,14 @@ export type InfobipAccount = {
   apiKey: string;
   /** Só dígitos; vazio quando não configurado. */
   voiceFrom: string;
+  /** Remetente do SMS (número ou nome aprovado na Infobip); vazio = padrão da conta. */
+  smsFrom: string;
 };
 
 export type ProviderAccount = ShortBrasilAccount | InfobipAccount;
+
+/** Contas que enviam SMS: Short Brasil ou Infobip. */
+export type SmsAccount = ShortBrasilAccount | InfobipAccount;
 
 /** A conta da casa existe mas não pode ser usada (desativada, ilegível, provedor errado). */
 export class ProviderAccountUnavailableError extends Error {
@@ -95,6 +100,7 @@ export function envInfobipAccount(): InfobipAccount {
     baseUrl: trimBaseUrl(process.env.INFOBIP_BASE_URL),
     apiKey: process.env.INFOBIP_API_KEY?.trim() ?? "",
     voiceFrom: process.env.INFOBIP_VOICE_FROM?.replace(/\D/g, "") ?? "",
+    smsFrom: "",
   };
 }
 
@@ -241,6 +247,7 @@ async function buildDbAccount(row: AccountRow): Promise<ProviderAccount> {
       baseUrl: trimBaseUrl(configString(config, "base_url")),
       apiKey: creds.api_key?.trim() ?? "",
       voiceFrom: configString(config, "voice_from")?.replace(/\D/g, "") ?? "",
+      smsFrom: configString(config, "sms_from") ?? "",
     };
   }
   throw new ProviderAccountUnavailableError(`Provedor desconhecido: ${row.provider}`);
@@ -354,24 +361,16 @@ export async function channelConfiguredFor(
     const account = await resolveChannelAccount(tenantId, channel);
     return account.provider === "short_brasil"
       ? channel === "sms" && shortBrasilConfigured(account)
-      : channel !== "sms" && infobipConfigured(account);
+      : infobipConfigured(account);
   } catch (error) {
     if (error instanceof ProviderAccountUnavailableError) return false;
     throw error;
   }
 }
 
-/** Conta de SMS da casa. Hoje só Short Brasil envia SMS. */
-export async function resolveSmsAccount(
-  tenantId: string | null | undefined,
-): Promise<ShortBrasilAccount> {
-  const account = await resolveChannelAccount(tenantId, "sms");
-  if (account.provider !== "short_brasil") {
-    throw new ProviderAccountUnavailableError(
-      `SMS pela conta "${account.label}" (${account.provider}) ainda não é suportado.`,
-    );
-  }
-  return account;
+/** Conta de SMS da casa (Short Brasil ou Infobip). */
+export async function resolveSmsAccount(tenantId: string | null | undefined): Promise<SmsAccount> {
+  return resolveChannelAccount(tenantId, "sms");
 }
 
 /** Conta Infobip de e-mail ou voz da casa. */

@@ -138,16 +138,29 @@ describe("provider accounts admin", () => {
     ]);
   });
 
+  it("an Infobip account can send SMS, with an optional sender", async () => {
+    const { id } = await save({
+      provider: "infobip",
+      label: "Infobip SMS",
+      channels: ["sms"],
+      config: { base_url: "https://a.test", sms_from: "CasaUm" },
+      credentials: { api_key: "k" },
+    });
+    expect(fake.db.rows("provider_accounts").find((r) => r.id === id)).toMatchObject({
+      channels: ["sms"],
+      config: { base_url: "https://a.test", sms_from: "CasaUm" },
+    });
+  });
+
   it("rejects unsupported channels, missing credentials and edits of the platform accounts", async () => {
     await expect(
       save({
-        provider: "infobip",
+        provider: "short_brasil",
         label: "x",
-        channels: ["sms"],
-        config: { base_url: "https://a.test" },
-        credentials: { api_key: "k" },
+        channels: ["email"],
+        credentials: { usuario: "u", chave: "c" },
       }),
-    ).rejects.toThrow(/SMS pela Infobip/);
+    ).rejects.toThrow(/só atende SMS/);
     await expect(
       save({
         provider: "short_brasil",
@@ -247,31 +260,29 @@ describe("provider accounts admin", () => {
 
     it("assigns an account, audits it, and moves the house's e-mail domains to it", async () => {
       await ownInfobip();
-      fake.db
-        .rows("tenant_domains")
-        .push(
-          {
-            id: "d1",
-            tenant_id: TENANT,
-            kind: "email",
-            hostname: "mail.casa.bet",
-            removed_at: null,
-          },
-          {
-            id: "d2",
-            tenant_id: TENANT,
-            kind: "shortener",
-            hostname: "go.casa.bet",
-            removed_at: null,
-          },
-          {
-            id: "d3",
-            tenant_id: TENANT,
-            kind: "email",
-            hostname: "old.casa.bet",
-            removed_at: "2026-10-01T00:00:00Z",
-          },
-        );
+      fake.db.rows("tenant_domains").push(
+        {
+          id: "d1",
+          tenant_id: TENANT,
+          kind: "email",
+          hostname: "mail.casa.bet",
+          removed_at: null,
+        },
+        {
+          id: "d2",
+          tenant_id: TENANT,
+          kind: "shortener",
+          hostname: "go.casa.bet",
+          removed_at: null,
+        },
+        {
+          id: "d3",
+          tenant_id: TENANT,
+          kind: "email",
+          hostname: "old.casa.bet",
+          removed_at: "2026-10-01T00:00:00Z",
+        },
+      );
       domains.refreshTenantDomain.mockResolvedValue({
         hostname: "mail.casa.bet",
         status: "pending",
