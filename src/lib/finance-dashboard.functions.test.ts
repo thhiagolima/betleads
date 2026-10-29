@@ -361,7 +361,8 @@ describe("months", () => {
       complete(HOUSE_A, "2025-11-15", 300, 100),
       complete(HOUSE_A, "2026-09-10", 500, 100),
       complete(HOUSE_A, "2026-10-05", 1000, 100),
-      dayRow(HOUSE_A, "2026-10-06", { deposit_amount: 50 }), // pending past day
+      // Pending past day: still incomplete, but its 50 of deposits count.
+      dayRow(HOUSE_A, "2026-10-06", { deposit_amount: 50 }),
     );
     fake.admin
       .rows("tenant_finance_other_costs")
@@ -415,7 +416,7 @@ describe("months", () => {
     });
     expect(dashboard.months[11]).toMatchObject({
       month: "2026-10",
-      cashResult: 900,
+      cashResult: 950,
       incomplete: true,
       inProgress: true,
       betleadsMissing: false,
@@ -668,6 +669,7 @@ describe("group and all scopes", () => {
       }),
       // B: result 300 - 300 = 0 on 300 of ads -> ROI 0.
       complete(HOUSE_B, "2026-10-23", 300, 300),
+      // B: pending day (no Anúncios/GGR) still counts its 1 of deposits.
       dayRow(HOUSE_B, "2026-10-22", { deposit_amount: 1 }),
       complete(HOUSE_C, "2026-10-23", 999, 1),
     );
@@ -692,20 +694,20 @@ describe("group and all scopes", () => {
     expect(dashboard.tenants.map((row) => row.nome)).toEqual(["Casa A", "Casa B"]);
     const [a, b] = dashboard.tenants;
     expect(a.current.cashResult).toBe(190);
-    expect(b.current.cashResult).toBe(-20);
+    expect(b.current.cashResult).toBe(-19);
     expect(b.pendingDates).toEqual(["2026-10-22"]);
-    // Row-level ROI: each house's own result over its own complete Anúncios.
+    // Row-level ROI: each house's own result over its own Anúncios.
     expect(a.current.roi).toBe(190 / 100);
-    expect(b.current.roi).toBe(-20 / 300);
-    expect(dashboard.totals.current.cashResult).toBe(170);
+    expect(b.current.roi).toBe(-19 / 300);
+    expect(dashboard.totals.current.cashResult).toBe(171);
     expect(dashboard.totals.current.betleadsUsage).toBe(30);
-    // Σresult / Σads = 170 / 400, not the mean of the houses.
-    expect(dashboard.totals.current.roi).toBe(170 / 400);
+    // Σresult / Σads = 171 / 400, not the mean of the houses.
+    expect(dashboard.totals.current.roi).toBe(171 / 400);
     expect(a.goals).toEqual([
       { metric: "roi", direction: "gte", target: 0, value: 1.9, status: "green" },
     ]);
     expect(b.goals).toEqual([]);
-    expect(dashboard.months.at(-1)!.byTenant).toEqual({ [HOUSE_A]: 190, [HOUSE_B]: -20 });
+    expect(dashboard.months.at(-1)!.byTenant).toEqual({ [HOUSE_A]: 190, [HOUSE_B]: -19 });
     // Group scope does not put a rate in the GGR label.
     expect(dashboard.costs.find((line) => line.key === "ggr_fee")?.label).toBe("Taxa de GGR");
     expect(financeDaysCalls[0]._tenants).toEqual([HOUSE_A, HOUSE_B]);
@@ -962,7 +964,7 @@ describe("group scope: cost-month rule and goals (ported from the group overview
     expect(dashboard.compareRange).toEqual({ from: "2026-10-16", to: "2026-10-16" });
   });
 
-  it("a pending today neither counts as pending nor grays a goal", async () => {
+  it("a pending today is not a pending day; its computed result enters the goal", async () => {
     financeDayRows.push(
       complete(HOUSE_A, "2026-10-23", 300, 100),
       dayRow(HOUSE_A, "2026-10-24", { deposit_amount: 50 }),
@@ -989,9 +991,11 @@ describe("group scope: cost-month rule and goals (ported from the group overview
     const a = row(dashboard, HOUSE_A);
     expect(a.current.pendingDays).toBe(0);
     expect(a.pendingDates).toEqual([]);
-    expect(a.current.cashResult).toBe(200);
+    // Today (pending) counts its 50 of deposits: 200 + 50.
+    expect(a.current.cashResult).toBe(250);
+    // Both goal days (2 × 150) against 250: yellow (≥ 80% of 300), not gray.
     expect(a.goals).toEqual([
-      { metric: "cash_result", direction: "gte", target: 150, value: 200, status: "green" },
+      { metric: "cash_result", direction: "gte", target: 300, value: 250, status: "yellow" },
     ]);
     expect(dashboard.totals.current.pendingDays).toBe(0);
   });

@@ -350,7 +350,6 @@ export function evaluateGoals(
   goalRows: GoalDayRow[],
   summary: PeriodSummary,
   range: DateRange,
-  today: string,
 ): GoalEvaluation[] {
   const byMetric = new Map<GoalMetric, GoalDay[]>();
   for (const row of goalRows) {
@@ -366,7 +365,7 @@ export function evaluateGoals(
   }
   return GOAL_METRICS.map((metric) => {
     const goalDays = byMetric.get(metric);
-    return goalDays ? evaluateGoal(goalDays, summary, range, today) : null;
+    return goalDays ? evaluateGoal(goalDays, summary, range) : null;
   }).filter((goal): goal is GoalEvaluation => goal !== null);
 }
 

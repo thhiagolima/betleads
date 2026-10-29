@@ -33,11 +33,12 @@ export type MonthlyGgr = { month: string /* "YYYY-MM-01" */; ggr: number; validT
 
 export type FinanceDay = FinanceDayInput & {
   ggrEstimated: boolean;
+  /** Anúncios or GGR missing; the results below still count them as 0. */
   pending: boolean;
-  net: number | null;
-  ggrFee: number | null;
-  movementFee: number | null;
-  cashResult: number | null;
+  net: number;
+  ggrFee: number;
+  movementFee: number;
+  cashResult: number;
   roi: number | null;
   costPerRegistration: number | null;
   costPerFtd: number | null;

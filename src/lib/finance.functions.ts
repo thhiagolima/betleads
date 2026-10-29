@@ -245,7 +245,7 @@ export async function getTenantFinanceMonthFor(
       history,
     },
     viewers: canManageViewers ? await listViewers(tenantId) : [],
-    goals: range ? evaluateGoals(goalRows, summary, range, today) : [],
+    goals: range ? evaluateGoals(goalRows, summary, range) : [],
     permissions: { canEditValues, canEditRates, canManageViewers, canManageGoals },
   };
 }

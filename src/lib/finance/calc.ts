@@ -28,36 +28,24 @@ function sumBy<T>(items: T[], pick: (item: T) => number): number {
   return round2(items.reduce((total, item) => total + pick(item), 0));
 }
 
+/**
+ * One day's results. A missing Anúncios or GGR (pending) counts as 0 for the
+ * math, so every result is always computed; the raw `adSpend`/`ggr` stay null
+ * so the grid can still show the input as empty and `pending` keeps flagging
+ * it. ROI is null without ad spend; a cost-per is null when its divisor is 0.
+ */
 export function computeDay(d: FinanceDayInput): FinanceDay {
   const pending = d.adSpend === null || d.ggr === null;
+  const adSpend = d.adSpend ?? 0;
+  const ggr = d.ggr ?? 0;
 
-  let net: number | null = null;
-  let ggrFee: number | null = null;
-  let movementFee: number | null = null;
-  let cashResult: number | null = null;
-  let roi: number | null = null;
-
-  if (!pending) {
-    const adSpend = d.adSpend as number;
-    const ggr = d.ggr as number;
-    const netValue = round2(d.depositAmount - d.withdrawalAmount);
-    const ggrFeeValue = round2(ggr * (d.ggrFeePct / 100));
-    const movementFeeValue =
-      round2(d.depositAmount * (d.movementFeePct / 100)) +
-      round2(d.withdrawalAmount * (d.movementFeePct / 100)) +
-      round2(netValue * (d.movementFeePct / 100));
-    const cashResultValue = round2(netValue - ggrFeeValue - movementFeeValue - adSpend);
-
-    net = netValue;
-    ggrFee = ggrFeeValue;
-    movementFee = movementFeeValue;
-    cashResult = cashResultValue;
-    roi = adSpend === 0 ? null : cashResultValue / adSpend;
-  }
-
-  const costPerRegistration =
-    d.adSpend === null || d.registrations === 0 ? null : d.adSpend / d.registrations;
-  const costPerFtd = d.adSpend === null || d.ftds === 0 ? null : d.adSpend / d.ftds;
+  const net = round2(d.depositAmount - d.withdrawalAmount);
+  const ggrFee = round2(ggr * (d.ggrFeePct / 100));
+  const movementFee =
+    round2(d.depositAmount * (d.movementFeePct / 100)) +
+    round2(d.withdrawalAmount * (d.movementFeePct / 100)) +
+    round2(net * (d.movementFeePct / 100));
+  const cashResult = round2(net - ggrFee - movementFee - adSpend);
 
   return {
     ...d,
@@ -67,9 +55,9 @@ export function computeDay(d: FinanceDayInput): FinanceDay {
     ggrFee,
     movementFee,
     cashResult,
-    roi,
-    costPerRegistration,
-    costPerFtd,
+    roi: adSpend === 0 ? null : cashResult / adSpend,
+    costPerRegistration: d.registrations === 0 ? null : adSpend / d.registrations,
+    costPerFtd: d.ftds === 0 ? null : adSpend / d.ftds,
   };
 }
 
@@ -77,8 +65,9 @@ export function computeDay(d: FinanceDayInput): FinanceDay {
  * Period totals. `today` ("YYYY-MM-DD", São Paulo) is passed explicitly so
  * this stays pure: today is expected to be incomplete, so a pending today is
  * not counted in `pendingDays` (it only sets `pendingToday`). Money results
- * (Net, Resultado) still sum only complete days. `pendingDays` counts
- * distinct dates, so a summary over several houses never counts a day twice.
+ * (Net, GGR, fees, Resultado, ROI) sum every day, a pending one included
+ * (computeDay counts its missing inputs as 0). `pendingDays` counts distinct
+ * dates, so a summary over several houses never counts a day twice.
  */
 export function summarize(
   days: FinanceDay[],
@@ -87,7 +76,6 @@ export function summarize(
   betleads?: BetleadsCost,
   options?: { ggrEstimated?: boolean },
 ): PeriodSummary {
-  const completeDays = days.filter((d) => !d.pending);
   const pendingDates = new Set(days.filter((d) => d.pending).map((d) => d.date));
   const pendingToday = today !== undefined && pendingDates.has(today);
   if (today !== undefined) pendingDates.delete(today);
@@ -99,20 +87,19 @@ export function summarize(
   const withdrawalAmount = sumBy(days, (d) => d.withdrawalAmount);
   const adSpend = sumBy(days, (d) => d.adSpend ?? 0);
 
-  const ggr = sumBy(completeDays, (d) => d.ggr ?? 0);
-  const net = sumBy(completeDays, (d) => d.net ?? 0);
-  const ggrFee = sumBy(completeDays, (d) => d.ggrFee ?? 0);
-  const movementFee = sumBy(completeDays, (d) => d.movementFee ?? 0);
-  const completeAdSpend = sumBy(completeDays, (d) => d.adSpend ?? 0);
-  const rawCashResult = sumBy(completeDays, (d) => d.cashResult ?? 0);
+  const ggr = sumBy(days, (d) => d.ggr ?? 0);
+  const net = sumBy(days, (d) => d.net);
+  const ggrFee = sumBy(days, (d) => d.ggrFee);
+  const movementFee = sumBy(days, (d) => d.movementFee);
+  const rawCashResult = sumBy(days, (d) => d.cashResult);
 
   const betleadsUsage = betleads?.usage ?? 0;
   const betleadsFee = betleads?.fee ?? null;
   const cashResult = round2(rawCashResult - (otherCosts ?? 0) - betleadsUsage - (betleadsFee ?? 0));
-  const roi = completeAdSpend === 0 ? null : cashResult / completeAdSpend;
+  const roi = adSpend === 0 ? null : cashResult / adSpend;
   const costPerRegistration = registrations === 0 ? null : adSpend / registrations;
   const costPerFtd = ftds === 0 ? null : adSpend / ftds;
-  const avgDailyCashResult = completeDays.length === 0 ? null : cashResult / completeDays.length;
+  const avgDailyCashResult = days.length === 0 ? null : cashResult / days.length;
 
   return {
     days: days.length,
@@ -364,31 +351,20 @@ export function evaluateGoal(
   goalDays: GoalDay[],
   summary: PeriodSummary,
   range: DateRange,
-  today?: string,
 ): GoalEvaluation | null {
   if (goalDays.length === 0) return null;
 
   const metric = goalDays[0].metric;
   const lastDay = lastGoalDayUpTo(goalDays, range.to);
   const direction = lastDay.direction;
-  // A pending today is left out of a manual metric's value (only complete
-  // days are summed), so its goal day is left out of the target too.
-  const targetDays =
-    dependsOnManual(metric) && summary.pendingToday && today !== undefined
-      ? goalDays.filter((d) => d.date !== today)
-      : goalDays;
   const target = isSumMetric(metric)
-    ? round2(targetDays.reduce((total, d) => total + d.dailyValue, 0))
+    ? round2(goalDays.reduce((total, d) => total + d.dailyValue, 0))
     : lastDay.dailyValue;
   const value = metricValue(summary, metric);
 
-  // Gray while a past day is pending, or when the only goal day is a
-  // pending today (nothing complete to judge yet).
-  const status: GoalStatus =
-    (dependsOnManual(metric) && (summary.pendingDays > 0 || targetDays.length === 0)) ||
-    value === null
-      ? "gray"
-      : goalStatusForBand(direction, target, value);
+  // Pending days count as 0 in the value (computeDay), so a goal is always
+  // judged on it; gray only when there is no value (e.g. ROI without ad spend).
+  const status: GoalStatus = value === null ? "gray" : goalStatusForBand(direction, target, value);
 
   return { metric, direction, target, value, status };
 }

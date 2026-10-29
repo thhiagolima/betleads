@@ -1,7 +1,8 @@
 // Month grid of the house's financial close (spec §5): one row per day, CRM
 // columns always filled, Anúncios/GGR manual (batch-edited and saved with a
-// single saveFinanceDays call), computed columns "pendente" until both
-// manual fields of the day are confirmed. A month with a "GGR do mês" total
+// single saveFinanceDays call). A missing manual field shows "pendente" in its
+// cell, while the computed columns always show their numbers (computeDay
+// counts a missing Anúncios or GGR as 0). A month with a "GGR do mês" total
 // (finance-monthly-ggr.tsx) shows the allocated daily GGR read-only. Reused
 // read-only by Task 7 (/grupo/casa) with `readOnly`.
 import { useEffect, useRef, useState } from "react";
@@ -338,7 +339,7 @@ export function FinanceMonthView({
                 <TableCell>{formatBRL(day.ftdDepositAmount)}</TableCell>
                 <TableCell>{formatBRL(day.depositAmount)}</TableCell>
                 <TableCell>{formatBRL(day.withdrawalAmount)}</TableCell>
-                <TableCell>{day.pending ? <PendingCell /> : formatBRL(day.net)}</TableCell>
+                <TableCell>{formatBRL(day.net)}</TableCell>
                 <TableCell className={MANUAL_CELL}>
                   {canEditDailyGgr ? (
                     <Input
@@ -360,8 +361,8 @@ export function FinanceMonthView({
                     formatBRL(day.ggr)
                   )}
                 </TableCell>
-                <TableCell>{day.pending ? <PendingCell /> : formatBRL(day.cashResult)}</TableCell>
-                <TableCell>{day.pending ? <PendingCell /> : formatRatio(day.roi)}</TableCell>
+                <TableCell>{formatBRL(day.cashResult)}</TableCell>
+                <TableCell>{formatRatio(day.roi)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
