@@ -34,5 +34,8 @@ describe("DayList", () => {
     expect(html).toContain("R$ 7,00"); // Envios
     expect(html).toContain("R$ 390,00"); // Lucro líquido: 400 − 7 − 3
     expect(html).not.toContain("<table");
+    // One name per number: the full labels.
+    expect(html).toContain("Net (depósitos − saques)");
+    expect(html).toContain("Lucro líquido");
   });
 });

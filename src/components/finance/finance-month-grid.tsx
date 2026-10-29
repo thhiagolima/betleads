@@ -98,7 +98,7 @@ export function FinanceMonthView({
   }, [savedGgrKey]);
 
   const canEditValues = !readOnly && data?.permissions.canEditValues === true;
-  const metaEntries = data ? metaFillEntries(data.days) : [];
+  const metaEntries = data ? metaFillEntries(data.days, todaySaoPaulo()) : [];
 
   // "Usar gasto da Meta nos dias vazios": every empty day with a suggestion, one save.
   const fillFromMeta = useMutation({
@@ -202,7 +202,11 @@ export function FinanceMonthView({
         otherCosts={data.otherCosts}
         onOpen={openDay}
         focusDate={focusDate}
+        usingMonthlyGgr={data.monthlyGgr !== null}
       />
+      <p className="text-xs text-muted-foreground">
+        A mensalidade entra só no total do mês fechado, não nos dias.
+      </p>
 
       <DayModal
         tenantId={tenantId}

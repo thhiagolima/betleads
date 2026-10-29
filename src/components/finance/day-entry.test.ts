@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { computeDay } from "@/lib/finance/calc";
 import type { FinanceDay, FinanceDayInput } from "@/lib/finance/types";
 
-import { dayResult, dayStatus, metaFillEntries, neighborDays } from "./day-entry";
+import { dayResult, dayStatus, leaveDayPlan, metaFillEntries, neighborDays } from "./day-entry";
 
 function day(overrides: Partial<FinanceDayInput> = {}): FinanceDay {
   return computeDay({
@@ -31,6 +31,9 @@ describe("day-entry", () => {
     expect(dayStatus(day({ ggrEstimated: true }))).toBe("estimado");
     // An estimated GGR with no ads still lacks the ads.
     expect(dayStatus(day({ ggrEstimated: true, adSpend: null }))).toBe("falta anúncios");
+    // With a month total, a day after its "atualizado até" has no allocated GGR.
+    expect(dayStatus(day({ ggr: null }), true)).toBe("falta GGR do mês");
+    expect(dayStatus(day({ ggr: null, adSpend: null }), true)).toBe("falta anúncios e GGR do mês");
   });
 
   it("neighborDays stops at month end and at today", () => {
@@ -67,11 +70,37 @@ describe("day-entry", () => {
       day({ date: "2026-10-03", adSpend: null, adSpendSuggested: null }),
       day({ date: "2026-10-04", adSpend: null, adSpendSuggested: 0 }),
     ];
-    expect(metaFillEntries(days)).toEqual([
+    expect(metaFillEntries(days, "2026-10-29")).toEqual([
       { date: "2026-10-01", adSpend: 120.5 },
       { date: "2026-10-04", adSpend: 0 },
     ]);
-    expect(metaFillEntries([day()])).toEqual([]);
+    expect(metaFillEntries([day()], "2026-10-29")).toEqual([]);
+    // Today (and later) is still open: the Meta figure is partial.
+    expect(metaFillEntries(days, "2026-10-04")).toEqual([{ date: "2026-10-01", adSpend: 120.5 }]);
+  });
+
+  it("leaveDayPlan saves before moving and confirms before discarding", () => {
+    const clean = { dayDirty: false, costDirty: false };
+    expect(leaveDayPlan("move", clean)).toEqual({ save: false, confirm: false });
+    expect(leaveDayPlan("close", clean)).toEqual({ save: false, confirm: false });
+    // Moving saves the typed day and goes on; only the unsent cost form is discarded.
+    expect(leaveDayPlan("move", { dayDirty: true, costDirty: false })).toEqual({
+      save: true,
+      confirm: false,
+    });
+    expect(leaveDayPlan("move", { dayDirty: true, costDirty: true })).toEqual({
+      save: true,
+      confirm: true,
+    });
+    // Closing never saves: anything typed asks "Descartar alterações?".
+    expect(leaveDayPlan("close", { dayDirty: true, costDirty: false })).toEqual({
+      save: false,
+      confirm: true,
+    });
+    expect(leaveDayPlan("close", { dayDirty: false, costDirty: true })).toEqual({
+      save: false,
+      confirm: true,
+    });
   });
 
   it("dayResult takes the day's sends and other costs off the day's cash result", () => {

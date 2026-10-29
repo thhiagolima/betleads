@@ -336,14 +336,21 @@ export function DuplicateBetleadsNote({
   );
 }
 
-export function FinanceOtherCosts({ tenantId }: { tenantId: string }) {
+export function FinanceOtherCosts({
+  tenantId,
+  initialMonth,
+}: {
+  tenantId: string;
+  /** "YYYY-MM" to open on (the day modal's "Editar em Outros custos"); default: this month. */
+  initialMonth?: string;
+}) {
   const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const getMonth = useServerFn(getTenantFinanceMonth);
   const saveFn = useServerFn(saveOtherCost);
   const removeFn = useServerFn(deleteOtherCost);
 
-  const [month, setMonth] = useState(currentMonth);
+  const [month, setMonth] = useState(() => initialMonth ?? currentMonth());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [descricao, setDescricao] = useState("");
   const [categoria, setCategoria] = useState(DEFAULT_CATEGORY);

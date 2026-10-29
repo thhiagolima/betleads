@@ -8,15 +8,27 @@ import { waterfallSteps } from "@/lib/finance/kpis";
 import type { FinanceDay, PeriodSummary, SendUsage, WaterfallStep } from "@/lib/finance/types";
 
 export type DayStatus =
-  "completo" | "falta anúncios" | "falta GGR" | "falta anúncios e GGR" | "estimado";
+  | "completo"
+  | "falta anúncios"
+  | "falta GGR"
+  | "falta anúncios e GGR"
+  | "falta GGR do mês"
+  | "falta anúncios e GGR do mês"
+  | "estimado";
 
-/** Missing inputs win; a GGR allocated from the month's total (ads filled) is "estimado". */
-export function dayStatus(day: FinanceDay): DayStatus {
+/**
+ * Missing inputs win; a GGR allocated from the month's total (ads filled) is
+ * "estimado". With a month total (`usingMonthlyGgr`), a day without GGR is
+ * one after its "atualizado até": what is missing is the month's GGR, not
+ * a daily one.
+ */
+export function dayStatus(day: FinanceDay, usingMonthlyGgr = false): DayStatus {
   const noAds = day.adSpend === null;
   const noGgr = day.ggr === null;
-  if (noAds && noGgr) return "falta anúncios e GGR";
+  const ggrName = usingMonthlyGgr ? "GGR do mês" : "GGR";
+  if (noAds && noGgr) return `falta anúncios e ${ggrName}`;
   if (noAds) return "falta anúncios";
-  if (noGgr) return "falta GGR";
+  if (noGgr) return `falta ${ggrName}`;
   if (day.ggrEstimated) return "estimado";
   return "completo";
 }
@@ -39,13 +51,33 @@ export function neighborDays(
   return { prev, next };
 }
 
-/** Days with no Anúncios and a Meta suggestion, to fill in one save. */
-export function metaFillEntries(days: FinanceDay[]): { date: string; adSpend: number }[] {
+/**
+ * Days before `today` with no Anúncios and a Meta suggestion, to fill in one
+ * save. Today is left out: its Meta spend is still growing.
+ */
+export function metaFillEntries(
+  days: FinanceDay[],
+  today: string,
+): { date: string; adSpend: number }[] {
   return days.flatMap((day) =>
-    day.adSpend === null && day.adSpendSuggested !== null
+    day.date < today && day.adSpend === null && day.adSpendSuggested !== null
       ? [{ date: day.date, adSpend: day.adSpendSuggested }]
       : [],
   );
+}
+
+/**
+ * What leaving the open day does. Moving to another day saves the typed
+ * Anúncios/GGR first (and stays on a save error); closing never saves, so
+ * anything typed asks "Descartar alterações?". A cost typed but not added is
+ * lost either way, so it always asks.
+ */
+export function leaveDayPlan(
+  kind: "move" | "close",
+  state: { dayDirty: boolean; costDirty: boolean },
+): { save: boolean; confirm: boolean } {
+  if (kind === "move") return { save: state.dayDirty, confirm: state.costDirty };
+  return { save: false, confirm: state.dayDirty || state.costDirty };
 }
 
 /** Σ amount of a day's sends (R$). */

@@ -2,9 +2,12 @@
 // §3.4): "Veio do CRM" (automatic numbers of the day), "Você lança" (Anúncios,
 // GGR and the day's other costs) and "Resultado do dia" (the day's waterfall,
 // previewing the typed values). "Salvar" saves this day only; "Dia anterior"
-// and "Próximo dia" walk the month up to today. A Sheet on a phone, a Dialog
-// from `sm` up. Read-only (group manager, demo house) shows values only.
-import { useEffect, useState, type ReactNode } from "react";
+// and "Próximo dia" walk the month up to today, saving a typed day first;
+// closing with something unsaved asks "Descartar alterações?" (leaveDayPlan).
+// A Sheet on a phone, a Dialog from `sm` up. Read-only (group manager, demo
+// house) shows values only.
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-react";
@@ -14,13 +17,17 @@ import {
   dayLabel,
   dayResult,
   dayStatus,
+  leaveDayPlan,
   neighborDays,
   todaySaoPaulo,
 } from "@/components/finance/day-entry";
 import { DayStatusChip } from "@/components/finance/day-list";
 import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { formatBRL, formatInt, GGR_COLUMN_LABEL } from "@/components/finance/format";
-import { MONTHLY_GGR_COLUMN_NOTE } from "@/components/finance/finance-monthly-ggr";
+import {
+  MONTHLY_GGR_COLUMN_NOTE,
+  type MonthlyGgrCurrent,
+} from "@/components/finance/finance-monthly-ggr";
 import {
   CategoryCombobox,
   CostValueLabel,
@@ -32,6 +39,16 @@ import { computeDay } from "@/lib/finance/calc";
 import { sendLines } from "@/lib/finance/kpis";
 import type { DayActivity, FinanceDay, SendUsage, WaterfallStep } from "@/lib/finance/types";
 import { saveFinanceDays, saveOtherCost } from "@/lib/finance.functions";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -90,6 +107,8 @@ export type DayModalContentProps = {
   dirty: boolean;
   /** The add form of "Outros custos deste dia" (stateful, given by DayModal). */
   costForm?: ReactNode;
+  /** "Editar em Outros custos": opens that tab on the month (edit/delete live there). */
+  onEditCosts?: () => void;
 };
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -135,6 +154,7 @@ export function DayModalContent({
   saving,
   dirty,
   costForm,
+  onEditCosts,
 }: DayModalContentProps) {
   // "Resultado do dia" previews what is typed (still unsaved).
   const preview = readOnly
@@ -271,7 +291,18 @@ export function DayModalContent({
           </div>
 
           <div className="space-y-2 rounded-md border border-border/40 px-3 py-2">
-            <p className="text-[11px] text-muted-foreground">Outros custos deste dia</p>
+            <div className="flex flex-wrap items-center justify-between gap-x-3">
+              <p className="text-[11px] text-muted-foreground">Outros custos deste dia</p>
+              {!readOnly && onEditCosts && (
+                <button
+                  type="button"
+                  className="text-[11px] text-primary underline-offset-2 hover:underline"
+                  onClick={onEditCosts}
+                >
+                  Editar em Outros custos
+                </button>
+              )}
+            </div>
             {otherCosts.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nenhum custo neste dia.</p>
             ) : (
@@ -335,6 +366,7 @@ export function DayModalContent({
 }
 
 /** The day's waterfall as compact rows: label, amount and a bar of its size. */
+/** Has its own TooltipProvider (the "Lucro líquido" TermTooltip), so it renders anywhere. */
 export function MiniWaterfall({ steps }: { steps: WaterfallStep[] }) {
   const size = (step: WaterfallStep) =>
     step.kind === "down" || step.kind === "up"
@@ -343,45 +375,47 @@ export function MiniWaterfall({ steps }: { steps: WaterfallStep[] }) {
   const max = Math.max(...steps.map(size), 0);
 
   return (
-    <ul className="space-y-1.5 text-sm">
-      {steps.map((step) => {
-        const isMove = step.kind === "down" || step.kind === "up";
-        const amount = isMove ? Math.abs(step.end - step.start) : step.end;
-        const strong = step.kind === "subtotal" || step.kind === "total";
-        return (
-          <li key={step.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3">
-            <span className={cn("truncate", strong && "font-medium")}>
-              {step.label}
-              {step.kind === "total" && <TermTooltip term="cashResult" />}
-            </span>
-            <span
-              className={cn(
-                "text-right tabular-nums",
-                strong && "font-semibold",
-                step.kind === "down" && "text-muted-foreground",
-                step.kind === "total" && step.end < 0 && "text-destructive",
-              )}
-            >
-              {step.kind === "down" ? "− " : step.kind === "up" ? "+ " : ""}
-              {formatBRL(amount)}
-            </span>
-            <span className="col-span-2 h-1 overflow-hidden rounded-full bg-muted/40">
+    <TooltipProvider delayDuration={150}>
+      <ul className="space-y-1.5 text-sm">
+        {steps.map((step) => {
+          const isMove = step.kind === "down" || step.kind === "up";
+          const amount = isMove ? Math.abs(step.end - step.start) : step.end;
+          const strong = step.kind === "subtotal" || step.kind === "total";
+          return (
+            <li key={step.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3">
+              <span className={cn("truncate", strong && "font-medium")}>
+                {step.label}
+                {step.kind === "total" && <TermTooltip term="cashResult" />}
+              </span>
               <span
                 className={cn(
-                  "block h-full rounded-full",
-                  step.kind === "down"
-                    ? "bg-amber-500/60"
-                    : step.kind === "total" && step.end < 0
-                      ? "bg-destructive/70"
-                      : "bg-primary/70",
+                  "text-right tabular-nums",
+                  strong && "font-semibold",
+                  step.kind === "down" && "text-muted-foreground",
+                  step.kind === "total" && step.end < 0 && "text-destructive",
                 )}
-                style={{ width: `${max === 0 ? 0 : (size(step) / max) * 100}%` }}
-              />
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+              >
+                {step.kind === "down" ? "− " : step.kind === "up" ? "+ " : ""}
+                {formatBRL(amount)}
+              </span>
+              <span className="col-span-2 h-1 overflow-hidden rounded-full bg-muted/40">
+                <span
+                  className={cn(
+                    "block h-full rounded-full",
+                    step.kind === "down"
+                      ? "bg-amber-500/60"
+                      : step.kind === "total" && step.end < 0
+                        ? "bg-destructive/70"
+                        : "bg-primary/70",
+                  )}
+                  style={{ width: `${max === 0 ? 0 : (size(step) / max) * 100}%` }}
+                />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </TooltipProvider>
   );
 }
 
@@ -407,11 +441,14 @@ function DayCostForm({
   month,
   date,
   categories,
+  onDirtyChange,
 }: {
   tenantId: string;
   month: string;
   date: string;
   categories: string[];
+  /** Something typed and not added yet (asked about before it is lost). */
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveOtherCost);
@@ -419,6 +456,9 @@ function DayCostForm({
   const [categoria, setCategoria] = useState("Outros");
   const [valor, setValor] = useState("");
   const [repeatMonthly, setRepeatMonthly] = useState(false);
+
+  const dirty = descricao.trim() !== "" || valor !== "";
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -497,8 +537,17 @@ export type DayModalData = {
   activityByDay: Record<string, DayActivity>;
   otherCosts: DayModalCost[];
   categories: string[];
-  monthlyGgr: unknown;
+  monthlyGgr: MonthlyGgrCurrent;
 };
+
+type DirtyState = { dayDirty: boolean; costDirty: boolean };
+const CLEAN: DirtyState = { dayDirty: false, costDirty: false };
+
+/**
+ * Runs `proceed` per leaveDayPlan: at once, or after "Descartar alterações?".
+ * `proceed(save)` tells a move whether to save the day first.
+ */
+type LeaveGuard = (kind: "move" | "close", proceed: (save: boolean) => void) => void;
 
 /** The stateful body: the typed values of one day (keyed by date in DayModal). */
 function DayModalBody({
@@ -508,6 +557,9 @@ function DayModalBody({
   data,
   readOnly,
   onDateChange,
+  onDirtyChange,
+  guard,
+  onEditCosts,
 }: {
   tenantId: string;
   month: string;
@@ -515,16 +567,26 @@ function DayModalBody({
   data: DayModalData;
   readOnly: boolean;
   onDateChange: (date: string | null) => void;
+  onDirtyChange: (state: DirtyState) => void;
+  guard: LeaveGuard;
+  onEditCosts?: () => void;
 }) {
   const qc = useQueryClient();
   const saveDaysFn = useServerFn(saveFinanceDays);
   const usingMonthlyGgr = data.monthlyGgr !== null;
   const [adSpend, setAdSpend] = useState(() => moneyString(day.adSpend));
   const [ggr, setGgr] = useState(() => moneyString(day.ggr));
+  const [costDirty, setCostDirty] = useState(false);
 
   const parsedAdSpend = parseMoneyInput(adSpend);
   const parsedGgr = parseMoneyInput(ggr);
-  const dirty = parsedAdSpend !== day.adSpend || (!usingMonthlyGgr && parsedGgr !== day.ggr);
+  const dirty =
+    !readOnly && (parsedAdSpend !== day.adSpend || (!usingMonthlyGgr && parsedGgr !== day.ggr));
+
+  useEffect(() => {
+    onDirtyChange({ dayDirty: dirty, costDirty: !readOnly && costDirty });
+  }, [dirty, costDirty, readOnly, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(CLEAN), [onDirtyChange]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -539,6 +601,7 @@ function DayModalBody({
       toast.success("Dia salvo");
       void invalidateFinanceAfterSave(qc, tenantId, month);
     },
+    // A failed save (also the one before a move) shows the error and stays on the day.
     onError: (error: Error) => toast.error(error.message),
   });
 
@@ -547,6 +610,15 @@ function DayModalBody({
     day.date,
     todaySaoPaulo(),
   );
+
+  // "Dia anterior"/"Próximo dia": save the typed day first, then move.
+  const moveTo = (target: string | null) => {
+    if (!target) return;
+    guard("move", (saveFirst) => {
+      if (saveFirst) save.mutate(undefined, { onSuccess: () => onDateChange(target) });
+      else onDateChange(target);
+    });
+  };
 
   return (
     <DayModalContent
@@ -561,17 +633,19 @@ function DayModalBody({
       onAdSpendChange={setAdSpend}
       onGgrChange={setGgr}
       neighbors={neighbors}
-      onPrev={() => neighbors.prev && onDateChange(neighbors.prev)}
-      onNext={() => neighbors.next && onDateChange(neighbors.next)}
+      onPrev={() => moveTo(neighbors.prev)}
+      onNext={() => moveTo(neighbors.next)}
       onSave={() => save.mutate()}
       saving={save.isPending}
       dirty={dirty}
+      onEditCosts={onEditCosts && (() => guard("close", () => onEditCosts()))}
       costForm={
         <DayCostForm
           tenantId={tenantId}
           month={month}
           date={day.date}
           categories={data.categories}
+          onDirtyChange={setCostDirty}
         />
       }
     />
@@ -595,16 +669,40 @@ export function DayModal({
   onDateChange: (date: string | null) => void;
 }) {
   const smUp = useIsSmUp();
+  const navigate = useNavigate();
   const day = date ? data.days.find((d) => d.date === date) : undefined;
   const open = day !== undefined;
-  const onOpenChange = (next: boolean) => {
-    if (!next) onDateChange(null);
+
+  const [dirtyState, setDirtyState] = useState<DirtyState>(CLEAN);
+  const onDirtyChange = useCallback(
+    (next: DirtyState) =>
+      setDirtyState((prev) =>
+        prev.dayDirty === next.dayDirty && prev.costDirty === next.costDirty ? prev : next,
+      ),
+    [],
+  );
+  // The action waiting for "Descartar" in "Descartar alterações?".
+  const [pending, setPending] = useState<(() => void) | null>(null);
+
+  const guard: LeaveGuard = (kind, proceed) => {
+    const plan = leaveDayPlan(kind, dirtyState);
+    if (plan.confirm) setPending(() => () => proceed(plan.save));
+    else proceed(plan.save);
   };
+
+  const onOpenChange = (next: boolean) => {
+    if (!next) guard("close", () => onDateChange(null));
+  };
+  // Only the house's own Financeiro has the Outros custos tab (not /grupo/casa).
+  const onEditCosts = readOnly
+    ? undefined
+    : // The new search has no `dia`, so the modal closes with the tab change.
+      () => void navigate({ to: "/financeiro", search: { tab: "outros-custos", month } });
 
   const title = day ? (
     <span className="flex flex-wrap items-center gap-2">
       {dayLabel(day.date)}
-      <DayStatusChip status={dayStatus(day)} />
+      <DayStatusChip status={dayStatus(day, data.monthlyGgr !== null)} />
     </span>
   ) : null;
   const body = day ? (
@@ -616,36 +714,75 @@ export function DayModal({
       data={data}
       readOnly={readOnly}
       onDateChange={onDateChange}
+      onDirtyChange={onDirtyChange}
+      guard={guard}
+      onEditCosts={onEditCosts}
     />
   ) : null;
   const description = "Números do CRM, o que você lança e o resultado do dia.";
 
+  const confirmDiscard = (
+    <AlertDialog
+      open={pending !== null}
+      onOpenChange={(next) => {
+        if (!next) setPending(null);
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Descartar alterações?</AlertDialogTitle>
+          <AlertDialogDescription>
+            O que você digitou neste dia ainda não foi salvo e será perdido.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              const run = pending;
+              setPending(null);
+              run?.();
+            }}
+          >
+            Descartar
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   if (smUp) {
     return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription className="sr-only">{description}</DialogDescription>
-          </DialogHeader>
-          {body}
-        </DialogContent>
-      </Dialog>
+      <>
+        <Dialog open={open} onOpenChange={onOpenChange}>
+          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{title}</DialogTitle>
+              <DialogDescription className="sr-only">{description}</DialogDescription>
+            </DialogHeader>
+            {body}
+          </DialogContent>
+        </Dialog>
+        {confirmDiscard}
+      </>
     );
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="bottom"
-        className="h-[100dvh] overflow-y-auto overflow-x-hidden px-4 pb-6 pt-5"
-      >
-        <SheetHeader className="mb-4 text-left">
-          <SheetTitle>{title}</SheetTitle>
-          <SheetDescription className="sr-only">{description}</SheetDescription>
-        </SheetHeader>
-        {body}
-      </SheetContent>
-    </Sheet>
+    <>
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="bottom"
+          className="h-[100dvh] overflow-y-auto overflow-x-hidden px-4 pb-6 pt-5"
+        >
+          <SheetHeader className="mb-4 text-left">
+            <SheetTitle>{title}</SheetTitle>
+            <SheetDescription className="sr-only">{description}</SheetDescription>
+          </SheetHeader>
+          {body}
+        </SheetContent>
+      </Sheet>
+      {confirmDiscard}
+    </>
   );
 }

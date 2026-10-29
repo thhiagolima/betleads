@@ -9,12 +9,16 @@ import { formatBRL } from "@/components/finance/format";
 import type { FinanceDay, SendUsage } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
+const MISSING_CLASS = "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400";
+
 const STATUS_CLASS: Record<DayStatus, string> = {
   completo: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
   estimado: "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  "falta anúncios": "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  "falta GGR": "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  "falta anúncios e GGR": "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  "falta anúncios": MISSING_CLASS,
+  "falta GGR": MISSING_CLASS,
+  "falta anúncios e GGR": MISSING_CLASS,
+  "falta GGR do mês": MISSING_CLASS,
+  "falta anúncios e GGR do mês": MISSING_CLASS,
 };
 
 export function DayStatusChip({ status }: { status: DayStatus }) {
@@ -40,6 +44,7 @@ export function DayList({
   otherCosts,
   onOpen,
   focusDate,
+  usingMonthlyGgr = false,
 }: {
   days: FinanceDay[];
   sendsByDay: Record<string, SendUsage[]>;
@@ -47,6 +52,8 @@ export function DayList({
   onOpen: (date: string) => void;
   /** Ringed row (the day "Lançar agora" pointed at). */
   focusDate?: string;
+  /** The month has a "GGR do mês" total (a day without GGR lacks the month's). */
+  usingMonthlyGgr?: boolean;
 }) {
   if (days.length === 0) {
     return (
@@ -65,9 +72,9 @@ export function DayList({
         )}
       >
         <span>Dia</span>
-        <span className="text-right">Net</span>
-        <span className="text-right">{FINANCE_TERMS.sends.label}</span>
-        <span className="text-right">{FINANCE_TERMS.cashResult.label}</span>
+        <span className="truncate text-right">{FINANCE_TERMS.net.label}</span>
+        <span className="truncate text-right">{FINANCE_TERMS.sends.label}</span>
+        <span className="truncate text-right">{FINANCE_TERMS.cashResult.label}</span>
       </div>
       <ul className="divide-y divide-border/40">
         {days.map((day) => {
@@ -87,12 +94,12 @@ export function DayList({
               >
                 <span className="col-span-3 flex min-w-0 items-center gap-2 sm:col-span-1">
                   <span className="font-medium tabular-nums">{dayLabel(day.date)}</span>
-                  <DayStatusChip status={dayStatus(day)} />
+                  <DayStatusChip status={dayStatus(day, usingMonthlyGgr)} />
                 </span>
-                <DayFigure label="Net" value={summary.net} />
+                <DayFigure label={FINANCE_TERMS.net.label} value={summary.net} />
                 <DayFigure label={FINANCE_TERMS.sends.label} value={sendCost} />
                 <DayFigure
-                  label="Lucro"
+                  label={FINANCE_TERMS.cashResult.label}
                   value={summary.cashResult}
                   strong
                   negative={summary.cashResult < 0}
@@ -120,7 +127,7 @@ function DayFigure({
 }) {
   return (
     <span className="min-w-0 sm:text-right">
-      <span className="block text-[11px] text-muted-foreground sm:hidden">{label}</span>
+      <span className="block truncate text-[11px] text-muted-foreground sm:hidden">{label}</span>
       <span
         className={cn(
           "block truncate tabular-nums",

@@ -85,5 +85,11 @@ describe("DayModalContent", () => {
     expect(html).not.toContain("Salvar");
     expect(html).not.toContain("Usar valor da Meta");
     expect(html).toContain("Gasto da Meta");
+    expect(html).not.toContain("Editar em Outros custos");
+  });
+
+  it("links the day's costs to Outros custos when editable", () => {
+    const html = renderToStaticMarkup(<DayModalContent {...props({ onEditCosts: () => {} })} />);
+    expect(html).toContain("Editar em Outros custos");
   });
 });

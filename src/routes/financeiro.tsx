@@ -92,7 +92,7 @@ function FinanceiroPage() {
         </TabsContent>
 
         <TabsContent value="outros-custos" className="mt-4">
-          <FinanceOtherCosts tenantId={active.id} />
+          <FinanceOtherCosts tenantId={active.id} initialMonth={search.month} />
         </TabsContent>
 
         <TabsContent value="configuracoes" className="mt-4">
