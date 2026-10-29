@@ -31,7 +31,7 @@ prioriza os ajustes em quatro camadas:
 - **Limite de contatos (2/24h e 14/7d) gravado nas 6 casas que não tinham**: betgreen,
   bravabet365, laelebet, betleads-original, crm-expert-queiroz e QA Jornadas P0. As 12 casas
   agora têm limite.
-- **Migração `20261114100000_journey_contact_limits_default.sql` aplicada em produção.**
+- **Migração `20261114100200_journey_contact_limits_default.sql` aplicada em produção.**
   O trigger `tenants_journey_contact_limits` cria o limite padrão em toda casa nova.
   Foi testada com uma casa fictícia dentro de uma transação desfeita. Falta commitar.
 - **P0.2, parte de configuração (aplicada em produção):**
