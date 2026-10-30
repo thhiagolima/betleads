@@ -36,6 +36,8 @@ export type SendEmailInput = {
   idempotencyKey?: string;
   tenantId?: string | null;
   linkTracking?: Omit<LinkTrackingContext, "channel">;
+  /** Área do Expert: owner of the campaign; the reservation checks his monthly cap. */
+  expertId?: string | null;
 };
 
 export type SendEmailResult = Awaited<ReturnType<typeof callInfobipEmail>> & {
@@ -218,6 +220,7 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
       deliveryKey: idempotencyKey,
       units: 1,
       referenceType: EMAIL_RESERVATION_REFERENCE_TYPE,
+      ...(input.expertId ? { expertId: input.expertId } : {}),
     });
   } catch (error) {
     await markTrackedDispatchesFailed(trackedDispatchIds);
@@ -225,6 +228,17 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
   }
   if (!reservation.ok) {
     await markTrackedDispatchesFailed(trackedDispatchIds);
+    if (reservation.refusal) {
+      // Área do Expert: the expert's cap (or deactivation), not the house.
+      return {
+        ok: false,
+        status: 0,
+        body: { error: reservation.reason },
+        idempotencyKey,
+        temporary: false,
+        errorKind: reservation.refusal,
+      };
+    }
     return {
       ok: false,
       status: 0,

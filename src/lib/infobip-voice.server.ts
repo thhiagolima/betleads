@@ -71,6 +71,8 @@ export type InfobipVoiceOptions = {
    * defaults to `VOICE_MAX_CALL_SECONDS` (120).
    */
   maxSeconds?: number | null;
+  /** Área do Expert: owner of the call; the reservation checks his monthly cap. */
+  expertId?: string | null;
 };
 
 export type InfobipVoiceContent =
@@ -200,7 +202,19 @@ export async function callInfobipVoice(
     deliveryKey: idempotencyKey,
     units,
     referenceType: "voice_call",
+    ...(options.expertId ? { expertId: options.expertId } : {}),
   });
+  if (!reservation.ok && reservation.refusal) {
+    // Área do Expert: the expert's cap (or deactivation); never dialed.
+    return {
+      ok: false,
+      status: 0,
+      body: { error: reservation.reason },
+      idempotencyKey,
+      providerCallId: null,
+      errorKind: reservation.refusal,
+    };
+  }
   if (!reservation.ok) {
     return {
       ok: false,
