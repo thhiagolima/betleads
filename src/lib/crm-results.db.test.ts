@@ -37,6 +37,10 @@ const CAMPAIGN_ID_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016170000_sms_log_campaign_id.sql"),
   "utf8",
 );
+const FINISHED_WITHOUT_MESSAGE_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261120100000_journey_metrics_finished_without_message.sql"),
+  "utf8",
+);
 const DORMANT_FIRST_DEPOSIT_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261109100000_crm_influenced_dormant_first_deposit.sql"),
   "utf8",
@@ -77,7 +81,7 @@ create table public.sms_send_logs (
   trigger_name text, idempotency_key text, created_at timestamptz);
 create table public.journey_step_executions (
   id uuid primary key default gen_random_uuid(), idempotency_key uuid, step_position integer,
-  tenant_id uuid, journey_id uuid, channel text, status text);
+  tenant_id uuid, journey_id uuid, channel text, status text, enrollment_id uuid);
 create table public.sms_campaigns (
   id uuid primary key, tenant_id uuid, name text, created_at timestamptz, status text default 'enviado');
 create table public.link_dispatches (
@@ -181,6 +185,8 @@ beforeAll(async () => {
   await db.exec(REPORT_PRICE_STUB);
   await db.exec(`begin; ${DORMANT_FIRST_DEPOSIT_MIGRATION}; commit;`);
   await db.exec(`begin; ${DORMANT_FIRST_DEPOSIT_MIGRATION}; commit;`);
+  await db.exec(`begin; ${FINISHED_WITHOUT_MESSAGE_MIGRATION}; commit;`);
+  await db.exec(`begin; ${FINISHED_WITHOUT_MESSAGE_MIGRATION}; commit;`);
   // The home dashboard function reads tables this schema does not model.
   const reports = `begin; set local check_function_bodies = off; ${REPORTS_MIGRATION}; commit;`;
   await db.exec(reports);
@@ -470,6 +476,33 @@ describe("click conversion excludes players already active (rule_version 3)", ()
     // A on J1: 100 + 40 (B-01 test) + 25 (next day). B's campaign deposit is not a journey.
     expect(Number(metrics.find((m) => m.journey_id === J1)?.metrics.recovered)).toBe(165);
     expect(Number(metrics.find((m) => m.journey_id === J2)?.metrics.recovered)).toBe(0);
+  });
+
+  it("counts people who left the journey without receiving any message", async () => {
+    const J4 = "00000000-0000-4000-8000-0000000000a4";
+    const [paidAfterSms, paidBeforeSms, onlyWaited, stillInside] = [1, 2, 3, 4].map(
+      (n) => `00000000-0000-4000-8000-0000000000e${n}`,
+    );
+    await db.exec(`
+      insert into journeys values ('${J4}', '${T}');
+      insert into journey_enrollments (id, tenant_id, journey_id, status, exit_reason, current_position) values
+        ('${paidAfterSms}', '${T}', '${J4}', 'exited', 'deposit', 1),
+        ('${paidBeforeSms}', '${T}', '${J4}', 'exited', 'deposit', 1),
+        ('${onlyWaited}', '${T}', '${J4}', 'completed', 'finished', 2),
+        ('${stillInside}', '${T}', '${J4}', 'waiting', null, 0);
+      insert into journey_step_executions (tenant_id, journey_id, enrollment_id, channel, status) values
+        ('${T}', '${J4}', '${paidAfterSms}', 'sms', 'sent'),
+        ('${T}', '${J4}', '${paidAfterSms}', null, 'sent'),
+        ('${T}', '${J4}', '${onlyWaited}', null, 'sent'),
+        ('${T}', '${J4}', '${onlyWaited}', 'sms', 'failed');
+    `);
+    const { rows: metrics } = await db.query<{
+      journey_id: string;
+      metrics: { finishedWithoutMessage: number; sentByChannel: Record<string, number> };
+    }>(`select * from list_journey_metrics($1)`, [T]);
+    const j4 = metrics.find((m) => m.journey_id === J4)?.metrics;
+    expect(j4?.finishedWithoutMessage).toBe(2);
+    expect(j4?.sentByChannel).toEqual({ sms: 1, other: 2 });
   });
 });
 

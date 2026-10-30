@@ -110,6 +110,7 @@ type Journey = {
     exits?: Record<string, number>;
     recovered?: number;
     sentByChannel?: Record<string, number>;
+    finishedWithoutMessage?: number;
   };
 };
 type LegacyJourney = {
@@ -887,6 +888,7 @@ function JourneyRow({
   const inProgress = journeyInProgress(metrics.byStatus);
   const finished = Number(metrics.byStatus?.completed ?? 0) + Number(metrics.byStatus?.exited ?? 0);
   const sent = journeyMessagesSent(metrics.sentByChannel);
+  const finishedSilent = Number(metrics.finishedWithoutMessage ?? 0);
   const active = journey.status === "active";
   return (
     <li className="grid gap-4 px-4 py-4 sm:px-5 xl:grid-cols-[minmax(16rem,1fr)_auto_auto] xl:items-center xl:gap-6">
@@ -933,8 +935,13 @@ function JourneyRow({
         />
         <JourneyMetric
           label="Concluíram"
-          hint="Jogadores que terminaram a jornada ou saíram dela (por exemplo, ao depositar)."
+          hint="Jogadores que terminaram a jornada ou saíram dela (por exemplo, ao depositar). Quem saiu antes da primeira mensagem — pagou antes do envio, limite diário, deixou de se encaixar ou grupo de controle — aparece como sem mensagem."
           value={finished.toLocaleString("pt-BR")}
+          detail={
+            finishedSilent > 0
+              ? `${finishedSilent.toLocaleString("pt-BR")} sem mensagem`
+              : undefined
+          }
         />
         <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
         <JourneyMetric
@@ -1149,11 +1156,13 @@ function JourneyMetric({
   label,
   value,
   hint,
+  detail,
   accent = false,
 }: {
   label: string;
   value: string;
   hint?: string;
+  detail?: string;
   accent?: boolean;
 }) {
   return (
@@ -1180,6 +1189,7 @@ function JourneyMetric({
         ) : null}
       </p>
       <p className={`mt-0.5 font-semibold tabular-nums ${accent ? "text-success" : ""}`}>{value}</p>
+      {detail ? <p className="text-meta text-muted-foreground tabular-nums">{detail}</p> : null}
     </div>
   );
 }

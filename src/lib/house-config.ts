@@ -14,7 +14,7 @@ export type DnsRecord = {
 const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 const IP_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 
-function stripWww(host: string): string {
+export function stripWww(host: string): string {
   return host.startsWith("www.") ? host.slice(4) : host;
 }
 
