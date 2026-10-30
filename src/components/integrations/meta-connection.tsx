@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import {
   connectMetaSystemUserToken,
@@ -246,6 +247,11 @@ function MetaConnectionWizard({
   disconnectPending: boolean;
 }) {
   const isDemo = useIsDemoTenant();
+  // Só o admin da casa (ou o super admin) altera a conexão; o servidor também confere.
+  // Enquanto o papel carrega, nada fica bloqueado.
+  const { active } = useActiveTenant();
+  const readOnly = Boolean(active) && active?.role !== "admin" && active?.role !== "super_admin";
+  const locked = isDemo || readOnly;
   const connections = useMemo(() => summary?.connections ?? [], [summary?.connections]);
   const activeConnectionIds = useMemo(
     () => new Set(connections.map((item) => item.id)),
@@ -322,6 +328,11 @@ function MetaConnectionWizard({
       <Button variant="outline" size="sm" onClick={() => setShowGuide((value) => !value)}>
         {showGuide ? "Esconder preparação" : "Como preparar a conta"}
       </Button>
+      {readOnly && (
+        <p className="mt-3 text-meta text-muted-foreground">
+          Só o administrador da casa altera a conexão.
+        </p>
+      )}
       {legacyConnections.length > 0 && (
         <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
           <p className="font-semibold text-warning">Conexão antiga precisa ser substituída</p>
@@ -386,7 +397,7 @@ function MetaConnectionWizard({
           <DemoDisabledTooltip active={isDemo}>
             <Button
               className="mt-3 gap-2"
-              disabled={isDemo || connectPending || token.trim().length < 40}
+              disabled={locked || connectPending || token.trim().length < 40}
               onClick={async () => {
                 try {
                   await onConnect(token.trim());
@@ -417,7 +428,12 @@ function MetaConnectionWizard({
                 Revise a origem antes de escolher as contas de anúncio.
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setShowTokenForm(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={readOnly}
+              onClick={() => setShowTokenForm(true)}
+            >
               Atualizar chave de acesso
             </Button>
           </div>
@@ -463,7 +479,7 @@ function MetaConnectionWizard({
                       variant="outline"
                       size="sm"
                       className="gap-2"
-                      disabled={isDemo || validatingConnectionId === connection.id}
+                      disabled={locked || validatingConnectionId === connection.id}
                       onClick={() => onValidate(connection.id)}
                     >
                       {validatingConnectionId === connection.id ? (
@@ -479,7 +495,7 @@ function MetaConnectionWizard({
                       variant="ghost"
                       size="sm"
                       className="gap-2 text-danger hover:text-danger/80"
-                      disabled={isDemo}
+                      disabled={locked}
                       onClick={() => setDisconnectId(connection.id)}
                     >
                       <Trash2 className="h-3.5 w-3.5" /> Desconectar
@@ -510,6 +526,7 @@ function MetaConnectionWizard({
                 >
                   <Checkbox
                     checked={selectedIds.includes(account.id)}
+                    disabled={readOnly}
                     onCheckedChange={(checked) =>
                       setSelectedIds((current) =>
                         checked
@@ -560,7 +577,7 @@ function MetaConnectionWizard({
             <div className="mt-4 flex justify-end">
               <DemoDisabledTooltip active={isDemo}>
                 <Button
-                  disabled={isDemo || selectionPending || accounts.length === 0}
+                  disabled={locked || selectionPending || accounts.length === 0}
                   onClick={() => onSaveSelection(selectedIds)}
                 >
                   {selectionPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar

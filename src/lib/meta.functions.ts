@@ -12,10 +12,14 @@ import {
   type MetaAd,
   type MetaInsight,
 } from "@/lib/meta-sync-rows";
+import { isBillingLockedError } from "@/lib/billing/billing-locked-error";
 import { decryptMetaToken, encryptMetaToken, metaTokenHint } from "@/lib/meta-token.server";
 import {
+  TENANT_BLOCKED_MESSAGE,
+  assertTenantCanOperate,
   assertTenantNotDemo,
   listDemoTenantIds,
+  requireTenantAdmin,
   resolveCurrentTenantId,
 } from "@/lib/tenant-access.server";
 
@@ -41,17 +45,24 @@ type MetaAccountForSync = {
   name: string | null;
   currency: string | null;
   timezone_name: string | null;
-  meta_connections:
-    | {
-        access_token: string;
-        encrypted_access_token?: string | null;
-      }
-    | {
-        access_token: string;
-        encrypted_access_token?: string | null;
-      }[]
-    | null;
+  // Só o token cifrado: o `access_token` em texto puro das conexões antigas não é
+  // mais lido (MB0-03). `tenant_id` vem junto para o worker conferir a casa.
+  meta_connections: MetaConnectionToken | MetaConnectionToken[] | null;
 };
+
+type MetaConnectionToken = {
+  tenant_id: string;
+  encrypted_access_token: string | null;
+};
+
+const LEGACY_CONNECTION_MESSAGE =
+  "Conexão antiga: reconecte usando a chave de acesso do Usuário do Sistema.";
+
+/** O token da conexão, só a partir da versão cifrada. Sem ela, pede reconexão. */
+async function connectionToken(connection: { encrypted_access_token?: string | null } | null) {
+  if (!connection?.encrypted_access_token) throw new Error(LEGACY_CONNECTION_MESSAGE);
+  return decryptMetaToken(connection.encrypted_access_token);
+}
 
 type MetaAdAccount = {
   id: string;
@@ -70,7 +81,6 @@ type MetaUser = { id: string; name?: string };
 function metaApiVersion() {
   return resolveMetaApiVersion(process.env.META_API_VERSION);
 }
-
 
 function accountPath(id: string) {
   return id.startsWith("act_") ? id : `act_${id}`;
@@ -208,15 +218,302 @@ async function resolveTenantId(client: unknown) {
   return resolveCurrentTenantId(supabase);
 }
 
+// Corpo das server functions que mexem na conexão, fora do createServerFn para ser
+// testável (o compilador do TanStack Start troca o handler por um stub fora do servidor).
+type TenantRpcClient = Parameters<typeof requireTenantAdmin>[0];
+type MetaActionContext = { supabase: TenantRpcClient; userId: string };
+
+const META_ADMIN_MESSAGE = "Apenas administradores da casa podem alterar a conexão com a Meta.";
+
+/**
+ * A casa ativa, só para o admin dela ou o super admin (D3). Conectar, escolher
+ * contas, testar, desconectar e "Atualizar agora" passam por aqui; o resumo e o
+ * histórico de sincronização continuam abertos a qualquer membro.
+ */
+async function requireMetaAdmin(client: TenantRpcClient, message = META_ADMIN_MESSAGE) {
+  const tenantId = await resolveTenantId(client);
+  return requireTenantAdmin(client, tenantId, message);
+}
+
 export const connectMetaSystemUserToken = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => systemTokenSchema.parse(input))
-  .handler(async ({ data, context }) => {
-    const tenantId = await resolveTenantId(context.supabase);
-    await assertTenantNotDemo(tenantId);
-    const token = data.accessToken;
-    const [metaUser, metaApp, permissions, adAccounts] = await Promise.all([
-      fetchMetaJson<MetaUser>("/me", { access_token: token, fields: "id,name" }),
+  .handler(async ({ data, context }) => connectMetaSystemUserTokenFor(context, data));
+
+export async function connectMetaSystemUserTokenFor(
+  context: MetaActionContext,
+  data: z.infer<typeof systemTokenSchema>,
+) {
+  const tenantId = await requireMetaAdmin(context.supabase);
+  await assertTenantNotDemo(tenantId);
+  const token = data.accessToken;
+  const [metaUser, metaApp, permissions, adAccounts] = await Promise.all([
+    fetchMetaJson<MetaUser>("/me", { access_token: token, fields: "id,name" }),
+    fetchMetaJson<MetaApp>("/app", { access_token: token, fields: "id,name" }),
+    fetchMetaJson<{ data?: MetaPermission[] }>("/me/permissions", { access_token: token }),
+    loadAllAdAccounts(token),
+  ]);
+  const granted = (permissions.data ?? [])
+    .filter((item) => item.status === "granted")
+    .map((item) => item.permission);
+  if (!granted.includes("ads_read")) throw new Error("O token não possui a permissão ads_read.");
+  if (adAccounts.length === 0)
+    throw new Error("O usuário do sistema não possui contas de anúncios atribuídas.");
+
+  const encrypted = await encryptMetaToken(token);
+  const checkedAt = new Date().toISOString();
+  const groups = new Map<string, MetaAdAccount[]>();
+  for (const account of adAccounts) {
+    const businessKey = account.business?.id ?? "__no_business__";
+    groups.set(businessKey, [...(groups.get(businessKey) ?? []), account]);
+  }
+
+  const connectionIds: string[] = [];
+  for (const [businessKey, businessAccounts] of groups) {
+    const business = businessAccounts.find((account) => account.business?.id)?.business ?? null;
+    let existingQuery = (supabaseAdmin as any)
+      .from("meta_connections")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("auth_type", "system_user_token")
+      .eq("app_id", metaApp.id)
+      .eq("meta_user_id", metaUser.id)
+      .neq("status", "disabled");
+    existingQuery =
+      businessKey === "__no_business__"
+        ? existingQuery.is("business_id", null)
+        : existingQuery.eq("business_id", businessKey);
+    const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+    if (existingError) throw new Error(existingError.message);
+
+    const connectionValues = {
+      tenant_id: tenantId,
+      connected_by_user_id: context.userId,
+      meta_user_id: metaUser.id,
+      meta_user_name: metaUser.name ?? "Usuário do sistema Meta",
+      access_token: null,
+      encrypted_access_token: encrypted,
+      token_hint: metaTokenHint(token),
+      auth_type: "system_user_token",
+      scopes: granted,
+      app_id: metaApp.id,
+      app_name: metaApp.name ?? null,
+      business_id: business?.id ?? null,
+      connection_label: business?.name ?? metaApp.name ?? "Conta Meta",
+      token_validated_at: checkedAt,
+      permissions_checked_at: checkedAt,
+      status: "connected",
+      disabled_at: null,
+      disabled_by_user_id: null,
+      last_error: null,
+      connected_at: checkedAt,
+    };
+
+    const connectionResult = existing?.id
+      ? await (supabaseAdmin as any)
+          .from("meta_connections")
+          .update(connectionValues)
+          .eq("id", existing.id)
+          .select("id")
+          .single()
+      : await (supabaseAdmin as any)
+          .from("meta_connections")
+          .insert(connectionValues)
+          .select("id")
+          .single();
+    if (connectionResult.error) throw new Error(connectionResult.error.message);
+    const connectionId = connectionResult.data.id as string;
+    connectionIds.push(connectionId);
+
+    const accountIds = businessAccounts.map((account) => account.id);
+    const { data: knownAccounts, error: knownAccountsError } = await (supabaseAdmin as any)
+      .from("meta_ad_accounts")
+      .select("id,meta_ad_account_id,selected")
+      .eq("tenant_id", tenantId)
+      .eq("connection_id", connectionId);
+    if (knownAccountsError) throw new Error(knownAccountsError.message);
+    const inaccessibleAccountIds = (knownAccounts ?? [])
+      .filter(
+        (account: { meta_ad_account_id: string }) =>
+          !accountIds.includes(account.meta_ad_account_id),
+      )
+      .map((account: { id: string }) => account.id);
+    if (inaccessibleAccountIds.length > 0) {
+      const { error: inaccessibleError } = await (supabaseAdmin as any)
+        .from("meta_ad_accounts")
+        .update({ selected: false })
+        .eq("tenant_id", tenantId)
+        .in("id", inaccessibleAccountIds);
+      if (inaccessibleError) throw new Error(inaccessibleError.message);
+    }
+    const selectionByAccount = new Map(
+      (knownAccounts ?? []).map((account: { meta_ad_account_id: string; selected: boolean }) => [
+        account.meta_ad_account_id,
+        account.selected,
+      ]),
+    );
+
+    const { error: accountsError } = await (supabaseAdmin as any).from("meta_ad_accounts").upsert(
+      businessAccounts.map((account) => ({
+        tenant_id: tenantId,
+        connection_id: connectionId,
+        meta_ad_account_id: account.id,
+        account_id: account.account_id ?? null,
+        name: account.name ?? account.id,
+        business_id: account.business?.id ?? null,
+        business_name: account.business?.name ?? null,
+        currency: account.currency ?? null,
+        timezone_name: account.timezone_name ?? null,
+        account_status: account.account_status ?? null,
+        selected: selectionByAccount.get(account.id) ?? false,
+        raw: account,
+      })),
+      { onConflict: "tenant_id,meta_ad_account_id" },
+    );
+    if (accountsError) throw new Error(accountsError.message);
+
+    const { error: auditError } = await (supabaseAdmin as any)
+      .from("meta_connection_audit")
+      .insert([
+        {
+          tenant_id: tenantId,
+          connection_id: connectionId,
+          actor_user_id: context.userId,
+          action: existing?.id ? "token_replaced" : "connected",
+          metadata: { app_id: metaApp.id, business_id: business?.id ?? null },
+        },
+        {
+          tenant_id: tenantId,
+          connection_id: connectionId,
+          actor_user_id: context.userId,
+          action: "accounts_discovered",
+          metadata: { count: businessAccounts.length },
+        },
+      ]);
+    if (auditError) throw new Error(auditError.message);
+
+    await (supabaseAdmin as any).from("marketing_integrations").upsert(
+      {
+        tenant_id: tenantId,
+        provider: "meta",
+        status: "configured",
+        account_name: business?.name ?? metaApp.name ?? "Meta Ads",
+        external_account_id: business?.id ?? metaApp.id,
+        settings: {
+          app_id: metaApp.id,
+          connection_id: connectionId,
+          discovered_accounts: businessAccounts.length,
+          selected_accounts: 0,
+        },
+        connected_at: checkedAt,
+      },
+      { onConflict: "tenant_id,provider,external_account_id" },
+    );
+  }
+
+  return {
+    connectionIds,
+    userName: metaUser.name ?? null,
+    app: { id: metaApp.id, name: metaApp.name ?? null },
+    permissions: granted,
+    accounts: adAccounts.map((account) => ({
+      id: account.id,
+      name: account.name ?? account.id,
+      businessName: account.business?.name ?? null,
+      currency: account.currency ?? null,
+      selected: false,
+    })),
+  };
+}
+
+export const updateMetaAccountSelection = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => metaAccountSelectionSchema.parse(input))
+  .handler(async ({ data, context }) => updateMetaAccountSelectionFor(context, data));
+
+export async function updateMetaAccountSelectionFor(
+  context: MetaActionContext,
+  data: z.infer<typeof metaAccountSelectionSchema>,
+) {
+  const tenantId = await requireMetaAdmin(context.supabase);
+  await assertTenantNotDemo(tenantId);
+  const { data: accounts, error: accountsError } = await (supabaseAdmin as any)
+    .from("meta_ad_accounts")
+    .select("id,connection_id,meta_connections!inner(status,tenant_id)")
+    .eq("tenant_id", tenantId)
+    .eq("meta_connections.status", "connected")
+    .eq("meta_connections.tenant_id", tenantId);
+  if (accountsError) throw new Error(accountsError.message);
+
+  const knownIds = new Set((accounts ?? []).map((account: { id: string }) => account.id));
+  if (data.accountIds.some((id) => !knownIds.has(id))) {
+    throw new Error("Uma das contas selecionadas não pertence à sua operação.");
+  }
+
+  const { error: clearError } = await (supabaseAdmin as any)
+    .from("meta_ad_accounts")
+    .update({ selected: false })
+    .eq("tenant_id", tenantId);
+  if (clearError) throw new Error(clearError.message);
+
+  if (data.accountIds.length > 0) {
+    const { error: selectError } = await (supabaseAdmin as any)
+      .from("meta_ad_accounts")
+      .update({ selected: true, sync_status: "queued", last_error: null })
+      .eq("tenant_id", tenantId)
+      .in("id", data.accountIds);
+    if (selectError) throw new Error(selectError.message);
+  }
+
+  const connectionIds = [
+    ...new Set((accounts ?? []).map((account: { connection_id: string }) => account.connection_id)),
+  ];
+  if (connectionIds.length > 0) {
+    const { error: auditError } = await (supabaseAdmin as any).from("meta_connection_audit").insert(
+      connectionIds.map((connectionId) => ({
+        tenant_id: tenantId,
+        connection_id: connectionId,
+        actor_user_id: context.userId,
+        action: "accounts_selected",
+        metadata: {
+          selected_count: (accounts ?? []).filter(
+            (account: { id: string; connection_id: string }) =>
+              account.connection_id === connectionId && data.accountIds.includes(account.id),
+          ).length,
+        },
+      })),
+    );
+    if (auditError) throw new Error(auditError.message);
+  }
+
+  return { selected: data.accountIds.length };
+}
+
+export const validateMetaConnection = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => metaConnectionSchema.parse(input))
+  .handler(async ({ data, context }) => validateMetaConnectionFor(context, data));
+
+export async function validateMetaConnectionFor(
+  context: MetaActionContext,
+  data: z.infer<typeof metaConnectionSchema>,
+) {
+  const tenantId = await requireMetaAdmin(context.supabase);
+  await assertTenantNotDemo(tenantId);
+  const { data: connection, error: connectionError } = await (supabaseAdmin as any)
+    .from("meta_connections")
+    .select("id,encrypted_access_token,app_id,business_id,status")
+    .eq("tenant_id", tenantId)
+    .eq("id", data.connectionId)
+    .maybeSingle();
+  if (connectionError) throw new Error(connectionError.message);
+  if (!connection || connection.status === "disabled")
+    throw new Error("Conexão Meta não encontrada.");
+
+  const token = await connectionToken(connection);
+
+  try {
+    const [metaApp, permissions, adAccounts] = await Promise.all([
       fetchMetaJson<MetaApp>("/app", { access_token: token, fields: "id,name" }),
       fetchMetaJson<{ data?: MetaPermission[] }>("/me/permissions", { access_token: token }),
       loadAllAdAccounts(token),
@@ -224,358 +521,101 @@ export const connectMetaSystemUserToken = createServerFn({ method: "POST" })
     const granted = (permissions.data ?? [])
       .filter((item) => item.status === "granted")
       .map((item) => item.permission);
-    if (!granted.includes("ads_read")) throw new Error("O token não possui a permissão ads_read.");
-    if (adAccounts.length === 0)
-      throw new Error("O usuário do sistema não possui contas de anúncios atribuídas.");
-
-    const encrypted = await encryptMetaToken(token);
-    const checkedAt = new Date().toISOString();
-    const groups = new Map<string, MetaAdAccount[]>();
-    for (const account of adAccounts) {
-      const businessKey = account.business?.id ?? "__no_business__";
-      groups.set(businessKey, [...(groups.get(businessKey) ?? []), account]);
+    if (!granted.includes("ads_read")) throw new Error("A permissão ads_read não está ativa.");
+    if (connection.app_id && connection.app_id !== metaApp.id) {
+      throw new Error("O token foi emitido por outro app Meta.");
+    }
+    const businessAccounts = connection.business_id
+      ? adAccounts.filter((account) => account.business?.id === connection.business_id)
+      : adAccounts;
+    if (businessAccounts.length === 0) {
+      throw new Error("O token não possui mais acesso às contas deste Business Manager.");
     }
 
-    const connectionIds: string[] = [];
-    for (const [businessKey, businessAccounts] of groups) {
-      const business = businessAccounts.find((account) => account.business?.id)?.business ?? null;
-      let existingQuery = (supabaseAdmin as any)
-        .from("meta_connections")
-        .select("id")
-        .eq("tenant_id", tenantId)
-        .eq("auth_type", "system_user_token")
-        .eq("app_id", metaApp.id)
-        .eq("meta_user_id", metaUser.id)
-        .neq("status", "disabled");
-      existingQuery =
-        businessKey === "__no_business__"
-          ? existingQuery.is("business_id", null)
-          : existingQuery.eq("business_id", businessKey);
-      const { data: existing, error: existingError } = await existingQuery.maybeSingle();
-      if (existingError) throw new Error(existingError.message);
-
-      const connectionValues = {
-        tenant_id: tenantId,
-        connected_by_user_id: context.userId,
-        meta_user_id: metaUser.id,
-        meta_user_name: metaUser.name ?? "Usuário do sistema Meta",
-        access_token: null,
-        encrypted_access_token: encrypted,
-        token_hint: metaTokenHint(token),
-        auth_type: "system_user_token",
+    const checkedAt = new Date().toISOString();
+    await (supabaseAdmin as any)
+      .from("meta_connections")
+      .update({
         scopes: granted,
-        app_id: metaApp.id,
-        app_name: metaApp.name ?? null,
-        business_id: business?.id ?? null,
-        connection_label: business?.name ?? metaApp.name ?? "Conta Meta",
         token_validated_at: checkedAt,
         permissions_checked_at: checkedAt,
         status: "connected",
-        disabled_at: null,
-        disabled_by_user_id: null,
-        last_error: null,
-        connected_at: checkedAt,
-      };
-
-      const connectionResult = existing?.id
-        ? await (supabaseAdmin as any)
-            .from("meta_connections")
-            .update(connectionValues)
-            .eq("id", existing.id)
-            .select("id")
-            .single()
-        : await (supabaseAdmin as any)
-            .from("meta_connections")
-            .insert(connectionValues)
-            .select("id")
-            .single();
-      if (connectionResult.error) throw new Error(connectionResult.error.message);
-      const connectionId = connectionResult.data.id as string;
-      connectionIds.push(connectionId);
-
-      const accountIds = businessAccounts.map((account) => account.id);
-      const { data: knownAccounts, error: knownAccountsError } = await (supabaseAdmin as any)
-        .from("meta_ad_accounts")
-        .select("id,meta_ad_account_id,selected")
-        .eq("tenant_id", tenantId)
-        .eq("connection_id", connectionId);
-      if (knownAccountsError) throw new Error(knownAccountsError.message);
-      const inaccessibleAccountIds = (knownAccounts ?? [])
-        .filter(
-          (account: { meta_ad_account_id: string }) =>
-            !accountIds.includes(account.meta_ad_account_id),
-        )
-        .map((account: { id: string }) => account.id);
-      if (inaccessibleAccountIds.length > 0) {
-        const { error: inaccessibleError } = await (supabaseAdmin as any)
-          .from("meta_ad_accounts")
-          .update({ selected: false })
-          .eq("tenant_id", tenantId)
-          .in("id", inaccessibleAccountIds);
-        if (inaccessibleError) throw new Error(inaccessibleError.message);
-      }
-      const selectionByAccount = new Map(
-        (knownAccounts ?? []).map((account: { meta_ad_account_id: string; selected: boolean }) => [
-          account.meta_ad_account_id,
-          account.selected,
-        ]),
-      );
-
-      const { error: accountsError } = await (supabaseAdmin as any).from("meta_ad_accounts").upsert(
-        businessAccounts.map((account) => ({
-          tenant_id: tenantId,
-          connection_id: connectionId,
-          meta_ad_account_id: account.id,
-          account_id: account.account_id ?? null,
-          name: account.name ?? account.id,
-          business_id: account.business?.id ?? null,
-          business_name: account.business?.name ?? null,
-          currency: account.currency ?? null,
-          timezone_name: account.timezone_name ?? null,
-          account_status: account.account_status ?? null,
-          selected: selectionByAccount.get(account.id) ?? false,
-          raw: account,
-        })),
-        { onConflict: "tenant_id,meta_ad_account_id" },
-      );
-      if (accountsError) throw new Error(accountsError.message);
-
-      const { error: auditError } = await (supabaseAdmin as any)
-        .from("meta_connection_audit")
-        .insert([
-          {
-            tenant_id: tenantId,
-            connection_id: connectionId,
-            actor_user_id: context.userId,
-            action: existing?.id ? "token_replaced" : "connected",
-            metadata: { app_id: metaApp.id, business_id: business?.id ?? null },
-          },
-          {
-            tenant_id: tenantId,
-            connection_id: connectionId,
-            actor_user_id: context.userId,
-            action: "accounts_discovered",
-            metadata: { count: businessAccounts.length },
-          },
-        ]);
-      if (auditError) throw new Error(auditError.message);
-
-      await (supabaseAdmin as any).from("marketing_integrations").upsert(
-        {
-          tenant_id: tenantId,
-          provider: "meta",
-          status: "configured",
-          account_name: business?.name ?? metaApp.name ?? "Meta Ads",
-          external_account_id: business?.id ?? metaApp.id,
-          settings: {
-            app_id: metaApp.id,
-            connection_id: connectionId,
-            discovered_accounts: businessAccounts.length,
-            selected_accounts: 0,
-          },
-          connected_at: checkedAt,
-        },
-        { onConflict: "tenant_id,provider,external_account_id" },
-      );
-    }
-
-    return {
-      connectionIds,
-      userName: metaUser.name ?? null,
-      app: { id: metaApp.id, name: metaApp.name ?? null },
-      permissions: granted,
-      accounts: adAccounts.map((account) => ({
-        id: account.id,
-        name: account.name ?? account.id,
-        businessName: account.business?.name ?? null,
-        currency: account.currency ?? null,
-        selected: false,
-      })),
-    };
-  });
-
-export const updateMetaAccountSelection = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((input) => metaAccountSelectionSchema.parse(input))
-  .handler(async ({ data, context }) => {
-    const tenantId = await resolveTenantId(context.supabase);
-    await assertTenantNotDemo(tenantId);
-    const { data: accounts, error: accountsError } = await (supabaseAdmin as any)
-      .from("meta_ad_accounts")
-      .select("id,connection_id,meta_connections!inner(status)")
-      .eq("tenant_id", tenantId)
-      .eq("meta_connections.status", "connected");
-    if (accountsError) throw new Error(accountsError.message);
-
-    const knownIds = new Set((accounts ?? []).map((account: { id: string }) => account.id));
-    if (data.accountIds.some((id) => !knownIds.has(id))) {
-      throw new Error("Uma das contas selecionadas não pertence à sua operação.");
-    }
-
-    const { error: clearError } = await (supabaseAdmin as any)
-      .from("meta_ad_accounts")
-      .update({ selected: false })
-      .eq("tenant_id", tenantId);
-    if (clearError) throw new Error(clearError.message);
-
-    if (data.accountIds.length > 0) {
-      const { error: selectError } = await (supabaseAdmin as any)
-        .from("meta_ad_accounts")
-        .update({ selected: true, sync_status: "queued", last_error: null })
-        .eq("tenant_id", tenantId)
-        .in("id", data.accountIds);
-      if (selectError) throw new Error(selectError.message);
-    }
-
-    const connectionIds = [
-      ...new Set(
-        (accounts ?? []).map((account: { connection_id: string }) => account.connection_id),
-      ),
-    ];
-    if (connectionIds.length > 0) {
-      const { error: auditError } = await (supabaseAdmin as any)
-        .from("meta_connection_audit")
-        .insert(
-          connectionIds.map((connectionId) => ({
-            tenant_id: tenantId,
-            connection_id: connectionId,
-            actor_user_id: context.userId,
-            action: "accounts_selected",
-            metadata: {
-              selected_count: (accounts ?? []).filter(
-                (account: { id: string; connection_id: string }) =>
-                  account.connection_id === connectionId && data.accountIds.includes(account.id),
-              ).length,
-            },
-          })),
-        );
-      if (auditError) throw new Error(auditError.message);
-    }
-
-    return { selected: data.accountIds.length };
-  });
-
-export const validateMetaConnection = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((input) => metaConnectionSchema.parse(input))
-  .handler(async ({ data, context }) => {
-    const tenantId = await resolveTenantId(context.supabase);
-    await assertTenantNotDemo(tenantId);
-    const { data: connection, error: connectionError } = await (supabaseAdmin as any)
-      .from("meta_connections")
-      .select("id,encrypted_access_token,access_token,app_id,business_id,status")
-      .eq("tenant_id", tenantId)
-      .eq("id", data.connectionId)
-      .maybeSingle();
-    if (connectionError) throw new Error(connectionError.message);
-    if (!connection || connection.status === "disabled")
-      throw new Error("Conexão Meta não encontrada.");
-
-    const token = connection.encrypted_access_token
-      ? await decryptMetaToken(connection.encrypted_access_token)
-      : connection.access_token;
-    if (!token) throw new Error("A conexão não possui um token válido.");
-
-    try {
-      const [metaApp, permissions, adAccounts] = await Promise.all([
-        fetchMetaJson<MetaApp>("/app", { access_token: token, fields: "id,name" }),
-        fetchMetaJson<{ data?: MetaPermission[] }>("/me/permissions", { access_token: token }),
-        loadAllAdAccounts(token),
-      ]);
-      const granted = (permissions.data ?? [])
-        .filter((item) => item.status === "granted")
-        .map((item) => item.permission);
-      if (!granted.includes("ads_read")) throw new Error("A permissão ads_read não está ativa.");
-      if (connection.app_id && connection.app_id !== metaApp.id) {
-        throw new Error("O token foi emitido por outro app Meta.");
-      }
-      const businessAccounts = connection.business_id
-        ? adAccounts.filter((account) => account.business?.id === connection.business_id)
-        : adAccounts;
-      if (businessAccounts.length === 0) {
-        throw new Error("O token não possui mais acesso às contas deste Business Manager.");
-      }
-
-      const checkedAt = new Date().toISOString();
-      await (supabaseAdmin as any)
-        .from("meta_connections")
-        .update({
-          scopes: granted,
-          token_validated_at: checkedAt,
-          permissions_checked_at: checkedAt,
-          status: "connected",
-          last_error: null,
-        })
-        .eq("id", connection.id);
-      await (supabaseAdmin as any).from("meta_connection_audit").insert({
-        tenant_id: tenantId,
-        connection_id: connection.id,
-        actor_user_id: context.userId,
-        action: "validated",
-        metadata: { accessible_accounts: businessAccounts.length },
-      });
-      return { ok: true, accounts: businessAccounts.length, permissions: granted };
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Não foi possível validar a conexão.";
-      await (supabaseAdmin as any)
-        .from("meta_connections")
-        .update({
-          status: "error",
-          last_error: message,
-          permissions_checked_at: new Date().toISOString(),
-        })
-        .eq("id", connection.id);
-      throw new Error(message);
-    }
-  });
-
-export const disconnectMetaConnection = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((input) => metaConnectionSchema.parse(input))
-  .handler(async ({ data, context }) => {
-    const tenantId = await resolveTenantId(context.supabase);
-    await assertTenantNotDemo(tenantId);
-    const { data: connection, error: connectionError } = await (supabaseAdmin as any)
-      .from("meta_connections")
-      .select("id")
-      .eq("tenant_id", tenantId)
-      .eq("id", data.connectionId)
-      .neq("status", "disabled")
-      .maybeSingle();
-    if (connectionError) throw new Error(connectionError.message);
-    if (!connection) throw new Error("Conexão Meta não encontrada.");
-
-    const now = new Date().toISOString();
-    const { error: accountsError } = await (supabaseAdmin as any)
-      .from("meta_ad_accounts")
-      .update({ selected: false })
-      .eq("tenant_id", tenantId)
-      .eq("connection_id", connection.id);
-    if (accountsError) throw new Error(accountsError.message);
-
-    const { error: updateError } = await (supabaseAdmin as any)
-      .from("meta_connections")
-      .update({
-        status: "disabled",
-        encrypted_access_token: null,
-        access_token: null,
-        disabled_at: now,
-        disabled_by_user_id: context.userId,
         last_error: null,
       })
       .eq("id", connection.id);
-    if (updateError) throw new Error(updateError.message);
-
     await (supabaseAdmin as any).from("meta_connection_audit").insert({
       tenant_id: tenantId,
       connection_id: connection.id,
       actor_user_id: context.userId,
-      action: "disabled",
-      metadata: {},
+      action: "validated",
+      metadata: { accessible_accounts: businessAccounts.length },
     });
-    return { ok: true };
+    return { ok: true, accounts: businessAccounts.length, permissions: granted };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Não foi possível validar a conexão.";
+    await (supabaseAdmin as any)
+      .from("meta_connections")
+      .update({
+        status: "error",
+        last_error: message,
+        permissions_checked_at: new Date().toISOString(),
+      })
+      .eq("id", connection.id);
+    throw new Error(message);
+  }
+}
+
+export const disconnectMetaConnection = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => metaConnectionSchema.parse(input))
+  .handler(async ({ data, context }) => disconnectMetaConnectionFor(context, data));
+
+export async function disconnectMetaConnectionFor(
+  context: MetaActionContext,
+  data: z.infer<typeof metaConnectionSchema>,
+) {
+  const tenantId = await requireMetaAdmin(context.supabase);
+  await assertTenantNotDemo(tenantId);
+  const { data: connection, error: connectionError } = await (supabaseAdmin as any)
+    .from("meta_connections")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("id", data.connectionId)
+    .neq("status", "disabled")
+    .maybeSingle();
+  if (connectionError) throw new Error(connectionError.message);
+  if (!connection) throw new Error("Conexão Meta não encontrada.");
+
+  const now = new Date().toISOString();
+  const { error: accountsError } = await (supabaseAdmin as any)
+    .from("meta_ad_accounts")
+    .update({ selected: false })
+    .eq("tenant_id", tenantId)
+    .eq("connection_id", connection.id);
+  if (accountsError) throw new Error(accountsError.message);
+
+  const { error: updateError } = await (supabaseAdmin as any)
+    .from("meta_connections")
+    .update({
+      status: "disabled",
+      encrypted_access_token: null,
+      access_token: null,
+      disabled_at: now,
+      disabled_by_user_id: context.userId,
+      last_error: null,
+    })
+    .eq("id", connection.id);
+  if (updateError) throw new Error(updateError.message);
+
+  await (supabaseAdmin as any).from("meta_connection_audit").insert({
+    tenant_id: tenantId,
+    connection_id: connection.id,
+    actor_user_id: context.userId,
+    action: "disabled",
+    metadata: {},
   });
+  return { ok: true };
+}
 
 export const getMetaConnectionSummary = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -613,10 +653,7 @@ async function syncMetaAccount(tenantId: string, account: MetaAccountForSync, da
   const connection = Array.isArray(account.meta_connections)
     ? account.meta_connections[0]
     : account.meta_connections;
-  const token = connection?.encrypted_access_token
-    ? await decryptMetaToken(connection.encrypted_access_token)
-    : connection?.access_token;
-  if (!token) throw new Error("A conexão não possui um token válido.");
+  const token = await connectionToken(connection ?? null);
 
   let imported = 0;
   const now = new Date().toISOString();
@@ -647,12 +684,10 @@ async function syncMetaAccount(tenantId: string, account: MetaAccountForSync, da
   if (missingCatalog.length > 0) {
     // Anúncio pausado ou encerrado que teve entrega: entra no catálogo sem apagar
     // a miniatura de quem já está lá.
-    const { error } = await (supabaseAdmin as any)
-      .from("meta_ads")
-      .upsert(missingCatalog, {
-        onConflict: "tenant_id,ad_account_id,ad_id",
-        ignoreDuplicates: true,
-      });
+    const { error } = await (supabaseAdmin as any).from("meta_ads").upsert(missingCatalog, {
+      onConflict: "tenant_id,ad_account_id,ad_id",
+      ignoreDuplicates: true,
+    });
     if (error) throw new Error(error.message);
   }
 
@@ -712,10 +747,11 @@ async function createMetaSyncRun({
 
   const { data: accounts, error: accountsError } = await (supabaseAdmin as any)
     .from("meta_ad_accounts")
-    .select("id,meta_connections!inner(status)")
+    .select("id,meta_connections!inner(status,tenant_id)")
     .eq("tenant_id", tenantId)
     .eq("selected", true)
-    .eq("meta_connections.status", "connected");
+    .eq("meta_connections.status", "connected")
+    .eq("meta_connections.tenant_id", tenantId);
   if (accountsError) throw new Error(accountsError.message);
   if (!accounts?.length) throw new Error("Nenhuma conta Meta selecionada para sincronizar.");
 
@@ -769,15 +805,29 @@ async function createMetaSyncRun({
 export const enqueueMetaSync = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => syncSchema.parse(input ?? {}))
-  .handler(async ({ data, context }) => {
-    const tenantId = await resolveTenantId(context.supabase);
-    return createMetaSyncRun({
-      tenantId,
-      days: data.days,
-      triggerType: "manual",
-      requestedByUserId: context.userId,
-    });
+  .handler(async ({ data, context }) => enqueueMetaSyncFor(context, data));
+
+export async function enqueueMetaSyncFor(
+  context: MetaActionContext,
+  data: z.infer<typeof syncSchema>,
+) {
+  const tenantId = await requireMetaAdmin(
+    context.supabase,
+    "Apenas administradores da casa podem sincronizar a Meta.",
+  );
+  await assertTenantNotDemo(tenantId);
+  // Casa suspensa ou bloqueada por cobrança não sincroniza, nem pelo super admin:
+  // `claim_meta_sync_jobs` nunca pega os jobs dela, e o run ficaria `queued` para
+  // sempre, travando (índice `meta_sync_runs_one_active_tenant`) as próximas
+  // sincronizações da casa. Sem o ator, o guard recusa tudo o que o claim recusa.
+  await assertTenantCanOperate(tenantId);
+  return createMetaSyncRun({
+    tenantId,
+    days: data.days,
+    triggerType: "manual",
+    requestedByUserId: context.userId,
   });
+}
 
 export const getMetaSyncRuns = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -796,7 +846,9 @@ export const getMetaSyncRuns = createServerFn({ method: "GET" })
   });
 
 function isPermanentMetaError(message: string) {
-  return /token|permiss|oauth|ads_read|outro app|não possui mais acesso/i.test(message);
+  return /token|permiss|oauth|ads_read|outro app|não possui mais acesso|conexão antiga/i.test(
+    message,
+  );
 }
 
 async function refreshMetaSyncRun(runId: string) {
@@ -840,6 +892,19 @@ async function refreshMetaSyncRun(runId: string) {
     .eq("id", runId);
 }
 
+/**
+ * Recusa de `assertTenantCanOperate` (casa suspensa/cancelada ou bloqueio de
+ * cobrança), diferente de uma falha de leitura do banco.
+ */
+function isTenantOperateBlock(error: unknown) {
+  if (isBillingLockedError(error)) return true;
+  return error instanceof Error && error.message === TENANT_BLOCKED_MESSAGE;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function enqueueScheduledMetaSyncs() {
   const { data: accounts } = await (supabaseAdmin as any)
     .from("meta_ad_accounts")
@@ -863,6 +928,15 @@ async function enqueueScheduledMetaSyncs() {
       .maybeSingle();
     if (recent) continue;
     try {
+      // Casa suspensa ou bloqueada por cobrança não ganha sincronização agendada.
+      await assertTenantCanOperate(tenantId);
+    } catch (error) {
+      if (!isTenantOperateBlock(error)) {
+        console.error("[meta-sync schedule]", tenantId, errorMessage(error));
+      }
+      continue;
+    }
+    try {
       const run = await createMetaSyncRun({ tenantId, days: 7, triggerType: "scheduled" });
       if (!run.reused) enqueued += 1;
     } catch {
@@ -881,7 +955,48 @@ export async function processMetaSyncQueue(limit = 2) {
   );
   if (claimError) throw new Error(claimError.message);
 
-  const claimedRunIds = [...new Set((claimed ?? []).map((job: { run_id: string }) => job.run_id))];
+  // O claim já pula casa suspensa/cancelada e `frozen`/`locked_manual`; o bloqueio
+  // que depende de BILLING_ENFORCEMENT_ENABLED (`locked_unpaid`,
+  // `awaiting_first_payment`) só é visto aqui. Os jobs da casa bloqueada voltam
+  // para a fila em 1 h sem gastar tentativa. Uma falha ao ler a casa não é
+  // bloqueio: registra e processa o job normalmente.
+  const tenantBlocked = new Map<string, boolean>();
+  for (const tenantId of new Set<string>(
+    (claimed ?? []).map((job: { tenant_id: string }) => job.tenant_id),
+  )) {
+    try {
+      await assertTenantCanOperate(tenantId);
+      tenantBlocked.set(tenantId, false);
+    } catch (error) {
+      const blocked = isTenantOperateBlock(error);
+      if (!blocked) console.error("[meta-sync tenant]", tenantId, errorMessage(error));
+      tenantBlocked.set(tenantId, blocked);
+    }
+  }
+  const parkedJobs = (claimed ?? []).filter((job: { tenant_id: string }) =>
+    tenantBlocked.get(job.tenant_id),
+  );
+  const parkUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  for (const job of parkedJobs) {
+    await (supabaseAdmin as any)
+      .from("meta_sync_jobs")
+      .update({
+        status: "retry",
+        next_attempt_at: parkUntil,
+        attempt_count: Math.max(0, job.attempt_count - 1),
+        locked_at: null,
+      })
+      .eq("id", job.id)
+      .eq("worker_id", workerId);
+  }
+  for (const runId of new Set<string>(parkedJobs.map((job: { run_id: string }) => job.run_id))) {
+    await refreshMetaSyncRun(runId);
+  }
+  const runnableJobs = (claimed ?? []).filter(
+    (job: { tenant_id: string }) => !tenantBlocked.get(job.tenant_id),
+  );
+
+  const claimedRunIds = [...new Set(runnableJobs.map((job: { run_id: string }) => job.run_id))];
   for (const runId of claimedRunIds) {
     await (supabaseAdmin as any)
       .from("meta_sync_runs")
@@ -898,16 +1013,35 @@ export async function processMetaSyncQueue(limit = 2) {
   let retried = 0;
   let failed = 0;
   const tenantsToReconcile = new Set<string>();
-  for (const job of claimed ?? []) {
+  for (const job of runnableJobs) {
+    // Os jobs reclamados rodam em sequência: renova o lock antes de cada um, senão um
+    // job lento deixa o lock do próximo vencer (10 min) e outro worker o pega junto.
+    // Sem linha renovada, outro worker já reclamou o job: ele fica com ele.
+    const { data: renewed, error: renewError } = await (supabaseAdmin as any)
+      .from("meta_sync_jobs")
+      .update({ locked_at: new Date().toISOString() })
+      .eq("id", job.id)
+      .eq("worker_id", workerId)
+      .eq("status", "running")
+      .select("id");
+    if (renewError) {
+      console.error("[meta-sync lock]", job.id, renewError.message);
+    } else if (!renewed?.length) {
+      continue;
+    }
+
+    // A conexão precisa ser da mesma casa da conta: uma linha com `connection_id`
+    // apontando para a conexão de outra casa nunca usa aquele token.
     const { data: account, error: accountError } = await (supabaseAdmin as any)
       .from("meta_ad_accounts")
       .select(
-        "id,tenant_id,connection_id,meta_ad_account_id,account_id,name,currency,timezone_name,selected,meta_connections!inner(access_token,encrypted_access_token,status)",
+        "id,tenant_id,connection_id,meta_ad_account_id,account_id,name,currency,timezone_name,selected,meta_connections!inner(tenant_id,encrypted_access_token,status)",
       )
       .eq("id", job.account_id)
       .eq("tenant_id", job.tenant_id)
       .eq("selected", true)
       .eq("meta_connections.status", "connected")
+      .eq("meta_connections.tenant_id", job.tenant_id)
       .maybeSingle();
     try {
       if (accountError) throw new Error(accountError.message);
@@ -1009,6 +1143,7 @@ export async function processMetaSyncQueue(limit = 2) {
     scheduled,
     pendingReconciled: Number(pendingReconciled ?? 0),
     claimed: claimed?.length ?? 0,
+    parked: parkedJobs.length,
     completed,
     retried,
     failed,
