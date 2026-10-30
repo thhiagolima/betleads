@@ -38,6 +38,8 @@ describe("GroupPeriodBar", () => {
     expect(html).toContain(" · 01/10 a 29/10");
     expect(html).toContain("Mês anterior");
     expect(html).toContain(" · 01/09 a 29/09");
+    // Both fields are popover triggers (toggle, aria-expanded, focus return).
+    expect(html.match(/aria-expanded="false"/g)).toHaveLength(2);
     // No native month input any more.
     expect(html).not.toContain('type="month"');
   });

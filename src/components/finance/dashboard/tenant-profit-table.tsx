@@ -62,6 +62,16 @@ export function sortTenantProfitRows<T extends TenantProfitRow>(
   });
 }
 
+export type TenantProfitSort = { column: TenantProfitColumn; direction: "asc" | "desc" };
+
+/** The sort kept when the comparison changes: Δ lucro is hidden without one. */
+export function sortAfterCompareChange(
+  sort: TenantProfitSort | null,
+  comparing: boolean,
+): TenantProfitSort | null {
+  return !comparing && sort?.column === "profitChange" ? null : sort;
+}
+
 function ProfitChange({ row }: { row: TenantProfitRow }) {
   const change = numericValue(row, "profitChange");
   if (change === null) return <span className="text-muted-foreground">—</span>;
@@ -83,10 +93,10 @@ export function TenantProfitTable({
   comparing?: boolean;
 }) {
   const columns = comparing ? COLUMNS : COLUMNS.filter((column) => column.key !== "profitChange");
-  const [sort, setSort] = useState<{
-    column: TenantProfitColumn;
-    direction: "asc" | "desc";
-  } | null>(null);
+  const [sort, setSort] = useState<TenantProfitSort | null>(null);
+  // Turning the comparison off resets a sort on the hidden Δ lucro column.
+  const keptSort = sortAfterCompareChange(sort, comparing);
+  if (keptSort !== sort) setSort(keptSort);
   const sortedRows = useMemo(
     () => (sort ? sortTenantProfitRows(rows, sort.column, sort.direction) : rows),
     [rows, sort],

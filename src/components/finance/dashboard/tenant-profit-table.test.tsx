@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  sortAfterCompareChange,
   sortTenantProfitRows,
   TenantProfitTable,
   type TenantProfitRow,
@@ -101,5 +102,14 @@ describe("TenantProfitTable", () => {
       "b",
       "a",
     ]);
+  });
+
+  it("a sort on Δ lucro is reset when the comparison turns off", () => {
+    const byChange = { column: "profitChange" as const, direction: "desc" as const };
+    const byProfit = { column: "cashResult" as const, direction: "asc" as const };
+    expect(sortAfterCompareChange(byChange, false)).toBeNull();
+    expect(sortAfterCompareChange(byChange, true)).toBe(byChange);
+    expect(sortAfterCompareChange(byProfit, false)).toBe(byProfit);
+    expect(sortAfterCompareChange(null, false)).toBeNull();
   });
 });

@@ -62,6 +62,8 @@ export const QUICK_SHORTCUTS: { shortcut: PeriodShortcut; label: string }[] = [
 ];
 
 const ALL_SHORTCUTS = SHORTCUT_GROUPS.flatMap((group) => group.shortcuts);
+/** Meses, then Semanas, then Dias: a longer range prefers its calendar name. */
+const MONTHS_FIRST = [...SHORTCUT_GROUPS].reverse().flatMap((group) => group.shortcuts);
 
 // ─── Dates ("YYYY-MM-DD", calendar arithmetic in UTC) ───────────────────────
 
@@ -131,21 +133,34 @@ export function shortcutRange(shortcut: PeriodShortcut, today: string): DateRang
 
 const sameRange = (a: DateRange, b: DateRange) => a.from === b.from && a.to === b.to;
 
-/** The first shortcut (menu order) whose range is exactly `range`, else null. */
-export function matchShortcut(range: DateRange, today: string): PeriodShortcut | null {
-  return ALL_SHORTCUTS.find((shortcut) => sameRange(shortcutRange(shortcut, today), range)) ?? null;
+/** More than one day, from the 1st of today's month up to today. */
+function isMonthToDate(range: DateRange, today: string): boolean {
+  return range.from === monthStart(today) && range.to === today && range.from !== range.to;
 }
 
 /**
- * The preset sent to the server: "Este mês" is "month"; anything else is
- * "custom" unless its range is exactly today, yesterday or the last 7 days.
+ * The shortcut whose range is exactly `range`, else null. A single day
+ * prefers Dias (Hoje, Ontem); a longer range prefers Meses, then Semanas, so
+ * the month-to-date range is always "Este mês" (same preset, fee and compare
+ * options however it was picked).
+ */
+export function matchShortcut(range: DateRange, today: string): PeriodShortcut | null {
+  const order = range.from === range.to ? ALL_SHORTCUTS : MONTHS_FIRST;
+  return order.find((shortcut) => sameRange(shortcutRange(shortcut, today), range)) ?? null;
+}
+
+/**
+ * The preset sent to the server: "Este mês", or any shortcut whose range is
+ * the month to date (e.g. "Últimos 7 dias" on the 7th), is "month"; anything
+ * else is "custom" unless its range is exactly today, yesterday or the last
+ * 7 days.
  */
 export function presetFor(
   shortcut: PeriodShortcut | null,
   range: DateRange,
   today: string,
 ): PeriodPreset {
-  if (shortcut === "this_month") return "month";
+  if (shortcut === "this_month" || isMonthToDate(range, today)) return "month";
   for (const preset of ["today", "yesterday", "7d"] as const) {
     if (sameRange(shortcutRange(preset, today), range)) return preset;
   }
@@ -156,9 +171,13 @@ export function presetFor(
 
 export type PeriodKind = "day" | "month" | "range";
 
-/** Este mês, Mês passado or a whole calendar month is a month; then one day; else a range. */
-export function periodKind(period: Pick<GroupPeriod, "shortcut" | "range">): PeriodKind {
-  if (period.shortcut === "this_month" || period.shortcut === "last_month") return "month";
+/**
+ * Este mês (the "month" preset), Mês passado or a whole calendar month is a
+ * month; then one day; else a range.
+ */
+export function periodKind(period: Pick<GroupPeriod, "shortcut" | "range" | "preset">): PeriodKind {
+  if (period.preset === "month" || period.shortcut === "this_month") return "month";
+  if (period.shortcut === "last_month") return "month";
   if (period.range.from === period.range.to) return "day";
   return isWholeMonth(period.range) ? "month" : "range";
 }

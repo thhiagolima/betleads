@@ -9,8 +9,8 @@ import { useState, type ReactNode } from "react";
 import { ptBR } from "react-day-picker/locale";
 
 import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import type { DateRange } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -104,6 +104,8 @@ function RangeCalendar({
     <div className="flex min-w-0 flex-col">
       <Calendar
         mode="range"
+        // Outside days would repeat the next month's range in the first grid.
+        showOutsideDays={false}
         locale={ptBR}
         weekStartsOn={1}
         numberOfMonths={months}
@@ -157,6 +159,7 @@ function PeriodPicker({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetCalendar, setSheetCalendar] = useState(false);
+  const [calendarMonths, setCalendarMonths] = useState<1 | 2>(2);
   const label = periodLabel(value, today);
 
   const applyShortcut = (shortcut: PeriodShortcut) => {
@@ -170,32 +173,32 @@ function PeriodPicker({
     setSheetOpen(false);
   };
 
-  const open = () => {
-    // Phones (< sm) get the bottom sheet, larger screens the popover.
-    if (typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches) {
-      setPopoverOpen(true);
-    } else {
+  const matches = (query: string) =>
+    typeof window !== "undefined" && window.matchMedia(query).matches;
+
+  // The trigger toggles the popover; phones (< sm) get the bottom sheet
+  // instead, and below md the calendar shows one month.
+  const onPopoverOpenChange = (next: boolean) => {
+    if (next && !matches("(min-width: 640px)")) {
       setSheetCalendar(false);
       setSheetOpen(true);
+      return;
     }
+    if (next) setCalendarMonths(matches("(min-width: 768px)") ? 2 : 1);
+    setPopoverOpen(next);
   };
 
   return (
     <>
-      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <PopoverAnchor asChild>
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            className={fieldButtonClass()}
-            onClick={open}
-          >
+      <Popover open={popoverOpen} onOpenChange={onPopoverOpenChange}>
+        <PopoverTrigger asChild>
+          <button type="button" className={fieldButtonClass()}>
             <FieldText name={label.name} dates={label.dates} />
           </button>
-        </PopoverAnchor>
+        </PopoverTrigger>
         <PopoverContent
           align="start"
-          className="flex w-auto max-w-[calc(100vw-2rem)] overflow-hidden rounded-[14px] p-0"
+          className="flex max-h-[var(--radix-popover-content-available-height)] w-auto max-w-[calc(100vw-2rem)] overflow-y-auto rounded-[14px] p-0"
         >
           <div className="w-[190px] shrink-0 border-r border-border p-2">
             {SHORTCUT_GROUPS.map((group) => (
@@ -230,10 +233,10 @@ function PeriodPicker({
           </div>
           <div className="p-2">
             <RangeCalendar
-              key={`${value.range.from}:${value.range.to}`}
+              key={`${value.range.from}:${value.range.to}:${calendarMonths}`}
               initial={value.range}
               today={today}
-              months={2}
+              months={calendarMonths}
               onCancel={() => setPopoverOpen(false)}
               onApply={applyRange}
             />
@@ -243,6 +246,9 @@ function PeriodPicker({
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto rounded-t-2xl p-4">
           <SheetTitle className="mb-3 text-base">Período</SheetTitle>
+          <SheetDescription className="sr-only">
+            Escolha um atalho ou as datas do período.
+          </SheetDescription>
           {sheetCalendar ? (
             <div className="flex justify-center">
               <RangeCalendar

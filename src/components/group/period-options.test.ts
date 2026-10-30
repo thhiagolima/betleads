@@ -83,6 +83,34 @@ describe("matchShortcut", () => {
   });
 });
 
+describe("month-to-date of the current month is always Este mês", () => {
+  it.each([
+    ["2026-10-07", "7d"],
+    ["2026-10-15", "15d"],
+  ] as const)(
+    "on %s the calendar range and the %s shortcut give the month preset",
+    (today, shortcut) => {
+      const range = { from: "2026-10-01", to: today };
+      expect(matchShortcut(range, today)).toBe("this_month");
+      expect(periodFromRange(range, "previous", today)).toMatchObject({
+        shortcut: "this_month",
+        preset: "month",
+      });
+      const clicked = periodFromShortcut(shortcut, "previous", today);
+      expect(clicked.range).toEqual(range);
+      expect(clicked.preset).toBe("month");
+      expect(compareOptions(clicked, today)[0]).toMatchObject({
+        label: "Mês anterior",
+        dates: `01/09 a ${today.slice(8)}/09`,
+      });
+    },
+  );
+
+  it("a single day stays a day, even on the 1st", () => {
+    expect(matchShortcut({ from: "2026-11-01", to: "2026-11-01" }, "2026-11-01")).toBe("today");
+  });
+});
+
 describe("formatDay / formatRange", () => {
   it("uses dd/mm, adding /aa when the year differs from today's", () => {
     expect(formatDay("2026-10-01", TODAY)).toBe("01/10");
