@@ -36,7 +36,12 @@ import {
 } from "@/components/house-config/composer-notices";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { supabase } from "@/integrations/supabase/client";
-import type { JourneyStepInput } from "@/lib/journeys.shared";
+import {
+  eventMaxAgeHours,
+  journeyEntryFilters,
+  type JourneyEntryFilters,
+} from "@/lib/journey-policy";
+import { MAX_LOOPS_LIMIT, endStepMaxLoops, type JourneyStepInput } from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -122,6 +127,40 @@ const HOLDOUT_OPTIONS: Option[] = [
   { value: "5", label: "5% não recebem mensagens" },
   { value: "10", label: "10% não recebem mensagens" },
 ];
+/** Number filters of "Quem pode entrar" (P1.1), stored in entry_rules.filters. */
+const ENTRY_FILTER_FIELDS: Array<{
+  key: Exclude<keyof JourneyEntryFilters, "require_ftd">;
+  label: string;
+  hint: string;
+}> = [
+  {
+    key: "min_total_deposited",
+    label: "Total depositado mínimo (R$)",
+    hint: "Ex.: 200 para focar em quem já tem valor.",
+  },
+  {
+    key: "max_total_deposited",
+    label: "Total depositado máximo (R$)",
+    hint: "Ex.: 999 para deixar de fora os maiores jogadores.",
+  },
+  {
+    key: "no_deposit_within_hours",
+    label: "Fora quem depositou nas últimas (horas)",
+    hint: "Ex.: 48 para não mandar para quem já está ativo.",
+  },
+  {
+    key: "last_deposit_within_days",
+    label: "Só quem depositou nos últimos (dias)",
+    hint: "Ex.: 30 para não insistir em quem sumiu há muito tempo.",
+  },
+];
+
+/** Triggers whose entry event has a max age (P0.3), with the field's wording. */
+const EVENT_AGE_LABELS: Record<string, string> = {
+  cadastrados_sem_deposito: "Só entra quem se cadastrou nas últimas (horas)",
+  primeiro_deposito: "Só entra quem fez o 1º depósito nas últimas (horas)",
+  saque_pago: "Só entra saque pago nas últimas (horas)",
+};
 const FAMILY_NONE = "none";
 const FAMILY_OPTIONS: Option[] = [
   { value: FAMILY_NONE, label: "Sem família" },
@@ -356,6 +395,9 @@ export function JourneyEditor({
     String(initial?.entry_rules?.audience ?? initialAudience ?? "all_active"),
   );
   const [reentry, setReentry] = useState(String(initial?.entry_rules?.reentry ?? "once"));
+  const [entryFilters, setEntryFilters] = useState<JourneyEntryFilters>(() =>
+    journeyEntryFilters(initial?.entry_rules),
+  );
   const [exitRules, setExitRules] = useState<Record<string, boolean>>(
     initial?.exit_rules ?? {
       deposit: true,
@@ -371,6 +413,9 @@ export function JourneyEditor({
     typeof initialLoopToPosition === "number" && initialEndIndex > initialLoopToPosition
       ? initialEndIndex - initialLoopToPosition
       : null;
+  const [maxLoops, setMaxLoops] = useState(() =>
+    endStepMaxLoops(enabledSteps[initialEndIndex]?.config),
+  );
   const [steps, setSteps] = useState<Step[]>(() => enabledSteps.flatMap(initialStep));
 
   // Unsaved changes: Ativar on a draft saves first; on a paused journey it warns.
@@ -392,6 +437,8 @@ export function JourneyEditor({
     reentry,
     exitRules,
     steps,
+    maxLoops,
+    entryFilters,
   ]);
   const [savedSignature, setSavedSignature] = useState(signature);
   const dirty = signature !== savedSignature;
@@ -515,6 +562,7 @@ export function JourneyEditor({
               reentry_cooldown_hours: cooldownHours,
               max_attempts: 3,
               retry_base_seconds: 60,
+              filters: entryFilters,
             },
             daily_limit: dailyLimit,
             cooldown_hours: cooldownHours,
@@ -529,7 +577,7 @@ export function JourneyEditor({
                 step_type: "end",
                 config:
                   loopTailLength !== null && body.length >= loopTailLength
-                    ? { loop_to_position: body.length - loopTailLength }
+                    ? { loop_to_position: body.length - loopTailLength, max_loops: maxLoops }
                     : {},
               },
             ],
@@ -805,6 +853,32 @@ export function JourneyEditor({
             />
           </Field>
         )}
+        {trigger in EVENT_AGE_LABELS && (
+          <Field
+            id="event-max-age"
+            label={EVENT_AGE_LABELS[trigger]}
+            hint="Evita tratar a base antiga como evento novo. 0 tira o limite."
+            className="border-t border-border pt-4 sm:max-w-md"
+          >
+            <Input
+              id="event-max-age"
+              className="h-10"
+              type="number"
+              min={0}
+              max={8760}
+              value={String(eventMaxAgeHours(trigger, triggerConfig) ?? 0)}
+              onChange={(event) =>
+                setTriggerConfig((current) => ({
+                  ...current,
+                  max_event_age_hours: Math.min(
+                    8760,
+                    Math.max(0, Math.trunc(Number(event.target.value) || 0)),
+                  ),
+                }))
+              }
+            />
+          </Field>
+        )}
       </EditorSection>
 
       <EditorSection
@@ -869,6 +943,54 @@ export function JourneyEditor({
               options={REENTRY_OPTIONS}
             />
           </Field>
+        </div>
+        <div className="space-y-3 border-t border-border pt-4">
+          <p className="text-[12.5px] text-muted-foreground">
+            Filtros de entrada (opcionais). Valem na entrada e antes de cada envio: quem deixar de
+            cumprir sai da jornada. Campo vazio não filtra.
+          </p>
+          <div className="flex min-h-11 items-center gap-3 md:min-h-0">
+            <Checkbox
+              id="filter-require-ftd"
+              checked={entryFilters.require_ftd === true}
+              onCheckedChange={(checked) =>
+                setEntryFilters((current) => {
+                  const { require_ftd: _drop, ...rest } = current;
+                  return checked === true ? { ...rest, require_ftd: true } : rest;
+                })
+              }
+            />
+            <Label htmlFor="filter-require-ftd" className="cursor-pointer font-normal">
+              Só quem já fez o primeiro depósito
+            </Label>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {ENTRY_FILTER_FIELDS.map((field) => (
+              <Field
+                key={field.key}
+                id={`filter-${field.key}`}
+                label={field.label}
+                hint={field.hint}
+              >
+                <Input
+                  id={`filter-${field.key}`}
+                  className="h-10"
+                  type="number"
+                  min={0}
+                  value={entryFilters[field.key] ?? ""}
+                  onChange={(event) =>
+                    setEntryFilters((current) => {
+                      const { [field.key]: _drop, ...rest } = current;
+                      const value = Number(event.target.value);
+                      return event.target.value === "" || !Number.isFinite(value) || value < 0
+                        ? rest
+                        : { ...rest, [field.key]: value };
+                    })
+                  }
+                />
+              </Field>
+            ))}
+          </div>
         </div>
       </EditorSection>
 
@@ -1068,10 +1190,33 @@ export function JourneyEditor({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <p className="rounded-lg border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground">
-          Fim da jornada
-          {loopTailLength !== null && ` · volta às últimas ${loopTailLength} etapa(s) em loop`}
-        </p>
+        <div className="space-y-3 rounded-lg border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground">
+          <p>
+            Fim da jornada
+            {loopTailLength !== null && ` · volta às últimas ${loopTailLength} etapa(s) em loop`}
+          </p>
+          {loopTailLength !== null && (
+            <Field
+              id="max-loops"
+              label="Repetir o loop no máximo"
+              hint={`Depois de ${maxLoops} repetição(ões) a jornada termina para o jogador. Máximo ${MAX_LOOPS_LIMIT}.`}
+            >
+              <Input
+                id="max-loops"
+                className="h-10 max-w-32"
+                type="number"
+                min={0}
+                max={MAX_LOOPS_LIMIT}
+                value={maxLoops}
+                onChange={(e) =>
+                  setMaxLoops(
+                    Math.min(MAX_LOOPS_LIMIT, Math.max(0, Math.trunc(Number(e.target.value) || 0))),
+                  )
+                }
+              />
+            </Field>
+          )}
+        </div>
       </EditorSection>
 
       <EditorSection

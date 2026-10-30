@@ -1,9 +1,11 @@
-// "Lucro por casa" (spec §6): one row per house of a group or of "Todas as
-// casas", with Lucro, ROI, Anúncios and the profit variation. Sortable by
+// "Lucro por casa" (spec §6, §3.2.5): one row per house of a group or of
+// "Todas as casas", with Lucro líquido, Margem, ROI, Anúncios, Envios and the profit
+// variation. Sortable by
 // header (desc first, asc on the second click, nulls always last); a row
 // click opens the house's painel.
 import { useMemo, useState } from "react";
 
+import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { formatBRL, formatPct, formatRatio } from "@/components/finance/format";
 import { pctChange } from "@/lib/finance/calc";
 import type { PeriodSummary } from "@/lib/finance/types";
@@ -14,20 +16,29 @@ export type TenantProfitRow = {
   nome: string;
   current: PeriodSummary;
   previous: PeriodSummary;
+  /** Lucro líquido ÷ net; null when net is 0. */
+  margin: number | null;
+  /** Envios of the current window. */
+  sendCost: number;
 };
 
-export type TenantProfitColumn = "nome" | "cashResult" | "roi" | "adSpend" | "profitChange";
+export type TenantProfitColumn =
+  "nome" | "cashResult" | "margin" | "roi" | "adSpend" | "sendCost" | "profitChange";
 
 const COLUMNS: { key: TenantProfitColumn; label: string }[] = [
   { key: "nome", label: "Casa" },
-  { key: "cashResult", label: "Lucro" },
+  { key: "cashResult", label: FINANCE_TERMS.cashResult.label },
+  { key: "margin", label: "Margem" },
   { key: "roi", label: "ROI" },
   { key: "adSpend", label: "Anúncios" },
+  { key: "sendCost", label: "Envios" },
   { key: "profitChange", label: "Δ lucro" },
 ];
 
 function numericValue(row: TenantProfitRow, column: Exclude<TenantProfitColumn, "nome">) {
   if (column === "profitChange") return pctChange(row.current.cashResult, row.previous.cashResult);
+  if (column === "margin") return row.margin;
+  if (column === "sendCost") return row.sendCost;
   return row.current[column];
 }
 
@@ -51,9 +62,19 @@ export function sortTenantProfitRows<T extends TenantProfitRow>(
   });
 }
 
+export type TenantProfitSort = { column: TenantProfitColumn; direction: "asc" | "desc" };
+
+/** The sort kept when the comparison changes: Δ lucro is hidden without one. */
+export function sortAfterCompareChange(
+  sort: TenantProfitSort | null,
+  comparing: boolean,
+): TenantProfitSort | null {
+  return !comparing && sort?.column === "profitChange" ? null : sort;
+}
+
 function ProfitChange({ row }: { row: TenantProfitRow }) {
   const change = numericValue(row, "profitChange");
-  if (change === null) return <span className="text-muted-foreground">n.a.</span>;
+  if (change === null) return <span className="text-muted-foreground">—</span>;
   return (
     <span className={change >= 0 ? "text-emerald-400" : "text-rose-400"}>
       {change >= 0 ? "▲" : "▼"} {formatPct(Math.abs(change))}
@@ -64,14 +85,18 @@ function ProfitChange({ row }: { row: TenantProfitRow }) {
 export function TenantProfitTable({
   rows,
   onOpenTenant,
+  comparing = true,
 }: {
   rows: TenantProfitRow[];
   onOpenTenant?: (tenantId: string) => void;
+  /** False for "Sem comparação": the Δ lucro column is hidden. */
+  comparing?: boolean;
 }) {
-  const [sort, setSort] = useState<{
-    column: TenantProfitColumn;
-    direction: "asc" | "desc";
-  } | null>(null);
+  const columns = comparing ? COLUMNS : COLUMNS.filter((column) => column.key !== "profitChange");
+  const [sort, setSort] = useState<TenantProfitSort | null>(null);
+  // Turning the comparison off resets a sort on the hidden Δ lucro column.
+  const keptSort = sortAfterCompareChange(sort, comparing);
+  if (keptSort !== sort) setSort(keptSort);
   const sortedRows = useMemo(
     () => (sort ? sortTenantProfitRows(rows, sort.column, sort.direction) : rows),
     [rows, sort],
@@ -87,10 +112,10 @@ export function TenantProfitTable({
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border/40">
-      <table className="w-full min-w-[32rem] text-sm">
+      <table className="w-full min-w-[42rem] text-sm">
         <thead>
           <tr className="border-b border-border/40 text-xs uppercase text-muted-foreground">
-            {COLUMNS.map((column) => (
+            {columns.map((column) => (
               <th
                 key={column.key}
                 className={cn("px-3 py-2", column.key === "nome" ? "text-left" : "text-right")}
@@ -136,20 +161,24 @@ export function TenantProfitTable({
               >
                 {formatBRL(row.current.cashResult)}
               </td>
+              <td className="whitespace-nowrap px-3 py-2 text-right">{formatPct(row.margin)}</td>
               <td className="whitespace-nowrap px-3 py-2 text-right">
                 {formatRatio(row.current.roi)}
               </td>
               <td className="whitespace-nowrap px-3 py-2 text-right">
                 {formatBRL(row.current.adSpend)}
               </td>
-              <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
-                <ProfitChange row={row} />
-              </td>
+              <td className="whitespace-nowrap px-3 py-2 text-right">{formatBRL(row.sendCost)}</td>
+              {comparing && (
+                <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
+                  <ProfitChange row={row} />
+                </td>
+              )}
             </tr>
           ))}
           {!sortedRows.length && (
             <tr>
-              <td colSpan={COLUMNS.length} className="px-3 py-8 text-center text-muted-foreground">
+              <td colSpan={columns.length} className="px-3 py-8 text-center text-muted-foreground">
                 Nenhuma casa neste recorte.
               </td>
             </tr>

@@ -10,6 +10,7 @@ import type {
   GoalEvaluation,
   GoalMetric,
   GoalStatus,
+  MonthlyGgr,
   PeriodPreset,
   PeriodSummary,
 } from "./types";
@@ -27,47 +28,36 @@ function sumBy<T>(items: T[], pick: (item: T) => number): number {
   return round2(items.reduce((total, item) => total + pick(item), 0));
 }
 
+/**
+ * One day's results. A missing Anúncios or GGR (pending) counts as 0 for the
+ * math, so every result is always computed; the raw `adSpend`/`ggr` stay null
+ * so the grid can still show the input as empty and `pending` keeps flagging
+ * it. ROI is null without ad spend; a cost-per is null when its divisor is 0.
+ */
 export function computeDay(d: FinanceDayInput): FinanceDay {
   const pending = d.adSpend === null || d.ggr === null;
+  const adSpend = d.adSpend ?? 0;
+  const ggr = d.ggr ?? 0;
 
-  let net: number | null = null;
-  let ggrFee: number | null = null;
-  let movementFee: number | null = null;
-  let cashResult: number | null = null;
-  let roi: number | null = null;
-
-  if (!pending) {
-    const adSpend = d.adSpend as number;
-    const ggr = d.ggr as number;
-    const netValue = round2(d.depositAmount - d.withdrawalAmount);
-    const ggrFeeValue = round2(ggr * (d.ggrFeePct / 100));
-    const movementFeeValue =
-      round2(d.depositAmount * (d.movementFeePct / 100)) +
-      round2(d.withdrawalAmount * (d.movementFeePct / 100)) +
-      round2(netValue * (d.movementFeePct / 100));
-    const cashResultValue = round2(netValue - ggrFeeValue - movementFeeValue - adSpend);
-
-    net = netValue;
-    ggrFee = ggrFeeValue;
-    movementFee = movementFeeValue;
-    cashResult = cashResultValue;
-    roi = adSpend === 0 ? null : cashResultValue / adSpend;
-  }
-
-  const costPerRegistration =
-    d.adSpend === null || d.registrations === 0 ? null : d.adSpend / d.registrations;
-  const costPerFtd = d.adSpend === null || d.ftds === 0 ? null : d.adSpend / d.ftds;
+  const net = round2(d.depositAmount - d.withdrawalAmount);
+  const ggrFee = round2(ggr * (d.ggrFeePct / 100));
+  const movementFee =
+    round2(d.depositAmount * (d.movementFeePct / 100)) +
+    round2(d.withdrawalAmount * (d.movementFeePct / 100)) +
+    round2(net * (d.movementFeePct / 100));
+  const cashResult = round2(net - ggrFee - movementFee - adSpend);
 
   return {
     ...d,
+    ggrEstimated: d.ggrEstimated ?? false,
     pending,
     net,
     ggrFee,
     movementFee,
     cashResult,
-    roi,
-    costPerRegistration,
-    costPerFtd,
+    roi: adSpend === 0 ? null : cashResult / adSpend,
+    costPerRegistration: d.registrations === 0 ? null : adSpend / d.registrations,
+    costPerFtd: d.ftds === 0 ? null : adSpend / d.ftds,
   };
 }
 
@@ -75,16 +65,17 @@ export function computeDay(d: FinanceDayInput): FinanceDay {
  * Period totals. `today` ("YYYY-MM-DD", São Paulo) is passed explicitly so
  * this stays pure: today is expected to be incomplete, so a pending today is
  * not counted in `pendingDays` (it only sets `pendingToday`). Money results
- * (Net, Resultado) still sum only complete days. `pendingDays` counts
- * distinct dates, so a summary over several houses never counts a day twice.
+ * (Net, GGR, fees, Resultado, ROI) sum every day, a pending one included
+ * (computeDay counts its missing inputs as 0). `pendingDays` counts distinct
+ * dates, so a summary over several houses never counts a day twice.
  */
 export function summarize(
   days: FinanceDay[],
-  otherCosts: number | null,
+  otherCosts: number,
   today?: string,
   betleads?: BetleadsCost,
+  options?: { ggrEstimated?: boolean },
 ): PeriodSummary {
-  const completeDays = days.filter((d) => !d.pending);
   const pendingDates = new Set(days.filter((d) => d.pending).map((d) => d.date));
   const pendingToday = today !== undefined && pendingDates.has(today);
   if (today !== undefined) pendingDates.delete(today);
@@ -96,20 +87,19 @@ export function summarize(
   const withdrawalAmount = sumBy(days, (d) => d.withdrawalAmount);
   const adSpend = sumBy(days, (d) => d.adSpend ?? 0);
 
-  const ggr = sumBy(completeDays, (d) => d.ggr ?? 0);
-  const net = sumBy(completeDays, (d) => d.net ?? 0);
-  const ggrFee = sumBy(completeDays, (d) => d.ggrFee ?? 0);
-  const movementFee = sumBy(completeDays, (d) => d.movementFee ?? 0);
-  const completeAdSpend = sumBy(completeDays, (d) => d.adSpend ?? 0);
-  const rawCashResult = sumBy(completeDays, (d) => d.cashResult ?? 0);
+  const ggr = sumBy(days, (d) => d.ggr ?? 0);
+  const net = sumBy(days, (d) => d.net);
+  const ggrFee = sumBy(days, (d) => d.ggrFee);
+  const movementFee = sumBy(days, (d) => d.movementFee);
+  const rawCashResult = sumBy(days, (d) => d.cashResult);
 
   const betleadsUsage = betleads?.usage ?? 0;
   const betleadsFee = betleads?.fee ?? null;
-  const cashResult = round2(rawCashResult - (otherCosts ?? 0) - betleadsUsage - (betleadsFee ?? 0));
-  const roi = completeAdSpend === 0 ? null : cashResult / completeAdSpend;
+  const cashResult = round2(rawCashResult - otherCosts - betleadsUsage - (betleadsFee ?? 0));
+  const roi = adSpend === 0 ? null : cashResult / adSpend;
   const costPerRegistration = registrations === 0 ? null : adSpend / registrations;
   const costPerFtd = ftds === 0 ? null : adSpend / ftds;
-  const avgDailyCashResult = completeDays.length === 0 ? null : cashResult / completeDays.length;
+  const avgDailyCashResult = days.length === 0 ? null : cashResult / days.length;
 
   return {
     days: days.length,
@@ -133,7 +123,99 @@ export function summarize(
     avgDailyCashResult,
     betleadsUsage,
     betleadsFee,
+    ggrEstimated: options?.ggrEstimated ?? false,
   };
+}
+
+/**
+ * Spreads a month's accumulated GGR ("Perdas na casa") over its days from the
+ * 1st to `validThrough`, proportionally to each day's net
+ * max(deposits − withdrawals, 0) (equally when every weight is 0). Each share
+ * is rounded with round2 and the remainder goes to the last allocated day, so
+ * the allocated days sum exactly to the total (negative totals included).
+ * Those days get `ggrEstimated: true`; the month's days after `validThrough`
+ * get GGR null (pending), whatever was typed for them. Days of other months
+ * are returned as given. Without a monthly total every day comes back with
+ * `ggrEstimated: false`.
+ */
+export function allocateMonthlyGgr(
+  days: FinanceDayInput[],
+  monthly: MonthlyGgr | null,
+): FinanceDayInput[] {
+  if (!monthly) return days.map((d) => ({ ...d, ggrEstimated: false }));
+
+  const monthKey = monthly.month.slice(0, 7);
+  const inMonth = (d: FinanceDayInput) => d.date.slice(0, 7) === monthKey;
+  const allocated = days
+    .filter((d) => inMonth(d) && d.date <= monthly.validThrough)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const weights = allocated.map((d) => Math.max(d.depositAmount - d.withdrawalAmount, 0));
+  const totalWeight = weights.reduce((total, w) => total + w, 0);
+  const shares = new Map<string, number>();
+  let assigned = 0;
+  allocated.forEach((d, index) => {
+    const isLast = index === allocated.length - 1;
+    const share = isLast
+      ? round2(monthly.ggr - assigned)
+      : round2(
+          totalWeight > 0
+            ? (monthly.ggr * weights[index]) / totalWeight
+            : monthly.ggr / allocated.length,
+        );
+    assigned = round2(assigned + share);
+    shares.set(d.date, share);
+  });
+
+  return days.map((d) => {
+    if (!inMonth(d)) return { ...d, ggrEstimated: false };
+    const share = shares.get(d.date);
+    return share === undefined
+      ? { ...d, ggr: null, ggrEstimated: false }
+      : { ...d, ggr: share, ggrEstimated: true };
+  });
+}
+
+/** The days [month, validThrough] a monthly GGR total was allocated to. */
+type GgrAllocation = Pick<MonthlyGgr, "month" | "validThrough">;
+
+/**
+ * True when `window` holds some but not all of an allocation's days: its GGR
+ * is then only an estimate of that part of the month ("GGR estimado a partir
+ * do total do mês"). A window holding every allocated day sums to the typed
+ * total exactly, so it is not flagged.
+ */
+export function hasPartialGgrEstimate(
+  window: DateRange | null,
+  allocations: GgrAllocation[],
+): boolean {
+  if (!window) return false;
+  return allocations.some((a) => {
+    const overlaps = window.from <= a.validThrough && window.to >= a.month;
+    const holdsAll = window.from <= a.month && window.to >= a.validThrough;
+    return overlaps && !holdsAll;
+  });
+}
+
+/**
+ * When every pending day lies after the `validThrough` of its month's
+ * monthly GGR total and has Anúncios filled, the pending days come only from
+ * that total being out of date: returns the `validThrough` of the earliest
+ * pending day's month. Otherwise (or with nothing pending) null.
+ */
+export function monthlyGgrPendingThrough(
+  pendingDays: Array<{ date: string; adSpend: number | null }>,
+  allocations: GgrAllocation[],
+): string | null {
+  if (!pendingDays.length) return null;
+  const byMonth = new Map(allocations.map((a) => [a.month.slice(0, 7), a.validThrough]));
+  const explained = pendingDays.every(({ date, adSpend }) => {
+    const validThrough = byMonth.get(date.slice(0, 7));
+    return adSpend !== null && validThrough !== undefined && date > validThrough;
+  });
+  if (!explained) return null;
+  const first = pendingDays.map((day) => day.date).sort()[0];
+  return byMonth.get(first.slice(0, 7)) ?? null;
 }
 
 /** A percent without trailing zeros, pt-BR style: 16 -> "16%", 2.7 -> "2,7%". */
@@ -143,10 +225,13 @@ function formatPctNoTrailingZeros(pct: number): string {
 
 /**
  * Cost breakdown shown next to the period summary: the computed lines
- * (Anúncios, Taxa de GGR, Taxa de movimentação, Betleads) plus one line per
- * manually entered cost category. Only Betleads is `auto` (the "automático"
- * tag): Anúncios is typed in and the fees follow it. Sorted by amount descending; a line with
- * amount 0 and no previous amount (0 or null) is dropped as noise.
+ * (Anúncios, Taxa de GGR, Taxa de movimentação, Envios, Mensalidade) plus one
+ * line per manually entered cost category. Envios and Mensalidade are `auto`
+ * (the "automático" tag): Anúncios is typed in and the fees follow it.
+ * Sorted by amount descending; a line with amount 0 and no previous amount (0
+ * or null) is dropped as noise — except Mensalidade, which is only dropped
+ * when the fee (current and previous) is null, i.e. the window never closed
+ * a billed month: a closed month with an actual R$ 0 invoice still shows.
  */
 export function costBreakdown(
   current: PeriodSummary,
@@ -158,7 +243,7 @@ export function costBreakdown(
   const ggrLabel =
     ggrFeePct === null ? "Taxa de GGR" : `Taxa de GGR (${formatPctNoTrailingZeros(ggrFeePct)})`;
 
-  const lines: CostLine[] = [
+  const baseLines: CostLine[] = [
     {
       key: "ad_spend",
       label: "Anúncios",
@@ -181,16 +266,16 @@ export function costBreakdown(
       auto: false,
     },
     {
-      key: "betleads",
-      label: "Betleads",
-      amount: round2(current.betleadsUsage + (current.betleadsFee ?? 0)),
-      previous: previous ? round2(previous.betleadsUsage + (previous.betleadsFee ?? 0)) : null,
+      key: "sends",
+      label: "Envios",
+      amount: current.betleadsUsage,
+      previous: previous?.betleadsUsage ?? null,
       auto: true,
     },
   ];
 
   for (const [name, amount] of Object.entries(categories)) {
-    lines.push({
+    baseLines.push({
       key: `category:${name}`,
       label: name,
       amount,
@@ -199,9 +284,22 @@ export function costBreakdown(
     });
   }
 
-  return lines
-    .filter((line) => !(line.amount === 0 && (line.previous === null || line.previous === 0)))
-    .sort((a, b) => b.amount - a.amount);
+  const filtered = baseLines.filter(
+    (line) => !(line.amount === 0 && (line.previous === null || line.previous === 0)),
+  );
+
+  const feeDroppable = current.betleadsFee === null && (previous?.betleadsFee ?? null) === null;
+  if (!feeDroppable) {
+    filtered.push({
+      key: "fee",
+      label: "Mensalidade",
+      amount: round2(current.betleadsFee ?? 0),
+      previous: previous ? round2(previous.betleadsFee ?? 0) : null,
+      auto: true,
+    });
+  }
+
+  return filtered.sort((a, b) => b.amount - a.amount);
 }
 
 /** Daily average of Anúncios over the days that have it filled (spec §5); null when none. */
@@ -238,10 +336,6 @@ export function isSumMetric(m: GoalMetric): boolean {
   );
 }
 
-export function dependsOnManual(m: GoalMetric): boolean {
-  return !(m === "registrations" || m === "ftds" || m === "deposits");
-}
-
 function goalStatusForBand(direction: GoalDirection, target: number, value: number): GoalStatus {
   if (target <= 0) {
     if (direction === "gte") return value >= target ? "green" : "red";
@@ -269,31 +363,20 @@ export function evaluateGoal(
   goalDays: GoalDay[],
   summary: PeriodSummary,
   range: DateRange,
-  today?: string,
 ): GoalEvaluation | null {
   if (goalDays.length === 0) return null;
 
   const metric = goalDays[0].metric;
   const lastDay = lastGoalDayUpTo(goalDays, range.to);
   const direction = lastDay.direction;
-  // A pending today is left out of a manual metric's value (only complete
-  // days are summed), so its goal day is left out of the target too.
-  const targetDays =
-    dependsOnManual(metric) && summary.pendingToday && today !== undefined
-      ? goalDays.filter((d) => d.date !== today)
-      : goalDays;
   const target = isSumMetric(metric)
-    ? round2(targetDays.reduce((total, d) => total + d.dailyValue, 0))
+    ? round2(goalDays.reduce((total, d) => total + d.dailyValue, 0))
     : lastDay.dailyValue;
   const value = metricValue(summary, metric);
 
-  // Gray while a past day is pending, or when the only goal day is a
-  // pending today (nothing complete to judge yet).
-  const status: GoalStatus =
-    (dependsOnManual(metric) && (summary.pendingDays > 0 || targetDays.length === 0)) ||
-    value === null
-      ? "gray"
-      : goalStatusForBand(direction, target, value);
+  // Pending days count as 0 in the value (computeDay), so a goal is always
+  // judged on it; gray only when there is no value (e.g. ROI without ad spend).
+  const status: GoalStatus = value === null ? "gray" : goalStatusForBand(direction, target, value);
 
   return { metric, direction, target, value, status };
 }
@@ -367,9 +450,36 @@ export function isWholeMonth(r: DateRange): boolean {
   return d === 1 && r.to === endOfMonth(y, m);
 }
 
-export function compareRange(r: DateRange, mode: CompareMode, preset: PeriodPreset): DateRange {
+/** The same date one year before; Feb 29 becomes Feb 28. */
+function minusOneYear(s: string): string {
+  const { y, m, d } = parseDateParts(s);
+  const day = m === 2 && d === 29 ? 28 : d;
+  return `${y - 1}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** The comparison window of `r`; null for "none" (no comparison). */
+export function compareRange(
+  r: DateRange,
+  mode: Exclude<CompareMode, "none">,
+  preset: PeriodPreset,
+): DateRange;
+export function compareRange(r: DateRange, mode: CompareMode, preset: PeriodPreset): DateRange | null;
+export function compareRange(
+  r: DateRange,
+  mode: CompareMode,
+  preset: PeriodPreset,
+): DateRange | null {
+  if (mode === "none") return null;
   if (mode === "last_week" || mode === "same_weekday_last_week") {
     return { from: addDays(r.from, -7), to: addDays(r.to, -7) };
+  }
+  if (mode === "same_period_last_year") {
+    // A whole month maps to the same whole month (a leap February included).
+    if (isWholeMonth(r)) {
+      const { y, m } = parseDateParts(r.from);
+      return { from: minusOneYear(r.from), to: endOfMonth(y - 1, m) };
+    }
+    return { from: minusOneYear(r.from), to: minusOneYear(r.to) };
   }
 
   // mode === "previous"

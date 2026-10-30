@@ -1,15 +1,26 @@
-// "Lucro em 12 meses" (spec §5.4, §6). Tenant scope: one bar per month,
-// negative months red, the month in progress lighter and a month with pending
-// days dashed ("incompleto" in the tooltip). Group/all scope: bars stacked by
+// "Lucro em 12 meses" (spec §5.4, §6). Tenant scope: one bar per month with
+// its value on the bar, negative months red, zero centered (symmetric domain)
+// when the series has negatives, a month with no data drawn as a faint dash,
+// the month in progress labeled bold, and the in-progress or incomplete
+// months lighter ("em andamento"/"incompleto" in the tooltip). When fewer
+// than 3 months have data a hint says where the data starts. The header
+// holds the title and the metric toggle (a segmented control). Group/all
+// scope: bars stacked by
 // house (byTenant). CHART_SERIES has five hues and a hue is never cycled, so
 // past four houses the smaller ones fold into "Outras casas". The tooltip
 // shows the month's lucro, anúncios and ROI from the MonthPoint totals.
+// A toggle switches the metric (spec §3.2.4): Lucro líquido | Net |
+// Depósitos. Only the profit is split by house (byTenant), so Net and
+// Depósitos are one bar per month in every scope.
+import { useState } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Legend,
+  Rectangle,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -32,6 +43,59 @@ import {
   chartTooltipStyle,
 } from "@/lib/chart-theme";
 import type { MonthPoint } from "@/lib/finance/types";
+import { cn } from "@/lib/utils";
+
+import { emptyMonth, trendStartHint } from "./display";
+
+export type TrendMetric = "cashResult" | "net" | "depositAmount";
+
+const METRICS: { key: TrendMetric; label: string }[] = [
+  { key: "cashResult", label: "Lucro líquido" },
+  { key: "net", label: "Net" },
+  { key: "depositAmount", label: "Depósitos" },
+];
+
+/**
+ * The chart card's title: "(lucro líquido empilhado por casa)" only while the
+ * bars are the profit stacked by house (group/all scope, Lucro líquido).
+ */
+export function trendChartTitle(stacked: boolean, metric: TrendMetric): string {
+  return stacked && metric === "cashResult"
+    ? "Últimos 12 meses (lucro líquido empilhado por casa)"
+    : "Últimos 12 meses";
+}
+
+/** The month's value for the picked metric. */
+export function trendValue(point: MonthPoint, metric: TrendMetric): number {
+  return point[metric];
+}
+
+/**
+ * The value axis: symmetric around zero when anything is negative (zero in
+ * the middle), else from zero to the largest value.
+ */
+export function trendDomain(values: number[]): [number, number] {
+  const max = Math.max(0, ...values);
+  const min = Math.min(0, ...values);
+  if (min < 0) {
+    const extent = Math.max(max, -min);
+    return [-extent, extent];
+  }
+  return [0, max || 1];
+}
+
+const shortBRL = (value: number) => formatBRL(value).replace(/,\d\d$/, "");
+
+type BarShapeProps = { x: number; y: number; width: number; height: number; index: number };
+
+type LabelProps = {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  value?: number | string;
+  index?: number;
+};
 
 const MAX_NAMED_HOUSES = 4;
 const OTHERS_KEY = "__outras";
@@ -66,7 +130,9 @@ function MonthTooltip({ active, payload }: { active?: boolean; payload?: Tooltip
         {point.inProgress && " · em andamento"}
         {point.incomplete && " · incompleto"}
       </p>
-      <p>Lucro: {formatBRL(point.cashResult)}</p>
+      <p>Lucro líquido: {formatBRL(point.cashResult)}</p>
+      <p>Net: {formatBRL(point.net)}</p>
+      <p>Depósitos: {formatBRL(point.depositAmount)}</p>
       <p>Anúncios: {formatBRL(point.adSpend)}</p>
       <p>ROI: {formatRatio(point.roi)}</p>
     </div>
@@ -78,6 +144,9 @@ export function ProfitTrendChart({
   tenants,
   stacked,
   betleadsSince,
+  metric: controlledMetric,
+  onMetricChange,
+  title,
 }: {
   months: MonthPoint[];
   /** Houses of the scope, sorted by name (dashboard.tenants). */
@@ -85,19 +154,73 @@ export function ProfitTrendChart({
   /** Group/all scope: bars stacked by house. */
   stacked: boolean;
   betleadsSince: string | null;
+  /** Controlled metric (the caller's title follows it); uncontrolled when omitted. */
+  metric?: TrendMetric;
+  onMetricChange?: (metric: TrendMetric) => void;
+  /** Header title; trendChartTitle(stacked, metric) when omitted. */
+  title?: string;
 }) {
+  const [ownMetric, setOwnMetric] = useState<TrendMetric>("cashResult");
+  const metric = controlledMetric ?? ownMetric;
+  const setMetric = (next: TrendMetric) => {
+    setOwnMetric(next);
+    onMetricChange?.(next);
+  };
+
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h2 className="text-lg font-semibold leading-tight">
+        {title ?? trendChartTitle(stacked, metric)}
+      </h2>
+      <div
+        className="inline-flex gap-0.5 rounded-lg border border-border bg-secondary/40 p-0.5"
+        role="group"
+        aria-label="Métrica do gráfico"
+      >
+        {METRICS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            aria-pressed={metric === item.key}
+            onClick={() => setMetric(item.key)}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              metric === item.key
+                ? "bg-secondary font-medium text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   if (!months.length) {
     return (
-      <p className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-        Sem dados para o gráfico.
-      </p>
+      <div className="space-y-4">
+        {header}
+        <p className="flex h-48 items-center justify-center text-sm text-muted-foreground">
+          Sem dados para o gráfico.
+        </p>
+      </div>
     );
   }
 
+  // Only the profit has a per-house split.
+  const byHouse = stacked && metric === "cashResult";
+  const metricLabel = METRICS.find((item) => item.key === metric)?.label ?? "";
   const { series, namedIds } = stackSeries(months, tenants);
-  const data = months.map((point) => {
-    const row: Record<string, unknown> = { ...point, label: monthLabel(point.month) };
-    if (stacked) {
+  const empties = months.map((point) => !byHouse && emptyMonth(point, betleadsSince));
+  const data = months.map((point, index) => {
+    const row: Record<string, unknown> = {
+      ...point,
+      label: monthLabel(point.month),
+      value: trendValue(point, metric),
+      empty: empties[index],
+    };
+    if (byHouse) {
       let others = 0;
       for (const tenant of tenants) {
         const value = point.byTenant[tenant.id] ?? 0;
@@ -109,18 +232,66 @@ export function ProfitTrendChart({
     return row;
   });
 
+  // Stacked bars reach the sum of each sign's parts.
+  const extents = byHouse
+    ? months.flatMap((point) => {
+        const parts = Object.values(point.byTenant);
+        return [
+          parts.filter((part) => part > 0).reduce((sum, part) => sum + part, 0),
+          parts.filter((part) => part < 0).reduce((sum, part) => sum + part, 0),
+        ];
+      })
+    : months.map((point) => trendValue(point, metric));
+  const [low, high] = trendDomain(extents);
+  // Headroom for the value labels.
+  const domain: [number, number] = [low * 1.2, high * 1.2];
+
   const missing = months.some((point) => point.betleadsMissing);
+  const hint = stacked ? null : trendStartHint(months, betleadsSince);
 
   return (
-    <div className="space-y-2">
-      <div className="h-64">
+    <div className="space-y-3">
+      {header}
+      <div className="h-60">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} stackOffset={stacked ? "sign" : undefined}>
+          <BarChart
+            data={data}
+            stackOffset={byHouse ? "sign" : undefined}
+            margin={{ top: 16, right: 4, bottom: 4, left: 4 }}
+          >
             <CartesianGrid {...chartGridProps} />
-            <XAxis dataKey="label" {...chartAxisProps} />
+            <XAxis
+              dataKey="label"
+              {...chartAxisProps}
+              interval={0}
+              tick={(props: {
+                x: number;
+                y: number;
+                index: number;
+                payload: { value: string };
+              }) => {
+                const current = months[props.index]?.inProgress;
+                return (
+                  <text
+                    x={props.x}
+                    y={props.y}
+                    dy={12}
+                    textAnchor="middle"
+                    fontSize={12}
+                    fontWeight={current ? 600 : 400}
+                    fill={current ? "var(--color-foreground)" : "var(--color-muted-foreground)"}
+                  >
+                    {props.payload.value}
+                  </text>
+                );
+              }}
+            />
             <YAxis
               {...chartAxisProps}
+              hide={!byHouse}
               width={88}
+              domain={domain}
+              allowDataOverflow
               tickFormatter={(value) => formatBRL(Number(value)).replace(/,00$/, "")}
             />
             <ReferenceLine y={0} stroke="var(--color-border)" />
@@ -128,7 +299,7 @@ export function ProfitTrendChart({
               content={<MonthTooltip />}
               cursor={{ fill: "var(--color-secondary)", opacity: 0.5 }}
             />
-            {stacked ? (
+            {byHouse ? (
               <>
                 <Legend {...chartLegendProps} />
                 {series.map((item) => (
@@ -144,22 +315,68 @@ export function ProfitTrendChart({
                 ))}
               </>
             ) : (
-              <Bar dataKey="cashResult" name="Lucro líquido" radius={[4, 4, 0, 0]}>
+              <Bar
+                dataKey="value"
+                name={metricLabel}
+                radius={4}
+                maxBarSize={56}
+                shape={(raw: unknown) => {
+                  const props = raw as BarShapeProps;
+                  // No data: a faint dash on the zero line instead of a bar.
+                  if (empties[props.index]) {
+                    return (
+                      <rect
+                        x={props.x + props.width * 0.3}
+                        y={props.y - 1}
+                        width={props.width * 0.4}
+                        height={2}
+                        rx={1}
+                        fill="var(--color-border)"
+                      />
+                    );
+                  }
+                  return <Rectangle {...(raw as object)} radius={4} />;
+                }}
+              >
                 {months.map((point) => (
                   <Cell
                     key={point.month}
-                    fill={point.cashResult < 0 ? CHART_COLORS.danger : CHART_COLORS.primary}
-                    fillOpacity={point.inProgress ? 0.45 : 1}
-                    stroke={point.incomplete ? CHART_COLORS.warning : undefined}
-                    strokeDasharray={point.incomplete ? "4 3" : undefined}
-                    strokeWidth={point.incomplete ? 1.5 : 0}
+                    fill={
+                      trendValue(point, metric) < 0 ? CHART_COLORS.danger : CHART_COLORS.primary
+                    }
+                    fillOpacity={point.inProgress || point.incomplete ? 0.6 : 1}
                   />
                 ))}
+                <LabelList
+                  dataKey="value"
+                  content={(props: LabelProps) => {
+                    if (props.index === undefined || empties[props.index]) return null;
+                    const value = Number(props.value);
+                    const x = Number(props.x) + Number(props.width) / 2;
+                    const y = Number(props.y);
+                    const height = Number(props.height);
+                    const top = Math.min(y, y + height);
+                    const bottom = Math.max(y, y + height);
+                    return (
+                      <text
+                        x={x}
+                        y={value < 0 ? bottom + 14 : top - 6}
+                        textAnchor="middle"
+                        fontSize={12}
+                        fontWeight={600}
+                        fill={value < 0 ? CHART_COLORS.danger : "var(--color-foreground)"}
+                      >
+                        {shortBRL(value)}
+                      </text>
+                    );
+                  }}
+                />
               </Bar>
             )}
           </BarChart>
         </ResponsiveContainer>
       </div>
+      {hint && <p className="text-[13px] text-muted-foreground">{hint}</p>}
       {missing && (
         <p className="text-xs text-muted-foreground">{betleadsMissingNote(betleadsSince)}</p>
       )}

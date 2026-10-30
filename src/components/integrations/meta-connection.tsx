@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import {
   connectMetaSystemUserToken,
@@ -59,6 +60,14 @@ function appendParams(url: string, params: string) {
   return `${clean}${clean.includes("?") ? "&" : "?"}${params}`;
 }
 
+const STALE_SELECTION_RPC_MESSAGE = "Uma das contas selecionadas não pertence à sua operação.";
+const STALE_SELECTION_MESSAGE =
+  "A lista de contas mudou desde que você abriu a tela. Revise e salve de novo.";
+
+function plural(count: number, one: string, many: string) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
 function statusLabel(status?: string) {
   // No connection row at all (Integrações does not load the marketing overview).
   if (!status) return "não conectada";
@@ -82,8 +91,17 @@ export function MetaConnectionPanel({ meta }: { meta?: MarketingIntegration }) {
   const connectMetaTokenMutation = useMutation({
     mutationFn: (accessToken: string) => connectMetaToken({ data: { accessToken } }),
     onSuccess: (result) => {
+      // Contagens do RPC `meta_connect_token`: BMs e contas que a chave alcança.
       toast.success(
-        `${result.accounts.length} conta(s) encontrada(s). Escolha quais acompanhar e salve.`,
+        `${result.created ? "Chave conectada" : "Chave atualizada"}: ${plural(
+          result.businesses,
+          "BM",
+          "BMs",
+        )}, ${plural(result.accountsTotal, "conta", "contas")} (${plural(
+          result.accountsNew,
+          "nova",
+          "novas",
+        )}). Escolha quais acompanhar e salve.`,
       );
       qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
       qc.invalidateQueries({ queryKey: ["marketing-overview"] });
@@ -97,12 +115,24 @@ export function MetaConnectionPanel({ meta }: { meta?: MarketingIntegration }) {
   const metaSelectionMutation = useMutation({
     mutationFn: (accountIds: string[]) => saveMetaSelection({ data: { accountIds } }),
     onSuccess: (result) => {
-      toast.success(`${result.selected} conta(s) selecionada(s)`);
+      toast.success(
+        `${result.selected} conta(s) selecionada(s)${
+          result.added > 0 ? ", a importação dos últimos 90 dias começou" : ""
+        }`,
+      );
       qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
       qc.invalidateQueries({ queryKey: ["marketing-overview"] });
     },
-    onError: (e) =>
-      toast.error(e instanceof Error ? e.message : "Não foi possível salvar as contas"),
+    onError: (e) => {
+      // A lista mudou depois que a tela abriu (redescoberta, chave desconectada):
+      // relê o resumo e pede para revisar, em vez de mostrar o erro do RPC.
+      if (e instanceof Error && e.message === STALE_SELECTION_RPC_MESSAGE) {
+        qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
+        toast.error(STALE_SELECTION_MESSAGE);
+        return;
+      }
+      toast.error(e instanceof Error ? e.message : "Não foi possível salvar as contas");
+    },
   });
 
   const validateMetaMutation = useMutation({
@@ -119,8 +149,16 @@ export function MetaConnectionPanel({ meta }: { meta?: MarketingIntegration }) {
 
   const disconnectMetaMutation = useMutation({
     mutationFn: (connectionId: string) => removeMetaConnection({ data: { connectionId } }),
-    onSuccess: () => {
-      toast.success("Conexão Meta removida");
+    onSuccess: (result) => {
+      const parts = [
+        result.accountsMoved > 0
+          ? `${plural(result.accountsMoved, "conta segue", "contas seguem")} por outra chave`
+          : null,
+        result.accountsStopped > 0
+          ? `${plural(result.accountsStopped, "conta parou", "contas pararam")} de sincronizar`
+          : null,
+      ].filter(Boolean);
+      toast.success(`Chave desconectada${parts.length ? `. ${parts.join("; ")}.` : ""}`);
       qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
       qc.invalidateQueries({ queryKey: ["marketing-overview"] });
     },
@@ -246,25 +284,58 @@ function MetaConnectionWizard({
   disconnectPending: boolean;
 }) {
   const isDemo = useIsDemoTenant();
+  // Só o admin da casa (ou o super admin) altera a conexão; o servidor também confere.
+  // Enquanto o papel carrega, nada fica bloqueado.
+  const { active } = useActiveTenant();
+  const readOnly = Boolean(active) && active?.role !== "admin" && active?.role !== "super_admin";
+  const locked = isDemo || readOnly;
   const connections = useMemo(() => summary?.connections ?? [], [summary?.connections]);
   const activeConnectionIds = useMemo(
     () => new Set(connections.map((item) => item.id)),
     [connections],
   );
+  // Chaves que o worker usa: só as `connected` (uma em erro não lê nem aceita conta nova).
+  const connectedIds = useMemo(
+    () => new Set(connections.filter((item) => item.status === "connected").map((item) => item.id)),
+    [connections],
+  );
+  // Uma conta aparece enquanto alguma chave ativa a alcança (tabela N:N da MB1). A
+  // marcada aparece sempre, mesmo sem chave, para não sumir da tela nem do Salvar.
   const accounts = useMemo(
     () =>
-      (summary?.accounts ?? []).filter((account) => activeConnectionIds.has(account.connection_id)),
+      (summary?.accounts ?? []).filter(
+        (account) =>
+          account.selected ||
+          account.access_connection_ids.some((id) => activeConnectionIds.has(id)),
+      ),
     [summary?.accounts, activeConnectionIds],
   );
+  // O que cada chave alcança: contas e BMs (a BM é atributo da conta, D1).
+  const reachByConnection = useMemo(() => {
+    const reach = new Map<string, { accounts: number; businesses: Set<string> }>();
+    for (const account of accounts) {
+      for (const connectionId of account.access_connection_ids) {
+        const entry = reach.get(connectionId) ?? { accounts: 0, businesses: new Set<string>() };
+        entry.accounts += 1;
+        entry.businesses.add(account.business_id ?? "__sem_bm__");
+        reach.set(connectionId, entry);
+      }
+    }
+    return reach;
+  }, [accounts]);
   const [token, setToken] = useState("");
   const [showGuide, setShowGuide] = useState(connections.length === 0);
   const [showTokenForm, setShowTokenForm] = useState(connections.length === 0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [disconnectId, setDisconnectId] = useState<string | null>(null);
 
+  // A partir de todas as contas do resumo: o Salvar nunca derruba uma conta marcada
+  // em silêncio (desmarcar é sempre uma ação explícita).
   useEffect(() => {
-    setSelectedIds(accounts.filter((account) => account.selected).map((account) => account.id));
-  }, [accounts]);
+    setSelectedIds(
+      (summary?.accounts ?? []).filter((account) => account.selected).map((account) => account.id),
+    );
+  }, [summary?.accounts]);
 
   useEffect(() => {
     if (connections.length === 0) setShowTokenForm(true);
@@ -322,6 +393,11 @@ function MetaConnectionWizard({
       <Button variant="outline" size="sm" onClick={() => setShowGuide((value) => !value)}>
         {showGuide ? "Esconder preparação" : "Como preparar a conta"}
       </Button>
+      {readOnly && (
+        <p className="mt-3 text-meta text-muted-foreground">
+          Só o administrador da casa altera a conexão.
+        </p>
+      )}
       {legacyConnections.length > 0 && (
         <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
           <p className="font-semibold text-warning">Conexão antiga precisa ser substituída</p>
@@ -351,9 +427,7 @@ function MetaConnectionWizard({
         <div className="mt-5 rounded-xl border border-border/60 bg-background/40 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="font-semibold">
-                {connections.length ? "Atualizar credencial" : "Conectar sua conta Meta"}
-              </p>
+              <p className="font-semibold">Conectar chave de acesso</p>
               <p className="text-meta text-muted-foreground">
                 A chave de acesso fica guardada de forma criptografada e não volta a aparecer.
               </p>
@@ -386,7 +460,7 @@ function MetaConnectionWizard({
           <DemoDisabledTooltip active={isDemo}>
             <Button
               className="mt-3 gap-2"
-              disabled={isDemo || connectPending || token.trim().length < 40}
+              disabled={locked || connectPending || token.trim().length < 40}
               onClick={async () => {
                 try {
                   await onConnect(token.trim());
@@ -417,8 +491,13 @@ function MetaConnectionWizard({
                 Revise a origem antes de escolher as contas de anúncio.
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setShowTokenForm(true)}>
-              Atualizar chave de acesso
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={readOnly}
+              onClick={() => setShowTokenForm(true)}
+            >
+              Adicionar ou atualizar chave
             </Button>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
@@ -435,7 +514,24 @@ function MetaConnectionWizard({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-semibold">
-                      {connection.connection_label ?? connection.app_name ?? "Conta Meta"}
+                      {connection.connection_label ??
+                        connection.meta_user_name ??
+                        connection.app_name ??
+                        "Conta Meta"}
+                    </p>
+                    <p className="mt-1 text-meta text-muted-foreground">
+                      Alcança{" "}
+                      {plural(
+                        reachByConnection.get(connection.id)?.businesses.size ?? 0,
+                        "BM",
+                        "BMs",
+                      )}{" "}
+                      ·{" "}
+                      {plural(
+                        reachByConnection.get(connection.id)?.accounts ?? 0,
+                        "conta",
+                        "contas",
+                      )}
                     </p>
                     <p className="mt-1 text-meta text-muted-foreground">
                       App {connection.app_name ?? connection.app_id ?? "identificado"} · chave{" "}
@@ -463,7 +559,7 @@ function MetaConnectionWizard({
                       variant="outline"
                       size="sm"
                       className="gap-2"
-                      disabled={isDemo || validatingConnectionId === connection.id}
+                      disabled={locked || validatingConnectionId === connection.id}
                       onClick={() => onValidate(connection.id)}
                     >
                       {validatingConnectionId === connection.id ? (
@@ -479,7 +575,7 @@ function MetaConnectionWizard({
                       variant="ghost"
                       size="sm"
                       className="gap-2 text-danger hover:text-danger/80"
-                      disabled={isDemo}
+                      disabled={locked}
                       onClick={() => setDisconnectId(connection.id)}
                     >
                       <Trash2 className="h-3.5 w-3.5" /> Desconectar
@@ -503,54 +599,85 @@ function MetaConnectionWizard({
               </span>
             </div>
             <div className="app-scrollbar mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
-              {accounts.map((account) => (
-                <label
-                  key={account.id}
-                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-border/50 px-3 py-3 hover:bg-muted/30"
-                >
-                  <Checkbox
-                    checked={selectedIds.includes(account.id)}
-                    onCheckedChange={(checked) =>
-                      setSelectedIds((current) =>
-                        checked
-                          ? [...current, account.id]
-                          : current.filter((id) => id !== account.id),
-                      )
-                    }
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold">
-                      {account.name ?? account.account_id}
-                    </span>
-                    <span className="text-meta text-muted-foreground">
-                      {account.meta_ad_account_id}
-                    </span>
-                  </span>
-                  <span className="text-meta text-muted-foreground">{account.currency ?? ""}</span>
-                  <Badge
-                    variant="outline"
+              {accounts.map((account) => {
+                const checked = selectedIds.includes(account.id);
+                const hasActiveKey = account.access_connection_ids.some((id) =>
+                  activeConnectionIds.has(id),
+                );
+                // Marcar exige uma chave `connected` com acesso ativo (o RPC recusa sem
+                // ela); a conta já marcada pode sempre ser desmarcada.
+                const selectable = account.access_connection_ids.some((id) => connectedIds.has(id));
+                const blockReason = selectable
+                  ? null
+                  : hasActiveKey
+                    ? "A chave que alcança esta conta está com erro. Teste o acesso."
+                    : "Nenhuma chave conectada alcança esta conta.";
+                return (
+                  <label
+                    key={account.id}
                     className={cn(
-                      "text-meta",
-                      account.sync_status === "healthy" && "border-success/30 text-success",
-                      account.sync_status === "warning" && "border-warning/30 text-warning",
-                      account.sync_status === "error" && "border-danger/30 text-danger",
+                      "flex items-center gap-3 rounded-lg border border-border/50 px-3 py-3 hover:bg-muted/30",
+                      selectable || checked ? "cursor-pointer" : "cursor-not-allowed opacity-70",
                     )}
-                    title={account.last_error ?? undefined}
                   >
-                    {account.sync_status === "healthy"
-                      ? "dados atualizados"
-                      : account.sync_status === "syncing"
-                        ? "sincronizando"
-                        : account.sync_status === "queued"
-                          ? "aguardando"
-                          : account.sync_status === "error"
-                            ? "erro"
-                            : account.sync_status === "warning"
-                              ? "atenção"
-                              : "sem leitura"}
-                  </Badge>
-                </label>
-              ))}
+                    <Checkbox
+                      checked={checked}
+                      disabled={readOnly || (!selectable && !checked)}
+                      onCheckedChange={(next) =>
+                        setSelectedIds((current) =>
+                          next
+                            ? selectable && !current.includes(account.id)
+                              ? [...current, account.id]
+                              : current
+                            : current.filter((id) => id !== account.id),
+                        )
+                      }
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">
+                        {account.name ?? account.account_id}
+                      </span>
+                      <span className="text-meta text-muted-foreground">
+                        {account.meta_ad_account_id}
+                        {account.business_name ? ` · ${account.business_name}` : ""}
+                      </span>
+                      {blockReason && (
+                        <span className="block text-meta text-warning">{blockReason}</span>
+                      )}
+                    </span>
+                    {!hasActiveKey && (
+                      <Badge variant="outline" className="border-warning/30 text-meta text-warning">
+                        sem chave ativa
+                      </Badge>
+                    )}
+                    <span className="text-meta text-muted-foreground">
+                      {account.currency ?? ""}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-meta",
+                        account.sync_status === "healthy" && "border-success/30 text-success",
+                        account.sync_status === "warning" && "border-warning/30 text-warning",
+                        account.sync_status === "error" && "border-danger/30 text-danger",
+                      )}
+                      title={account.last_error ?? undefined}
+                    >
+                      {account.sync_status === "healthy"
+                        ? "dados atualizados"
+                        : account.sync_status === "syncing"
+                          ? "sincronizando"
+                          : account.sync_status === "queued"
+                            ? "aguardando"
+                            : account.sync_status === "error"
+                              ? "erro"
+                              : account.sync_status === "warning"
+                                ? "atenção"
+                                : "sem leitura"}
+                    </Badge>
+                  </label>
+                );
+              })}
               {accounts.length === 0 && (
                 <p className="py-6 text-center text-sm text-muted-foreground">
                   Nenhuma conta de anúncio foi encontrada.
@@ -560,7 +687,7 @@ function MetaConnectionWizard({
             <div className="mt-4 flex justify-end">
               <DemoDisabledTooltip active={isDemo}>
                 <Button
-                  disabled={isDemo || selectionPending || accounts.length === 0}
+                  disabled={locked || selectionPending || accounts.length === 0}
                   onClick={() => onSaveSelection(selectedIds)}
                 >
                   {selectionPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar
@@ -578,10 +705,11 @@ function MetaConnectionWizard({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Desconectar esta conta Meta?</AlertDialogTitle>
+            <AlertDialogTitle>Desconectar esta chave?</AlertDialogTitle>
             <AlertDialogDescription>
-              A chave de acesso guardada será removida e as contas vinculadas deixarão de
-              sincronizar. Os relatórios já importados serão preservados.
+              A chave de acesso guardada será removida. As contas que outra chave conectada também
+              alcança continuam sincronizando por ela; as demais deixam de sincronizar. Os
+              relatórios já importados serão preservados.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

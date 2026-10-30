@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { getTenantGoals, setTenantGoal, type TenantGoalCurrent } from "@/lib/finance.functions";
 import type { GoalDirection, GoalMetric } from "@/lib/finance/types";
 import { getGroupPeople } from "@/lib/groups.functions";
@@ -35,8 +36,8 @@ const METRIC_LABEL: Record<GoalMetric, string> = {
   registrations: "Cadastros",
   ftds: "FTDs",
   deposits: "Depósitos totais",
-  net: "Net bruto",
-  cash_result: "Resultado caixa",
+  net: FINANCE_TERMS.net.label,
+  cash_result: FINANCE_TERMS.cashResult.label,
   cost_per_registration: "Custo por cadastro",
   cost_per_ftd: "Custo por FTD",
   roi: "ROI caixa",

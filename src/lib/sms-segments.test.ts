@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countSmsSegments } from "./sms-segments";
+import { countSmsSegments, toGsm7Text } from "./sms-segments";
 
 describe("countSmsSegments", () => {
   it.each([
@@ -66,5 +66,27 @@ describe("countSmsSegments", () => {
       expect(result.encoding).toBe("GSM-7");
       expect(result.units).toBe(2); // extension chars are 2 units
     }
+  });
+});
+
+describe("toGsm7Text", () => {
+  it("strips accents GSM-7 lacks and keeps the ones it has", () => {
+    expect(toGsm7Text("João, não perca! Ação até amanhã.")).toBe("Joao, nao perca! Acao até amanha.");
+    expect(toGsm7Text("Antônio Fabrício Çé ü")).toBe("Antonio Fabricio Çé ü");
+  });
+
+  it("maps typographic punctuation to plain GSM-7", () => {
+    expect(toGsm7Text("“Oi” – é o 1º… ok’")).toBe('"Oi" - é o 1o... ok\'');
+  });
+
+  it("leaves characters without a GSM-7 form (emoji) untouched", () => {
+    expect(toGsm7Text("Oi 😀")).toBe("Oi 😀");
+  });
+
+  it("keeps a name with accents in a single GSM-7 segment", () => {
+    const sms =
+      "João, saque pago! Sua mare de sorte esta em alta: aproveite e redeposite agora em https://bmkt.click/n3K1mk Para sair, responda SAIR.";
+    expect(countSmsSegments(sms)).toMatchObject({ encoding: "UCS-2", segments: 2 });
+    expect(countSmsSegments(toGsm7Text(sms))).toMatchObject({ encoding: "GSM-7", segments: 1 });
   });
 });

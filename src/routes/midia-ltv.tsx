@@ -44,6 +44,7 @@ import { EmptyState } from "@/components/ui-premium/empty-state";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { getMarketingOverview } from "@/lib/marketing.functions";
 import type {
@@ -355,6 +356,10 @@ function VisualizacaoSection({
   syncRuns: MetaSyncRun[];
 }) {
   const isDemo = useIsDemoTenant();
+  // Só o admin da casa (ou o super admin) sincroniza a Meta; o servidor também confere.
+  // Enquanto o papel carrega, nada fica bloqueado.
+  const { active } = useActiveTenant();
+  const readOnly = Boolean(active) && active?.role !== "admin" && active?.role !== "super_admin";
   const [reportView, setReportView] = useState<
     "creatives" | "audiences" | "campaigns" | "evolution" | "diagnostics"
   >("creatives");
@@ -386,7 +391,7 @@ function VisualizacaoSection({
           <Button
             variant="outline"
             className="gap-2"
-            disabled={isDemo || syncPending || accounts.length === 0}
+            disabled={isDemo || readOnly || syncPending || accounts.length === 0}
             onClick={onSync}
           >
             {syncPending ? (
@@ -397,6 +402,11 @@ function VisualizacaoSection({
             {syncPending ? "sincronização na fila" : "Atualizar agora"}
           </Button>
         </DemoDisabledTooltip>
+        {readOnly && !isDemo && (
+          <span className="text-xs text-muted-foreground">
+            Só o administrador da casa sincroniza a Meta.
+          </span>
+        )}
       </div>
 
       {latestRun && (
@@ -449,7 +459,11 @@ function VisualizacaoSection({
                   >
                     <span>
                       {syncStatusLabel(run.status)} ·{" "}
-                      {run.trigger_type === "manual" ? "manual" : "automática"}
+                      {run.trigger_type === "manual"
+                        ? "manual"
+                        : run.trigger_type === "backfill"
+                          ? "importação inicial"
+                          : "automática"}
                     </span>
                     <span>
                       {run.processed_accounts}/{run.total_accounts} contas ·{" "}

@@ -11,9 +11,19 @@ import {
   legacyEmailBlockSenderConfig,
 } from "./journeys.shared";
 import { activationTriggerConfig, journeyEntryKey } from "./journey-policy";
+import { previewJourneyActivation } from "./journey-activation-preview.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 import { toggleJourneyExpress } from "./journey-express";
 import { assertTenantEmailSender } from "./campaign-refs.server";
+import { maskPhone } from "./campaign-recipients";
+import {
+  DEAD_LEAD_THRESHOLD_DEFAULT,
+  DEAD_LEAD_THRESHOLD_MAX,
+  DEAD_LEAD_THRESHOLD_MIN,
+  maskDeadLeadEmail,
+  normalizeBackfillResult,
+  sanitizeDeadLeadSearch,
+} from "./dead-leads.shared";
 
 const journeyIdSchema = z.object({ id: z.string().uuid() });
 const legacyJourneySchema = z.object({
@@ -29,6 +39,14 @@ const journeyContactLimitsSchema = z
   .object({
     max24h: z.number().int().min(1).max(1000).nullable(),
     max7d: z.number().int().min(1).max(5000).nullable(),
+    // Optional so older callers (only the two limits) keep the saved rule as is.
+    deadLeadEnabled: z.boolean().optional(),
+    deadLeadThreshold: z
+      .number()
+      .int()
+      .min(DEAD_LEAD_THRESHOLD_MIN)
+      .max(DEAD_LEAD_THRESHOLD_MAX)
+      .optional(),
   })
   .superRefine((value, context) => {
     if (value.max24h != null && value.max7d != null && value.max7d < value.max24h) {
@@ -833,7 +851,7 @@ export const enrollJourneyManually = createServerFn({ method: "POST" })
     await requireJourneyDraftEditor(context.userId, tenantId);
     const { data: journey, error: journeyError } = await db
       .from("journeys")
-      .select("id,version,status,trigger_type,entry_rules")
+      .select("id,version,status,trigger_type,entry_rules,express")
       .eq("id", data.journeyId)
       .eq("tenant_id", tenantId)
       .maybeSingle();
@@ -878,7 +896,31 @@ export const enrollJourneyManually = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error && !/duplicate|unique/i.test(error.message))
       throw new Error("Não foi possível matricular o jogador.");
-    if (!created) return { ok: true, duplicate: true };
+    if (!created) {
+      // The entry trigger silently drops dead leads from non-express journeys;
+      // tell the operator instead of reporting a duplicate.
+      if (!journey.express) {
+        const [{ data: limits }, { data: dead }] = await Promise.all([
+          db
+            .from("journey_contact_limits")
+            .select("dead_lead_enabled")
+            .eq("tenant_id", tenantId)
+            .maybeSingle(),
+          db
+            .from("journey_dead_leads")
+            .select("player_id")
+            .eq("tenant_id", tenantId)
+            .eq("player_id", player.id)
+            .is("revived_at", null)
+            .maybeSingle(),
+        ]);
+        if (limits?.dead_lead_enabled && dead)
+          throw new Error(
+            "Este jogador está em Leads mortos. Reative-o na aba Leads mortos antes de matriculá-lo.",
+          );
+      }
+      return { ok: true, duplicate: true };
+    }
     await db.from("journey_events").insert({
       tenant_id: tenantId,
       journey_id: journey.id,
@@ -935,19 +977,32 @@ export const listJourneyOperations = createServerFn({ method: "GET" })
     };
   });
 
+function deadLeadRule(
+  row: { dead_lead_enabled?: boolean | null; dead_lead_threshold?: number | null } | null,
+) {
+  return {
+    deadLeadEnabled: row?.dead_lead_enabled === true,
+    deadLeadThreshold:
+      row?.dead_lead_threshold == null
+        ? DEAD_LEAD_THRESHOLD_DEFAULT
+        : Number(row.dead_lead_threshold),
+  };
+}
+
 export const getJourneyContactLimits = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await tenant(context);
     const { data, error } = await db
       .from("journey_contact_limits")
-      .select("max_messages_24h,max_messages_7d")
+      .select("max_messages_24h,max_messages_7d,dead_lead_enabled,dead_lead_threshold")
       .eq("tenant_id", tenantId)
       .maybeSingle();
     if (error) throw new Error("Não foi possível carregar os limites de contato.");
     return {
       max24h: data?.max_messages_24h == null ? null : Number(data.max_messages_24h),
       max7d: data?.max_messages_7d == null ? null : Number(data.max_messages_7d),
+      ...deadLeadRule(data),
     };
   });
 
@@ -962,6 +1017,10 @@ export const saveJourneyContactLimits = createServerFn({ method: "POST" })
         tenant_id: tenantId,
         max_messages_24h: data.max24h,
         max_messages_7d: data.max7d,
+        ...(data.deadLeadEnabled === undefined ? {} : { dead_lead_enabled: data.deadLeadEnabled }),
+        ...(data.deadLeadThreshold === undefined
+          ? {}
+          : { dead_lead_threshold: data.deadLeadThreshold }),
         updated_by: context.userId,
       },
       { onConflict: "tenant_id" },
@@ -970,29 +1029,223 @@ export const saveJourneyContactLimits = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+const deadLeadsListSchema = z.object({
+  status: z.enum(["dead", "revived"]).default("dead"),
+  search: z.string().max(120).optional(),
+  page: z.number().int().min(0).default(0),
+  pageSize: z.number().int().min(1).max(100).default(25),
+});
+const DEAD_LEAD_SEARCH_PLAYER_CAP = 300;
+const DEAD_LEAD_COLUMNS =
+  "player_id,marked_at,messages_count,last_action_at,last_action_type,last_journey_id,exited_enrollments,revived_at,revived_reason";
+const DEAD_LEAD_PLAYER_COLUMNS =
+  "id,nome,telefone,email,player_external_id,total_depositado,ftd_em,ultimo_deposito,ultimo_login,vip,created_at";
+
+async function loadDeadLeadRule(tenantId: string) {
+  const { data, error } = await db
+    .from("journey_contact_limits")
+    .select("dead_lead_enabled,dead_lead_threshold")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (error) throw new Error("Não foi possível carregar a regra de leads mortos.");
+  return deadLeadRule(data);
+}
+
+/**
+ * "Leads mortos" tab: one page of dead (or revived) leads plus the summary
+ * cards. Search matches players first (name, phone, e-mail, external id),
+ * then the page is read from journey_dead_leads; contact data is masked.
+ */
+export const listDeadLeads = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => deadLeadsListSchema.parse(value ?? {}))
+  .handler(async ({ data, context }) => {
+    const tenantId = await tenant(context);
+    const since30d = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const summaryPromise = Promise.all([
+      db
+        .from("journey_dead_leads")
+        .select("player_id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .is("revived_at", null),
+      db
+        .from("journey_dead_leads")
+        .select("player_id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .gte("revived_at", since30d),
+      loadDeadLeadRule(tenantId),
+    ]);
+
+    const term = sanitizeDeadLeadSearch(data.search);
+    let searchIds: string[] | null = null;
+    if (term) {
+      const like = `%${term}%`;
+      const digits = term.replace(/\D/g, "");
+      const filters = [
+        `nome.ilike.${like}`,
+        `email.ilike.${like}`,
+        `player_external_id.ilike.${like}`,
+        ...(digits.length >= 3 ? [`telefone.ilike.%${digits}%`] : []),
+      ];
+      const { data: matches, error } = await db
+        .from("players")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .or(filters.join(","))
+        .limit(DEAD_LEAD_SEARCH_PLAYER_CAP);
+      if (error) throw new Error("Não foi possível buscar os jogadores.");
+      searchIds = (matches ?? []).map((row: { id: string }) => row.id);
+    }
+
+    let rows: any[] = [];
+    let total = 0;
+    if (searchIds === null || searchIds.length > 0) {
+      let query = db
+        .from("journey_dead_leads")
+        .select(DEAD_LEAD_COLUMNS, { count: "exact" })
+        .eq("tenant_id", tenantId);
+      query =
+        data.status === "dead"
+          ? query.is("revived_at", null).order("marked_at", { ascending: false })
+          : query.not("revived_at", "is", null).order("revived_at", { ascending: false });
+      if (searchIds) query = query.in("player_id", searchIds);
+      const from = data.page * data.pageSize;
+      const { data: page, count, error } = await query.range(from, from + data.pageSize - 1);
+      if (error) throw new Error("Não foi possível carregar os leads mortos.");
+      rows = page ?? [];
+      total = Number(count ?? 0);
+    }
+
+    const playerIds = rows.map((row) => row.player_id);
+    const journeyIds = [...new Set(rows.map((row) => row.last_journey_id).filter(Boolean))];
+    const [playersResult, journeysResult] = await Promise.all([
+      playerIds.length
+        ? db
+            .from("players")
+            .select(DEAD_LEAD_PLAYER_COLUMNS)
+            .eq("tenant_id", tenantId)
+            .in("id", playerIds)
+        : { data: [], error: null },
+      journeyIds.length
+        ? db.from("journeys").select("id,name").eq("tenant_id", tenantId).in("id", journeyIds)
+        : { data: [], error: null },
+    ]);
+    if (playersResult.error) throw new Error("Não foi possível carregar os jogadores.");
+    if (journeysResult.error) throw new Error("Não foi possível carregar as jornadas.");
+    const players = new Map<string, any>(
+      (playersResult.data ?? []).map((player: any) => [player.id, player]),
+    );
+    const journeyNames = new Map<string, string>(
+      (journeysResult.data ?? []).map((journey: any) => [journey.id, journey.name]),
+    );
+
+    const [deadCount, revivedCount, rule] = await summaryPromise;
+    if (deadCount.error || revivedCount.error)
+      throw new Error("Não foi possível carregar o resumo de leads mortos.");
+
+    return {
+      rows: rows.map((row) => {
+        const player = players.get(row.player_id);
+        return {
+          playerId: row.player_id as string,
+          nome: (player?.nome as string | undefined) ?? null,
+          telefone: player?.telefone ? maskPhone(player.telefone) : null,
+          email: maskDeadLeadEmail(player?.email),
+          externalId: (player?.player_external_id as string | null | undefined) ?? null,
+          markedAt: row.marked_at as string,
+          messagesCount: Number(row.messages_count ?? 0),
+          lastActionAt: (row.last_action_at as string | null) ?? null,
+          lastActionType: (row.last_action_type as string | null) ?? null,
+          lastJourneyId: (row.last_journey_id as string | null) ?? null,
+          lastJourneyName: row.last_journey_id
+            ? (journeyNames.get(row.last_journey_id) ?? null)
+            : null,
+          exitedEnrollments: Number(row.exited_enrollments ?? 0),
+          revivedAt: (row.revived_at as string | null) ?? null,
+          revivedReason: (row.revived_reason as string | null) ?? null,
+          totalDepositado: Number(player?.total_depositado ?? 0),
+          hasFtd: Boolean(player?.ftd_em),
+          ftdAt: (player?.ftd_em as string | null | undefined) ?? null,
+          ultimoDeposito: (player?.ultimo_deposito as string | null | undefined) ?? null,
+          ultimoLogin: (player?.ultimo_login as string | null | undefined) ?? null,
+          vip: player?.vip === true,
+          playerCreatedAt: (player?.created_at as string | null | undefined) ?? null,
+        };
+      }),
+      total,
+      searchCapped: (searchIds?.length ?? 0) >= DEAD_LEAD_SEARCH_PLAYER_CAP,
+      summary: {
+        dead: Number(deadCount.count ?? 0),
+        revivedLast30d: Number(revivedCount.count ?? 0),
+        enabled: rule.deadLeadEnabled,
+        threshold: rule.deadLeadThreshold,
+      },
+    };
+  });
+
+/** Manual reactivation: the lead leaves the dead list and may enter journeys again. */
+export const reviveDeadLeadFn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => z.object({ playerId: z.string().uuid() }).parse(value))
+  .handler(async ({ data, context }) => {
+    const tenantId = await tenant(context);
+    await requireJourneyDraftEditor(context.userId, tenantId);
+    const { data: revived, error } = await db.rpc("revive_dead_lead", {
+      p_tenant_id: tenantId,
+      p_player_id: data.playerId,
+      p_reason: "manual",
+    });
+    if (error) throw new Error("Não foi possível reativar o lead.");
+    return { revived: revived === true };
+  });
+
+/**
+ * One backfill round over the current base (default batch size of the RPC).
+ * The UI calls it again while `remaining` is true, with a round cap.
+ */
+export const runDeadLeadBackfill = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await tenant(context);
+    await requireJourneyDraftEditor(context.userId, tenantId);
+    const rule = await loadDeadLeadRule(tenantId);
+    if (!rule.deadLeadEnabled) {
+      throw new Error(
+        "Ligue a regra de leads mortos em Limites de contato antes de avaliar a base.",
+      );
+    }
+    const { data, error } = await db.rpc("backfill_dead_leads", { p_tenant_id: tenantId });
+    if (error) throw new Error("Não foi possível avaliar a base atual.");
+    return normalizeBackfillResult(data);
+  });
+
 /**
  * P3: impact of publishing a journey "including the current base" — players
- * that would enter now and the cost of their first message.
+ * that would enter now and the cost of their first message. P1.2: counted
+ * with the scanner's matcher (audience, entry filters, max event age) and
+ * priced by SMS segments, plus the SMS cost of one full pass per player.
  */
 export const getJourneyActivationEstimate = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((value: unknown) => z.object({ id: z.string().uuid() }).parse(value))
   .handler(async ({ data, context }) => {
     const tenantId = await tenant(context);
-    const userDb = context.supabase as any;
-    const { data: rows, error } = await userDb.rpc("journey_activation_estimate", {
-      _journey: data.id,
-    });
-    if (error) throw new Error("Não foi possível estimar o impacto da publicação.");
-    const row = (rows ?? [])[0] as
-      { eligible: number | string | null; supported: boolean } | undefined;
+    let preview: Awaited<ReturnType<typeof previewJourneyActivation>>;
+    try {
+      preview = await previewJourneyActivation(data.id, tenantId);
+    } catch {
+      throw new Error("Não foi possível estimar o impacto da publicação.");
+    }
+    if (!preview) throw new Error("Jornada não encontrada.");
     const prices = await getEffectivePrices(tenantId);
     const price = prices.sms.unitPrice;
-    const eligible = row?.eligible == null ? null : Number(row.eligible);
+    const eligible = preview.eligible;
     return {
-      supported: Boolean(row?.supported),
+      supported: preview.supported,
       eligible,
       pricePerSms: price,
-      firstSendCost: eligible == null ? null : eligible * price,
+      firstSendCost: eligible == null ? null : eligible * price * preview.firstSmsSegments,
+      smsSteps: preview.smsSteps,
+      costPerPlayerPass: price * preview.segmentsPerPass,
     };
   });

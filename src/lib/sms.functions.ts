@@ -38,6 +38,7 @@ import {
   readSmsBreaker,
   reportSmsProviderAccountFailure,
   reportUnknownSmsProviderRefusal,
+  smsBreakerKey,
   smsSuspendedMessage,
 } from "./sms-provider-breaker.server";
 import type { LinkTrackingContext } from "./shortio.server";
@@ -66,13 +67,20 @@ import {
   reserveForDelivery,
   refundForDelivery,
 } from "./billing/wallet.server";
-import { countSmsSegments } from "./sms-segments";
+import { countSmsSegments, toGsm7Text } from "./sms-segments";
+import { captureServerException } from "@/lib/observability/sentry.server";
 import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 import { externalListBlockedVariables, externalListVariablesError } from "./campaign-external-list";
+import {
+  channelConfiguredFor,
+  ProviderAccountUnavailableError,
+  resolveSmsAccount,
+  type ShortBrasilAccount,
+  type SmsAccount,
+} from "./provider-accounts.server";
+import { smsBreakerKeyForTenant } from "./sms-account-gates.server";
+import { postInfobipSms } from "./infobip-sms.server";
 
-const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
-const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
-const DEFAULT_SHORTCODE_MESSAGES_URL = "https://api.shortcode.com.br/messages";
 // Mantém a tentativa abaixo do timeout de uma server function. Sem isso, uma
 // conexão TCP bloqueada pelo provedor pode deixar o envio preso indefinidamente.
 const SHORT_BRASIL_REQUEST_TIMEOUT_MS = 8_000;
@@ -129,24 +137,21 @@ function campaignUnresolvedSummary(resolution: RecipientResolution) {
   };
 }
 
-function shortBrasilSingleUrl(): string {
-  return process.env.SHORT_BRASIL_SMS_SINGLE_URL ?? DEFAULT_SHORT_BRASIL_SINGLE_URL;
-}
-
-export function shortBrasilBulkUrl(): string {
-  return process.env.SHORT_BRASIL_SMS_BULK_URL ?? DEFAULT_SHORT_BRASIL_BULK_URL;
-}
-
-function shortcodeMessagesUrl(): string {
-  return process.env.SHORTCODE_SMS_URL ?? DEFAULT_SHORTCODE_MESSAGES_URL;
-}
-
-function cleanCredential(raw: string | undefined): string {
-  return (raw ?? "")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .trim()
-    .replace(/^['"]+|['"]+$/g, "")
-    .trim();
+/**
+ * Conta SMS da casa (provider-accounts.server.ts). Uma conta da casa
+ * indispon\u00EDvel vira falha `misconfigured`: nada \u00E9 enviado e n\u00E3o h\u00E1 fallback
+ * para a conta padr\u00E3o.
+ */
+async function smsAccountFor(
+  tenantId: string | null,
+): Promise<{ account: SmsAccount } | { account: null; error: string }> {
+  try {
+    return { account: await resolveSmsAccount(tenantId) };
+  } catch (error) {
+    if (!(error instanceof ProviderAccountUnavailableError)) throw error;
+    console.error("SMS provider account unavailable", { tenantId, error: error.message });
+    return { account: null, error: error.message };
+  }
 }
 
 /** Fingerprint curto e irreversivel so pra confirmar nos logs quais credenciais
@@ -195,17 +200,6 @@ export function renderSmsVariables(
   return renderTemplate(content, vars, house);
 }
 
-export function shortBrasilCredentials(): { usuario: string; chave: string } {
-  return {
-    usuario: cleanCredential(process.env.SHORT_BRASIL_SMS_USUARIO),
-    chave: cleanCredential(process.env.SHORT_BRASIL_SMS_CHAVE),
-  };
-}
-
-export function shortcodeToken(): string {
-  return cleanCredential(process.env.SHORTCODE_SMS_TOKEN);
-}
-
 async function shortBrasilFetch(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SHORT_BRASIL_REQUEST_TIMEOUT_MS);
@@ -242,7 +236,12 @@ function shortcodeResponseFailed(body: unknown): boolean {
   });
 }
 
-async function callShortBrasil(
+/**
+ * Sends one SMS through the house's SMS account: Short Brasil or Infobip
+ * (provider-accounts.server.ts). Guard, account resolution and the shape of
+ * the result are the same for both.
+ */
+async function callSmsProvider(
   tenantId: string | null,
   to: string,
   content: string,
@@ -261,12 +260,48 @@ async function callShortBrasil(
       idempotencyKey: "",
       errorKind: null as ProviderErrorKind | null,
       demoBlocked: true as const,
+      providerAccountId: null as string | null,
     };
   }
-  const token = shortcodeToken();
-  const { usuario, chave } = shortBrasilCredentials();
+  const resolved = await smsAccountFor(tenantId);
+  if (!resolved.account) {
+    return {
+      ok: false as const,
+      status: 0,
+      body: { error: resolved.error },
+      idempotencyKey: "",
+      errorKind: "misconfigured" as ProviderErrorKind,
+      providerAccountId: null as string | null,
+    };
+  }
+  const message = renderSmsVariables(content, variables);
+  if (resolved.account.provider === "infobip") {
+    return {
+      ...(await postInfobipSms(resolved.account, to, message, idempotencyKey)),
+      provider: "infobip" as const,
+    };
+  }
+  return {
+    ...(await postShortBrasilSingle(resolved.account, to, message, idempotencyKey)),
+    provider: "short-brasil" as const,
+  };
+}
+
+/**
+ * One SMS through one Short Brasil account (no house guard, billing or log:
+ * callers own those). Also used by the super admin's connection test.
+ */
+export async function postShortBrasilSingle(
+  account: ShortBrasilAccount,
+  to: string,
+  message: string,
+  idempotencyKey: string = crypto.randomUUID(),
+) {
+  const providerAccountId = account.id as string | null;
+  const token = account.shortcodeToken;
+  const { usuario, chave } = account;
   if (!token && (!usuario || !chave)) {
-    console.error("SMS Short Brasil credentials missing");
+    console.error("SMS Short Brasil credentials missing", { providerAccountId });
     return {
       ok: false as const,
       status: 0,
@@ -274,13 +309,13 @@ async function callShortBrasil(
         error:
           "SHORTCODE_SMS_TOKEN ou SHORT_BRASIL_SMS_USUARIO/SHORT_BRASIL_SMS_CHAVE nao configurados",
       },
+      providerAccountId,
       idempotencyKey: "",
       errorKind: "misconfigured" as ProviderErrorKind,
     };
   }
   const credentialFp = await credentialFingerprint(token || usuario);
   let res: Response;
-  const message = renderSmsVariables(content, variables);
   const payload = token
     ? [{ external_id: idempotencyKey, number: toShortBrasilCell(to), message }]
     : { celular: toShortBrasilCell(to), mensagem: message, parceiroId: idempotencyKey };
@@ -296,7 +331,7 @@ async function callShortBrasil(
         api: token ? "shortcode-v1" : "short-brasil-legacy",
         attempt,
       });
-      res = await shortBrasilFetch(token ? shortcodeMessagesUrl() : shortBrasilSingleUrl(), {
+      res = await shortBrasilFetch(token ? account.shortcodeUrl : account.singleUrl, {
         method: "POST",
         headers: token
           ? {
@@ -329,6 +364,7 @@ async function callShortBrasil(
         body: { error: err instanceof Error ? err.message : String(err), attempts: attempt },
         idempotencyKey,
         errorKind: errorKind as ProviderErrorKind,
+        providerAccountId,
       };
     }
     if (res.status >= 500 && res.status <= 599 && attempt < maxAttempts) {
@@ -371,6 +407,7 @@ async function callShortBrasil(
     body,
     idempotencyKey,
     errorKind: null as ProviderErrorKind | null,
+    providerAccountId,
   };
 }
 
@@ -398,8 +435,22 @@ export async function callShortBrasilSmsBulk(args: {
   if (blocked) {
     return { ok: false, status: 0, body: { error: blocked }, idempotencyKey: "", dispatchId: null };
   }
-  const token = shortcodeToken();
-  const { usuario, chave } = shortBrasilCredentials();
+  const resolved = await smsAccountFor(args.tenantId);
+  if (!resolved.account) {
+    return { ok: false, status: 0, body: { error: resolved.error }, idempotencyKey: "", dispatchId: null };
+  }
+  const account = resolved.account;
+  if (account.provider !== "short_brasil") {
+    return {
+      ok: false,
+      status: 0,
+      body: { error: "Envio em lote só existe na Short Brasil" },
+      idempotencyKey: "",
+      dispatchId: null,
+    };
+  }
+  const token = account.shortcodeToken;
+  const { usuario, chave } = account;
   if (!token && (!usuario || !chave)) {
     return {
       ok: false,
@@ -433,7 +484,7 @@ export async function callShortBrasilSmsBulk(args: {
   while (true) {
     attempt++;
     try {
-      res = await shortBrasilFetch(token ? shortcodeMessagesUrl() : shortBrasilBulkUrl(), {
+      res = await shortBrasilFetch(token ? account.shortcodeUrl : account.bulkUrl, {
         method: "POST",
         headers: token
           ? {
@@ -520,6 +571,10 @@ async function logSend(row: {
   tenant_id?: string | null;
   /** Units reserved from the wallet for this send (Task 6 adds the column). */
   billed_units?: number | null;
+  /** Conta de provedor que fez o envio; null quando nenhuma conta foi usada. */
+  provider_account_id?: string | null;
+  /** Default: short-brasil (the platform SMS account). */
+  provider?: "short-brasil" | "infobip";
 }) {
   const { data, error } = await supabaseAdmin
     .from("sms_send_logs")
@@ -527,7 +582,7 @@ async function logSend(row: {
       to_phone: row.to,
       content: row.content,
       status: row.status,
-      provider: "short-brasil",
+      provider: row.provider ?? "short-brasil",
       provider_response: (row.provider_response ?? {}) as Json,
       error: row.error,
       idempotency_key: row.idempotency_key || null,
@@ -542,6 +597,7 @@ async function logSend(row: {
       flow_lead_id: row.flow_lead_id ?? null,
       ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
       billed_units: row.billed_units ?? null,
+      provider_account_id: row.provider_account_id ?? null,
     })
     .select("id")
     .single();
@@ -860,6 +916,9 @@ export async function sendSmsInternal(args: {
     preparedContent = prepared.content;
     trackedDispatchIds = prepared.links.map((link) => link.dispatchId);
   }
+  // One accent (a lead named "João") would switch the whole SMS to UCS-2 and
+  // multiply the segments billed; send the GSM-7 form instead.
+  preparedContent = toGsm7Text(preparedContent);
   let billingReferenceId: string = crypto.randomUUID();
   let creditReserved = false;
   // Segments are counted on the FINAL content actually sent (after
@@ -902,33 +961,49 @@ export async function sendSmsInternal(args: {
   }
 
   const sendStartedAt = new Date();
-  const r = await callShortBrasil(
+  const r = await callSmsProvider(
     billingTenantId,
     normalized,
     preparedContent,
     undefined,
     deliveryKey,
   );
-  const providerMessageId = r.ok ? extractProviderMessageId(r.body) : null;
-  const errorSummary = r.ok ? null : summarizeProviderError(r.status, r.body);
+  // The Infobip adapter reports its own message id, refusal reason and account
+  // verdict; the Short Brasil fields are read from its body.
+  const viaInfobip = "provider" in r && r.provider === "infobip";
+  const providerMessageId = r.ok
+    ? viaInfobip
+      ? r.providerMessageId
+      : extractProviderMessageId(r.body)
+    : null;
+  const errorSummary = r.ok
+    ? null
+    : viaInfobip
+      ? r.errorSummary
+      : summarizeProviderError(r.status, r.body);
   // A demo block from the transport guard is final: never "pending"/retried.
   const demoBlockedAtTransport = "demoBlocked" in r && r.demoBlocked === true;
   const isTemporary =
     !r.ok && !demoBlockedAtTransport && (r.status === 0 || r.status === 429 || r.status >= 500);
   // Account-level refusal (101/505, HTTP 401/402/403): not the lead's fault.
-  // Opens the SMS circuit breaker; workers defer without consuming attempts.
+  // Opens the circuit breaker of the account that sent; workers defer the
+  // houses on that account without consuming attempts.
   const accountReason =
     !r.ok && r.errorKind === null && r.status > 0
-      ? smsProviderAccountReason(r.status, r.body)
+      ? viaInfobip
+        ? r.accountReason
+        : smsProviderAccountReason(r.status, r.body)
       : null;
+  const breakerKey = smsBreakerKey(r.providerAccountId);
   if (accountReason) {
     await reportSmsProviderAccountFailure({
       reason: accountReason,
       error: errorSummary ?? `HTTP ${r.status}`,
       sendStartedAt,
+      key: breakerKey,
     });
   } else if (r.ok) {
-    await noteSmsProviderSuccess(sendStartedAt);
+    await noteSmsProviderSuccess(sendStartedAt, breakerKey);
   }
   if (!r.ok && creditReserved && billingTenantId) {
     await refundSmsCredit(
@@ -937,6 +1012,10 @@ export async function sendSmsInternal(args: {
       errorSummary ?? `SMS nao aceito pelo provedor: HTTP ${r.status}`,
     );
   }
+  // Once the provider accepted the SMS (and the wallet was charged), failing to
+  // write the log must not turn into an error: callers would retry and send it
+  // again (28/10/2026, missing provider_account_id column: 709 attempts for 292
+  // journey items). Reported instead; a refused send still throws.
   const messageLogId = await logSend({
     to: normalized,
     content: preparedContent,
@@ -959,6 +1038,16 @@ export async function sendSmsInternal(args: {
     flow_lead_id: args.flowLeadId,
     tenant_id: billingTenantId ?? args.tenantId ?? null,
     billed_units: creditReserved ? billedUnits : null,
+    provider_account_id: r.providerAccountId,
+    provider: viaInfobip ? "infobip" : "short-brasil",
+  }).catch((logError: unknown) => {
+    if (!r.ok) throw logError;
+    captureServerException(logError, {
+      job: "sms_send_log",
+      tenantId: billingTenantId ?? args.tenantId ?? undefined,
+      tags: { reason: "log_after_accepted" },
+    });
+    return null;
   });
   if (messageLogId && trackedDispatchIds.length > 0) {
     const { error: dispatchLogError } = await (supabaseAdmin as any)
@@ -986,6 +1075,8 @@ export async function sendSmsInternal(args: {
         errorKind: (accountReason
           ? "provider_account"
           : (r.errorKind ?? null)) as ProviderErrorKind | null,
+        /** Account that refused; null = the platform account or none. */
+        providerAccountId: r.providerAccountId,
       };
 }
 
@@ -993,13 +1084,10 @@ export async function sendSmsInternal(args: {
 
 export const smsProviderStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const health = tenantChannelHealth(
-      Boolean(
-        process.env.SHORTCODE_SMS_TOKEN ||
-        (process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
-      ),
-    );
+  .handler(async ({ context }) => {
+    // The caller's house account; without a resolvable house, the platform one.
+    const tenantId = await resolveCurrentTenantId(context.supabase).catch(() => null);
+    const health = tenantChannelHealth(await channelConfiguredFor(tenantId, "sms"));
     return { ...health, configured: health.available };
   });
 
@@ -1360,11 +1448,16 @@ export const sendBulkSms = createServerFn({ method: "POST" })
       temporary?: boolean;
     }[] = [];
     const concurrency = 5;
-    // SMS circuit breaker: while the provider refuses the account, nothing is
-    // sent here; recipients stay pending for the campaign worker (same key).
-    const breaker = await readSmsBreaker({ force: true });
+    // SMS circuit breaker of the house's account: while the provider refuses
+    // it, nothing is sent here; recipients stay pending for the campaign
+    // worker (same key).
+    const breakerKey = await smsBreakerKeyForTenant(tenantId);
+    const breaker =
+      breakerKey === null
+        ? null
+        : await readSmsBreaker({ force: true, key: breakerKey });
     let providerSuspended: string | null =
-      breaker.state === "closed" ? null : smsSuspendedMessage(breaker);
+      !breaker || breaker.state === "closed" ? null : smsSuspendedMessage(breaker);
     for (let i = 0; i < targets.length; i += concurrency) {
       const batch = targets.slice(i, i + concurrency);
       const batchResults = await Promise.all(
@@ -1398,7 +1491,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             deliveryKey: await campaignDeliveryKey(immediateCampaign.id, t.playerId),
           });
           if (!r.ok && (r as { errorKind?: unknown }).errorKind === "provider_account") {
-            providerSuspended = smsSuspendedMessage(cachedSmsBreaker());
+            providerSuspended = smsSuspendedMessage(cachedSmsBreaker(breakerKey ?? undefined));
           }
           return {
             phone: t.phone,

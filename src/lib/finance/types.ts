@@ -24,14 +24,21 @@ export type FinanceDayInput = {
   ggr: number | null;
   ggrFeePct: number;
   movementFeePct: number;
+  /** True when `ggr` was allocated from the month's accumulated total (allocateMonthlyGgr); absent = false. */
+  ggrEstimated?: boolean;
 };
 
+/** A house's accumulated GGR ("Perdas na casa") for one month, valid up to `validThrough`. */
+export type MonthlyGgr = { month: string /* "YYYY-MM-01" */; ggr: number; validThrough: string };
+
 export type FinanceDay = FinanceDayInput & {
+  ggrEstimated: boolean;
+  /** Anúncios or GGR missing; the results below still count them as 0. */
   pending: boolean;
-  net: number | null;
-  ggrFee: number | null;
-  movementFee: number | null;
-  cashResult: number | null;
+  net: number;
+  ggrFee: number;
+  movementFee: number;
+  cashResult: number;
   roi: number | null;
   costPerRegistration: number | null;
   costPerFtd: number | null;
@@ -53,7 +60,8 @@ export type PeriodSummary = {
   net: number;
   ggrFee: number;
   movementFee: number;
-  otherCosts: number | null;
+  /** Other costs dated inside the window (0 when none). */
+  otherCosts: number;
   cashResult: number;
   roi: number | null;
   costPerRegistration: number | null;
@@ -63,6 +71,11 @@ export type PeriodSummary = {
   betleadsUsage: number;
   /** Plan fee for the window's closed month; null when the window is not a closed month. */
   betleadsFee: number | null;
+  /**
+   * True when the window holds some but not all of the days a monthly GGR
+   * total was allocated to (its GGR is an estimate); see hasPartialGgrEstimate.
+   */
+  ggrEstimated: boolean;
 };
 
 /** The Betleads cost for a window, passed into summarize() by the caller. */
@@ -70,7 +83,7 @@ export type BetleadsCost = { usage: number; fee: number | null };
 
 /** A row of the cost breakdown shown next to the period summary. */
 export type CostLineKey =
-  "ad_spend" | "ggr_fee" | "movement_fee" | "betleads" | `category:${string}`;
+  "ad_spend" | "ggr_fee" | "movement_fee" | "sends" | "fee" | `category:${string}`;
 
 export type CostLine = {
   key: CostLineKey;
@@ -80,11 +93,79 @@ export type CostLine = {
   auto: boolean;
 };
 
+export type SendItem = "sms" | "voice_30s" | "email";
+
+export type SendUsage = {
+  item: SendItem;
+  units: number;
+  amount: number;
+  missingCostUnits: number;
+};
+
+export type DayActivity = {
+  depositCount: number;
+  depositorCount: number;
+  withdrawalCount: number;
+  generatedPixCount: number;
+  crmSent: number;
+  crmClicks: number;
+  crmDirectConversions: number;
+  crmDirectRevenue: number;
+  crmInfluencedRevenue: number;
+  adImpressions: number;
+  adClicks: number;
+};
+
+export type SendLine = {
+  item: SendItem;
+  label: string;
+  unitLabel: string;
+  units: number;
+  amount: number;
+  unitCost: number | null;
+  previousAmount: number | null;
+  missingCost: boolean;
+};
+
+export type FinanceKpis = {
+  depositCount: number; // Σ DayActivity.depositCount
+  withdrawalCount: number; // Σ DayActivity.withdrawalCount
+  margin: number | null; // cashResult / net; null when net <= 0
+  ticketMedio: number | null; // depositAmount / depositCount
+  saqueMedio: number | null; // withdrawalAmount / withdrawalCount
+  depositorsPerDay: number | null; // Σ depositorCount / days
+  withdrawalShare: number | null; // withdrawalAmount / depositAmount
+  pixConversion: number | null; // depositCount / generatedPixCount
+  registrationToFtd: number | null; // ftds / registrations
+  ftdMedio: number | null; // ftdDepositAmount / ftds
+  ggrShareOfDeposits: number | null; // ggr / depositAmount
+  cpm: number | null; // Meta spend (adSpendSuggested) per 1000 impressions
+  ctr: number | null;
+  costPerClick: number | null; // Meta spend / clicks; only when adImpressions > 0, else null
+  sendCost: number; // Σ SendUsage.amount
+  /** Some sends have no provider cost registered: sendCost (and the CRM returns) are partial. */
+  sendCostIncomplete: boolean;
+  crmDirectRevenue: number;
+  crmInfluencedRevenue: number;
+  crmDirectReturn: number | null; // crmDirectRevenue / sendCost
+  crmInfluencedReturn: number | null; // crmInfluencedRevenue / sendCost
+};
+
+export type WaterfallStep = {
+  key: string;
+  label: string;
+  kind: "start" | "down" | "up" | "subtotal" | "total";
+  start: number;
+  end: number;
+};
+
 /** One point of the monthly cashResult series (filled by a server function in a later task). */
 export type MonthPoint = {
   month: string; // "YYYY-MM"
   cashResult: number;
   adSpend: number;
+  net: number; // depósitos − saques
+  depositAmount: number;
   roi: number | null;
   incomplete: boolean; // pendingDays > 0 or pendingToday
   inProgress: boolean; // the current month
@@ -112,4 +193,15 @@ export type DateRange = { from: string; to: string };
 
 export type PeriodPreset = "today" | "yesterday" | "7d" | "month" | "custom";
 
-export type CompareMode = "previous" | "same_weekday_last_week" | "last_week";
+/**
+ * "previous" is the window right before (the previous month for a month);
+ * "same_weekday_last_week" and "last_week" shift by 7 days (kept for
+ * compatibility); "same_period_last_year" shifts by one year; "none" has no
+ * comparison window.
+ */
+export type CompareMode =
+  | "previous"
+  | "same_weekday_last_week"
+  | "last_week"
+  | "same_period_last_year"
+  | "none";

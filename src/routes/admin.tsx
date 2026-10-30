@@ -51,6 +51,7 @@ import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { ChannelObservabilityPanel } from "@/components/admin/channel-observability-panel";
+import { ProviderAccountsPanel } from "@/components/admin/provider-accounts-panel";
 import {
   adminCreateUser,
   adminDeleteUser,
@@ -254,59 +255,63 @@ function AdminIntegrationsTab() {
   });
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-4">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            <RadioTower className="h-5 w-5 text-primary" /> Provedores de canais
-          </CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Diagnóstico técnico visível exclusivamente para o super admin.
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
-          Atualizar
-        </Button>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="grid gap-4 xl:grid-cols-3">
-          {(data?.channels ?? []).map((item) => (
-            <div key={item.channel} className="space-y-3 rounded-lg border border-border/70 p-4">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="font-medium">
-                    {INTEGRATION_CHANNEL_LABEL[item.channel.toLowerCase()] ?? item.channel}
-                  </p>
-                  <p className="text-meta text-muted-foreground">{item.provider}</p>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-4">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <RadioTower className="h-5 w-5 text-primary" /> Provedores de canais
+            </CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Contas padrão da plataforma (variáveis de ambiente). Diagnóstico técnico visível
+              exclusivamente para o super admin.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
+            Atualizar
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-4 xl:grid-cols-3">
+            {(data?.channels ?? []).map((item) => (
+              <div key={item.channel} className="space-y-3 rounded-lg border border-border/70 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="font-medium">
+                      {INTEGRATION_CHANNEL_LABEL[item.channel.toLowerCase()] ?? item.channel}
+                    </p>
+                    <p className="text-meta text-muted-foreground">{item.provider}</p>
+                  </div>
+                  <Badge variant={item.configured ? "default" : "destructive"}>
+                    {item.configured ? "configurado" : "incompleto"}
+                  </Badge>
                 </div>
-                <Badge variant={item.configured ? "default" : "destructive"}>
-                  {item.configured ? "configurado" : "incompleto"}
-                </Badge>
-              </div>
-              <div className="space-y-1">
-                <Label>Endpoint</Label>
-                <Input readOnly value={item.endpoint} className="font-mono text-meta" />
-              </div>
-              <div className="space-y-1">
-                <Label>Callback</Label>
-                <div className="flex gap-2">
-                  <Input readOnly value={item.callbackUrl} className="font-mono text-meta" />
-                  <IconButton
-                    variant="outline"
-                    label="Copiar callback"
-                    icon={<Copy className="h-4 w-4" />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(item.callbackUrl);
-                      toast.success("Callback copiado");
-                    }}
-                  />
+                <div className="space-y-1">
+                  <Label>Endpoint</Label>
+                  <Input readOnly value={item.endpoint} className="font-mono text-meta" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Callback</Label>
+                  <div className="flex gap-2">
+                    <Input readOnly value={item.callbackUrl} className="font-mono text-meta" />
+                    <IconButton
+                      variant="outline"
+                      label="Copiar callback"
+                      icon={<Copy className="h-4 w-4" />}
+                      onClick={() => {
+                        navigator.clipboard.writeText(item.callbackUrl);
+                        toast.success("Callback copiado");
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+      <ProviderAccountsPanel />
+    </div>
   );
 }
 
@@ -546,10 +551,7 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                     </SelectContent>
                   </Select>
                   <IconButton
-                    disabled={
-                      (membership.role as string) === "expert" ||
-                      removeMut.isPending
-                    }
+                    disabled={(membership.role as string) === "expert" || removeMut.isPending}
                     label={`Remover acesso a ${membership.tenant?.nome ?? "esta conta"}`}
                     icon={<Trash2 className="h-4 w-4 text-destructive" />}
                     onClick={async () => {

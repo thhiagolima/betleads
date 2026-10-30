@@ -4,11 +4,12 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   EmailDomainNotVerifiedError,
-  emailBillingColumns,
+  emailSendLogColumns,
   resolveSender,
   sendInfobipEmail,
 } from "./email-send.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
+import { DEFAULT_INFOBIP_ACCOUNT_ID } from "./provider-accounts.server";
 import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
@@ -862,7 +863,7 @@ export async function runEmailFlowDispatcher({
       block_index: plan.blockIdx,
       step_label: computeEmailStepLabel(plan.blocks, plan.blockIdx),
       tenant_id: plan.lead.tenant_id,
-      ...emailBillingColumns(result),
+      ...emailSendLogColumns(result),
       provider_response: {
         status: result.status,
         body: result.body,
@@ -894,20 +895,27 @@ export async function runEmailFlowDispatcher({
         await import("./dispatch-pause-insufficient.server");
       // The house's own wallet refusal returned early above; only a real
       // provider 402 (no errorKind) reaches here and pauses every tenant.
-      const insufficient = isInsufficientFunds(result.status, result.body);
+      // The channel-wide throttle/pause belong to the platform Infobip
+      // account: a house's own account refusing only reschedules its lead.
+      const platformAccount =
+        (result.providerAccountId ?? DEFAULT_INFOBIP_ACCOUNT_ID) === DEFAULT_INFOBIP_ACCOUNT_ID;
+      const providerOutOfFunds = isInsufficientFunds(result.status, result.body);
+      const insufficient = platformAccount && providerOutOfFunds;
+      const authError = result.status === 401 || result.status === 403;
       if (result.status === 429 || /rate.?limit|throttle|too many/i.test(bodyStr)) {
         rateLimited++;
         const retryAfter = parseRetryAfter(result.body);
-        await registerThrottle("email", retryAfter, lastProviderError);
+        if (platformAccount) await registerThrottle("email", retryAfter, lastProviderError);
       }
-      if (result.status === 401 || result.status === 403) {
+      if (authError && platformAccount) {
         await registerThrottle("email", 600, `auth_error_${result.status}: ${lastProviderError}`);
       }
       if (insufficient) {
         await pauseChannelForInsufficientFunds("email", lastProviderError);
         await registerThrottle("email", 1800, `insufficient_funds: ${lastProviderError}`);
       }
-      const treatAsTemporary = isTemporary || insufficient;
+      const ownAccountRefused = !platformAccount && (providerOutOfFunds || authError);
+      const treatAsTemporary = isTemporary || insufficient || ownAccountRefused;
       if (treatAsTemporary || result.status === 429) rescheduled++;
       else errorsCount++;
       await applySendFailure(plan, result.status, treatAsTemporary, insufficient);

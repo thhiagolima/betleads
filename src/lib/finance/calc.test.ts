@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import fixtureDays from "./__fixtures__/pixreals-outubro.json";
 import {
+  allocateMonthlyGgr,
   averageFilledAdSpend,
   compareRange,
   computeDay,
   costBreakdown,
-  dependsOnManual,
   evaluateGoal,
+  hasPartialGgrEstimate,
   isSumMetric,
   isWholeMonth,
   metricValue,
+  monthlyGgrPendingThrough,
   pctChange,
   ppChange,
   presetRange,
@@ -86,6 +88,60 @@ describe("computeDay", () => {
 
     expect(day.cashResult).toBeCloseTo(-205.4, 2);
   });
+
+  it("computes a day with missing Anúncios and GGR as 0, keeping the raw inputs null", () => {
+    const day = computeDay({
+      date: "2026-10-02",
+      registrations: 4,
+      ftds: 2,
+      ftdDepositAmount: 100,
+      depositAmount: 1100,
+      withdrawalAmount: 210,
+      adSpend: null,
+      adSpendSuggested: null,
+      ggr: null,
+      ggrFeePct: 16,
+      movementFeePct: 2.7,
+    });
+
+    expect(day.pending).toBe(true);
+    expect(day.adSpend).toBeNull();
+    expect(day.ggr).toBeNull();
+    expect(day.net).toBe(890);
+    expect(day.ggrFee).toBe(0);
+    // 29,70 + 5,67 + 24,03
+    expect(day.movementFee).toBeCloseTo(59.4, 2);
+    expect(day.cashResult).toBeCloseTo(830.6, 2);
+    // ROI stays null with no ad spend; cost-per is 0 / divisor.
+    expect(day.roi).toBeNull();
+    expect(day.costPerRegistration).toBe(0);
+    expect(day.costPerFtd).toBe(0);
+  });
+
+  it("a day missing only GGR uses its Anúncios; missing only Anúncios uses its GGR", () => {
+    const base = {
+      date: "2026-10-03",
+      registrations: 0,
+      ftds: 0,
+      ftdDepositAmount: 0,
+      depositAmount: 1000,
+      withdrawalAmount: 0,
+      adSpendSuggested: null,
+      ggrFeePct: 10,
+      movementFeePct: 0,
+    };
+    const noGgr = computeDay({ ...base, adSpend: 200, ggr: null });
+    expect(noGgr.pending).toBe(true);
+    expect(noGgr.cashResult).toBe(800);
+    expect(noGgr.roi).toBe(4);
+    expect(noGgr.costPerRegistration).toBeNull();
+
+    const noAds = computeDay({ ...base, adSpend: null, ggr: 500 });
+    expect(noAds.pending).toBe(true);
+    expect(noAds.ggrFee).toBe(50);
+    expect(noAds.cashResult).toBe(950);
+    expect(noAds.roi).toBeNull();
+  });
 });
 
 describe("summarize", () => {
@@ -144,11 +200,16 @@ describe("summarize", () => {
       }),
     ];
 
-    const summary = summarize(days, null);
+    const summary = summarize(days, 0);
     expect(summary.pendingDays).toBe(1);
     expect(summary.ftds).toBe(3);
-    // Only the 2 complete days (10-01: 616, 10-03: 749.2); the pending 10-02 is excluded.
-    expect(summary.cashResult).toBeCloseTo(1365.2, 2);
+    // Every day counts; the pending 10-02 (no GGR) counts as GGR 0:
+    // 10-01: 616, 10-02: 770.6, 10-03: 749.2.
+    expect(summary.cashResult).toBeCloseTo(2135.8, 2);
+    expect(summary.net).toBe(2670);
+    expect(summary.ggr).toBe(1100);
+    expect(summary.roi as number).toBeCloseTo(2135.8 / 180, 6);
+    expect(summary.avgDailyCashResult as number).toBeCloseTo(2135.8 / 3, 4);
 
     const range = { from: "2026-10-01", to: "2026-10-03" };
 
@@ -157,7 +218,8 @@ describe("summarize", () => {
       summary,
       range,
     );
-    expect(cashResultGoal?.status).toBe("gray");
+    // Pending days no longer gray a goal: it is judged on the computed value.
+    expect(cashResultGoal?.status).toBe("green");
 
     const ftdsGoal = evaluateGoal(
       [{ date: "2026-10-01", metric: "ftds", direction: "gte", dailyValue: 1 }],
@@ -184,13 +246,13 @@ describe("summarize", () => {
       });
     const days = [day("2026-10-23", 500), day("2026-10-24", null)];
 
-    const withToday = summarize(days, null, "2026-10-24");
+    const withToday = summarize(days, 0, "2026-10-24");
     expect(withToday.pendingDays).toBe(0);
     expect(withToday.pendingToday).toBe(true);
-    // Resultado still sums only the complete day (10-23: 616).
-    expect(withToday.cashResult).toBeCloseTo(616, 2);
+    // Resultado sums every day, today included (10-23: 616, 10-24: 696).
+    expect(withToday.cashResult).toBeCloseTo(1312, 2);
 
-    const withoutToday = summarize(days, null);
+    const withoutToday = summarize(days, 0);
     expect(withoutToday.pendingDays).toBe(1);
     expect(withoutToday.pendingToday).toBe(false);
 
@@ -199,18 +261,18 @@ describe("summarize", () => {
       { date: "2026-10-23", metric: "cash_result", direction: "gte", dailyValue: 600 },
       { date: "2026-10-24", metric: "cash_result", direction: "gte", dailyValue: 600 },
     ];
-    const goal = evaluateGoal(goalDays, withToday, range, "2026-10-24");
-    // Not gray, and today's goal day is left out of the target like its value.
+    const goal = evaluateGoal(goalDays, withToday, range);
+    // Today's value is counted, so today's goal day is in the target too.
     expect(goal?.status).toBe("green");
-    expect(goal?.target).toBe(600);
+    expect(goal?.target).toBe(1200);
 
-    const onlyToday = evaluateGoal(
-      [goalDays[1]],
-      summarize([days[1]], null, "2026-10-24"),
-      { from: "2026-10-24", to: "2026-10-24" },
-      "2026-10-24",
-    );
-    expect(onlyToday?.status).toBe("gray");
+    const onlyToday = evaluateGoal([goalDays[1]], summarize([days[1]], 0, "2026-10-24"), {
+      from: "2026-10-24",
+      to: "2026-10-24",
+    });
+    // A pending today alone is judged on its computed value (696 >= 600).
+    expect(onlyToday?.status).toBe("green");
+    expect(onlyToday?.value).toBeCloseTo(696, 2);
   });
 
   it("pendingDays counts distinct dates across houses", () => {
@@ -235,16 +297,15 @@ describe("summarize", () => {
       pendingDay("2026-10-24"),
       pendingDay("2026-10-24"),
     ];
-    expect(summarize(days, null, "2026-10-24").pendingDays).toBe(2);
+    expect(summarize(days, 0, "2026-10-24").pendingDays).toBe(2);
   });
 
-  it("other costs only reduce the period result when provided", () => {
+  it("other costs reduce the period result and nothing else", () => {
     const days = rows.slice(0, 3).map((row) => computeDay(toInput(row)));
-    const withoutCosts = summarize(days, null);
-    const withZeroCosts = summarize(days, 0);
+    const withoutCosts = summarize(days, 0);
     const withCosts = summarize(days, 100);
 
-    expect(withoutCosts.cashResult).toBe(withZeroCosts.cashResult);
+    expect(withoutCosts.otherCosts).toBe(0);
     expect(withCosts.cashResult).toBeCloseTo(withoutCosts.cashResult - 100, 2);
     expect(withCosts.net).toBe(withoutCosts.net);
     expect(withCosts.ggrFee).toBe(withoutCosts.ggrFee);
@@ -302,7 +363,7 @@ describe("summarize", () => {
         movementFeePct: 0,
       }),
     ];
-    const summary = summarize(days, null);
+    const summary = summarize(days, 0);
     expect(summary.roi).toBeNull();
     expect(pctChange(-50, -100)).toBeCloseTo(0.5, 6);
   });
@@ -323,7 +384,7 @@ describe("costBreakdown", () => {
     net: 0,
     ggrFee: 0,
     movementFee: 0,
-    otherCosts: null,
+    otherCosts: 0,
     cashResult: 0,
     roi: null,
     costPerRegistration: null,
@@ -331,10 +392,11 @@ describe("costBreakdown", () => {
     avgDailyCashResult: null,
     betleadsUsage: 0,
     betleadsFee: null,
+    ggrEstimated: false,
     ...overrides,
   });
 
-  it("orders by amount, labels the GGR rate, marks Betleads auto, drops empty lines", () => {
+  it("orders by amount, labels the GGR rate, marks Envios and Mensalidade auto, drops empty lines", () => {
     const current = summaryWith({
       adSpend: 100,
       ggrFee: 50,
@@ -351,17 +413,40 @@ describe("costBreakdown", () => {
       "ggr_fee",
       "category:Equipe",
       "movement_fee",
-      "betleads",
+      "sends",
+      "fee",
     ]);
     expect(lines.find((l) => l.key === "ggr_fee")?.label).toBe("Taxa de GGR (16%)");
-    const betleadsLine = lines.find((l) => l.key === "betleads");
-    expect(betleadsLine?.label).toBe("Betleads");
-    expect(betleadsLine?.auto).toBe(true);
-    // Only the Betleads line is "automático"; Anúncios and the fees are not.
-    expect(lines.filter((l) => l.auto).map((l) => l.key)).toEqual(["betleads"]);
-    expect(betleadsLine?.amount).toBe(10);
+    const sendsLine = lines.find((l) => l.key === "sends");
+    expect(sendsLine?.label).toBe("Envios");
+    expect(sendsLine?.auto).toBe(true);
+    expect(sendsLine?.amount).toBe(10);
+    const feeLine = lines.find((l) => l.key === "fee");
+    expect(feeLine?.label).toBe("Mensalidade");
+    expect(feeLine?.auto).toBe(true);
+    expect(feeLine?.amount).toBe(0);
+    // Only Envios and Mensalidade are "automático"; Anúncios and the fees are not.
+    expect(lines.filter((l) => l.auto).map((l) => l.key)).toEqual(["sends", "fee"]);
     // Ferramentas (0, no previous) is dropped.
     expect(lines.some((l) => l.key === "category:Ferramentas")).toBe(false);
+  });
+
+  it("drops Mensalidade only when the fee (current and previous) is null", () => {
+    const openWindow = summaryWith({ betleadsFee: null });
+    expect(costBreakdown(openWindow, null, {}, null, null).some((l) => l.key === "fee")).toBe(
+      false,
+    );
+
+    // A closed month with an actual R$ 0 invoice still shows the line.
+    const zeroFee = summaryWith({ betleadsFee: 0 });
+    const zeroLines = costBreakdown(zeroFee, null, {}, null, null);
+    expect(zeroLines.find((l) => l.key === "fee")).toMatchObject({ amount: 0, previous: null });
+
+    // Kept when only the previous window had a fee.
+    const previousClosed = summaryWith({ betleadsFee: null });
+    const previousFee = summaryWith({ betleadsFee: 500 });
+    const lines = costBreakdown(previousClosed, previousFee, {}, null, null);
+    expect(lines.find((l) => l.key === "fee")).toMatchObject({ amount: 0, previous: 500 });
   });
 
   it("labels the GGR line without a rate when ggrFeePct is null", () => {
@@ -422,7 +507,7 @@ describe("goals", () => {
     net: 0,
     ggrFee: 0,
     movementFee: 0,
-    otherCosts: null,
+    otherCosts: 0,
     cashResult: 0,
     roi: null,
     costPerRegistration: null,
@@ -430,6 +515,7 @@ describe("goals", () => {
     avgDailyCashResult: null,
     betleadsUsage: 0,
     betleadsFee: null,
+    ggrEstimated: false,
   };
   const range = { from: "2026-10-01", to: "2026-10-01" };
 
@@ -483,12 +569,25 @@ describe("goals", () => {
     expect(evaluation?.status).toBe("green");
   });
 
+  it("is gray only when the value is null, not because of pending days", () => {
+    const goalDays: GoalDay[] = [
+      { date: range.from, metric: "cash_result", direction: "gte", dailyValue: 100 },
+    ];
+    const pending: PeriodSummary = { ...baseSummary, pendingDays: 3, cashResult: 50 };
+    expect(evaluateGoal(goalDays, pending, range)?.status).toBe("red");
+
+    const roiGoal: GoalDay[] = [
+      { date: range.from, metric: "roi", direction: "gte", dailyValue: 0.2 },
+    ];
+    expect(evaluateGoal(roiGoal, { ...baseSummary, roi: null }, range)?.status).toBe("gray");
+  });
+
   it("returns null when there are no goal days", () => {
     expect(evaluateGoal([], baseSummary, range)).toBeNull();
   });
 });
 
-describe("metricValue, isSumMetric, dependsOnManual", () => {
+describe("metricValue, isSumMetric", () => {
   it("maps metrics to summary fields", () => {
     const summary: PeriodSummary = {
       days: 1,
@@ -504,7 +603,7 @@ describe("metricValue, isSumMetric, dependsOnManual", () => {
       net: 80,
       ggrFee: 1,
       movementFee: 2,
-      otherCosts: null,
+      otherCosts: 0,
       cashResult: 50,
       roi: 0.5,
       costPerRegistration: 6,
@@ -512,6 +611,7 @@ describe("metricValue, isSumMetric, dependsOnManual", () => {
       avgDailyCashResult: 50,
       betleadsUsage: 0,
       betleadsFee: null,
+      ggrEstimated: false,
     };
 
     expect(metricValue(summary, "registrations")).toBe(5);
@@ -533,17 +633,6 @@ describe("metricValue, isSumMetric, dependsOnManual", () => {
     expect(isSumMetric("cost_per_registration")).toBe(false);
     expect(isSumMetric("cost_per_ftd")).toBe(false);
     expect(isSumMetric("roi")).toBe(false);
-  });
-
-  it("dependsOnManual is false only for registrations, ftds and deposits", () => {
-    expect(dependsOnManual("registrations")).toBe(false);
-    expect(dependsOnManual("ftds")).toBe(false);
-    expect(dependsOnManual("deposits")).toBe(false);
-    expect(dependsOnManual("net")).toBe(true);
-    expect(dependsOnManual("cash_result")).toBe(true);
-    expect(dependsOnManual("cost_per_registration")).toBe(true);
-    expect(dependsOnManual("cost_per_ftd")).toBe(true);
-    expect(dependsOnManual("roi")).toBe(true);
   });
 });
 
@@ -608,6 +697,44 @@ describe("compareRange", () => {
       to: "2026-10-17",
     });
   });
+
+  it("same_period_last_year: one day is the same date a year before", () => {
+    expect(
+      compareRange({ from: "2026-10-29", to: "2026-10-29" }, "same_period_last_year", "today"),
+    ).toEqual({ from: "2025-10-29", to: "2025-10-29" });
+  });
+
+  it("same_period_last_year: a whole month is the same whole month of the previous year", () => {
+    expect(
+      compareRange({ from: "2026-09-01", to: "2026-09-30" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2025-09-01", to: "2025-09-30" });
+    // February of a common year maps to the whole (29-day) February of a leap year.
+    expect(
+      compareRange({ from: "2025-02-01", to: "2025-02-28" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2024-02-01", to: "2024-02-29" });
+  });
+
+  it("same_period_last_year: month-to-date maps to the same days", () => {
+    expect(
+      compareRange({ from: "2026-10-01", to: "2026-10-29" }, "same_period_last_year", "month"),
+    ).toEqual({ from: "2025-10-01", to: "2025-10-29" });
+  });
+
+  it("same_period_last_year: Feb 29 becomes Feb 28", () => {
+    expect(
+      compareRange({ from: "2028-02-29", to: "2028-02-29" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2027-02-28", to: "2027-02-28" });
+    expect(
+      compareRange({ from: "2028-02-29", to: "2028-03-06" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2027-02-28", to: "2027-03-06" });
+    expect(
+      compareRange({ from: "2028-02-01", to: "2028-02-29" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2027-02-01", to: "2027-02-28" });
+  });
+
+  it("none has no comparison window", () => {
+    expect(compareRange({ from: "2026-10-01", to: "2026-10-29" }, "none", "month")).toBeNull();
+  });
 });
 
 describe("pctChange", () => {
@@ -644,5 +771,187 @@ describe("isWholeMonth", () => {
     expect(isWholeMonth({ from: "2026-02-01", to: "2026-02-28" })).toBe(true);
     expect(isWholeMonth({ from: "2026-09-01", to: "2026-09-29" })).toBe(false);
     expect(isWholeMonth({ from: "2026-09-02", to: "2026-09-30" })).toBe(false);
+  });
+});
+
+describe("allocateMonthlyGgr", () => {
+  const input = (date: string, deposit: number, withdrawal = 0, ggr: number | null = null) => ({
+    date,
+    registrations: 0,
+    ftds: 0,
+    ftdDepositAmount: 0,
+    depositAmount: deposit,
+    withdrawalAmount: withdrawal,
+    adSpend: 0,
+    adSpendSuggested: null,
+    ggr,
+    ggrFeePct: 17,
+    movementFeePct: 0,
+  });
+  const sum = (values: Array<number | null>) =>
+    round2(values.reduce<number>((total, value) => total + (value ?? 0), 0));
+
+  it("without a monthly total returns the days unchanged, not estimated", () => {
+    const days = [input("2026-10-01", 100, 0, 5)];
+    const out = allocateMonthlyGgr(days, null);
+    expect(out[0].ggr).toBe(5);
+    expect(out[0].ggrEstimated).toBe(false);
+  });
+
+  it("splits by net max(deposit − withdrawal, 0) and the days sum exactly to the total", () => {
+    const days = [
+      input("2026-10-01", 300, 100), // net 200
+      input("2026-10-02", 100, 400), // net negative → weight 0
+      input("2026-10-03", 100), // net 100
+    ];
+    const out = allocateMonthlyGgr(days, {
+      month: "2026-10-01",
+      ggr: 1497.15,
+      validThrough: "2026-10-03",
+    });
+    expect(out.map((d) => d.ggr)).toEqual([998.1, 0, 499.05]);
+    expect(out.every((d) => d.ggrEstimated)).toBe(true);
+    expect(sum(out.map((d) => d.ggr))).toBe(1497.15);
+  });
+
+  it("puts the rounding remainder on the last allocated day", () => {
+    const days = [input("2026-10-01", 1), input("2026-10-02", 1), input("2026-10-03", 1)];
+    const out = allocateMonthlyGgr(days, {
+      month: "2026-10-01",
+      ggr: 100,
+      validThrough: "2026-10-03",
+    });
+    expect(out.map((d) => d.ggr)).toEqual([33.33, 33.33, 33.34]);
+  });
+
+  it("splits equally when every weight is zero", () => {
+    const days = [input("2026-10-01", 0), input("2026-10-02", 50, 80)];
+    const out = allocateMonthlyGgr(days, {
+      month: "2026-10-01",
+      ggr: 10.01,
+      validThrough: "2026-10-02",
+    });
+    expect(out.map((d) => d.ggr)).toEqual([5.01, 5]);
+  });
+
+  it("allocates a negative total the same way", () => {
+    const days = [input("2026-10-01", 100), input("2026-10-02", 300)];
+    const out = allocateMonthlyGgr(days, {
+      month: "2026-10-01",
+      ggr: -400,
+      validThrough: "2026-10-02",
+    });
+    expect(out.map((d) => d.ggr)).toEqual([-100, -300]);
+  });
+
+  it("ignores stored daily GGR; days after validThrough are pending; other months untouched", () => {
+    const days = [
+      input("2026-09-30", 100, 0, 7),
+      input("2026-10-01", 100, 0, 999),
+      input("2026-10-02", 100, 0, 999),
+      input("2026-10-03", 100, 0, 999),
+    ];
+    const out = allocateMonthlyGgr(days, {
+      month: "2026-10-01",
+      ggr: 50,
+      validThrough: "2026-10-02",
+    });
+    expect(out.map((d) => [d.date, d.ggr, d.ggrEstimated])).toEqual([
+      ["2026-09-30", 7, false],
+      ["2026-10-01", 25, true],
+      ["2026-10-02", 25, true],
+      ["2026-10-03", null, false],
+    ]);
+  });
+
+  it("whole-month GGR fee equals total × rate through computeDay", () => {
+    const days = [input("2026-10-01", 123.45), input("2026-10-02", 77.7), input("2026-10-03", 9)];
+    const out = allocateMonthlyGgr(days, {
+      month: "2026-10-01",
+      ggr: 1497.15,
+      validThrough: "2026-10-03",
+    }).map(computeDay);
+    const summary = summarize(out, 0);
+    expect(summary.ggr).toBe(1497.15);
+    expect(Math.abs(summary.ggrFee - 254.52)).toBeLessThanOrEqual(0.02);
+    expect(out.every((d) => d.ggrEstimated)).toBe(true);
+  });
+
+  it("days after validThrough stay pending but count as GGR 0 in the results", () => {
+    const days = [input("2026-10-01", 100), input("2026-10-02", 300)];
+    const out = allocateMonthlyGgr(days, {
+      month: "2026-10-01",
+      ggr: 50,
+      validThrough: "2026-10-01",
+    }).map(computeDay);
+    expect(out[1].ggr).toBeNull();
+    expect(out[1].pending).toBe(true);
+    expect(out[1].ggrFee).toBe(0);
+    expect(out[1].cashResult).toBe(300);
+
+    const summary = summarize(out, 0, "2026-10-05");
+    expect(summary.pendingDays).toBe(1);
+    expect(summary.ggr).toBe(50);
+    // 10-01: 100 − 17% of 50 = 91,50; 10-02: 300.
+    expect(summary.cashResult).toBe(391.5);
+  });
+});
+
+describe("hasPartialGgrEstimate", () => {
+  const allocations = [{ month: "2026-10-01", validThrough: "2026-10-20" }];
+
+  it("is true when the window holds some but not all allocated days", () => {
+    expect(hasPartialGgrEstimate({ from: "2026-10-14", to: "2026-10-20" }, allocations)).toBe(true);
+    expect(hasPartialGgrEstimate({ from: "2026-09-25", to: "2026-10-05" }, allocations)).toBe(true);
+  });
+
+  it("is false when the window holds all or none of them", () => {
+    expect(hasPartialGgrEstimate({ from: "2026-10-01", to: "2026-10-24" }, allocations)).toBe(
+      false,
+    );
+    expect(hasPartialGgrEstimate({ from: "2026-10-21", to: "2026-10-24" }, allocations)).toBe(
+      false,
+    );
+    expect(hasPartialGgrEstimate(null, allocations)).toBe(false);
+    expect(hasPartialGgrEstimate({ from: "2026-10-01", to: "2026-10-05" }, [])).toBe(false);
+  });
+
+  it("summarize carries the flag (false by default)", () => {
+    expect(summarize([], 0).ggrEstimated).toBe(false);
+    expect(summarize([], 0, undefined, undefined, { ggrEstimated: true }).ggrEstimated).toBe(true);
+  });
+});
+
+describe("monthlyGgrPendingThrough", () => {
+  const allocations = [{ month: "2026-10-01", validThrough: "2026-10-20" }];
+
+  const pending = (...dates: string[]) => dates.map((date) => ({ date, adSpend: 10 }));
+
+  it("returns validThrough when every pending date is after the month's validThrough", () => {
+    expect(monthlyGgrPendingThrough(pending("2026-10-21", "2026-10-23"), allocations)).toBe(
+      "2026-10-20",
+    );
+  });
+
+  it("is null when a pending date is not explained by a monthly total", () => {
+    expect(monthlyGgrPendingThrough(pending("2026-10-10", "2026-10-21"), allocations)).toBeNull();
+    expect(monthlyGgrPendingThrough(pending("2026-09-30", "2026-10-21"), allocations)).toBeNull();
+    expect(monthlyGgrPendingThrough([], allocations)).toBeNull();
+  });
+
+  it("is null when a pending day after validThrough also misses Anúncios", () => {
+    expect(
+      monthlyGgrPendingThrough(
+        [
+          { date: "2026-10-21", adSpend: 10 },
+          { date: "2026-10-22", adSpend: null },
+        ],
+        allocations,
+      ),
+    ).toBeNull();
+    // Anúncios of 0 counts as filled.
+    expect(monthlyGgrPendingThrough([{ date: "2026-10-21", adSpend: 0 }], allocations)).toBe(
+      "2026-10-20",
+    );
   });
 });

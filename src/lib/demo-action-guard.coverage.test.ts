@@ -156,10 +156,11 @@ const entries: Entry[] = [
     name: "sendAllWhatsappExternalEvents",
     kind: "handler",
   },
-  { file: "meta.functions.ts", name: "connectMetaSystemUserToken", kind: "handler" },
-  { file: "meta.functions.ts", name: "updateMetaAccountSelection", kind: "handler" },
-  { file: "meta.functions.ts", name: "validateMetaConnection", kind: "handler" },
-  { file: "meta.functions.ts", name: "disconnectMetaConnection", kind: "handler" },
+  { file: "meta.functions.ts", name: "connectMetaSystemUserTokenFor", kind: "function" },
+  { file: "meta.functions.ts", name: "updateMetaAccountSelectionFor", kind: "function" },
+  { file: "meta.functions.ts", name: "validateMetaConnectionFor", kind: "function" },
+  { file: "meta.functions.ts", name: "disconnectMetaConnectionFor", kind: "function" },
+  { file: "meta.functions.ts", name: "enqueueMetaSyncFor", kind: "function" },
   // sms-credits.functions.ts: `createSmsCreditCheckout` and
   // `adminMarkSmsCreditOrderPaid` were dead code (no screen called either
   // one) and were removed in the PG1 final review. `createSmsCreditCheckoutFor`

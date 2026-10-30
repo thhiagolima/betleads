@@ -1,6 +1,8 @@
 // Infobip domain-management HTTP client (house onboarding).
-// Central Betleads account: INFOBIP_BASE_URL / INFOBIP_API_KEY. No per-house credentials.
+// Each call runs against one Infobip account (provider-accounts.server.ts):
+// the house's e-mail account, defaulting to the platform account.
 import type { DnsRecord } from "@/lib/house-config";
+import { envInfobipAccount, type InfobipAccount } from "@/lib/provider-accounts.server";
 import { DomainProviderError, type ProviderDomain } from "./shortio-domains.server";
 
 type InfobipDnsRecord = {
@@ -17,14 +19,9 @@ type InfobipDomainBody = {
   dnsRecords?: unknown;
 };
 
-function baseUrl(): string | null {
-  const value = process.env.INFOBIP_BASE_URL?.trim().replace(/\/$/, "");
-  return value || null;
-}
-
-function requireConfig(): { apiKey: string; baseUrl: string } {
-  const key = process.env.INFOBIP_API_KEY?.trim();
-  const url = baseUrl();
+function requireConfig(account: InfobipAccount): { apiKey: string; baseUrl: string } {
+  const key = account.apiKey;
+  const url = account.baseUrl;
   if (!key || !url) {
     throw new DomainProviderError(
       "UNAVAILABLE",
@@ -94,8 +91,11 @@ async function throwForResponse(response: Response, actionLabel: string): Promis
   );
 }
 
-export async function createInfobipDomain(domainName: string): Promise<ProviderDomain> {
-  const { apiKey, baseUrl } = requireConfig();
+export async function createInfobipDomain(
+  domainName: string,
+  account: InfobipAccount = envInfobipAccount(),
+): Promise<ProviderDomain> {
+  const { apiKey, baseUrl } = requireConfig(account);
   const response = await fetch(`${baseUrl}/email/1/domains`, {
     method: "POST",
     headers: { ...authHeaders(apiKey), "Content-Type": "application/json" },
@@ -110,8 +110,11 @@ export async function createInfobipDomain(domainName: string): Promise<ProviderD
   return toProviderDomain(body);
 }
 
-export async function getInfobipDomain(domainName: string): Promise<ProviderDomain> {
-  const { apiKey, baseUrl } = requireConfig();
+export async function getInfobipDomain(
+  domainName: string,
+  account: InfobipAccount = envInfobipAccount(),
+): Promise<ProviderDomain> {
+  const { apiKey, baseUrl } = requireConfig(account);
   const response = await fetch(
     `${baseUrl}/email/1/domains/${encodeURIComponent(domainName)}`,
     { headers: authHeaders(apiKey) },
@@ -121,8 +124,11 @@ export async function getInfobipDomain(domainName: string): Promise<ProviderDoma
   return toProviderDomain(body);
 }
 
-export async function requestInfobipVerification(domainName: string): Promise<void> {
-  const { apiKey, baseUrl } = requireConfig();
+export async function requestInfobipVerification(
+  domainName: string,
+  account: InfobipAccount = envInfobipAccount(),
+): Promise<void> {
+  const { apiKey, baseUrl } = requireConfig(account);
   const response = await fetch(
     `${baseUrl}/email/1/domains/${encodeURIComponent(domainName)}/verify`,
     { method: "POST", headers: authHeaders(apiKey) },
@@ -130,8 +136,11 @@ export async function requestInfobipVerification(domainName: string): Promise<vo
   if (!response.ok) await throwForResponse(response, "solicitar a verificação do domínio");
 }
 
-export async function deleteInfobipDomain(domainName: string): Promise<void> {
-  const { apiKey, baseUrl } = requireConfig();
+export async function deleteInfobipDomain(
+  domainName: string,
+  account: InfobipAccount = envInfobipAccount(),
+): Promise<void> {
+  const { apiKey, baseUrl } = requireConfig(account);
   const response = await fetch(
     `${baseUrl}/email/1/domains/${encodeURIComponent(domainName)}`,
     { method: "DELETE", headers: authHeaders(apiKey) },

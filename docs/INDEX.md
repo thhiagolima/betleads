@@ -15,6 +15,8 @@ Status usados:
 
 | Documento | Tipo | Data | Status | Para que serve |
 |---|---|---|---|---|
+| [ESCOPO_META_MULTI_BM_2026-10-30.md](ESCOPO_META_MULTI_BM_2026-10-30.md) | escopo | 30/10/2026 | Proposto | Conexão Meta Ads com várias BMs: segurança (MB0), modelo por token com conta compartilhada (MB1), sync robusto (MB2), UX da aba (MB3), observabilidade (MB4). Absorve a AL2 e a parte de conexão da AL3. |
+| [ESCOPO_AUDITORIA_FINANCEIRO_2026-10-29.md](ESCOPO_AUDITORIA_FINANCEIRO_2026-10-29.md) | auditoria + escopo | 29/10/2026 | Implementado | Auditoria do painel Financeiro (números pouco claros, custo de envio sem canal, KPIs faltando, lançamento dos dias, outros custos sem data) e escopo do redesign em fases F1–F5 com perguntas em aberto. |
 | [ESCOPO_GATEWAY_PAGAMENTO_UPPER_2026-10-21.md](ESCOPO_GATEWAY_PAGAMENTO_UPPER_2026-10-21.md) | escopo | 21/10/2026 | Proposto | Pix da Upper para o plano mensal (R$ 4.000) e créditos com saldo único que não expira (SMS R$ 0,08 por segmento, voz R$ 0,09/30 s, e-mail 100 mil grátis + R$ 0,002); casas isentas no plano `interno`; fases PG0–PG6. |
 | [operacoes/RUNBOOK_VIRADA_SALDO_UNICO.md](operacoes/RUNBOOK_VIRADA_SALDO_UNICO.md) | runbook | 21/10/2026 | Proposto | Roteiro de virada em produção do PG1 (saldo único em BRL): checagens, as 5 migrations, conversão dos créditos legados, deploy, refresh da Central de Resultados, hardening e rollback. |
 | [operacoes/RUNBOOK_ATIVAR_PIX_UPPER.md](operacoes/RUNBOOK_ATIVAR_PIX_UPPER.md) | runbook | 22/10/2026 | Proposto | Roteiro de ativação em produção do Pix via Upper (PG2): env na VPS, as 2 migrations (tabelas antes do deploy, cron depois), deploy, cadastro do webhook, teste real de R$ 100,00, monitoramento e rollback. |

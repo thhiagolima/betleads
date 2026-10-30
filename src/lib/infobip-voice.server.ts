@@ -3,6 +3,11 @@ import { refundForDelivery, reserveForDelivery } from "./billing/wallet.server";
 import { requireBrazilianPhone } from "./phone-normalization";
 import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
 import { assertTenantNotDemoForSend } from "./tenant-access.server";
+import {
+  ProviderAccountUnavailableError,
+  resolveInfobipAccount,
+  type InfobipAccount,
+} from "./provider-accounts.server";
 
 // Infobip Calls Markup Language (CML) adapter for outbound recorded calls.
 // Voz do CRM é atendida exclusivamente pela Infobip.
@@ -27,6 +32,8 @@ export type InfobipVoiceResult = {
    * refunded). Callers persist `referenceId` in call_history.billing_reference_id.
    */
   billing?: { referenceId: string; units: number };
+  /** Conta de provedor que fez a ligação; ausente quando nenhuma foi usada. */
+  providerAccountId?: string | null;
 };
 
 /** Default cap (seconds) of a call without a known audio/flow limit. */
@@ -108,9 +115,6 @@ export async function callInfobipVoice(
   content: InfobipVoiceContent,
   options: InfobipVoiceOptions,
 ): Promise<InfobipVoiceResult> {
-  const baseUrl = process.env.INFOBIP_BASE_URL?.trim().replace(/\/$/, "");
-  const apiKey = process.env.INFOBIP_API_KEY?.trim();
-  const from = process.env.INFOBIP_VOICE_FROM?.replace(/\D/g, "");
   const idempotencyKey = options.idempotencyKey || crypto.randomUUID();
   // The CML create endpoint has no request-idempotency contract, so a retried
   // delivery is deduplicated against local state before dialing anyone.
@@ -141,6 +145,21 @@ export async function callInfobipVoice(
       };
     }
   }
+  let account: InfobipAccount;
+  try {
+    account = await resolveInfobipAccount(options.tenantId, "voice");
+  } catch (error) {
+    if (!(error instanceof ProviderAccountUnavailableError)) throw error;
+    return {
+      ok: false,
+      status: 0,
+      body: { error: error.message },
+      idempotencyKey,
+      providerCallId: null,
+      errorKind: "misconfigured",
+    };
+  }
+  const { baseUrl, apiKey, voiceFrom: from } = account;
   const callback = callbackUrl(
     "/api/public/infobip/voice/cml",
     content.type === "audio"
@@ -161,6 +180,7 @@ export async function callInfobipVoice(
       idempotencyKey,
       providerCallId: null,
       errorKind: "misconfigured",
+      providerAccountId: account.id,
     };
   }
   // Fail-closed guard immediately before the provider request: a demo,
@@ -204,7 +224,7 @@ export async function callInfobipVoice(
       reason: `infobip_voice_${result.status || result.errorKind || "error"}`,
     });
   }
-  return { ...result, billing };
+  return { ...result, billing, providerAccountId: account.id };
 }
 
 async function placeCall(

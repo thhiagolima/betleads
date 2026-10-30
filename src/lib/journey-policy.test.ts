@@ -4,7 +4,11 @@ import {
   audienceMatches,
   activationTriggerConfig,
   defaultEntryScope,
+  INCLUDE_BASE_START_AFTER,
+  eventMaxAgeHours,
+  eventYoungEnough,
   inactivityUpperBoundHours,
+  journeyEntryFilters,
   journeyEntryKey,
   nextJourneyWindowOpen,
   pickSmsVariant,
@@ -113,6 +117,31 @@ describe("pix expiry (D-6)", () => {
   });
 });
 
+describe("entry event max age (P0.3)", () => {
+  it("defaults per trigger; other triggers have no limit", () => {
+    expect(eventMaxAgeHours("cadastrados_sem_deposito", {})).toBe(168);
+    expect(eventMaxAgeHours("primeiro_deposito", {})).toBe(72);
+    expect(eventMaxAgeHours("saque_pago", {})).toBe(24);
+    expect(eventMaxAgeHours("inactivity", {})).toBeNull();
+    expect(eventMaxAgeHours("pix_gerado_nao_pago", {})).toBeNull();
+  });
+
+  it("max_event_age_hours overrides; 0 disables; invalid keeps the default", () => {
+    expect(eventMaxAgeHours("saque_pago", { max_event_age_hours: 6 })).toBe(6);
+    expect(eventMaxAgeHours("saque_pago", { max_event_age_hours: 0 })).toBeNull();
+    expect(eventMaxAgeHours("saque_pago", { max_event_age_hours: "bad" })).toBe(24);
+  });
+
+  it("eventYoungEnough compares the event time against the max age", () => {
+    const now = Date.parse("2026-10-29T12:00:00.000Z");
+    const hoursAgo = (h: number) => now - h * 3600_000;
+    expect(eventYoungEnough("cadastrados_sem_deposito", {}, hoursAgo(167), now)).toBe(true);
+    expect(eventYoungEnough("cadastrados_sem_deposito", {}, hoursAgo(169), now)).toBe(false);
+    expect(eventYoungEnough("inactivity", {}, hoursAgo(10_000), now)).toBe(true);
+    expect(eventYoungEnough("cadastrados_sem_deposito", {}, Number.NaN, now)).toBe(false);
+  });
+});
+
 describe("sms variants (D-8)", () => {
   const variants = ["a", "b", "c", "d"];
 
@@ -183,6 +212,19 @@ describe("activation entry scope (E-02)", () => {
     );
     expect(activationTriggerConfig("inactivity", config, undefined, now)).toEqual(config);
   });
+
+  it("P0.4: including the base on an event trigger without start_after sets an explicit start", () => {
+    expect(activationTriggerConfig("cadastrados_sem_deposito", {}, "include_base", now)).toEqual({
+      start_after: INCLUDE_BASE_START_AFTER,
+    });
+    expect(
+      activationTriggerConfig("cashback_pago", { start_after: "" }, "include_base", now),
+    ).toEqual({
+      start_after: INCLUDE_BASE_START_AFTER,
+    });
+    // Without a scope nothing is added here: the database trigger stamps the activation time.
+    expect(activationTriggerConfig("cadastrados_sem_deposito", {}, undefined, now)).toEqual({});
+  });
 });
 
 describe("audienceMatches (E-06)", () => {
@@ -199,5 +241,64 @@ describe("audienceMatches (E-06)", () => {
     expect(audienceMatches({ entry_rules: { audience: "manual" } }, { status: "ativo" })).toBe(
       false,
     );
+  });
+});
+
+describe("entry filters (P1.1)", () => {
+  const now = Date.parse("2026-10-29T12:00:00.000Z");
+  const hoursAgo = (h: number) => new Date(now - h * 3600_000).toISOString();
+  const rules = (filters: Record<string, unknown>) => ({
+    entry_rules: { audience: "system:all-leads", filters },
+  });
+
+  it("keeps only valid filters", () => {
+    expect(journeyEntryFilters(undefined)).toEqual({});
+    expect(journeyEntryFilters({ filters: [] })).toEqual({});
+    expect(
+      journeyEntryFilters({
+        filters: {
+          require_ftd: true,
+          min_total_deposited: "200",
+          max_total_deposited: -1,
+          no_deposit_within_hours: "",
+          last_deposit_within_days: "x",
+        },
+      }),
+    ).toEqual({ require_ftd: true, min_total_deposited: 200 });
+  });
+
+  it("no filters: everyone in the audience matches (existing journeys unchanged)", () => {
+    expect(audienceMatches(rules({}), { status: "ativo" }, now)).toBe(true);
+  });
+
+  it("require_ftd and total deposited bounds", () => {
+    expect(audienceMatches(rules({ require_ftd: true }), { total_depositado: 0 }, now)).toBe(false);
+    expect(audienceMatches(rules({ require_ftd: true }), { ftd_em: hoursAgo(500) }, now)).toBe(
+      true,
+    );
+    const valuable = rules({ min_total_deposited: 200, max_total_deposited: 999 });
+    expect(audienceMatches(valuable, { total_depositado: "150" }, now)).toBe(false);
+    expect(audienceMatches(valuable, { total_depositado: 200 }, now)).toBe(true);
+    expect(audienceMatches(valuable, { total_depositado: 1000 }, now)).toBe(false);
+  });
+
+  it("leaves out recent depositors and keeps only recent-enough ones", () => {
+    const notActive = rules({ no_deposit_within_hours: 48 });
+    expect(audienceMatches(notActive, { ultimo_deposito: hoursAgo(10) }, now)).toBe(false);
+    expect(audienceMatches(notActive, { ultimo_deposito: hoursAgo(72) }, now)).toBe(true);
+    expect(audienceMatches(notActive, { ultimo_deposito: null }, now)).toBe(true);
+
+    const recent = rules({ last_deposit_within_days: 30 });
+    expect(audienceMatches(recent, { ultimo_deposito: hoursAgo(24 * 20) }, now)).toBe(true);
+    expect(audienceMatches(recent, { ultimo_deposito: hoursAgo(24 * 40) }, now)).toBe(false);
+    expect(audienceMatches(recent, { ultimo_deposito: null }, now)).toBe(false);
+  });
+
+  it("filters combine with the audience rule", () => {
+    const journey = {
+      entry_rules: { audience: "all_active", filters: { min_total_deposited: 50 } },
+    };
+    expect(audienceMatches(journey, { status: "inativo", total_depositado: 500 }, now)).toBe(false);
+    expect(audienceMatches(journey, { status: "ativo", total_depositado: 500 }, now)).toBe(true);
   });
 });

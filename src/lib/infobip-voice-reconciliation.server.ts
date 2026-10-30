@@ -132,14 +132,17 @@ export async function reconcilePendingInfobipEmails(limit = 500, demoTenantIds?:
   return result;
 }
 
-/** SMS is also callback-first; this exposes missing Short Brasil callbacks. */
+/**
+ * SMS is also callback-first; this exposes missing delivery callbacks of both
+ * SMS providers (Short Brasil and Infobip accounts).
+ */
 export async function reconcilePendingShortBrasilSms(limit = 500, demoTenantIds?: string[]) {
   const now = Date.now();
   const demoFilter = await demoTenantFilter(demoTenantIds);
   let query = supabaseAdmin
     .from("sms_send_logs")
     .select("id, created_at, provider_response")
-    .eq("provider", "short-brasil")
+    .in("provider", ["short-brasil", "infobip"])
     .in("delivery_status", ["pending", "sent"])
     .lte("created_at", new Date(now - MIN_AGE_MS).toISOString())
     .gte("created_at", new Date(now - MAX_AGE_MS).toISOString());

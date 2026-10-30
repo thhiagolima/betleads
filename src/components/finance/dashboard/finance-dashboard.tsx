@@ -1,19 +1,19 @@
 // Financeiro painel (spec §5–§6, mockup financeiro-painel-v1.html): one view
 // for a house, a group or every house. It owns the scope (super admin can
-// change it with "Ver:") and the period (month picker on), and reads
-// getFinanceDashboard. Group/all scope adds "Lucro por casa" right after the
-// cards, as in the mockup, and the goal scoreboard at the bottom.
+// change it with "Ver:") and the period (GroupPeriodBar), and reads
+// getFinanceDashboard. Top to bottom (spec §3.2): result band, the "Do
+// depósito ao lucro" waterfall, the KPI blocks (Movimentação, Aquisição, GGR,
+// Envios e CRM), the 12-month chart and, in group/all scope, "Lucro por
+// casa" and the goal scoreboard.
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState, type ReactNode } from "react";
 
-import {
-  defaultGroupPeriod,
-  GroupPeriodBar,
-  type GroupPeriod,
-} from "@/components/group/group-period-bar";
+import { GroupPeriodBar } from "@/components/group/group-period-bar";
+import { defaultGroupPeriod, type GroupPeriod } from "@/components/group/period-options";
 import { GroupScoreboard } from "@/components/group/group-scoreboard";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   getFinanceDashboard,
   type DashboardScope,
@@ -22,21 +22,36 @@ import {
 
 import { FINANCE_DASHBOARD_QUERY_KEY } from "@/components/finance/query-keys";
 
-import { CostBreakdown } from "./cost-breakdown";
-import { KpiCards } from "./kpi-cards";
+import { periodLabel } from "./display";
+import { KpiBlocks } from "./kpi-blocks";
 import { PendingBanner } from "./pending-banner";
-import { ProfitTrendChart } from "./profit-trend-chart";
+import { ProfitTrendChart, trendChartTitle, type TrendMetric } from "./profit-trend-chart";
+import { ResultBand } from "./result-band";
 import { scopeToValue, tenantClickAction } from "./scope";
 import { ScopePicker } from "./scope-picker";
+import { sendsBetleadsNote } from "./sends-block";
 import { TenantProfitTable } from "./tenant-profit-table";
+import { WaterfallChart } from "./waterfall-chart";
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** A painel card: 18px title on the left, an optional label on the right. */
+function Section({
+  title,
+  aside,
+  children,
+}: {
+  title?: string;
+  aside?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="px-4 pb-4 sm:px-5 sm:pb-5">{children}</CardContent>
+    <Card className="min-w-0 rounded-[14px] p-5 sm:p-6">
+      {title && (
+        <div className="mb-3.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 className="text-lg font-semibold leading-tight">{title}</h2>
+          {aside && <span className="text-[13px] text-muted-foreground">{aside}</span>}
+        </div>
+      )}
+      {children}
     </Card>
   );
 }
@@ -51,45 +66,65 @@ function DashboardBody({
   onLaunchPending?: (firstDate: string) => void;
 }) {
   const multi = dashboard.scope.kind !== "tenant";
-  const { totals, tenants } = dashboard;
+  const { totals, tenants, kpis } = dashboard;
+  // "Sem comparação": the server sends no comparison window.
+  const comparing = dashboard.compareRange !== null;
+  // The 12-month chart's metric: its card title follows it.
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>("cashResult");
 
   return (
-    <div className="space-y-4">
-      <PendingBanner
-        scopeKind={dashboard.scope.kind}
-        tenants={tenants}
-        duplicateBetleadsCosts={dashboard.duplicateBetleadsCosts}
-        onLaunchPending={onLaunchPending}
-      />
-      <KpiCards
-        current={totals.current}
-        previous={totals.previous}
-        houseCount={multi ? tenants.length : undefined}
-      />
-      {multi && (
-        <Section title="Lucro por casa">
-          <TenantProfitTable rows={tenants} onOpenTenant={onOpenTenant} />
-        </Section>
-      )}
-      <Section
-        title={
-          multi
-            ? "Lucro líquido · últimos 12 meses (empilhado por casa)"
-            : "Lucro líquido · últimos 12 meses"
-        }
-      >
-        <ProfitTrendChart
-          months={dashboard.months}
+    // One TooltipProvider for every TermTooltip of the painel.
+    <TooltipProvider delayDuration={150}>
+      <div className="space-y-8">
+        <PendingBanner
+          scopeKind={dashboard.scope.kind}
           tenants={tenants}
-          stacked={multi}
-          betleadsSince={dashboard.betleadsSince}
+          duplicateBetleadsCosts={dashboard.duplicateBetleadsCosts}
+          onLaunchPending={onLaunchPending}
         />
-      </Section>
-      <Section title={multi ? "Para onde foi o dinheiro (somado)" : "Para onde foi o dinheiro"}>
-        <CostBreakdown costs={dashboard.costs} />
-      </Section>
-      {multi && <GroupScoreboard rows={tenants} onRowClick={onOpenTenant} />}
-    </div>
+        <ResultBand
+          current={totals.current}
+          previous={totals.previous}
+          kpis={kpis}
+          roiReference={dashboard.roiReference}
+          houseCount={multi ? tenants.length : undefined}
+          comparing={comparing}
+        />
+        <Section
+          title={multi ? "Do depósito ao lucro (somado)" : "Do depósito ao lucro"}
+          aside={periodLabel(dashboard.range)}
+        >
+          <WaterfallChart
+            steps={dashboard.waterfall}
+            withoutFee={totals.current.betleadsFee === null}
+          />
+        </Section>
+        <KpiBlocks
+          totals={totals}
+          kpis={kpis}
+          sends={dashboard.sends}
+          exemptHouse={dashboard.exemptHouse}
+          betleadsNote={sendsBetleadsNote(dashboard.range.from, dashboard.betleadsSince)}
+        />
+        <Section>
+          <ProfitTrendChart
+            title={trendChartTitle(multi, trendMetric)}
+            months={dashboard.months}
+            tenants={tenants}
+            stacked={multi}
+            betleadsSince={dashboard.betleadsSince}
+            metric={trendMetric}
+            onMetricChange={setTrendMetric}
+          />
+        </Section>
+        {multi && (
+          <Section title="Lucro por casa">
+            <TenantProfitTable rows={tenants} onOpenTenant={onOpenTenant} comparing={comparing} />
+          </Section>
+        )}
+        {multi && <GroupScoreboard rows={tenants} onRowClick={onOpenTenant} />}
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -154,7 +189,7 @@ export function FinanceDashboardView({
           onChange={setScope}
         />
       )}
-      <GroupPeriodBar value={period} onChange={setPeriod} monthPicker />
+      <GroupPeriodBar value={period} onChange={setPeriod} />
       {query.isError ? (
         <p className="text-sm text-destructive">
           {(query.error as Error).message || "Não foi possível carregar o painel."}

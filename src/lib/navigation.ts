@@ -16,9 +16,11 @@ import {
   ShieldQuestion,
   Sparkles,
   Target,
+  TrendingUp,
   Trophy,
   UserCog,
   Users,
+  Users2,
   Wallet,
   Workflow,
   type LucideIcon,
@@ -40,7 +42,7 @@ export type ShellRole = "admin" | "gestor" | "member" | "super_admin" | "expert"
 
 export type NavAccess = {
   /** Who sees the item. Defaults to everyone. */
-  requires?: "tenant_admin" | "super_admin" | "not_super_admin" | "finance";
+  requires?: "tenant_admin" | "super_admin" | "not_super_admin" | "finance" | "team_profile";
 };
 
 export type NavLink = NavAccess & {
@@ -76,6 +78,8 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     label: "Resultados",
     items: [
       link("Resultados do CRM", "/resultados", Target, { alsoActiveOn: ["/relatorios"] }),
+      link("Meu rendimento", "/rendimento", TrendingUp, { requires: "team_profile" }),
+      link("Rendimento da equipe", "/rendimento/equipe", Users2, { requires: "tenant_admin" }),
       link("Aquisição e LTV", "/midia-ltv", BarChart3),
       link("Financeiro", "/financeiro", Wallet, { requires: "finance" }),
     ],
@@ -151,6 +155,7 @@ export const EXPERT_SECTIONS: NavSection[] = [
     items: [
       link("Início", "/expert", Home),
       link("Leads", "/expert/leads", Users),
+      link("Rendimento", "/expert/rendimento", TrendingUp),
       link("Modelos", "/expert/modelos", FileText),
     ],
   },
@@ -203,6 +208,7 @@ export type MobileTab = { title: string; to?: string; icon: LucideIcon; alsoActi
 export const EXPERT_MOBILE_TABS: MobileTab[] = [
   { title: "Início", to: "/expert", icon: Home },
   { title: "Leads", to: "/expert/leads", icon: Users },
+  { title: "Rendimento", to: "/expert/rendimento", icon: TrendingUp },
   { title: "Modelos", to: "/expert/modelos", icon: FileText },
 ];
 
@@ -239,6 +245,9 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/resultados": { section: "Resultados", title: "Resultados do CRM" },
   "/resultados/comparar": { section: "Resultados", title: "Comparar casas" },
   "/relatorios/conversao": { section: "Resultados", title: "Relatório de conversão" },
+  "/rendimento": { section: "Resultados", title: "Meu rendimento" },
+  "/rendimento/equipe": { section: "Resultados", title: "Rendimento da equipe" },
+  "/rendimento/equipe/$expertId": { section: "Resultados", title: "Relatório de rendimento" },
   "/midia-ltv": { section: "Resultados", title: "Aquisição e LTV" },
   "/financeiro": { section: "Resultados", title: "Financeiro" },
   "/players": { section: "Jogadores", title: "Jogadores" },
@@ -270,6 +279,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/inteligencia": { section: "IA", title: "Assistente IA" },
   "/treino-ia": { section: "IA", title: "Configurar IA" },
   "/experts": { section: "Jogadores", title: "Experts" },
+  "/experts/$expertId": { section: "Jogadores", title: "Expert" },
   "/expert": { section: "Expert", title: "Início" },
   // The generated route tree's `FileRoutesByFullPath` keeps the trailing
   // slash for a nested index route ("/expert/" is `expert.index.tsx`'s
@@ -279,6 +289,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/expert/": { section: "Expert", title: "Início" },
   "/expert/leads": { section: "Expert", title: "Leads" },
   "/expert/leads/$playerId": { section: "Expert", title: "Ficha do lead" },
+  "/expert/rendimento": { section: "Expert", title: "Rendimento" },
   "/expert/modelos": { section: "Expert", title: "Modelos de mensagem" },
   "/webhooks": { section: "Configurações", title: "Integrações" },
   "/consentimentos": { section: "Canais", title: "Consentimentos" },
@@ -330,6 +341,7 @@ export function canSee(
   role: ShellRole | null,
   isSuperAdmin: boolean,
   canViewFinance = false,
+  hasTeamProfile = false,
 ) {
   if (!access.requires) return true;
   if (access.requires === "super_admin") return isSuperAdmin;
@@ -337,6 +349,10 @@ export function canSee(
   // (like "Conta e equipe") only gated on "not being the super admin".
   if (access.requires === "not_super_admin") return !isSuperAdmin && role !== "expert";
   if (access.requires === "finance") return isSuperAdmin || canViewFinance;
+  // "Meu rendimento": visible only when the active house's switcher says the
+  // user has a team profile there (a real membership, not the forced
+  // super_admin role — see tenants-team-profile-flag.test.ts).
+  if (access.requires === "team_profile") return hasTeamProfile;
   return isSuperAdmin || role === "admin";
 }
 
@@ -344,12 +360,17 @@ export function visibleSections(
   role: ShellRole | null,
   isSuperAdmin: boolean,
   canViewFinance = false,
+  hasTeamProfile = false,
 ): NavSection[] {
   if (role === "expert") return EXPERT_SECTIONS;
-  return SIDEBAR_SECTIONS.filter((section) => canSee(section, role, isSuperAdmin, canViewFinance))
+  return SIDEBAR_SECTIONS.filter((section) =>
+    canSee(section, role, isSuperAdmin, canViewFinance, hasTeamProfile),
+  )
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => canSee(item, role, isSuperAdmin, canViewFinance)),
+      items: section.items.filter((item) =>
+        canSee(item, role, isSuperAdmin, canViewFinance, hasTeamProfile),
+      ),
     }))
     .filter((section) => section.items.length > 0);
 }

@@ -33,6 +33,7 @@ import { Route as PlanoECreditosRouteImport } from './routes/plano-e-creditos'
 import { Route as PlayersRouteImport } from './routes/players'
 import { Route as PublicosRouteImport } from './routes/publicos'
 import { Route as RegrasRouteImport } from './routes/regras'
+import { Route as RendimentoRouteImport } from './routes/rendimento'
 import { Route as ResultadosRouteImport } from './routes/resultados'
 import { Route as SmsRouteImport } from './routes/sms'
 import { Route as TenantsRouteImport } from './routes/tenants'
@@ -47,6 +48,8 @@ import { Route as ConfiguracoesCasaRouteImport } from './routes/configuracoes_.c
 import { Route as ExpertIndexRouteImport } from './routes/expert.index'
 import { Route as ExpertLeadsRouteImport } from './routes/expert.leads'
 import { Route as ExpertModelosRouteImport } from './routes/expert.modelos'
+import { Route as ExpertRendimentoRouteImport } from './routes/expert.rendimento'
+import { Route as ExpertsExpertIdRouteImport } from './routes/experts.$expertId'
 import { Route as GrupoCasaRouteImport } from './routes/grupo_.casa'
 import { Route as GrupoMetasRouteImport } from './routes/grupo_.metas'
 import { Route as GrupoPessoasRouteImport } from './routes/grupo_.pessoas'
@@ -55,6 +58,7 @@ import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
 import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
 import { Route as RelatoriosConversaoRouteImport } from './routes/relatorios.conversao'
+import { Route as RendimentoEquipeRouteImport } from './routes/rendimento.equipe'
 import { Route as ResultadosCompararRouteImport } from './routes/resultados_.comparar'
 import { Route as SmsTemplatesRouteImport } from './routes/sms.templates'
 import { Route as UTokenRouteImport } from './routes/u.$token'
@@ -64,6 +68,7 @@ import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms
 import { Route as CampanhasCampaignIdRelatorioRouteImport } from './routes/campanhas.$campaignId.relatorio'
 import { Route as ExpertLeadsPlayerIdRouteImport } from './routes/expert.leads.$playerId'
 import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornadas.$journeyId_.relatorio'
+import { Route as RendimentoEquipeExpertIdRouteImport } from './routes/rendimento.equipe.$expertId'
 import { Route as ApiPublicAutomationsDispatchRouteImport } from './routes/api/public/automations/dispatch'
 import { Route as ApiPublicAutomationsEvaluateRouteImport } from './routes/api/public/automations/evaluate'
 import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/call-flows/tick'
@@ -90,6 +95,7 @@ import { Route as ApiPublicUpperWebhookRouteImport } from './routes/api/public/u
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
 import { Route as ApiPublicEmailImgAssetIdFilenameRouteImport } from './routes/api/public/email-img.$assetId.$filename'
 import { Route as ApiPublicInfobipEmailEventsRouteImport } from './routes/api/public/infobip/email/events'
+import { Route as ApiPublicInfobipSmsEventsRouteImport } from './routes/api/public/infobip/sms/events'
 import { Route as ApiPublicInfobipVoiceCmlRouteImport } from './routes/api/public/infobip/voice/cml'
 import { Route as ApiPublicInfobipVoiceEventsRouteImport } from './routes/api/public/infobip/voice/events'
 import { Route as ApiPublicInfobipVoiceReconcileRouteImport } from './routes/api/public/infobip/voice/reconcile'
@@ -215,6 +221,11 @@ const RegrasRoute = RegrasRouteImport.update({
   path: '/regras',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RendimentoRoute = RendimentoRouteImport.update({
+  id: '/rendimento',
+  path: '/rendimento',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ResultadosRoute = ResultadosRouteImport.update({
   id: '/resultados',
   path: '/resultados',
@@ -285,6 +296,16 @@ const ExpertModelosRoute = ExpertModelosRouteImport.update({
   path: '/expert/modelos',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ExpertRendimentoRoute = ExpertRendimentoRouteImport.update({
+  id: '/expert/rendimento',
+  path: '/expert/rendimento',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExpertsExpertIdRoute = ExpertsExpertIdRouteImport.update({
+  id: '/$expertId',
+  path: '/$expertId',
+  getParentRoute: () => ExpertsRoute,
+} as any)
 const GrupoCasaRoute = GrupoCasaRouteImport.update({
   id: '/grupo_/casa',
   path: '/grupo/casa',
@@ -324,6 +345,11 @@ const RelatoriosConversaoRoute = RelatoriosConversaoRouteImport.update({
   id: '/relatorios/conversao',
   path: '/relatorios/conversao',
   getParentRoute: () => rootRouteImport,
+} as any)
+const RendimentoEquipeRoute = RendimentoEquipeRouteImport.update({
+  id: '/equipe',
+  path: '/equipe',
+  getParentRoute: () => RendimentoRoute,
 } as any)
 const ResultadosCompararRoute = ResultadosCompararRouteImport.update({
   id: '/resultados_/comparar',
@@ -372,6 +398,12 @@ const JornadasJourneyIdRelatorioRoute =
     id: '/$journeyId_/relatorio',
     path: '/$journeyId/relatorio',
     getParentRoute: () => JornadasRoute,
+  } as any)
+const RendimentoEquipeExpertIdRoute =
+  RendimentoEquipeExpertIdRouteImport.update({
+    id: '/$expertId',
+    path: '/$expertId',
+    getParentRoute: () => RendimentoEquipeRoute,
   } as any)
 const ApiPublicAutomationsDispatchRoute =
   ApiPublicAutomationsDispatchRouteImport.update({
@@ -520,6 +552,12 @@ const ApiPublicInfobipEmailEventsRoute =
     path: '/api/public/infobip/email/events',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicInfobipSmsEventsRoute =
+  ApiPublicInfobipSmsEventsRouteImport.update({
+    id: '/api/public/infobip/sms/events',
+    path: '/api/public/infobip/sms/events',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicInfobipVoiceCmlRoute =
   ApiPublicInfobipVoiceCmlRouteImport.update({
     id: '/api/public/infobip/voice/cml',
@@ -556,7 +594,7 @@ export interface FileRoutesByFullPath {
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
-  '/experts': typeof ExpertsRoute
+  '/experts': typeof ExpertsRouteWithChildren
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/grupo': typeof GrupoRoute
@@ -570,6 +608,7 @@ export interface FileRoutesByFullPath {
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
+  '/rendimento': typeof RendimentoRouteWithChildren
   '/resultados': typeof ResultadosRoute
   '/sms': typeof SmsRouteWithChildren
   '/tenants': typeof TenantsRoute
@@ -583,6 +622,8 @@ export interface FileRoutesByFullPath {
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/expert/modelos': typeof ExpertModelosRoute
+  '/expert/rendimento': typeof ExpertRendimentoRoute
+  '/experts/$expertId': typeof ExpertsExpertIdRoute
   '/grupo/casa': typeof GrupoCasaRoute
   '/grupo/metas': typeof GrupoMetasRoute
   '/grupo/pessoas': typeof GrupoPessoasRoute
@@ -591,6 +632,7 @@ export interface FileRoutesByFullPath {
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/relatorios/conversao': typeof RelatoriosConversaoRoute
+  '/rendimento/equipe': typeof RendimentoEquipeRouteWithChildren
   '/resultados/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
@@ -601,6 +643,7 @@ export interface FileRoutesByFullPath {
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
   '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
+  '/rendimento/equipe/$expertId': typeof RendimentoEquipeExpertIdRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -627,6 +670,7 @@ export interface FileRoutesByFullPath {
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
+  '/api/public/infobip/sms/events': typeof ApiPublicInfobipSmsEventsRoute
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
@@ -643,7 +687,7 @@ export interface FileRoutesByTo {
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
-  '/experts': typeof ExpertsRoute
+  '/experts': typeof ExpertsRouteWithChildren
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/grupo': typeof GrupoRoute
@@ -657,6 +701,7 @@ export interface FileRoutesByTo {
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
+  '/rendimento': typeof RendimentoRouteWithChildren
   '/resultados': typeof ResultadosRoute
   '/sms': typeof SmsRouteWithChildren
   '/tenants': typeof TenantsRoute
@@ -670,6 +715,8 @@ export interface FileRoutesByTo {
   '/configuracoes/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/expert/modelos': typeof ExpertModelosRoute
+  '/expert/rendimento': typeof ExpertRendimentoRoute
+  '/experts/$expertId': typeof ExpertsExpertIdRoute
   '/grupo/casa': typeof GrupoCasaRoute
   '/grupo/metas': typeof GrupoMetasRoute
   '/grupo/pessoas': typeof GrupoPessoasRoute
@@ -678,6 +725,7 @@ export interface FileRoutesByTo {
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/relatorios/conversao': typeof RelatoriosConversaoRoute
+  '/rendimento/equipe': typeof RendimentoEquipeRouteWithChildren
   '/resultados/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
@@ -688,6 +736,7 @@ export interface FileRoutesByTo {
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
   '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
+  '/rendimento/equipe/$expertId': typeof RendimentoEquipeExpertIdRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -714,6 +763,7 @@ export interface FileRoutesByTo {
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
+  '/api/public/infobip/sms/events': typeof ApiPublicInfobipSmsEventsRoute
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
@@ -731,7 +781,7 @@ export interface FileRoutesById {
   '/creditos-sms': typeof CreditosSmsRoute
   '/email': typeof EmailRoute
   '/eventos': typeof EventosRoute
-  '/experts': typeof ExpertsRoute
+  '/experts': typeof ExpertsRouteWithChildren
   '/financeiro': typeof FinanceiroRoute
   '/gamificacao': typeof GamificacaoRoute
   '/grupo': typeof GrupoRoute
@@ -745,6 +795,7 @@ export interface FileRoutesById {
   '/players': typeof PlayersRouteWithChildren
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
+  '/rendimento': typeof RendimentoRouteWithChildren
   '/resultados': typeof ResultadosRoute
   '/sms': typeof SmsRouteWithChildren
   '/tenants': typeof TenantsRoute
@@ -758,6 +809,8 @@ export interface FileRoutesById {
   '/configuracoes_/casa': typeof ConfiguracoesCasaRoute
   '/expert/leads': typeof ExpertLeadsRouteWithChildren
   '/expert/modelos': typeof ExpertModelosRoute
+  '/expert/rendimento': typeof ExpertRendimentoRoute
+  '/experts/$expertId': typeof ExpertsExpertIdRoute
   '/grupo_/casa': typeof GrupoCasaRoute
   '/grupo_/metas': typeof GrupoMetasRoute
   '/grupo_/pessoas': typeof GrupoPessoasRoute
@@ -766,6 +819,7 @@ export interface FileRoutesById {
   '/links/configuracoes': typeof LinksConfiguracoesRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/relatorios/conversao': typeof RelatoriosConversaoRoute
+  '/rendimento/equipe': typeof RendimentoEquipeRouteWithChildren
   '/resultados_/comparar': typeof ResultadosCompararRoute
   '/sms/templates': typeof SmsTemplatesRoute
   '/u/$token': typeof UTokenRoute
@@ -776,6 +830,7 @@ export interface FileRoutesById {
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
   '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId_/relatorio': typeof JornadasJourneyIdRelatorioRoute
+  '/rendimento/equipe/$expertId': typeof RendimentoEquipeExpertIdRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -802,6 +857,7 @@ export interface FileRoutesById {
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
   '/api/public/email-img/$assetId/$filename': typeof ApiPublicEmailImgAssetIdFilenameRoute
   '/api/public/infobip/email/events': typeof ApiPublicInfobipEmailEventsRoute
+  '/api/public/infobip/sms/events': typeof ApiPublicInfobipSmsEventsRoute
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
@@ -834,6 +890,7 @@ export interface FileRouteTypes {
     | '/players'
     | '/publicos'
     | '/regras'
+    | '/rendimento'
     | '/resultados'
     | '/sms'
     | '/tenants'
@@ -847,6 +904,8 @@ export interface FileRouteTypes {
     | '/configuracoes/casa'
     | '/expert/leads'
     | '/expert/modelos'
+    | '/expert/rendimento'
+    | '/experts/$expertId'
     | '/grupo/casa'
     | '/grupo/metas'
     | '/grupo/pessoas'
@@ -855,6 +914,7 @@ export interface FileRouteTypes {
     | '/links/configuracoes'
     | '/players/$playerId'
     | '/relatorios/conversao'
+    | '/rendimento/equipe'
     | '/resultados/comparar'
     | '/sms/templates'
     | '/u/$token'
@@ -865,6 +925,7 @@ export interface FileRouteTypes {
     | '/campanhas/$campaignId/relatorio'
     | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
+    | '/rendimento/equipe/$expertId'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -891,6 +952,7 @@ export interface FileRouteTypes {
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
+    | '/api/public/infobip/sms/events'
     | '/api/public/infobip/voice/cml'
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
@@ -921,6 +983,7 @@ export interface FileRouteTypes {
     | '/players'
     | '/publicos'
     | '/regras'
+    | '/rendimento'
     | '/resultados'
     | '/sms'
     | '/tenants'
@@ -934,6 +997,8 @@ export interface FileRouteTypes {
     | '/configuracoes/casa'
     | '/expert/leads'
     | '/expert/modelos'
+    | '/expert/rendimento'
+    | '/experts/$expertId'
     | '/grupo/casa'
     | '/grupo/metas'
     | '/grupo/pessoas'
@@ -942,6 +1007,7 @@ export interface FileRouteTypes {
     | '/links/configuracoes'
     | '/players/$playerId'
     | '/relatorios/conversao'
+    | '/rendimento/equipe'
     | '/resultados/comparar'
     | '/sms/templates'
     | '/u/$token'
@@ -952,6 +1018,7 @@ export interface FileRouteTypes {
     | '/campanhas/$campaignId/relatorio'
     | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
+    | '/rendimento/equipe/$expertId'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -978,6 +1045,7 @@ export interface FileRouteTypes {
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
+    | '/api/public/infobip/sms/events'
     | '/api/public/infobip/voice/cml'
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
@@ -1008,6 +1076,7 @@ export interface FileRouteTypes {
     | '/players'
     | '/publicos'
     | '/regras'
+    | '/rendimento'
     | '/resultados'
     | '/sms'
     | '/tenants'
@@ -1021,6 +1090,8 @@ export interface FileRouteTypes {
     | '/configuracoes_/casa'
     | '/expert/leads'
     | '/expert/modelos'
+    | '/expert/rendimento'
+    | '/experts/$expertId'
     | '/grupo_/casa'
     | '/grupo_/metas'
     | '/grupo_/pessoas'
@@ -1029,6 +1100,7 @@ export interface FileRouteTypes {
     | '/links/configuracoes'
     | '/players/$playerId'
     | '/relatorios/conversao'
+    | '/rendimento/equipe'
     | '/resultados_/comparar'
     | '/sms/templates'
     | '/u/$token'
@@ -1039,6 +1111,7 @@ export interface FileRouteTypes {
     | '/campanhas/$campaignId/relatorio'
     | '/expert/leads/$playerId'
     | '/jornadas/$journeyId_/relatorio'
+    | '/rendimento/equipe/$expertId'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -1065,6 +1138,7 @@ export interface FileRouteTypes {
     | '/api/public/webhook/$evento'
     | '/api/public/email-img/$assetId/$filename'
     | '/api/public/infobip/email/events'
+    | '/api/public/infobip/sms/events'
     | '/api/public/infobip/voice/cml'
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
@@ -1082,7 +1156,7 @@ export interface RootRouteChildren {
   CreditosSmsRoute: typeof CreditosSmsRoute
   EmailRoute: typeof EmailRoute
   EventosRoute: typeof EventosRoute
-  ExpertsRoute: typeof ExpertsRoute
+  ExpertsRoute: typeof ExpertsRouteWithChildren
   FinanceiroRoute: typeof FinanceiroRoute
   GamificacaoRoute: typeof GamificacaoRoute
   GrupoRoute: typeof GrupoRoute
@@ -1096,6 +1170,7 @@ export interface RootRouteChildren {
   PlayersRoute: typeof PlayersRouteWithChildren
   PublicosRoute: typeof PublicosRoute
   RegrasRoute: typeof RegrasRoute
+  RendimentoRoute: typeof RendimentoRouteWithChildren
   ResultadosRoute: typeof ResultadosRoute
   SmsRoute: typeof SmsRouteWithChildren
   TenantsRoute: typeof TenantsRoute
@@ -1105,6 +1180,7 @@ export interface RootRouteChildren {
   ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
   ExpertLeadsRoute: typeof ExpertLeadsRouteWithChildren
   ExpertModelosRoute: typeof ExpertModelosRoute
+  ExpertRendimentoRoute: typeof ExpertRendimentoRoute
   GrupoCasaRoute: typeof GrupoCasaRoute
   GrupoMetasRoute: typeof GrupoMetasRoute
   GrupoPessoasRoute: typeof GrupoPessoasRoute
@@ -1141,6 +1217,7 @@ export interface RootRouteChildren {
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
   ApiPublicEmailImgAssetIdFilenameRoute: typeof ApiPublicEmailImgAssetIdFilenameRoute
   ApiPublicInfobipEmailEventsRoute: typeof ApiPublicInfobipEmailEventsRoute
+  ApiPublicInfobipSmsEventsRoute: typeof ApiPublicInfobipSmsEventsRoute
   ApiPublicInfobipVoiceCmlRoute: typeof ApiPublicInfobipVoiceCmlRoute
   ApiPublicInfobipVoiceEventsRoute: typeof ApiPublicInfobipVoiceEventsRoute
   ApiPublicInfobipVoiceReconcileRoute: typeof ApiPublicInfobipVoiceReconcileRoute
@@ -1317,6 +1394,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RegrasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/rendimento': {
+      id: '/rendimento'
+      path: '/rendimento'
+      fullPath: '/rendimento'
+      preLoaderRoute: typeof RendimentoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/resultados': {
       id: '/resultados'
       path: '/resultados'
@@ -1415,6 +1499,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExpertModelosRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/expert/rendimento': {
+      id: '/expert/rendimento'
+      path: '/expert/rendimento'
+      fullPath: '/expert/rendimento'
+      preLoaderRoute: typeof ExpertRendimentoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/experts/$expertId': {
+      id: '/experts/$expertId'
+      path: '/$expertId'
+      fullPath: '/experts/$expertId'
+      preLoaderRoute: typeof ExpertsExpertIdRouteImport
+      parentRoute: typeof ExpertsRoute
+    }
     '/grupo_/casa': {
       id: '/grupo_/casa'
       path: '/grupo/casa'
@@ -1470,6 +1568,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/relatorios/conversao'
       preLoaderRoute: typeof RelatoriosConversaoRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/rendimento/equipe': {
+      id: '/rendimento/equipe'
+      path: '/equipe'
+      fullPath: '/rendimento/equipe'
+      preLoaderRoute: typeof RendimentoEquipeRouteImport
+      parentRoute: typeof RendimentoRoute
     }
     '/resultados_/comparar': {
       id: '/resultados_/comparar'
@@ -1533,6 +1638,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/jornadas/$journeyId/relatorio'
       preLoaderRoute: typeof JornadasJourneyIdRelatorioRouteImport
       parentRoute: typeof JornadasRoute
+    }
+    '/rendimento/equipe/$expertId': {
+      id: '/rendimento/equipe/$expertId'
+      path: '/$expertId'
+      fullPath: '/rendimento/equipe/$expertId'
+      preLoaderRoute: typeof RendimentoEquipeExpertIdRouteImport
+      parentRoute: typeof RendimentoEquipeRoute
     }
     '/api/public/automations/dispatch': {
       id: '/api/public/automations/dispatch'
@@ -1716,6 +1828,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicInfobipEmailEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/infobip/sms/events': {
+      id: '/api/public/infobip/sms/events'
+      path: '/api/public/infobip/sms/events'
+      fullPath: '/api/public/infobip/sms/events'
+      preLoaderRoute: typeof ApiPublicInfobipSmsEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/infobip/voice/cml': {
       id: '/api/public/infobip/voice/cml'
       path: '/api/public/infobip/voice/cml'
@@ -1777,6 +1896,17 @@ const CampanhasRouteWithChildren = CampanhasRoute._addFileChildren(
   CampanhasRouteChildren,
 )
 
+interface ExpertsRouteChildren {
+  ExpertsExpertIdRoute: typeof ExpertsExpertIdRoute
+}
+
+const ExpertsRouteChildren: ExpertsRouteChildren = {
+  ExpertsExpertIdRoute: ExpertsExpertIdRoute,
+}
+
+const ExpertsRouteWithChildren =
+  ExpertsRoute._addFileChildren(ExpertsRouteChildren)
+
 interface JornadasRouteChildren {
   JornadasJourneyIdRoute: typeof JornadasJourneyIdRoute
   JornadasNovaRoute: typeof JornadasNovaRoute
@@ -1814,6 +1944,29 @@ const PlayersRouteChildren: PlayersRouteChildren = {
 const PlayersRouteWithChildren =
   PlayersRoute._addFileChildren(PlayersRouteChildren)
 
+interface RendimentoEquipeRouteChildren {
+  RendimentoEquipeExpertIdRoute: typeof RendimentoEquipeExpertIdRoute
+}
+
+const RendimentoEquipeRouteChildren: RendimentoEquipeRouteChildren = {
+  RendimentoEquipeExpertIdRoute: RendimentoEquipeExpertIdRoute,
+}
+
+const RendimentoEquipeRouteWithChildren =
+  RendimentoEquipeRoute._addFileChildren(RendimentoEquipeRouteChildren)
+
+interface RendimentoRouteChildren {
+  RendimentoEquipeRoute: typeof RendimentoEquipeRouteWithChildren
+}
+
+const RendimentoRouteChildren: RendimentoRouteChildren = {
+  RendimentoEquipeRoute: RendimentoEquipeRouteWithChildren,
+}
+
+const RendimentoRouteWithChildren = RendimentoRoute._addFileChildren(
+  RendimentoRouteChildren,
+)
+
 interface SmsRouteChildren {
   SmsTemplatesRoute: typeof SmsTemplatesRoute
 }
@@ -1847,7 +2000,7 @@ const rootRouteChildren: RootRouteChildren = {
   CreditosSmsRoute: CreditosSmsRoute,
   EmailRoute: EmailRoute,
   EventosRoute: EventosRoute,
-  ExpertsRoute: ExpertsRoute,
+  ExpertsRoute: ExpertsRouteWithChildren,
   FinanceiroRoute: FinanceiroRoute,
   GamificacaoRoute: GamificacaoRoute,
   GrupoRoute: GrupoRoute,
@@ -1861,6 +2014,7 @@ const rootRouteChildren: RootRouteChildren = {
   PlayersRoute: PlayersRouteWithChildren,
   PublicosRoute: PublicosRoute,
   RegrasRoute: RegrasRoute,
+  RendimentoRoute: RendimentoRouteWithChildren,
   ResultadosRoute: ResultadosRoute,
   SmsRoute: SmsRouteWithChildren,
   TenantsRoute: TenantsRoute,
@@ -1870,6 +2024,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
   ExpertLeadsRoute: ExpertLeadsRouteWithChildren,
   ExpertModelosRoute: ExpertModelosRoute,
+  ExpertRendimentoRoute: ExpertRendimentoRoute,
   GrupoCasaRoute: GrupoCasaRoute,
   GrupoMetasRoute: GrupoMetasRoute,
   GrupoPessoasRoute: GrupoPessoasRoute,
@@ -1906,6 +2061,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
   ApiPublicEmailImgAssetIdFilenameRoute: ApiPublicEmailImgAssetIdFilenameRoute,
   ApiPublicInfobipEmailEventsRoute: ApiPublicInfobipEmailEventsRoute,
+  ApiPublicInfobipSmsEventsRoute: ApiPublicInfobipSmsEventsRoute,
   ApiPublicInfobipVoiceCmlRoute: ApiPublicInfobipVoiceCmlRoute,
   ApiPublicInfobipVoiceEventsRoute: ApiPublicInfobipVoiceEventsRoute,
   ApiPublicInfobipVoiceReconcileRoute: ApiPublicInfobipVoiceReconcileRoute,

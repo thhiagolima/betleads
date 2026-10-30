@@ -44,15 +44,9 @@ import {
   type ProviderGateDecision,
   type SmsCampaignRow,
 } from "./sms-campaign-dispatch.server";
-import {
-  acquireSmsSendGate,
-  breakerRetryAt,
-  cachedSmsBreaker,
-  readSmsBreaker,
-  releaseSmsProbe,
-  smsSuspendedMessage,
-  type SmsSendGate,
-} from "./sms-provider-breaker.server";
+import { PLATFORM_SMS_BREAKER_KEY, smsBreakerKey } from "./sms-provider-breaker.server";
+import { SmsAccountGates } from "./sms-account-gates.server";
+import { ProviderAccountUnavailableError, resolveSmsAccount } from "./provider-accounts.server";
 import { PROVIDER_ACCOUNT_DEFER_MS } from "./rate-limit/provider-errors.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
 
@@ -222,25 +216,16 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
     });
     return { processed: 0, throttled: true };
   }
-  // SMS provider circuit breaker (global): while the provider refuses the
-  // account nothing is claimed, so no lead advances, fails or burns attempts.
-  const breakerHolder = `sms-flow:${crypto.randomUUID()}`;
-  const smsGate = await acquireSmsSendGate(breakerHolder);
-  if (smsGate.mode === "open") {
-    await recordRun(startedAt, {
-      channel,
-      queue_before: queueBefore,
-      stop_reason: "provider_unavailable",
-      provider: "short-brasil",
-      last_provider_error: smsSuspendedMessage(smsGate.snapshot),
-    });
-    return { processed: 0, providerUnavailable: true };
-  }
+  // SMS provider circuit breakers, one per provider account: each lead is
+  // admitted against the breaker of its house's account right before the
+  // send, so an account that is down holds only its own houses' leads (no
+  // attempt consumed) and never the houses on other accounts.
+  const gates = new SmsAccountGates(`sms-flow:${crypto.randomUUID()}`);
   try {
-    return await runSmsFlowBatch({ limit, startedAt, queueBefore, rate, smsGate });
+    return await runSmsFlowBatch({ limit, startedAt, queueBefore, rate, gates });
   } finally {
     // Probe taken but no provider verdict (e.g. only delays were due): hand it back.
-    if (smsGate.mode === "probe") await releaseSmsProbe(breakerHolder);
+    await gates.release();
   }
 }
 
@@ -249,18 +234,16 @@ async function runSmsFlowBatch({
   startedAt,
   queueBefore,
   rate,
-  smsGate,
+  gates,
 }: {
   limit: number;
   startedAt: number;
   queueBefore: number;
   rate: Awaited<ReturnType<typeof getRateState>>;
-  smsGate: SmsSendGate;
+  gates: SmsAccountGates;
 }) {
   const channel = "sms" as const;
-  // Half-open: exactly one lead is claimed; its send is the probe.
-  const effectiveLimit =
-    smsGate.mode === "probe" ? 1 : Math.max(1, Math.min(limit, rate?.max_per_minute ?? 5000));
+  const effectiveLimit = Math.max(1, Math.min(limit, rate?.max_per_minute ?? 5000));
 
   // Claim atômico: reserva leads via FOR UPDATE SKIP LOCKED — seguro pra rodar
   // em paralelo (vários workers do cron) sem enviar SMS duplicado.
@@ -644,12 +627,30 @@ async function runSmsFlowBatch({
       })
       .eq("id", leadId);
   await runPool(sendNow, 10, async (item) => {
-    if (providerDown) {
-      // Breaker opened during this tick: give the lead back untouched.
-      await holdLead(item.lead.id);
+    const admission = await gates.admit(item.lead.tenant_id, item.lead.id);
+    if (admission.mode === "open") {
+      // The house's account is refused by the provider: give the lead back
+      // untouched until its breaker allows a new try. Waiting only for this
+      // tick's probe verdict: back on the next tick.
+      providerDown = true;
+      lastProviderError ??= admission.message;
+      await holdLead(
+        item.lead.id,
+        admission.probeInFlight
+          ? undefined
+          : await gates.retryAt(item.lead.tenant_id, PROVIDER_ACCOUNT_DEFER_MS),
+      );
       rescheduled++;
       return;
     }
+    try {
+      await sendFlowItem(item);
+    } finally {
+      // Probe item: learn the verdict for the rest of this tick.
+      await gates.settle(item.lead.id);
+    }
+  });
+  async function sendFlowItem(item: (typeof sendNow)[number]) {
     const nowIso = new Date().toISOString();
     // Idempotência anti-duplicação: se já enviamos esse mesmo conteúdo
     // para esse mesmo telefone com sucesso nos últimos 30 minutos, não
@@ -743,13 +744,18 @@ async function runSmsFlowBatch({
       );
     } else if ((r as { errorKind?: unknown }).errorKind === "provider_account") {
       // Account refused (101/505, 401/402/403): not the lead's fault. Same
-      // step, attempts unchanged, back when the breaker allows a new try.
+      // step, attempts unchanged, back when the breaker of the house's
+      // account allows a new try. Other accounts keep sending.
       providerDown = true;
       lastProviderError = `provider_account: ${(r as { error?: string }).error ?? ""}`.slice(
         0,
         800,
       );
-      await holdLead(item.lead.id, breakerRetryAt(cachedSmsBreaker(), PROVIDER_ACCOUNT_DEFER_MS));
+      await gates.markOpen(item.lead.tenant_id, item.lead.id);
+      await holdLead(
+        item.lead.id,
+        await gates.retryAt(item.lead.tenant_id, PROVIDER_ACCOUNT_DEFER_MS),
+      );
       rescheduled++;
     } else {
       const status = r.status ?? 0;
@@ -762,23 +768,28 @@ async function runSmsFlowBatch({
           ? String((r as { body?: unknown }).body)
           : JSON.stringify((r as { body?: unknown }).body ?? {}).slice(0, 400);
       lastProviderError = `status=${status} ${bodySnippet}`.slice(0, 800);
+      // The channel-wide throttle and pause below belong to the platform
+      // account; a house's own account only reschedules its own lead.
+      const platformAccount =
+        smsBreakerKey((r as { providerAccountId?: string | null }).providerAccountId) ===
+        PLATFORM_SMS_BREAKER_KEY;
 
       // 429 / rate limit: registra throttle global para desacelerar próximos ticks.
       if (status === 429) {
         rateLimited++;
         const retryAfter = parseRetryAfter((r as { body?: unknown }).body);
-        await registerThrottle("sms", retryAfter, lastProviderError);
+        if (platformAccount) await registerThrottle("sms", retryAfter, lastProviderError);
       }
 
       // Auth error (token inválido/expirado): pausa o canal por 10 min e
       // mantém o lead na fila. NÃO incrementa attempts pra não acabar a fila.
-      if (isAuthError) {
+      if (isAuthError && platformAccount) {
         await registerThrottle("sms", 600, `auth_error_${status}: ${lastProviderError}`);
       }
 
       // Sem saldo na Short Brasil: pausa o canal de SMS pra todos os tenants
       // e reagenda o lead. Sem isso, o motor queimaria toda a fila como "failed".
-      if (insufficient) {
+      if (insufficient && platformAccount) {
         await pauseChannelForInsufficientFunds("sms", lastProviderError);
         await registerThrottle("sms", 1800, `insufficient_funds: ${lastProviderError}`);
       }
@@ -789,18 +800,22 @@ async function runSmsFlowBatch({
         // pausado em dispatch_pause_state — o claim ignora leads do canal
         // pausado. Quando a recarga acontecer e o canal for despausado, o lead
         // volta a ser elegível no MESMO horário original (sem burst no início
-        // do dia). O rate cap absorve o backlog naturalmente.
-        if (insufficient) {
+        // do dia). O rate cap absorve o backlog naturalmente. Conta própria
+        // sem saldo não pausa o canal: o lead volta em 10 min, como auth.
+        if (insufficient && platformAccount) {
           await supabaseAdmin
             .from("sms_flow_leads")
             .update({ locked_at: null, locked_by: null })
             .eq("id", item.lead.id);
         } else {
-          const backoffMs = isAuthError ? 600_000 : status === 429 ? 60_000 : 30_000;
+          const backoffMs = isAuthError || insufficient ? 600_000 : status === 429 ? 60_000 : 30_000;
           await supabaseAdmin
             .from("sms_flow_leads")
             .update({
-              attempts: status === 429 || isAuthError ? item.lead.attempts : item.lead.attempts + 1,
+              attempts:
+                status === 429 || isAuthError || insufficient
+                  ? item.lead.attempts
+                  : item.lead.attempts + 1,
               next_run_at: new Date(Date.now() + backoffMs).toISOString(),
               locked_at: null,
               locked_by: null,
@@ -822,7 +837,7 @@ async function runSmsFlowBatch({
         errors++;
       }
     }
-  });
+  }
   await recordRun(startedAt, {
     channel,
     queue_before: queueBefore,
@@ -904,7 +919,23 @@ async function campaignRecipientHash(tenantId: string, target: CampaignTarget) {
   return target.playerId ? null : externalRecipientHash(tenantId, target.phone);
 }
 
-function campaignDeps(): CampaignDispatchDeps {
+/**
+ * ENV-10 bulk path for a house: SMS_BULK_ENABLED and the house's SMS account
+ * uses the legacy usuario/chave API (the Bearer API keeps the per-recipient
+ * path). A house whose own account is unavailable stays on the per-recipient
+ * path, where each send fails as misconfigured.
+ */
+async function campaignUsesBulk(tenantId: string): Promise<boolean> {
+  if (!smsBulkEnabled()) return false;
+  try {
+    return smsBulkTransport(await resolveSmsAccount(tenantId)) === "short-brasil-bulk";
+  } catch (error) {
+    if (error instanceof ProviderAccountUnavailableError) return false;
+    throw error;
+  }
+}
+
+function campaignDeps(bulk: boolean): CampaignDispatchDeps {
   return {
     now: () => Date.now(),
     resolveRecipients: (tenantId, inputs) =>
@@ -991,8 +1022,8 @@ function campaignDeps(): CampaignDispatchDeps {
     },
     // ENV-10: one Short Brasil bulk request per batch (personalised text and
     // tracked links per recipient). Off unless SMS_BULK_ENABLED=true (QA B1);
-    // the Bearer API keeps the per-recipient path.
-    ...(smsBulkEnabled() && smsBulkTransport() === "short-brasil-bulk"
+    // the Bearer API keeps the per-recipient path (campaignUsesBulk).
+    ...(bulk
       ? {
           async sendBatch({ campaign, items }) {
             const house = await loadHouseLinks(campaign.tenant_id);
@@ -1106,9 +1137,10 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
   // Um único orçamento de tempo por execução (cron 1×/min), compartilhado pelas
   // campanhas reservadas; as que não couberem só têm o lock liberado.
   const deadline = Date.now() + SMS_CAMPAIGN_RUN_BUDGET_MS;
-  const breakerHolder = `sms-campaign:${crypto.randomUUID()}`;
-  const gate = createCampaignProviderGate(breakerHolder);
-  const deps = { ...campaignDeps(), providerGate: gate.next };
+  // Breakers per provider account: a campaign stops only when ITS house's
+  // account is refused.
+  const gates = new SmsAccountGates(`sms-campaign:${crypto.randomUUID()}`);
+  const baseDeps = campaignDeps(false);
   let totalSent = 0;
   let totalFailed = 0;
   let totalDeduplicated = 0;
@@ -1116,10 +1148,14 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
   for (const c of campaigns) {
     if (Date.now() >= deadline) {
       stopReason = "deadline";
-      await deps.updateCampaign(c, { status: "enviando", locked_at: null, locked_by: null });
+      await baseDeps.updateCampaign(c, { status: "enviando", locked_at: null, locked_by: null });
       continue;
     }
     try {
+      const deps = {
+        ...campaignDeps(await campaignUsesBulk(c.tenant_id)),
+        providerGate: () => campaignProviderGate(gates, c),
+      };
       const r = await processSmsCampaignTick(c, deps, {
         deadline,
         tickSeconds: SMS_CAMPAIGN_TICK_SECONDS,
@@ -1148,7 +1184,7 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
         campaignId: c.id,
         error: error instanceof Error ? error.message : String(error),
       });
-      await deps.updateCampaign(c, {
+      await baseDeps.updateCampaign(c, {
         status: "enviando",
         last_error: error instanceof Error ? error.message.slice(0, 500) : String(error),
         locked_at: null,
@@ -1158,7 +1194,7 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
     run.progress({ sent: totalSent, errors: totalFailed });
   }
 
-  await gate.finish();
+  await gates.release();
   return {
     processed: campaigns.length,
     sent: totalSent,
@@ -1169,37 +1205,20 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
 }
 
 /**
- * Campaign view of the SMS provider breaker for one dispatcher run. The first
- * call asks the breaker (may get the half-open probe: ONE send); later calls
- * use the cached state (refreshed every few seconds), so a run that sees the
- * breaker open stops each campaign before its next batch without moving the
- * cursor.
+ * Campaign view of the SMS provider breaker of its house's account, asked
+ * before each batch. The first ask may get the half-open probe (ONE send);
+ * the next ask of the same campaign learns its verdict. A campaign whose
+ * account is refused stops before its next batch without moving the cursor;
+ * campaigns of houses on other accounts keep sending.
  */
-export function createCampaignProviderGate(holder: string) {
-  let decision: SmsSendGate | null = null;
-  let probeGiven = false;
-  let heldProbe = false;
-  return {
-    async next(): Promise<ProviderGateDecision> {
-      if (!decision) {
-        decision = await acquireSmsSendGate(holder);
-      } else {
-        const snapshot = await readSmsBreaker();
-        if (snapshot.state === "closed") decision = { mode: "closed" };
-        else if (decision.mode === "closed" || probeGiven) decision = { mode: "open", snapshot };
-      }
-      if (decision.mode === "closed") return { mode: "closed" };
-      if (decision.mode === "probe" && !probeGiven) {
-        probeGiven = true;
-        heldProbe = true;
-        return { mode: "probe" };
-      }
-      const snapshot = decision.mode === "open" ? decision.snapshot : cachedSmsBreaker();
-      return { mode: "open", message: smsSuspendedMessage(snapshot) };
-    },
-    async finish() {
-      // No-op unless the breaker is still half-open with this holder (no verdict).
-      if (heldProbe) await releaseSmsProbe(holder);
-    },
-  };
+export async function campaignProviderGate(
+  gates: SmsAccountGates,
+  campaign: Pick<SmsCampaignRow, "id" | "tenant_id">,
+): Promise<ProviderGateDecision> {
+  const itemId = `campaign:${campaign.id}`;
+  await gates.settle(itemId);
+  const admission = await gates.admit(campaign.tenant_id, itemId);
+  return admission.mode === "open"
+    ? { mode: "open", message: admission.message }
+    : { mode: admission.mode };
 }

@@ -34,6 +34,14 @@ import { ENROLLMENT_STATUS_LABELS } from "@/lib/player-journeys";
 import { JourneyMapCard } from "@/components/journeys/journey-map-card";
 import { useJourneyStatusControl } from "@/components/journeys/journey-status-control";
 import { FlowsTab } from "@/components/ligacoes/flows-tab";
+import { DeadLeadsPanel } from "@/components/journeys/dead-leads-panel";
+import {
+  DEAD_LEAD_RULE_TEXT,
+  DEAD_LEAD_THRESHOLD_DEFAULT,
+  DEAD_LEAD_THRESHOLD_MAX,
+  DEAD_LEAD_THRESHOLD_MIN,
+  parseDeadLeadThreshold,
+} from "@/lib/dead-leads.shared";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { requestConfirmation } from "@/components/system-dialog-host";
@@ -59,11 +67,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   JOURNEY_STATUS_LABELS,
   journeyExitReasonLabel,
   journeyInProgress,
+  journeyMessagesSent,
   journeyTriggerLabel,
   priorityPauseReasonLabel,
 } from "@/components/journeys/journey-editor-config";
@@ -100,6 +110,7 @@ type Journey = {
     exits?: Record<string, number>;
     recovered?: number;
     sentByChannel?: Record<string, number>;
+    finishedWithoutMessage?: number;
   };
 };
 type LegacyJourney = {
@@ -126,13 +137,14 @@ type OperationItem = {
   players: { nome: string | null } | null;
 };
 
-type HubView = "journeys" | "map" | "queue" | "failures" | "conflicts" | "flows";
+type HubView = "journeys" | "map" | "queue" | "failures" | "conflicts" | "dead" | "flows";
 const HUB_VIEWS: ReadonlyArray<{ value: HubView; label: string; hash: string }> = [
   { value: "journeys", label: "Jornadas", hash: "jornadas" },
   { value: "map", label: "Mapa", hash: "mapa" },
   { value: "queue", label: "Fila de envio", hash: "fila" },
   { value: "failures", label: "Falhas", hash: "falhas" },
   { value: "conflicts", label: "Conflitos", hash: "conflitos" },
+  { value: "dead", label: "Leads mortos", hash: "leads-mortos" },
   { value: "flows", label: "Fluxos de voz", hash: "fluxos-de-voz" },
 ];
 
@@ -195,6 +207,8 @@ export function JourneysHub() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [dailyMessageLimit, setDailyMessageLimit] = useState("");
   const [weeklyMessageLimit, setWeeklyMessageLimit] = useState("");
+  const [deadLeadEnabled, setDeadLeadEnabled] = useState(false);
+  const [deadLeadThreshold, setDeadLeadThreshold] = useState(String(DEAD_LEAD_THRESHOLD_DEFAULT));
   const statusControl = useJourneyStatusControl();
   const journeys = useQuery({ queryKey: ["journeys"], queryFn: () => list() });
   const operations = useQuery({
@@ -264,18 +278,38 @@ export function JourneysHub() {
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  const parsedDeadLeadThreshold = parseDeadLeadThreshold(deadLeadThreshold);
   const saveContactLimits = useMutation({
-    mutationFn: () =>
-      saveContactLimitsFn({
+    mutationFn: () => {
+      if (parsedDeadLeadThreshold == null) {
+        throw new Error(
+          `O limite de leads mortos deve ser um número entre ${DEAD_LEAD_THRESHOLD_MIN} e ${DEAD_LEAD_THRESHOLD_MAX}.`,
+        );
+      }
+      return saveContactLimitsFn({
         data: {
           max24h: dailyMessageLimit.trim() ? Number(dailyMessageLimit) : null,
           max7d: weeklyMessageLimit.trim() ? Number(weeklyMessageLimit) : null,
+          deadLeadEnabled,
+          deadLeadThreshold: parsedDeadLeadThreshold,
         },
-      }),
+      });
+    },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["journey-contact-limits"] });
+      const turnedOn = deadLeadEnabled && contactLimits.data?.deadLeadEnabled !== true;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["journey-contact-limits"] }),
+        queryClient.invalidateQueries({ queryKey: ["dead-leads"] }),
+      ]);
       setSettingsOpen(false);
-      toast.success("Limites de contato salvos.");
+      if (turnedOn) {
+        // The rule only applies to the next messages: send the user to the
+        // Leads mortos tab, where "Avaliar base atual agora" marks the base.
+        setView("dead");
+        toast.success(
+          "Regra de leads mortos ligada. Use “Avaliar base atual agora” para marcar quem já se encaixa.",
+        );
+      } else toast.success("Limites de contato salvos.");
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -283,6 +317,8 @@ export function JourneysHub() {
     const result = await contactLimits.refetch();
     setDailyMessageLimit(result.data?.max24h?.toString() ?? "");
     setWeeklyMessageLimit(result.data?.max7d?.toString() ?? "");
+    setDeadLeadEnabled(result.data?.deadLeadEnabled === true);
+    setDeadLeadThreshold(String(result.data?.deadLeadThreshold ?? DEAD_LEAD_THRESHOLD_DEFAULT));
     setSettingsOpen(true);
   };
   const allJourneys = useMemo(
@@ -306,10 +342,7 @@ export function JourneysHub() {
         (total, journey) => {
           const metrics = journey.metrics ?? {};
           total.recovered += Number(metrics.recovered ?? 0);
-          total.sent += Object.values(metrics.sentByChannel ?? {}).reduce(
-            (sum, value) => sum + Number(value),
-            0,
-          );
+          total.sent += journeyMessagesSent(metrics.sentByChannel);
           total.queued += journeyInProgress(metrics.byStatus);
           if (journey.status === "active") total.active += 1;
           return total;
@@ -565,6 +598,7 @@ export function JourneysHub() {
           )}
         </HomeCard>
       )}
+      {view === "dead" && <DeadLeadsPanel onOpenSettings={() => void openContactSettings()} />}
       {view === "flows" && <FlowsTab />}
       {view === "map" && (
         <JourneyMapCard
@@ -712,9 +746,10 @@ export function JourneysHub() {
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Limite de mensagens por pessoa</DialogTitle>
+            <DialogTitle>Limites de contato</DialogTitle>
             <DialogDescription>
-              Vale para todas as jornadas, em todos os canais. Em branco, não há limite.
+              Máximo de mensagens por pessoa e regra de leads mortos. Vale para todas as jornadas,
+              em todos os canais. Limite em branco = sem limite.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -743,6 +778,47 @@ export function JourneysHub() {
             A contagem inclui os SMS e e-mails já enviados pela casa em cada canal. Mensagens ainda
             agendadas não entram no limite.
           </p>
+          <div className="space-y-3 border-t border-border pt-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="dead-lead-enabled" className="text-sm font-semibold">
+                  Leads mortos
+                </Label>
+                <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+                  {DEAD_LEAD_RULE_TEXT}
+                </p>
+              </div>
+              <Switch
+                id="dead-lead-enabled"
+                checked={deadLeadEnabled}
+                onCheckedChange={setDeadLeadEnabled}
+              />
+            </div>
+            <div className="space-y-1.5 sm:w-1/2">
+              <Label htmlFor="dead-lead-threshold">Mensagens seguidas sem ação (N)</Label>
+              <Input
+                id="dead-lead-threshold"
+                inputMode="numeric"
+                disabled={!deadLeadEnabled}
+                placeholder={String(DEAD_LEAD_THRESHOLD_DEFAULT)}
+                value={deadLeadThreshold}
+                aria-invalid={parsedDeadLeadThreshold == null}
+                onChange={(event) => setDeadLeadThreshold(event.target.value)}
+              />
+              <p
+                className={`text-[12px] ${parsedDeadLeadThreshold == null ? "text-danger" : "text-muted-foreground"}`}
+              >
+                Entre {DEAD_LEAD_THRESHOLD_MIN} e {DEAD_LEAD_THRESHOLD_MAX}. Padrão:{" "}
+                {DEAD_LEAD_THRESHOLD_DEFAULT}. Jornadas de envio imediato disparadas pela ação do
+                próprio jogador continuam valendo.
+              </p>
+            </div>
+            {deadLeadEnabled && contactLimits.data?.deadLeadEnabled !== true && (
+              <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+                Ao salvar, você vai para a aba Leads mortos para avaliar a base atual.
+              </p>
+            )}
+          </div>
           <DialogFooter>
             <Button
               disabled={saveContactLimits.isPending}
@@ -811,10 +887,8 @@ function JourneyRow({
   const metrics = journey.metrics ?? {};
   const inProgress = journeyInProgress(metrics.byStatus);
   const finished = Number(metrics.byStatus?.completed ?? 0) + Number(metrics.byStatus?.exited ?? 0);
-  const sent = Object.values(metrics.sentByChannel ?? {}).reduce(
-    (total, value) => total + Number(value),
-    0,
-  );
+  const sent = journeyMessagesSent(metrics.sentByChannel);
+  const finishedSilent = Number(metrics.finishedWithoutMessage ?? 0);
   const active = journey.status === "active";
   return (
     <li className="grid gap-4 px-4 py-4 sm:px-5 xl:grid-cols-[minmax(16rem,1fr)_auto_auto] xl:items-center xl:gap-6">
@@ -861,8 +935,13 @@ function JourneyRow({
         />
         <JourneyMetric
           label="Concluíram"
-          hint="Jogadores que terminaram a jornada ou saíram dela (por exemplo, ao depositar)."
+          hint="Jogadores que terminaram a jornada ou saíram dela (por exemplo, ao depositar). Quem saiu antes da primeira mensagem — pagou antes do envio, limite diário, deixou de se encaixar ou grupo de controle — aparece como sem mensagem."
           value={finished.toLocaleString("pt-BR")}
+          detail={
+            finishedSilent > 0
+              ? `${finishedSilent.toLocaleString("pt-BR")} sem mensagem`
+              : undefined
+          }
         />
         <JourneyMetric label="Enviados" value={sent.toLocaleString("pt-BR")} />
         <JourneyMetric
@@ -1077,11 +1156,13 @@ function JourneyMetric({
   label,
   value,
   hint,
+  detail,
   accent = false,
 }: {
   label: string;
   value: string;
   hint?: string;
+  detail?: string;
   accent?: boolean;
 }) {
   return (
@@ -1108,6 +1189,7 @@ function JourneyMetric({
         ) : null}
       </p>
       <p className={`mt-0.5 font-semibold tabular-nums ${accent ? "text-success" : ""}`}>{value}</p>
+      {detail ? <p className="text-meta text-muted-foreground tabular-nums">{detail}</p> : null}
     </div>
   );
 }

@@ -11,9 +11,25 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { compareRange, costBreakdown, round2, summarize } from "@/lib/finance/calc";
+import {
+  compareRange,
+  costBreakdown,
+  hasPartialGgrEstimate,
+  monthlyGgrPendingThrough,
+  round2,
+  summarize,
+} from "@/lib/finance/calc";
 import { categoryKey, categoryLabel, looksLikeBetleadsCost } from "@/lib/finance/categories";
 import {
+  computeKpis,
+  hasMissingSendCost,
+  marginOf,
+  sendLines,
+  sumActivity,
+  waterfallSteps,
+} from "@/lib/finance/kpis";
+import {
+  OTHER_COST_COLUMNS,
   clampToToday,
   compareMode,
   costMonthsFor,
@@ -22,28 +38,40 @@ import {
   evaluateGoals,
   fetchBetleadsFees,
   fetchBetleadsSince,
-  fetchBetleadsUsage,
+  fetchActivityDays,
+  fetchSendUsage,
+  fetchTenantsExempt,
   fetchFinanceDays,
   fetchGoalDays,
+  fetchMonthlyGgr,
+  financeDaysWithMonthlyGgr,
   inRange,
   num,
   periodPreset,
   requirePermission,
+  sendUsageTotal,
+  sumSendUsage,
   todaySaoPaulo,
-  toFinanceDay,
-  type BetleadsUsageRow,
+  toDayActivity,
+  toMonthlyGgr,
+  type ActivityDayRow,
   type GoalDayRow,
   type OtherCostRow,
+  type SendUsageRow,
 } from "@/lib/finance/finance-data.server";
 import type {
   CompareMode,
   CostLine,
   DateRange,
   FinanceDay,
+  FinanceKpis,
   GoalEvaluation,
+  MonthlyGgr,
   MonthPoint,
   PeriodPreset,
   PeriodSummary,
+  SendLine,
+  WaterfallStep,
 } from "@/lib/finance/types";
 import { managedGroupIds } from "@/lib/tenants.functions";
 import { dbUuid } from "@/lib/zod-helpers";
@@ -67,8 +95,19 @@ export type DashboardTenantRow = {
   current: PeriodSummary;
   previous: PeriodSummary;
   goals: GoalEvaluation[];
+  /** The house is exempt now: its Betleads cost is the provider cost of its sends. */
+  exempt: boolean;
   /** Past dates in the current window missing GGR or Anúncios (today left out). */
   pendingDates: string[];
+  /**
+   * When every pending date comes after the "atualizado até" of its month's
+   * GGR do mês, that date (the pending banner asks to update it); else null.
+   */
+  ggrUpdatedThrough: string | null;
+  /** Lucro líquido ÷ net of the current window; null when net is 0 or negative. */
+  margin: number | null;
+  /** Envios of the current window (= current.betleadsUsage). */
+  sendCost: number;
 };
 
 export type FinanceDashboard = {
@@ -76,7 +115,8 @@ export type FinanceDashboard = {
   /** House name, group name or "Todas as casas". */
   label: string;
   range: DateRange;
-  compareRange: DateRange;
+  /** The comparison window; null for "Sem comparação" (previous values are then empty). */
+  compareRange: DateRange | null;
   totals: { current: PeriodSummary; previous: PeriodSummary };
   costs: CostLine[];
   /** 12 points, oldest first, ending at the month of range.to; empty for a scope with no house. */
@@ -87,6 +127,18 @@ export type FinanceDashboard = {
   betleadsSince: string | null;
   /** Other costs of the current cost month that look like a Betleads charge, from the house's since month on. */
   duplicateBetleadsCosts: number;
+  /** One line per channel of the current window, with the comparison window's amount. */
+  sends: SendLine[];
+  kpis: { current: FinanceKpis; previous: FinanceKpis };
+  /** Depósitos down to Lucro líquido for the current window; ends at totals.current.cashResult. */
+  waterfall: WaterfallStep[];
+  /**
+   * ROI of the calendar month before range.to's month (spec §4.5), cut at the
+   * same day while range.to's month is in progress.
+   */
+  roiReference: { roi: number | null; range: DateRange };
+  /** Tenant scope of a house that is exempt now; false for group and all scopes. */
+  exemptHouse: boolean;
 };
 
 const ALL_LABEL = "Todas as casas";
@@ -189,18 +241,20 @@ async function resolveScope(
 const OTHER_COSTS_PAGE = 1000;
 
 /**
- * Other costs of the given houses and months, oldest entry first. Paged, since
- * PostgREST returns at most 1000 rows per request without an error.
+ * Other costs of the given houses dated inside `span`, oldest entry first.
+ * Paged, since PostgREST returns at most 1000 rows per request without an
+ * error.
  */
-async function fetchOtherCosts(tenantIds: string[], months: string[]) {
-  if (!tenantIds.length || !months.length) return [];
+async function fetchOtherCosts(tenantIds: string[], span: DateRange | null) {
+  if (!tenantIds.length || !span) return [];
   const rows: OtherCostRow[] = [];
   for (let offset = 0; ; offset += OTHER_COSTS_PAGE) {
     const { data, error } = await db()
       .from<OtherCostRow[]>("tenant_finance_other_costs")
-      .select("id,tenant_id,month,descricao,valor,categoria")
+      .select(OTHER_COST_COLUMNS)
       .in("tenant_id", tenantIds)
-      .in("month", months)
+      .gte("cost_date", span.from)
+      .lte("cost_date", span.to)
       .order("created_at", { ascending: true })
       .order("id", { ascending: true })
       .range(offset, offset + OTHER_COSTS_PAGE - 1);
@@ -210,6 +264,10 @@ async function fetchOtherCosts(tenantIds: string[], months: string[]) {
     if (page.length < OTHER_COSTS_PAGE) return rows;
   }
 }
+
+/** Calendar days of a window; 0 for none. */
+const daysOf = (window: DateRange | null) =>
+  window ? (Date.parse(window.to) - Date.parse(window.from)) / 86_400_000 + 1 : 0;
 
 /** "YYYY-MM-01" of every month the window touches, oldest first. */
 function monthsOfWindow(window: DateRange): string[] {
@@ -244,8 +302,9 @@ function addToSums(sums: Map<string, number>, tenantId: string, month: string, a
  * Dashboard of a house, a group or every house. One call per data source
  * (finance_days, goals, other costs, Betleads usage, fees, since) covers the
  * current and comparison windows and the 12-month series; days after today
- * are left out. Other costs and the plan fee enter a window only for a closed
- * month (costMonthsFor); Betleads usage enters any window, per day.
+ * are left out. Other costs enter any window that contains their cost_date;
+ * the plan fee only a closed month (costMonthsFor); Betleads usage enters any
+ * window, per day.
  */
 export async function getFinanceDashboardFor(
   ctx: ServerContext,
@@ -258,8 +317,9 @@ export async function getFinanceDashboardFor(
   const today = todaySaoPaulo();
   const previousRange = compareRange(data.range, data.compare, data.preset);
   const current = clampToToday(data.range, today);
-  const previous = clampToToday(previousRange, today);
-  const costMonths = costMonthsFor(data.range, data.compare, data.preset);
+  // "none": no comparison window, so every previous summary is empty (no days).
+  const previous = previousRange ? clampToToday(previousRange, today) : null;
+  const feeMonths = costMonthsFor(data.range, data.compare, data.preset);
 
   const lastMonth = monthStartOf(data.range.to);
   const seriesMonths = tenantIds.length
@@ -273,42 +333,104 @@ export async function getFinanceDashboardFor(
     ? clampToToday({ from: seriesMonths[0], to: lastDayOfMonth(lastMonth) }, today)
     : null;
 
-  const span = tenantIds.length ? spanOf([current, previous, seriesSpan]) : null;
-  const allCostMonths = [
-    ...new Set(
-      [...seriesMonths, costMonths.current, costMonths.previous].filter(
-        (month): month is string => month !== null,
-      ),
-    ),
-  ].sort();
-  const feeMonths = tenantIds.length ? allCostMonths : [];
+  // ROI reference (spec §4.5): the month before range.to's, compared like the
+  // "Mês" preset (cut at the same day while range.to's month is in progress).
+  // It lies inside the 12-month series, so the series' data covers it.
+  const referenceMonth = { from: lastMonth, to: lastDayOfMonth(lastMonth) };
+  const roiReferenceRange = compareRange(
+    clampToToday(referenceMonth, today) ?? referenceMonth,
+    "previous",
+    "month",
+  );
 
-  const [dayRows, goalRows, costRows, usageRows, feeRows, sinceRows] = await Promise.all([
+  const span = tenantIds.length ? spanOf([current, previous, seriesSpan]) : null;
+  const activitySpan = tenantIds.length ? spanOf([current, previous]) : null;
+  const allFeeMonths = tenantIds.length
+    ? [
+        ...new Set(
+          [...seriesMonths, feeMonths.current, feeMonths.previous].filter(
+            (month): month is string => month !== null,
+          ),
+        ),
+      ].sort()
+    : [];
+
+  const [
+    dayRows,
+    goalRows,
+    costRows,
+    sendRows,
+    activityRows,
+    feeRows,
+    sinceRows,
+    monthlyRows,
+    exemptByTenant,
+  ] = await Promise.all([
     span ? fetchFinanceDays(tenantIds, span) : Promise.resolve([]),
     current && tenantIds.length ? fetchGoalDays(tenantIds, current) : Promise.resolve([]),
-    fetchOtherCosts(tenantIds, allCostMonths),
-    span ? fetchBetleadsUsage(tenantIds, span) : Promise.resolve([]),
-    feeMonths.length
-      ? fetchBetleadsFees(tenantIds, feeMonths[0], feeMonths.at(-1) as string)
+    fetchOtherCosts(tenantIds, span),
+    span ? fetchSendUsage(tenantIds, span) : Promise.resolve([]),
+    activitySpan ? fetchActivityDays(tenantIds, activitySpan) : Promise.resolve([]),
+    allFeeMonths.length
+      ? fetchBetleadsFees(tenantIds, allFeeMonths[0], allFeeMonths.at(-1) as string)
       : Promise.resolve([]),
     tenantIds.length ? fetchBetleadsSince(tenantIds) : Promise.resolve([]),
+    span
+      ? fetchMonthlyGgr(tenantIds, monthStartOf(span.from), monthStartOf(span.to))
+      : Promise.resolve([]),
+    tenantIds.length ? fetchTenantsExempt(tenantIds) : Promise.resolve(new Map<string, boolean>()),
   ]);
+
+  // A monthly GGR total is split over its month's days from the 1st, so when
+  // the span starts mid-month the houses with a total for that month also
+  // need the days before span.from (only for the allocation: windows never
+  // reach them).
+  const firstMonth = span ? monthStartOf(span.from) : null;
+  const partialMonthTenants =
+    span && firstMonth !== span.from
+      ? monthlyRows.filter((row) => row.month === firstMonth).map((row) => row.tenant_id)
+      : [];
+  const leadingDayRows =
+    span && firstMonth && partialMonthTenants.length
+      ? await fetchFinanceDays(partialMonthTenants, {
+          from: firstMonth,
+          to: new Date(Date.parse(`${span.from}T00:00:00Z`) - 86_400_000)
+            .toISOString()
+            .slice(0, 10),
+        })
+      : [];
+
+  const allocationsByTenant = new Map<string, MonthlyGgr[]>();
+  for (const row of monthlyRows) {
+    const list = allocationsByTenant.get(row.tenant_id) ?? [];
+    list.push(toMonthlyGgr(row));
+    allocationsByTenant.set(row.tenant_id, list);
+  }
+  const allAllocations = monthlyRows.map(toMonthlyGgr);
 
   // Days, usage, other costs and fees are indexed once by house and month
   // (and by month for every house), so each window reads only its months.
   const allDays: FinanceDay[] = [];
   const dayBuckets = new Map<string, FinanceDay[]>();
-  for (const row of dayRows) {
-    const day = toFinanceDay(row);
+  for (const { tenantId, day } of financeDaysWithMonthlyGgr(
+    [...leadingDayRows, ...dayRows],
+    monthlyRows,
+  )) {
     allDays.push(day);
-    addToBuckets(dayBuckets, row.tenant_id, monthStartOf(day.date), day);
+    addToBuckets(dayBuckets, tenantId, monthStartOf(day.date), day);
   }
-  const usageBuckets = new Map<string, BetleadsUsageRow[]>();
-  for (const row of usageRows) {
-    addToBuckets(usageBuckets, row.tenant_id, monthStartOf(row.metric_date), row);
+  const sendBuckets = new Map<string, SendUsageRow[]>();
+  for (const row of sendRows) {
+    addToBuckets(sendBuckets, row.tenant_id, monthStartOf(row.metric_date), row);
   }
-  const costSums = new Map<string, number>();
-  for (const row of costRows) addToSums(costSums, row.tenant_id, row.month, num(row.valor));
+  const activityBuckets = new Map<string, ActivityDayRow[]>();
+  for (const row of activityRows) {
+    addToBuckets(activityBuckets, row.tenant_id, monthStartOf(row.metric_date), row);
+  }
+  const costBuckets = new Map<string, OtherCostRow[]>();
+  for (const row of costRows) {
+    addToBuckets(costBuckets, row.tenant_id, monthStartOf(row.cost_date), row);
+  }
   const feeSums = new Map<string, number>();
   for (const row of feeRows) addToSums(feeSums, row.tenant_id, row.month, num(row.amount));
   const goalRowsByTenant = new Map<string, GoalDayRow[]>();
@@ -338,45 +460,58 @@ export async function getFinanceDashboardFor(
     );
   const monthSum = (sums: Map<string, number>, month: string | null, tenantId?: string) =>
     month === null ? null : round2(sums.get(bucketKey(tenantId ?? ALL_TENANTS, month)) ?? 0);
-  const otherCostsFor = (month: string | null, tenantId?: string) =>
-    monthSum(costSums, month, tenantId);
+  /** The window's other costs (dated inside it), oldest entry first. */
+  const costsIn = (window: DateRange | null, tenantId?: string) =>
+    inWindow(costBuckets, window, (row) => row.cost_date, tenantId);
+  const otherCostsFor = (window: DateRange | null, tenantId?: string) =>
+    round2(costsIn(window, tenantId).reduce((total, row) => total + num(row.valor), 0));
+  /** The window's sends summed per channel (the month view sums them the same way). */
+  const sendsFor = (window: DateRange | null, tenantId?: string) =>
+    sumSendUsage(inWindow(sendBuckets, window, (row) => row.metric_date, tenantId));
   const usageFor = (window: DateRange | null, tenantId?: string) =>
-    round2(
-      inWindow(usageBuckets, window, (row) => row.metric_date, tenantId).reduce(
-        (total, row) => total + num(row.amount),
-        0,
-      ),
-    );
+    sendUsageTotal(sendsFor(window, tenantId));
+  const activityFor = (window: DateRange | null) =>
+    sumActivity(inWindow(activityBuckets, window, (row) => row.metric_date).map(toDayActivity));
+  /** Σ Meta spend (adSpendSuggested) of the scope's days in the window: CPM / CPC divide it. */
+  const metaSpendFor = (window: DateRange | null) =>
+    round2(windowDays(window).reduce((total, day) => total + (day.adSpendSuggested ?? 0), 0));
   const feeFor = (month: string | null, tenantId?: string) => monthSum(feeSums, month, tenantId);
-  const summarizeWindow = (window: DateRange | null, costMonth: string | null, tenantId?: string) =>
-    summarize(windowDays(window, tenantId), otherCostsFor(costMonth, tenantId), today, {
-      usage: usageFor(window, tenantId),
-      fee: feeFor(costMonth, tenantId),
-    });
+  const allocationsOf = (tenantId?: string) =>
+    tenantId === undefined ? allAllocations : (allocationsByTenant.get(tenantId) ?? []);
+  const summarizeWindow = (window: DateRange | null, feeMonth: string | null, tenantId?: string) =>
+    summarize(
+      windowDays(window, tenantId),
+      otherCostsFor(window, tenantId),
+      today,
+      { usage: usageFor(window, tenantId), fee: feeFor(feeMonth, tenantId) },
+      { ggrEstimated: hasPartialGgrEstimate(window, allocationsOf(tenantId)) },
+    );
 
   const rows: DashboardTenantRow[] = tenants.map((tenant) => {
-    const currentSummary = summarizeWindow(current, costMonths.current, tenant.id);
+    const currentSummary = summarizeWindow(current, feeMonths.current, tenant.id);
+    const pendingDays = windowDays(current, tenant.id).filter(
+      (day) => day.pending && day.date < today,
+    );
+    const pendingDates = [...new Set(pendingDays.map((day) => day.date))];
     return {
       id: tenant.id,
       nome: tenant.nome,
       current: currentSummary,
-      previous: summarizeWindow(previous, costMonths.previous, tenant.id),
+      previous: summarizeWindow(previous, feeMonths.previous, tenant.id),
       goals: current
-        ? evaluateGoals(goalRowsByTenant.get(tenant.id) ?? [], currentSummary, current, today)
+        ? evaluateGoals(goalRowsByTenant.get(tenant.id) ?? [], currentSummary, current)
         : [],
-      pendingDates: [
-        ...new Set(
-          windowDays(current, tenant.id)
-            .filter((day) => day.pending && day.date < today)
-            .map((day) => day.date),
-        ),
-      ],
+      exempt: exemptByTenant.get(tenant.id) ?? false,
+      pendingDates,
+      ggrUpdatedThrough: monthlyGgrPendingThrough(pendingDays, allocationsOf(tenant.id)),
+      margin: marginOf(currentSummary.cashResult, currentSummary.net),
+      sendCost: currentSummary.betleadsUsage,
     };
   });
 
   const totals = {
-    current: summarizeWindow(current, costMonths.current),
-    previous: summarizeWindow(previous, costMonths.previous),
+    current: summarizeWindow(current, feeMonths.current),
+    previous: summarizeWindow(previous, feeMonths.previous),
   };
 
   const sinceByTenant = new Map(sinceRows.map((row) => [row.tenant_id, row.since]));
@@ -390,6 +525,8 @@ export async function getFinanceDashboardFor(
       month: month.slice(0, 7),
       cashResult: summary.cashResult,
       adSpend: summary.adSpend,
+      net: summary.net,
+      depositAmount: summary.depositAmount,
       roi: summary.roi,
       incomplete: summary.pendingDays > 0 || summary.pendingToday,
       inProgress: month === todayMonth,
@@ -409,20 +546,27 @@ export async function getFinanceDashboardFor(
     if (!labels.has(key)) labels.set(key, label);
     return labels.get(key) as string;
   };
-  const categoriesFor = (month: string) => {
+  const categoriesFor = (window: DateRange) => {
     const totalsByLabel: Record<string, number> = {};
-    for (const row of costRows) {
-      if (row.month !== month) continue;
+    for (const row of costsIn(window)) {
       const label = categoryOf(row);
       totalsByLabel[label] = round2((totalsByLabel[label] ?? 0) + num(row.valor));
     }
     return totalsByLabel;
   };
-  const currentCategories = costMonths.current ? categoriesFor(costMonths.current) : {};
-  const previousCategories = costMonths.previous ? categoriesFor(costMonths.previous) : null;
-  // A category that dropped to zero this month still shows, with its
-  // variation: the current month lists the union of both months' categories.
-  if (costMonths.current && previousCategories) {
+  const currentCategories = current ? categoriesFor(current) : {};
+  // The waterfall's categories: exactly the scope's other costs that entered
+  // totals.current (costRows only hold the scope's houses).
+  const waterfall = waterfallSteps(
+    totals.current,
+    totals.current.betleadsUsage,
+    { ...currentCategories },
+    { sendCostIncomplete: hasMissingSendCost(sendsFor(current)) },
+  );
+  const previousCategories = previous ? categoriesFor(previous) : null;
+  // A category that dropped to zero this window still shows, with its
+  // variation: the current window lists the union of both windows' categories.
+  if (current && previousCategories) {
     for (const label of Object.keys(previousCategories)) currentCategories[label] ??= 0;
   }
 
@@ -446,17 +590,14 @@ export async function getFinanceDashboardFor(
 
   // Spec §7.3: a manual cost that looks like a Betleads charge is flagged only
   // from the month the house has Betleads data on; before it, it is the only data.
-  const duplicateBetleadsCosts = costMonths.current
-    ? costRows.filter((row) => {
-        const since = sinceByTenant.get(row.tenant_id);
-        return (
-          row.month === costMonths.current &&
-          since !== undefined &&
-          row.month >= monthStartOf(since) &&
-          looksLikeBetleadsCost(row.descricao, row.categoria)
-        );
-      }).length
-    : 0;
+  const duplicateBetleadsCosts = costsIn(current).filter((row) => {
+    const since = sinceByTenant.get(row.tenant_id);
+    return (
+      since !== undefined &&
+      row.month >= monthStartOf(since) &&
+      looksLikeBetleadsCost(row.descricao, row.categoria)
+    );
+  }).length;
 
   return {
     scope: data.scope,
@@ -469,6 +610,32 @@ export async function getFinanceDashboardFor(
     tenants: rows,
     betleadsSince,
     duplicateBetleadsCosts,
+    sends: sendLines(sendsFor(current), previous ? sendsFor(previous) : null),
+    kpis: {
+      current: computeKpis(
+        totals.current,
+        activityFor(current),
+        sendsFor(current),
+        daysOf(current),
+        metaSpendFor(current),
+      ),
+      previous: computeKpis(
+        totals.previous,
+        activityFor(previous),
+        sendsFor(previous),
+        daysOf(previous),
+        metaSpendFor(previous),
+      ),
+    },
+    waterfall,
+    roiReference: {
+      roi: summarizeWindow(
+        clampToToday(roiReferenceRange, today),
+        monthStartOf(roiReferenceRange.from),
+      ).roi,
+      range: roiReferenceRange,
+    },
+    exemptHouse: data.scope.kind === "tenant" && (exemptByTenant.get(data.scope.tenantId) ?? false),
   };
 }
 

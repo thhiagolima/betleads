@@ -243,6 +243,7 @@ describe("expert role", () => {
     expect(linkPaths(visibleSections("expert", false))).toEqual([
       "/expert",
       "/expert/leads",
+      "/expert/rendimento",
       "/expert/modelos",
     ]);
   });
@@ -302,6 +303,45 @@ describe("expert role", () => {
     expect(resolveRouteMeta("/expert/leads/abc")).toEqual({
       section: "Expert",
       title: "Ficha do lead",
+    });
+  });
+});
+
+describe("rendimento", () => {
+  function linkPaths(sections: ReturnType<typeof visibleSections>) {
+    return sections
+      .flatMap((section) =>
+        section.items.flatMap((item) => (item.kind === "group" ? item.children : [item])),
+      )
+      .map((item) => item.to);
+  }
+
+  it("Meu rendimento shows only with a team profile", () => {
+    expect(linkPaths(visibleSections("member", false, false, false))).not.toContain("/rendimento");
+    expect(linkPaths(visibleSections("member", false, false, true))).toContain("/rendimento");
+    expect(linkPaths(visibleSections("admin", false, false, false))).not.toContain("/rendimento");
+    expect(linkPaths(visibleSections("admin", false, false, true))).toContain("/rendimento");
+  });
+
+  it("Rendimento da equipe only for tenant_admin", () => {
+    const hasTeamLink = (role: Parameters<typeof visibleSections>[0], superAdmin: boolean) =>
+      linkPaths(visibleSections(role, superAdmin)).includes("/rendimento/equipe");
+    expect(hasTeamLink("admin", false)).toBe(true);
+    expect(hasTeamLink("super_admin", true)).toBe(true);
+    expect(hasTeamLink("gestor", false)).toBe(false);
+    expect(hasTeamLink("member", false)).toBe(false);
+    expect(hasTeamLink("expert", false)).toBe(false);
+  });
+
+  it("expert sections include /expert/rendimento", () => {
+    expect(linkPaths(visibleSections("expert", false))).toContain("/expert/rendimento");
+  });
+
+  it("person report path keeps Rendimento da equipe active", () => {
+    expect(activeNavKey("/rendimento/equipe/abc-123", "")).toBe("/rendimento/equipe");
+    expect(resolveRouteMeta("/rendimento/equipe/abc-123")).toEqual({
+      section: "Resultados",
+      title: "Relatório de rendimento",
     });
   });
 });

@@ -4,6 +4,8 @@ import { startJobRun, type JobRunHandle } from "./observability/job-monitor.serv
 import { captureServerException } from "./observability/sentry.server";
 import {
   audienceMatches,
+  eventMaxAgeHours,
+  eventYoungEnough,
   inactivityBandConfig,
   journeyEntryKey,
   pixExpiryHours,
@@ -36,6 +38,8 @@ export type Journey = {
   entry_rules: Record<string, unknown>;
   exit_rules?: Record<string, unknown> | null;
   cooldown_hours: number;
+  /** Express journeys (PIX gerado, Saque pago) start from the player's own action. */
+  express?: boolean | null;
 };
 
 export type Player = Record<string, unknown> & {
@@ -58,7 +62,7 @@ type ScanBatchResult = {
 };
 
 export const JOURNEY_SELECT_COLUMNS =
-  "id,tenant_id,version,status,trigger_type,trigger_config,entry_rules,exit_rules,cooldown_hours";
+  "id,tenant_id,version,status,trigger_type,trigger_config,entry_rules,exit_rules,cooldown_hours,express";
 
 /**
  * Every player column read by the matchers (audience, detectTriggersForPlayer /
@@ -114,10 +118,11 @@ async function financialOccurrences(journey: Journey, players: Player[]) {
         : query.eq("status", "pendente").ilike("metodo", "%pix%");
     if (startAt != null) query = query.gte("created_at", new Date(startAt).toISOString());
     // D-6: a pending PIX older than the expiry no longer drives the journey.
+    // P0.3: neither does a withdrawal older than max_event_age_hours.
     const expiryHours =
       journey.trigger_type === "pix_gerado_nao_pago"
         ? pixExpiryHours(journey.trigger_config)
-        : null;
+        : eventMaxAgeHours(journey.trigger_type, journey.trigger_config);
     if (expiryHours != null)
       query = query.gte("created_at", new Date(Date.now() - expiryHours * 3600_000).toISOString());
     const { data, error } = await query;
@@ -139,7 +144,10 @@ export function matchJourneyScanPlayer(
   if (journey.trigger_type === "cadastrados_sem_deposito") {
     const occurredAt = Date.parse(player.created_at);
     return {
-      matches: !player.ftd_em && (startAt == null || occurredAt >= startAt),
+      matches:
+        !player.ftd_em &&
+        (startAt == null || occurredAt >= startAt) &&
+        eventYoungEnough(journey.trigger_type, journey.trigger_config, occurredAt),
       occurrence: player.created_at,
     };
   }
@@ -149,7 +157,8 @@ export function matchJourneyScanPlayer(
       matches:
         Number.isFinite(occurredAt) &&
         player.ftd_em != null &&
-        (startAt == null || occurredAt >= startAt),
+        (startAt == null || occurredAt >= startAt) &&
+        eventYoungEnough(journey.trigger_type, journey.trigger_config, occurredAt),
       occurrence: String(player.ftd_em ?? "missing_first_deposit"),
     };
   }
@@ -187,6 +196,37 @@ async function recentCooldownPlayers(journey: Journey, playerIds: string[]) {
     .gte("created_at", new Date(Date.now() - hours * 3600_000).toISOString());
   if (error) throw new Error(error.message);
   for (const row of data ?? []) if (row.player_id) blocked.add(String(row.player_id));
+  return blocked;
+}
+
+/** Player ids per `in(...)` filter of the dead lead lookup (short PostgREST URLs). */
+const DEAD_LEAD_ID_CHUNK = 300;
+
+/**
+ * Leads mortos (journey_dead_leads, revived_at null) of a house with the rule
+ * on: they do not enter non-express journeys. The enrollment trigger drops
+ * those inserts anyway; filtering here keeps eligible/duplicate accurate.
+ * Missing configuration (or columns not deployed yet) = rule off.
+ */
+async function deadLeadPlayers(journey: Journey, playerIds: string[]) {
+  const blocked = new Set<string>();
+  if (journey.express || !playerIds.length) return blocked;
+  const { data: limits, error: limitsError } = await db
+    .from("journey_contact_limits")
+    .select("dead_lead_enabled")
+    .eq("tenant_id", journey.tenant_id)
+    .maybeSingle();
+  if (limitsError || !limits?.dead_lead_enabled) return blocked;
+  for (let i = 0; i < playerIds.length; i += DEAD_LEAD_ID_CHUNK) {
+    const { data, error } = await db
+      .from("journey_dead_leads")
+      .select("player_id")
+      .eq("tenant_id", journey.tenant_id)
+      .in("player_id", playerIds.slice(i, i + DEAD_LEAD_ID_CHUNK))
+      .is("revived_at", null);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) if (row.player_id) blocked.add(String(row.player_id));
+  }
   return blocked;
 }
 
@@ -230,11 +270,14 @@ export async function enrollPlayersInJourney(
     .map((player) => ({ player, match: matchJourneyScanPlayer(journey, player, occurrences) }))
     .filter(({ match }) => match.matches);
   if (!matched.length) return empty;
-  const cooldownBlocked = await recentCooldownPlayers(
-    journey,
-    matched.map(({ player }) => player.id),
+  const matchedIds = matched.map(({ player }) => player.id);
+  const [cooldownBlocked, deadBlocked] = await Promise.all([
+    recentCooldownPlayers(journey, matchedIds),
+    deadLeadPlayers(journey, matchedIds),
+  ]);
+  const eligible = matched.filter(
+    ({ player }) => !cooldownBlocked.has(player.id) && !deadBlocked.has(player.id),
   );
-  const eligible = matched.filter(({ player }) => !cooldownBlocked.has(player.id));
   if (!eligible.length) return empty;
   const rows = eligible.map(({ player, match }) => ({
     tenant_id: journey.tenant_id,

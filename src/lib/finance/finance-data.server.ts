@@ -2,28 +2,35 @@
 // (finance.functions.ts) and the finance dashboard
 // (finance-dashboard.functions.ts): the service-role client, permission
 // checks, the finance_days / finance_goal_days / Betleads cost RPCs and the
-// cost-month rule. Permission decisions stay in the SQL helpers
+// plan-fee month rule. Permission decisions stay in the SQL helpers
 // (finance_can_*, group_ids_managed_by, is_super_admin).
 import { z } from "zod";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
+  allocateMonthlyGgr,
   compareRange,
   computeDay,
   evaluateGoal,
   isWholeMonth,
   presetRange,
+  round2,
 } from "@/lib/finance/calc";
 import type {
   CompareMode,
   DateRange,
+  DayActivity,
   FinanceDay,
+  FinanceDayInput,
   GoalDay,
   GoalDirection,
   GoalEvaluation,
   GoalMetric,
+  MonthlyGgr,
   PeriodPreset,
   PeriodSummary,
+  SendItem,
+  SendUsage,
 } from "@/lib/finance/types";
 
 type DbError = { message: string; code?: string };
@@ -32,6 +39,8 @@ type QueryBuilder<T = unknown> = PromiseLike<DbResult<T>> & {
   select: (columns?: string) => QueryBuilder<T>;
   eq: (column: string, value: unknown) => QueryBuilder<T>;
   in: (column: string, values: unknown[]) => QueryBuilder<T>;
+  gte: (column: string, value: unknown) => QueryBuilder<T>;
+  lte: (column: string, value: unknown) => QueryBuilder<T>;
   not: (column: string, operator: string, value: unknown) => QueryBuilder<T>;
   order: (column: string, options?: unknown) => QueryBuilder<T>;
   range: (from: number, to: number) => QueryBuilder<T>;
@@ -71,14 +80,52 @@ export type GoalDayRow = {
 export type OtherCostRow = {
   id: string;
   tenant_id: string;
+  /** First day of cost_date's month (kept for compatibility). */
   month: string;
+  /** "YYYY-MM-DD": the cost enters every window that contains this day. */
+  cost_date: string;
   descricao: string;
   valor: number | string;
   categoria: string | null;
+  repeat_monthly: boolean;
+  /** Repeating series (its first row's id); null for a cost that never repeated. */
+  series_id: string | null;
 };
-export type BetleadsUsageRow = { tenant_id: string; metric_date: string; amount: number | string };
+
+export const OTHER_COST_COLUMNS =
+  "id,tenant_id,month,cost_date,descricao,valor,categoria,repeat_monthly,series_id";
+export type SendUsageRow = {
+  tenant_id: string;
+  metric_date: string;
+  item: SendItem;
+  units: number | string;
+  amount: number | string;
+  missing_cost_units: number | string;
+};
+export type ActivityDayRow = {
+  tenant_id: string;
+  metric_date: string;
+  deposit_count: number | string | null;
+  depositor_count: number | string | null;
+  withdrawal_count: number | string | null;
+  generated_pix_count: number | string | null;
+  crm_sent: number | string | null;
+  crm_clicks: number | string | null;
+  crm_direct_conversions: number | string | null;
+  crm_direct_revenue: number | string | null;
+  crm_influenced_revenue: number | string | null;
+  ad_impressions: number | string | null;
+  ad_clicks: number | string | null;
+};
 export type BetleadsFeeRow = { tenant_id: string; month: string; amount: number | string };
 export type BetleadsSinceRow = { tenant_id: string; since: string };
+export type TenantExemptRow = { tenant_id: string; exempt: boolean };
+export type MonthlyGgrRow = {
+  tenant_id: string;
+  month: string;
+  ggr: number | string;
+  valid_through: string;
+};
 
 export const db = () => supabaseAdmin as unknown as LooseDb;
 
@@ -132,8 +179,8 @@ export async function requirePermission(fn: string, userId: string, tenantId: st
   if (!(await can(fn, userId, tenantId))) throw new Error("Sem permissão");
 }
 
-export function toFinanceDay(row: FinanceDayRow): FinanceDay {
-  return computeDay({
+function toFinanceDayInput(row: FinanceDayRow): FinanceDayInput {
+  return {
     date: row.metric_date,
     registrations: num(row.registrations),
     ftds: num(row.ftds),
@@ -146,7 +193,47 @@ export function toFinanceDay(row: FinanceDayRow): FinanceDay {
     // Stored and consumed as percent numbers (16 = 16%), see computeDay.
     ggrFeePct: num(row.ggr_fee_pct),
     movementFeePct: num(row.movement_fee_pct),
-  });
+  };
+}
+
+export function toFinanceDay(row: FinanceDayRow): FinanceDay {
+  return computeDay(toFinanceDayInput(row));
+}
+
+export const toMonthlyGgr = (row: MonthlyGgrRow): MonthlyGgr => ({
+  month: row.month,
+  ggr: num(row.ggr),
+  validThrough: row.valid_through,
+});
+
+/**
+ * The one path from finance_days rows to FinanceDay, shared by the month view
+ * and the dashboard so both apply a month's accumulated GGR the same way:
+ * each house × month with a tenant_finance_monthly_ggr row has its GGR
+ * replaced by allocateMonthlyGgr before computeDay. For an exact split the
+ * rows must hold every day of that month up to valid_through.
+ */
+export function financeDaysWithMonthlyGgr(
+  dayRows: FinanceDayRow[],
+  monthlyRows: MonthlyGgrRow[],
+): Array<{ tenantId: string; day: FinanceDay }> {
+  const key = (tenantId: string, month: string) => `${tenantId}|${month.slice(0, 7)}`;
+  const monthlyByKey = new Map(
+    monthlyRows.map((row) => [key(row.tenant_id, row.month), toMonthlyGgr(row)]),
+  );
+  const groups = new Map<string, { tenantId: string; inputs: FinanceDayInput[] }>();
+  for (const row of dayRows) {
+    const groupKey = key(row.tenant_id, row.metric_date);
+    const group = groups.get(groupKey);
+    if (group) group.inputs.push(toFinanceDayInput(row));
+    else groups.set(groupKey, { tenantId: row.tenant_id, inputs: [toFinanceDayInput(row)] });
+  }
+  return [...groups.entries()].flatMap(([groupKey, group]) =>
+    allocateMonthlyGgr(group.inputs, monthlyByKey.get(groupKey) ?? null).map((input) => ({
+      tenantId: group.tenantId,
+      day: computeDay(input),
+    })),
+  );
 }
 
 // ─── RPCs ───────────────────────────────────────────────────────────────────
@@ -224,9 +311,61 @@ export function fetchGoalDays(tenantIds: string[], range: DateRange) {
   return rpcRowsByDay<GoalDayRow>("finance_goal_days", tenantIds, range, GOAL_METRICS.length);
 }
 
-/** Wallet usage (SMS, voz, e-mail) per house and São Paulo day; a day may be negative. */
-export function fetchBetleadsUsage(tenantIds: string[], range: DateRange) {
-  return rpcRowsByDay<BetleadsUsageRow>("finance_betleads_usage", tenantIds, range, 1);
+/** Wallet usage per house, São Paulo day and channel: up to 3 rows (sms, voice_30s, email) a house-day. */
+export function fetchSendUsage(tenantIds: string[], range: DateRange) {
+  return rpcRowsByDay<SendUsageRow>("finance_send_usage", tenantIds, range, 3);
+}
+
+/** Daily activity (counts, CRM, Meta): one row per house and day. */
+export function fetchActivityDays(tenantIds: string[], range: DateRange) {
+  return rpcRowsByDay<ActivityDayRow>("finance_activity_days", tenantIds, range, 1);
+}
+
+const SEND_ITEMS: SendItem[] = ["sms", "voice_30s", "email"];
+
+/**
+ * Send rows summed per channel, ordered SMS, Voz, E-mail; each amount is rounded
+ * to cents once, after the sum. The Envios cost of a window is the sum of
+ * these amounts (sendUsageTotal), so the channels always add up to it.
+ */
+export function sumSendUsage(rows: SendUsageRow[]): SendUsage[] {
+  const byItem = new Map<SendItem, SendUsage>();
+  for (const row of rows) {
+    const usage = byItem.get(row.item) ?? {
+      item: row.item,
+      units: 0,
+      amount: 0,
+      missingCostUnits: 0,
+    };
+    usage.units += num(row.units);
+    usage.amount += num(row.amount);
+    usage.missingCostUnits += num(row.missing_cost_units);
+    byItem.set(row.item, usage);
+  }
+  return SEND_ITEMS.flatMap((item) => {
+    const usage = byItem.get(item);
+    return usage ? [{ ...usage, amount: round2(usage.amount) }] : [];
+  });
+}
+
+/** The Envios cost: Σ amount of the per-channel usage. */
+export const sendUsageTotal = (usage: SendUsage[]) =>
+  round2(usage.reduce((total, line) => total + line.amount, 0));
+
+export function toDayActivity(row: ActivityDayRow): DayActivity {
+  return {
+    depositCount: num(row.deposit_count),
+    depositorCount: num(row.depositor_count),
+    withdrawalCount: num(row.withdrawal_count),
+    generatedPixCount: num(row.generated_pix_count),
+    crmSent: num(row.crm_sent),
+    crmClicks: num(row.crm_clicks),
+    crmDirectConversions: num(row.crm_direct_conversions),
+    crmDirectRevenue: num(row.crm_direct_revenue),
+    crmInfluencedRevenue: num(row.crm_influenced_revenue),
+    adImpressions: num(row.ad_impressions),
+    adClicks: num(row.ad_clicks),
+  };
 }
 
 const monthsInclusive = (fromMonth: string, toMonth: string) =>
@@ -262,6 +401,46 @@ export async function fetchBetleadsSince(tenantIds: string[]) {
   return parts.flat();
 }
 
+/**
+ * Whether each house is exempt now (billing_tenant_exempt): its Betleads cost
+ * is the provider cost (finance_send_usage) and is labelled as such.
+ */
+export async function fetchTenantsExempt(tenantIds: string[]): Promise<Map<string, boolean>> {
+  const parts = await Promise.all(
+    chunk(tenantIds, RPC_ROW_BUDGET).map((ids) =>
+      rpcRows<TenantExemptRow>("finance_tenants_exempt", { _tenants: ids }),
+    ),
+  );
+  return new Map(parts.flat().map((row) => [row.tenant_id, row.exempt === true]));
+}
+
+const MONTHLY_GGR_COLUMNS = "tenant_id,month,ggr,valid_through";
+
+/**
+ * The houses' monthly GGR totals for months fromMonth..toMonth ("YYYY-MM-01",
+ * both inclusive): at most one row per house and month, houses batched so a
+ * response stays under PostgREST's 1000-row cap.
+ */
+export async function fetchMonthlyGgr(tenantIds: string[], fromMonth: string, toMonth: string) {
+  const housesPerCall = Math.max(
+    1,
+    Math.floor(RPC_ROW_BUDGET / Math.max(1, monthsInclusive(fromMonth, toMonth))),
+  );
+  const parts = await Promise.all(
+    chunk(tenantIds, housesPerCall).map(async (ids) => {
+      const { data, error } = await db()
+        .from<MonthlyGgrRow[]>("tenant_finance_monthly_ggr")
+        .select(MONTHLY_GGR_COLUMNS)
+        .in("tenant_id", ids)
+        .gte("month", fromMonth)
+        .lte("month", toMonth);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    }),
+  );
+  return parts.flat();
+}
+
 // ─── Goals ──────────────────────────────────────────────────────────────────
 
 /**
@@ -272,7 +451,6 @@ export function evaluateGoals(
   goalRows: GoalDayRow[],
   summary: PeriodSummary,
   range: DateRange,
-  today: string,
 ): GoalEvaluation[] {
   const byMetric = new Map<GoalMetric, GoalDay[]>();
   for (const row of goalRows) {
@@ -288,15 +466,16 @@ export function evaluateGoals(
   }
   return GOAL_METRICS.map((metric) => {
     const goalDays = byMetric.get(metric);
-    return goalDays ? evaluateGoal(goalDays, summary, range, today) : null;
+    return goalDays ? evaluateGoal(goalDays, summary, range) : null;
   }).filter((goal): goal is GoalEvaluation => goal !== null);
 }
 
-// ─── Cost months ────────────────────────────────────────────────────────────
+// ─── Fee months ─────────────────────────────────────────────────────────────
 
 /**
- * The month ("YYYY-MM-01") whose other costs and plan fee enter each window,
- * or null when that window is not a closed month.
+ * The month ("YYYY-MM-01") whose plan fee (Mensalidade) enters each window,
+ * or null when that window is not a closed month. Other costs do not use
+ * this: they enter any window that contains their cost_date (spec §3.5).
  */
 export function costMonthsFor(
   range: DateRange,
@@ -304,11 +483,13 @@ export function costMonthsFor(
   preset: PeriodPreset,
 ): { current: string | null; previous: string | null } {
   const previousRange = compareRange(range, compare, preset);
-  // Spec §5: other costs enter a window's result only for a closed calendar
-  // month: a range covering exactly one month, or the "Mês" preset (also
+  // Spec §4.3: the plan fee enters a window's result only for a closed
+  // calendar month: a range covering exactly one month, or the "Mês" preset (also
   // while in progress). The preset is only trusted when the range really is
   // a month-to-date window, and its comparison window counts only for
-  // "previous" (the previous month to the same day), never a 7-day shift.
+  // "previous" (the previous month to the same day) or "same_period_last_year"
+  // (the same days of that month a year before), never a 7-day shift.
+  // "none" has no comparison window.
   const monthToDate =
     preset === "month" &&
     range.from.endsWith("-01") &&
@@ -317,7 +498,9 @@ export function costMonthsFor(
   return {
     current: monthToDate || isWholeMonth(range) ? monthOf(range) : null,
     previous:
-      (monthToDate && compare === "previous") || isWholeMonth(previousRange)
+      previousRange &&
+      ((monthToDate && (compare === "previous" || compare === "same_period_last_year")) ||
+        isWholeMonth(previousRange))
         ? monthOf(previousRange)
         : null,
   };
@@ -335,5 +518,11 @@ export const dateRange = z
   .refine((range) => range.from <= range.to, "Período inválido")
   .refine((range) => daysInclusive(range) <= MAX_RANGE_DAYS, "Período longo demais");
 
-export const compareMode = z.enum(["previous", "same_weekday_last_week", "last_week"]);
+export const compareMode = z.enum([
+  "previous",
+  "same_weekday_last_week",
+  "last_week",
+  "same_period_last_year",
+  "none",
+]);
 export const periodPreset = z.enum(["today", "yesterday", "7d", "month", "custom"]);

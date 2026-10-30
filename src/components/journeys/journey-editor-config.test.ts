@@ -7,6 +7,7 @@ import {
   journeyAudienceDescription,
   journeyExitReasonLabel,
   journeyInProgress,
+  journeyMessagesSent,
   journeyStatusLabel,
   smsExtra,
   smsExtraForTemplateChange,
@@ -16,6 +17,11 @@ import {
 } from "./journey-editor-config";
 
 describe("journey editor config helpers", () => {
+  it("counts only real messages as sent, not wait/end steps", () => {
+    expect(journeyMessagesSent({ sms: 3621, other: 2549, email: 2, voice: 1 })).toBe(3624);
+    expect(journeyMessagesSent(undefined)).toBe(0);
+  });
+
   it("keeps the SMS config keys the editor does not manage", () => {
     expect(
       smsExtra({

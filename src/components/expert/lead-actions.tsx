@@ -237,6 +237,11 @@ export function LeadActions({
         >
           {generateLink.isPending ? "Gerando…" : "Gerar link"}
         </Button>
+        <p className="text-label text-muted-foreground">
+          Pode gerar um link só e fixar na conversa: a cada clique do lead, os depósitos das{" "}
+          {sheet.janelaHoras}h seguintes contam para você. Depósito sem clicar no link só conta se o
+          lead for seu afiliado.
+        </p>
         {link && (
           <div className="space-y-2">
             <div className="flex items-center gap-2">

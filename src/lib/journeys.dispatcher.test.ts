@@ -346,7 +346,7 @@ describe("runJourneyDispatcher", () => {
     });
   });
 
-  it("house wallet refusal (errorKind insufficient_balance): the step is skipped (saldo_insuficiente), the journey advances, no retry, no attempt consumed, the house is alerted (PG3 Task 7)", async () => {
+  it("house wallet refusal (errorKind insufficient_balance): the step waits on the same position for 15 min, no attempt consumed, the house is alerted", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({
       ok: false,
@@ -354,21 +354,27 @@ describe("runJourneyDispatcher", () => {
       error: "Saldo insuficiente",
       errorKind: "insufficient_balance",
     });
+    const before = Date.now();
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ failed: 0, rescheduled: 0, skippedNoBalance: 1 });
+    expect(result).toMatchObject({ failed: 0, rescheduled: 0, deferredNoBalance: 1 });
     const row = enrollment("e1");
-    // Next step, due now: not a retry of the same step.
+    // Same step, later: never skipped to the next one.
     expect(row).toMatchObject({
-      status: "active",
-      current_position: 1,
-      attempts: 0,
+      status: "waiting",
+      current_position: 0,
+      attempts: 1,
       claimed_by: null,
     });
-    expect(Date.parse(String(row.next_run_at))).toBeLessThanOrEqual(Date.now());
-    expect(fake.tables.journey_step_executions[0]).toMatchObject({ status: "skipped" });
+    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
+      before + 15 * 60_000 - 1_000,
+    );
+    expect(fake.tables.journey_step_executions[0]).toMatchObject({
+      status: "retrying",
+      provider: "wallet",
+    });
     expect(fake.tables.dispatch_pause_state).toHaveLength(0);
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "step_skipped",
+      event_type: "step_deferred",
       detail: expect.objectContaining({
         channel: "sms",
         step_position: 0,
@@ -379,7 +385,7 @@ describe("runJourneyDispatcher", () => {
     expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
   });
 
-  it("a house without balance is not retried: a second run does not resend the skipped step", async () => {
+  it("after a recharge the held step is sent (it was not lost)", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({
       ok: false,
@@ -389,14 +395,36 @@ describe("runJourneyDispatcher", () => {
     });
     await runJourneyDispatcher(1000);
     seedClaimAgain();
-    sms.sendSmsInternal.mockClear();
+    sms.sendSmsInternal.mockReset();
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
     await runJourneyDispatcher(1000);
-    // Position 1 does not exist: the journey ends instead of re-sending step 0.
-    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
-    expect(enrollment("e1")).toMatchObject({ status: "completed" });
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+    // Step 0 sent on this run: the enrollment moves past it.
+    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
   });
 
-  it("an alert failure never breaks the skip", async () => {
+  it("one wallet refusal holds the house's other items in the same run without calling the wallet again", async () => {
+    // One item at a time, so the refusal is seen before the next item starts.
+    vi.stubEnv("JOURNEYS_DISPATCH_CONCURRENCY", "1");
+    seed(["e1", "e2"]);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 402,
+      error: "Saldo insuficiente",
+      errorKind: "insufficient_balance",
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ claimed: 2, failed: 0, deferredNoBalance: 2 });
+    for (const id of ["e1", "e2"]) {
+      expect(enrollment(id)).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
+    }
+    // Only the refused item reserved an execution.
+    expect(fake.tables.journey_step_executions).toHaveLength(1);
+    expect(alerts.notifyNoBalance).toHaveBeenCalledTimes(1);
+  });
+
+  it("an alert failure never breaks the hold", async () => {
     seed(["e1"]);
     alerts.notifyNoBalance.mockRejectedValueOnce(new Error("alert down"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -407,8 +435,8 @@ describe("runJourneyDispatcher", () => {
       errorKind: "insufficient_balance",
     });
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ failed: 0, skippedNoBalance: 1 });
-    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
+    expect(result).toMatchObject({ failed: 0, deferredNoBalance: 1 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
   });
 
   it("caps consecutive no-cost defers: the 11th 429 in a row consumes an attempt", async () => {
@@ -543,7 +571,7 @@ describe("runJourneyDispatcher", () => {
     expect(fake.tables.journey_step_executions[0].status).toBe("failed");
   });
 
-  it("missing provider credentials fail the item and are reported (no defer loop)", async () => {
+  it("missing provider credentials hold the item as a platform failure (no attempt consumed) and are reported", async () => {
     seed(["e1"]);
     sentry.captureServerException.mockClear();
     sms.sendSmsInternal.mockResolvedValue({
@@ -554,9 +582,9 @@ describe("runJourneyDispatcher", () => {
       errorKind: "misconfigured",
     });
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ failed: 1, rescheduled: 0, outcomeUnknown: 0 });
-    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
-    expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+    expect(result).toMatchObject({ failed: 0, rescheduled: 0, outcomeUnknown: 0, platformHeld: 1 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 1, current_position: 0 });
+    expect(fake.tables.journey_step_executions[0].status).toBe("retrying");
     expect(sentry.captureServerException).toHaveBeenCalledTimes(1);
   });
 
@@ -695,10 +723,12 @@ describe("runJourneyDispatcher", () => {
       createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
     } as never);
     const originalFrom = fake.client.from;
-    const from = vi.spyOn(fake.client, "from").mockImplementation(((table: string) =>
-      table === "call_history"
-        ? { insert: async () => ({ error: { message: "insert failed" } }) }
-        : originalFrom(table)) as never);
+    const from = vi
+      .spyOn(fake.client, "from")
+      .mockImplementation(((table: string) =>
+        table === "call_history"
+          ? { insert: async () => ({ error: { message: "insert failed" } }) }
+          : originalFrom(table)) as never);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     voice.callInfobipVoice.mockResolvedValue({
       ok: true,
@@ -745,16 +775,74 @@ describe("runJourneyDispatcher", () => {
     });
     const result = await runJourneyDispatcher(1000);
     signed.mockRestore();
-    // PG3 Task 7: same skip-and-advance as SMS and e-mail.
+    // Same hold-on-the-same-step as SMS and e-mail.
     expect(result).toMatchObject({ failed: 0, outcomeUnknown: 0, rescheduled: 0 });
-    expect(result).toMatchObject({ skippedNoBalance: 1 });
-    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
+    expect(result).toMatchObject({ deferredNoBalance: 1 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "step_skipped",
+      event_type: "step_deferred",
       detail: expect.objectContaining({ channel: "voice", reason: "saldo_insuficiente" }),
     });
     expect(fake.tables.call_history ?? []).toEqual([]);
     expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
+  });
+
+  describe("end step loop cap (P0.2b)", () => {
+    function seedLoop(loopIteration: number, endConfig: Record<string, unknown>) {
+      seed(["e1"]);
+      fake.tables.journey_steps.push({
+        id: "step-1",
+        journey_id: JOURNEY,
+        position: 1,
+        step_type: "end",
+        is_enabled: true,
+        config: endConfig,
+      });
+      Object.assign(fake.tables.journey_enrollments[0], {
+        current_position: 1,
+        loop_iteration: loopIteration,
+      });
+    }
+
+    it("below the cap the end step sends the enrollment back to the loop target", async () => {
+      seedLoop(1, { loop_to_position: 0 });
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({
+        status: "active",
+        current_position: 0,
+        loop_iteration: 2,
+      });
+      expect(fake.tables.journey_events.at(-1)).toMatchObject({
+        event_type: "loop_restarted",
+        detail: expect.objectContaining({ loop_iteration: 2, max_loops: 2 }),
+      });
+    });
+
+    it("at the default cap (2) the enrollment completes with exit_reason max_loops", async () => {
+      seedLoop(2, { loop_to_position: 0 });
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({ status: "completed", exit_reason: "max_loops" });
+      expect(fake.tables.journey_events.at(-1)).toMatchObject({
+        event_type: "completed",
+        detail: expect.objectContaining({ reason: "max_loops", max_loops: 2 }),
+      });
+    });
+
+    it("max_loops 0 never repeats; a higher max_loops keeps looping", async () => {
+      seedLoop(0, { loop_to_position: 0, max_loops: 0 });
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({ status: "completed", exit_reason: "max_loops" });
+
+      seedLoop(5, { loop_to_position: 0, max_loops: 10 });
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({ status: "active", loop_iteration: 6 });
+    });
+
+    it("an end step without a loop still completes as end_step", async () => {
+      seedLoop(0, {});
+      await runJourneyDispatcher(1000);
+      expect(enrollment("e1")).toMatchObject({ status: "completed", exit_reason: "end_step" });
+    });
   });
 
   it("permanent provider errors still consume attempts", async () => {
@@ -764,6 +852,55 @@ describe("runJourneyDispatcher", () => {
     expect(result).toMatchObject({ failed: 1, rescheduled: 0 });
     expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
     expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+  });
+
+  it("platform failure before sending (no Short.io domain): held on the same step for 30 min, no attempt consumed, reported once per house", async () => {
+    // One item at a time: the second item sees the first report.
+    vi.stubEnv("JOURNEYS_DISPATCH_CONCURRENCY", "1");
+    seed(["e1", "e2"]);
+    sms.sendSmsInternal.mockRejectedValue(
+      new Error("SHORTIO_DOMAIN não configurado para este tenant"),
+    );
+    const before = Date.now();
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0, platformHeld: 2 });
+    for (const id of ["e1", "e2"]) {
+      const row = enrollment(id);
+      expect(row).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
+      expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
+        before + 30 * 60_000 - 1_000,
+      );
+      expect(row.metadata).toMatchObject({ platform_holds: { step_position: 0, count: 1 } });
+    }
+    expect(fake.tables.journey_step_executions[0].status).toBe("retrying");
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_deferred",
+      detail: expect.objectContaining({
+        reason: "platform_error",
+        platform_reason: "shortio_not_configured",
+        attempt_consumed: false,
+      }),
+    });
+    expect(sentry.captureServerException).toHaveBeenCalledTimes(1);
+  });
+
+  it("platform holds are capped: past the cap the normal attempts policy applies", async () => {
+    seed(["e1"]);
+    fake.tables.journey_enrollments[0].metadata = {
+      platform_holds: { step_position: 0, loop_iteration: 0, count: 144 },
+    };
+    sms.sendSmsInternal.mockRejectedValue(new Error("Falha ao criar link Short.io: HTTP 503"));
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, platformHeld: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
+  });
+
+  it("an error that may be the player's keeps the normal attempts policy", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockRejectedValue(new Error("Jogador da jornada não encontrado"));
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, platformHeld: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", attempts: 2 });
   });
 
   it("a house locked for the monthly fee: the item fails final, no retry scheduled", async () => {
@@ -1131,7 +1268,7 @@ describe("runJourneyDispatcher email step", () => {
       }),
     ]);
   });
-  it("email step without balance: skipped (saldo_insuficiente), no log row, the journey advances (PG3 Task 7)", async () => {
+  it("email step without balance: held on the same step (saldo_insuficiente), no log row", async () => {
     seed(["e1"]);
     fake.tables.journey_steps[0] = {
       id: "step-0",
@@ -1164,13 +1301,85 @@ describe("runJourneyDispatcher email step", () => {
     });
 
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ processed: 0, failed: 0, skippedNoBalance: 1 });
+    expect(result).toMatchObject({ processed: 0, failed: 0, deferredNoBalance: 1 });
     expect(fake.tables.email_send_logs).toEqual([]);
-    expect(enrollment("e1")).toMatchObject({ current_position: 1, attempts: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "step_skipped",
+      event_type: "step_deferred",
       detail: expect.objectContaining({ channel: "email", reason: "saldo_insuficiente" }),
     });
     expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
+  });
+});
+
+describe("runJourneyDispatcher with the dead lead rule (Leads mortos)", () => {
+  it("checks the player after each sent message, with this enrollment", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    fake.rpcs.journey_dead_lead_check = () => false;
+    await runJourneyDispatcher(1000);
+    const check = fake.rpcCalls.find((c) => c.name === "journey_dead_lead_check")!;
+    expect(check.args).toEqual({ p_tenant_id: TENANT, p_player_id: PLAYER, p_enrollment_id: "e1" });
+    expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 1 });
+  });
+
+  it("a lead marked dead does not continue to the next step and its lease is released", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    fake.rpcs.journey_dead_lead_check = () => {
+      // The RPC exits the enrollment but keeps the caller's lease.
+      Object.assign(enrollment("e1"), {
+        status: "exited",
+        exit_reason: "dead_lead",
+        exited_at: new Date().toISOString(),
+      });
+      return true;
+    };
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ processed: 1, failed: 0, leaseLost: 0 });
+    expect(enrollment("e1")).toMatchObject({
+      status: "exited",
+      exit_reason: "dead_lead",
+      current_position: 0,
+      claimed_by: null,
+    });
+    expect(fake.tables.journey_step_executions[0].status).toBe("sent");
+    expect(fake.tables.journey_events.map((e) => e.event_type)).toContain("step_sent");
+  });
+
+  it("an express journey keeps going even when the player is dead", async () => {
+    seed(["e1"]);
+    fake.tables.journeys[0].express = true;
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    fake.rpcs.journey_dead_lead_check = () => true;
+    await runJourneyDispatcher(1000);
+    expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 1 });
+  });
+
+  it("a failing check never fails the send", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    fake.rpcs.journey_dead_lead_check = () => {
+      throw new Error("boom");
+    };
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 1 });
+  });
+
+  it("does not check skipped (holdout) steps", async () => {
+    seed(["e1"]);
+    fake.tables.journey_enrollments[0].is_holdout = true;
+    await runJourneyDispatcher(1000);
+    expect(rpcNames()).not.toContain("journey_dead_lead_check");
+  });
+
+  it("runs the revival sweep on every dispatch", async () => {
+    seed([]);
+    await runJourneyDispatcher(1000);
+    expect(fake.rpcCalls).toContainEqual({
+      name: "sweep_dead_lead_revivals",
+      args: { p_tenant_id: null },
+    });
   });
 });

@@ -39,9 +39,14 @@ type Row = Record<string, unknown>;
 const PGRST_MAX_ROWS = 1000;
 let financeDayRows: Row[];
 let goalDayRows: Row[];
+/** finance_send_usage rows; `item` defaults to "sms", `units` to 1, `missing_cost_units` to 0. */
 let usageRows: Row[];
+/** finance_activity_days rows (one per house and day); missing columns are 0. */
+let activityRows: Row[];
 let feeRows: Row[];
 let sinceRows: Row[];
+/** Houses billing_tenant_exempt reports as exempt (finance_tenants_exempt). */
+let exemptTenants: Set<string>;
 let financeDaysCalls: Row[];
 
 function dayRow(tenantId: string, date: string, overrides: Row = {}): Row {
@@ -67,17 +72,21 @@ const complete = (tenantId: string, date: string, deposit: number, adSpend: numb
   dayRow(tenantId, date, { deposit_amount: deposit, ad_spend: adSpend, ggr: 0 });
 
 let otherCostSeq = 0;
+/** An other cost dated `costDate` ("YYYY-MM-DD"); month is its first day, as in the table. */
 const otherCost = (
   id: string,
   tenantId: string,
-  month: string,
+  costDate: string,
   descricao: string,
   valor: number,
   categoria: string | null = null,
 ) => ({
   id,
   tenant_id: tenantId,
-  month,
+  month: `${costDate.slice(0, 7)}-01`,
+  cost_date: costDate,
+  repeat_monthly: false,
+  series_id: null,
   descricao,
   valor,
   categoria,
@@ -117,8 +126,10 @@ beforeEach(() => {
   financeDayRows = [];
   goalDayRows = [];
   usageRows = [];
+  activityRows = [];
   feeRows = [];
   sinceRows = [];
+  exemptTenants = new Set();
   financeDaysCalls = [];
 
   const isSuper = (u: unknown) => u === SUPER;
@@ -192,8 +203,16 @@ beforeEach(() => {
     data: capped(goalDayRows.filter((row) => inWindow(row, args))),
     error: null,
   }));
-  fake.admin.onRpc("finance_betleads_usage", (args) => ({
-    data: capped(usageRows.filter((row) => inWindow(row, args))),
+  fake.admin.onRpc("finance_send_usage", (args) => ({
+    data: capped(
+      usageRows
+        .filter((row) => inWindow(row, args))
+        .map((row) => ({ item: "sms", units: 1, missing_cost_units: 0, ...row })),
+    ),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_activity_days", (args) => ({
+    data: capped(activityRows.filter((row) => inWindow(row, args))),
     error: null,
   }));
   fake.admin.onRpc("finance_betleads_fees", (args) => ({
@@ -204,6 +223,15 @@ beforeEach(() => {
           String(row.month) >= String(args._from_month) &&
           String(row.month) <= String(args._to_month),
       ),
+    ),
+    error: null,
+  }));
+  fake.admin.onRpc("finance_tenants_exempt", (args) => ({
+    data: capped(
+      [...new Set(args._tenants as string[])].map((id) => ({
+        tenant_id: id,
+        exempt: exemptTenants.has(id),
+      })),
     ),
     error: null,
   }));
@@ -281,10 +309,16 @@ describe("Betleads cost", () => {
     expect(month.totals.current.betleadsFee).toBe(4000);
     expect(month.totals.current.cashResult).toBe(900 - 110.5 - 4000);
     expect(month.totals.previous.betleadsFee).toBe(3000);
-    expect(month.costs.find((line) => line.key === "betleads")).toEqual({
-      key: "betleads",
-      label: "Betleads",
-      amount: 4110.5,
+    expect(month.costs.find((line) => line.key === "sends")).toMatchObject({
+      key: "sends",
+      label: "Envios",
+      amount: 110.5,
+      auto: true,
+    });
+    expect(month.costs.find((line) => line.key === "fee")).toEqual({
+      key: "fee",
+      label: "Mensalidade",
+      amount: 4000,
       previous: 3000,
       auto: true,
     });
@@ -316,6 +350,7 @@ describe("Betleads cost", () => {
         ),
         otherCost("c3", HOUSE_A, "2026-10-01", "Pacote", 20, "Betleads"),
         otherCost("c4", HOUSE_A, "2026-09-01", "SMS", 99),
+        otherCost("c5", HOUSE_A, "2026-10-20", "E-mail", 5),
       );
 
     const october = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
@@ -323,7 +358,7 @@ describe("Betleads cost", () => {
       ...monthToDate,
     });
     expect(october.betleadsSince).toBe("2026-10-03");
-    expect(october.duplicateBetleadsCosts).toBe(2);
+    expect(october.duplicateBetleadsCosts).toBe(3);
 
     // September is before the since month: the manual SMS is the only data.
     const september = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
@@ -334,12 +369,80 @@ describe("Betleads cost", () => {
     });
     expect(september.duplicateBetleadsCosts).toBe(0);
 
-    // A window that is not a closed month has no cost month: nothing flagged.
+    // Any window flags the costs dated inside it: only the e-mail of the 20th.
     const week = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
       scope: { kind: "tenant", tenantId: HOUSE_A },
       ...last7Days,
     });
-    expect(week.duplicateBetleadsCosts).toBe(0);
+    expect(week.duplicateBetleadsCosts).toBe(1);
+  });
+
+  it("tenant scope of an exempt house still uses the Envios line", async () => {
+    exemptTenants.add(HOUSE_A);
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 });
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+
+    const line = dashboard.costs.find((l) => l.key === "sends");
+    expect(line).toMatchObject({
+      label: "Envios",
+      amount: 7.5,
+      auto: true,
+    });
+    expect(dashboard.tenants[0].exempt).toBe(true);
+  });
+
+  it("tenant scope of a paying house uses the Envios line too", async () => {
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 });
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+
+    expect(dashboard.costs.find((l) => l.key === "sends")?.label).toBe("Envios");
+    expect(dashboard.tenants[0].exempt).toBe(false);
+  });
+
+  it("group scope sums Envios across an exempt and a paying house", async () => {
+    exemptTenants.add(HOUSE_A);
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 },
+      { tenant_id: HOUSE_B, metric_date: "2026-10-20", amount: 2.5 },
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+
+    expect(dashboard.costs.find((l) => l.key === "sends")).toMatchObject({
+      label: "Envios",
+      amount: 10,
+    });
+    expect(dashboard.tenants.map((row) => [row.nome, row.exempt])).toEqual([
+      ["Casa A", true],
+      ["Casa B", false],
+    ]);
+  });
+
+  it("the month view says whether the house is exempt", async () => {
+    exemptTenants.add(HOUSE_A);
+    const exempt = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(exempt.betleadsExempt).toBe(true);
+
+    exemptTenants.clear();
+    const paying = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(paying.betleadsExempt).toBe(false);
   });
 
   it("a house without since never flags duplicates", async () => {
@@ -361,7 +464,8 @@ describe("months", () => {
       complete(HOUSE_A, "2025-11-15", 300, 100),
       complete(HOUSE_A, "2026-09-10", 500, 100),
       complete(HOUSE_A, "2026-10-05", 1000, 100),
-      dayRow(HOUSE_A, "2026-10-06", { deposit_amount: 50 }), // pending past day
+      // Pending past day: still incomplete, but its 50 of deposits count.
+      dayRow(HOUSE_A, "2026-10-06", { deposit_amount: 50 }),
     );
     fake.admin
       .rows("tenant_finance_other_costs")
@@ -397,6 +501,8 @@ describe("months", () => {
       month: "2025-11",
       cashResult: 200,
       adSpend: 100,
+      net: 300,
+      depositAmount: 300,
       roi: 2,
       incomplete: false,
       inProgress: false,
@@ -407,6 +513,8 @@ describe("months", () => {
       month: "2026-09",
       cashResult: 500 - 100 - 50 - 10 - 40,
       adSpend: 100,
+      net: 500,
+      depositAmount: 500,
       roi: 3,
       incomplete: false,
       inProgress: false,
@@ -415,7 +523,7 @@ describe("months", () => {
     });
     expect(dashboard.months[11]).toMatchObject({
       month: "2026-10",
-      cashResult: 900,
+      cashResult: 950,
       incomplete: true,
       inProgress: true,
       betleadsMissing: false,
@@ -472,21 +580,359 @@ describe("tenant scope", () => {
   });
 });
 
+const activity = (tenantId: string, date: string, overrides: Row = {}): Row => ({
+  tenant_id: tenantId,
+  metric_date: date,
+  deposit_count: 0,
+  depositor_count: 0,
+  withdrawal_count: 0,
+  generated_pix_count: 0,
+  crm_sent: 0,
+  crm_clicks: 0,
+  crm_direct_conversions: 0,
+  crm_direct_revenue: 0,
+  crm_influenced_revenue: 0,
+  ad_impressions: 0,
+  ad_clicks: 0,
+  ...overrides,
+});
+
+describe("sends, activity and KPIs", () => {
+  it("dashboard returns send lines per channel and envios equals summary.betleadsUsage", async () => {
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-20", item: "sms", units: 10, amount: 0.8 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-21", item: "email", units: 3, amount: 0.0012 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-21", item: "voice_30s", units: 4, amount: 0.136 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-22", item: "sms", units: 5, amount: 0.4 },
+      // Previous window (2026-10-11..17).
+      { tenant_id: HOUSE_A, metric_date: "2026-10-15", item: "sms", units: 6, amount: 0.48 },
+      // Another house: only in the group scope.
+      { tenant_id: HOUSE_B, metric_date: "2026-10-20", item: "sms", units: 100, amount: 8 },
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+
+    expect(dashboard.sends.map((line) => [line.item, line.units, line.amount])).toEqual([
+      ["sms", 15, 1.2],
+      ["voice_30s", 4, 0.14],
+      ["email", 3, 0],
+    ]);
+    expect(dashboard.sends[0]).toMatchObject({
+      label: "SMS",
+      unitCost: 0.08,
+      previousAmount: 0.48,
+    });
+    expect(dashboard.sends[1].previousAmount).toBeNull();
+    const envios = dashboard.sends.reduce((total, line) => total + line.amount, 0);
+    expect(envios).toBeCloseTo(dashboard.totals.current.betleadsUsage, 10);
+    expect(dashboard.totals.current.betleadsUsage).toBe(1.34);
+    expect(dashboard.costs.find((line) => line.key === "sends")?.amount).toBe(1.34);
+    expect(dashboard.kpis.current.sendCost).toBe(1.34);
+    expect(dashboard.tenants[0].sendCost).toBe(1.34);
+
+    const group = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+    expect(group.sends[0]).toMatchObject({ item: "sms", units: 115, amount: 9.2 });
+    expect(group.totals.current.betleadsUsage).toBe(9.34);
+    expect(group.tenants.map((row) => [row.nome, row.sendCost])).toEqual([
+      ["Casa A", 1.34],
+      ["Casa B", 8],
+    ]);
+  });
+
+  it("kpis come from activity of the window", async () => {
+    financeDayRows.push(
+      // Anúncios 100 + 50; of it, Meta spend 60 + 30 (CPM and CPC use the Meta spend).
+      dayRow(HOUSE_A, "2026-10-20", {
+        deposit_amount: 1000,
+        withdrawal_amount: 200,
+        ad_spend: 100,
+        ad_spend_suggested: 60,
+        ggr: 0,
+      }),
+      dayRow(HOUSE_A, "2026-10-21", {
+        deposit_amount: 500,
+        ad_spend: 50,
+        ad_spend_suggested: "30",
+        ggr: 0,
+      }),
+      // Another house's Meta spend stays out.
+      dayRow(HOUSE_B, "2026-10-20", { ad_spend_suggested: 999 }),
+      dayRow(HOUSE_A, "2026-10-15", { deposit_amount: 300, ad_spend: 0, ggr: 0 }),
+    );
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", units: 100, amount: 10 });
+    activityRows.push(
+      activity(HOUSE_A, "2026-10-20", {
+        deposit_count: 10,
+        depositor_count: 7,
+        withdrawal_count: 2,
+        generated_pix_count: 20,
+        crm_direct_revenue: 40,
+        crm_influenced_revenue: "100",
+        ad_impressions: 2000,
+        ad_clicks: 30,
+      }),
+      activity(HOUSE_A, "2026-10-21", {
+        deposit_count: 5,
+        depositor_count: 7,
+        generated_pix_count: 10,
+        ad_impressions: 1000,
+        ad_clicks: 0,
+      }),
+      // Previous window (2026-10-11..17).
+      activity(HOUSE_A, "2026-10-15", { deposit_count: 3, depositor_count: 3 }),
+      // Outside both windows.
+      activity(HOUSE_A, "2026-10-05", { deposit_count: 1000, depositor_count: 1000 }),
+      // Another house.
+      activity(HOUSE_B, "2026-10-20", { deposit_count: 1000 }),
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+
+    const { current, previous } = dashboard.kpis;
+    expect(current.ticketMedio).toBe(1500 / 15);
+    expect(current.saqueMedio).toBe(100);
+    expect(current.depositorsPerDay).toBe(14 / 7);
+    expect(current.pixConversion).toBe(15 / 30);
+    expect(current.withdrawalShare).toBe(200 / 1500);
+    expect(current.cpm).toBe((90 / 3000) * 1000);
+    expect(current.ctr).toBe(30 / 3000);
+    expect(current.costPerClick).toBe(90 / 30);
+    expect(current.sendCost).toBe(10);
+    expect(current.crmDirectRevenue).toBe(40);
+    expect(current.crmDirectReturn).toBe(4);
+    expect(current.crmInfluencedReturn).toBe(10);
+    // cashResult 1300 - 150 - 10 = 1140 over net 1300.
+    expect(current.margin).toBe(1140 / 1300);
+    expect(dashboard.tenants[0].margin).toBe(1140 / 1300);
+
+    expect(previous.ticketMedio).toBe(100);
+    expect(previous.depositorsPerDay).toBe(3 / 7);
+    expect(previous.pixConversion).toBeNull();
+    expect(previous.crmDirectReturn).toBeNull();
+    expect(previous.cpm).toBeNull();
+  });
+
+  it("roiReference is the previous month cut at the same day while in progress", async () => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-09-10", 1000, 100),
+      // After the cut (the 24th): left out of the reference.
+      complete(HOUSE_A, "2026-09-28", 5000, 100),
+      complete(HOUSE_A, "2026-07-10", 700, 100),
+    );
+    fake.admin
+      .rows("tenant_finance_other_costs")
+      .push(otherCost("c1", HOUSE_A, "2026-09-01", "Equipe", 50, "Equipe"));
+
+    const week = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(week.roiReference.range).toEqual({ from: "2026-09-01", to: "2026-09-24" });
+    expect(week.roiReference.roi).toBe((1000 - 100 - 50) / 100);
+
+    // A past month: the whole previous month.
+    const august = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      range: { from: "2026-08-01", to: "2026-08-31" },
+      compare: "previous",
+      preset: "custom",
+    });
+    expect(august.roiReference.range).toEqual({ from: "2026-07-01", to: "2026-07-31" });
+    expect(august.roiReference.roi).toBe(6);
+  });
+
+  it("waterfall total equals totals.current.cashResult", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-10", {
+        deposit_amount: 1000.33,
+        withdrawal_amount: 200.17,
+        ad_spend: 100.11,
+        ggr: 300.07,
+        ggr_fee_pct: 17,
+        movement_fee_pct: 2.7,
+      }),
+      dayRow(HOUSE_B, "2026-10-11", {
+        deposit_amount: 500,
+        withdrawal_amount: 50,
+        ad_spend: 20,
+        ggr: 40,
+        ggr_fee_pct: 16,
+        movement_fee_pct: 2.7,
+      }),
+    );
+    fake.admin.rows("tenant_finance_other_costs").push(
+      otherCost("c1", HOUSE_A, "2026-10-01", "Equipe", 33.33, "Equipe"),
+      otherCost("c2", HOUSE_A, "2026-10-01", "Aluguel", 66.67, "Aluguel"),
+      otherCost("c3", HOUSE_A, "2026-10-01", "Diversos", 10.01),
+      otherCost("c4", HOUSE_B, "2026-10-01", "Equipe", 70, "Equipe"),
+      // Another month: never in the waterfall.
+      otherCost("c5", HOUSE_A, "2026-09-01", "Infra", 999, "Infra"),
+    );
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-10", item: "sms", units: 3, amount: 0.177 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-10", item: "voice_30s", units: 3, amount: 0.102 },
+      { tenant_id: HOUSE_B, metric_date: "2026-10-11", item: "email", units: 3, amount: 0.0012 },
+    );
+    feeRows.push(
+      { tenant_id: HOUSE_A, month: "2026-10-01", amount: 400 },
+      { tenant_id: HOUSE_B, month: "2026-10-01", amount: 300 },
+    );
+
+    const house = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    const houseTotal = house.waterfall.at(-1);
+    expect(houseTotal).toMatchObject({ key: "profit", kind: "total" });
+    expect(houseTotal?.end).toBeCloseTo(house.totals.current.cashResult, 2);
+    expect(house.waterfall[0]).toMatchObject({ key: "deposits", end: 1000.33 });
+    // Only the house's own other costs of the window, by category.
+    expect(
+      house.waterfall.filter((step) => step.key.startsWith("category:")).map((s) => s.label),
+    ).toEqual(["Equipe", "Aluguel", "Outros"]);
+    expect(house.waterfall.some((step) => step.key === "other_costs")).toBe(false);
+    expect(house.waterfall.find((step) => step.key === "fee")).toMatchObject({
+      start: expect.any(Number),
+    });
+
+    const group = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...monthToDate,
+    });
+    expect(group.waterfall.at(-1)?.end).toBeCloseTo(group.totals.current.cashResult, 2);
+    const equipe = group.waterfall.find((step) => step.key === "category:Equipe");
+    expect(equipe && round(equipe.start - equipe.end)).toBe(103.33);
+
+    // A 7-day window has no other costs: no category steps.
+    const week = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(week.waterfall.at(-1)?.end).toBeCloseTo(week.totals.current.cashResult, 2);
+    expect(week.waterfall.some((step) => step.key.startsWith("category:"))).toBe(false);
+  });
+
+  it("a send without provider cost marks Envios partial (kpis and waterfall label)", async () => {
+    financeDayRows.push(dayRow(HOUSE_A, "2026-10-20", { deposit_amount: 100, ad_spend: 0, ggr: 0 }));
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-20", item: "sms", units: 10, amount: 0.8 },
+      {
+        tenant_id: HOUSE_A,
+        metric_date: "2026-10-20",
+        item: "voice_30s",
+        units: 4,
+        amount: 0,
+        missing_cost_units: 4,
+      },
+      // Previous window: complete.
+      { tenant_id: HOUSE_A, metric_date: "2026-10-15", item: "sms", units: 6, amount: 0.48 },
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(dashboard.kpis.current.sendCostIncomplete).toBe(true);
+    expect(dashboard.kpis.previous.sendCostIncomplete).toBe(false);
+    expect(dashboard.waterfall.find((step) => step.key === "sends")?.label).toBe(
+      "Envios (parcial)",
+    );
+    expect(dashboard.waterfall.at(-1)?.end).toBeCloseTo(dashboard.totals.current.cashResult, 2);
+  });
+
+  it("a house margin is n.a. when its net is zero or negative", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-10-20", {
+        deposit_amount: 100,
+        withdrawal_amount: 300,
+        ad_spend: 0,
+        ggr: 0,
+      }),
+    );
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(dashboard.totals.current.net).toBe(-200);
+    expect(dashboard.tenants[0].margin).toBeNull();
+    expect(dashboard.kpis.current.margin).toBeNull();
+  });
+
+  it("exemptHouse is true only for the tenant scope of an exempt house", async () => {
+    exemptTenants.add(HOUSE_A);
+    const house = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(house.exemptHouse).toBe(true);
+
+    const group = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+    expect(group.exemptHouse).toBe(false);
+
+    exemptTenants.clear();
+    const paying = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(paying.exemptHouse).toBe(false);
+  });
+
+  it("months carry net and deposits", async () => {
+    financeDayRows.push(
+      dayRow(HOUSE_A, "2026-09-10", {
+        deposit_amount: 800,
+        withdrawal_amount: 300,
+        ad_spend: 0,
+        ggr: 0,
+      }),
+    );
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    expect(dashboard.months.at(-2)).toMatchObject({
+      month: "2026-09",
+      net: 500,
+      depositAmount: 800,
+    });
+    expect(dashboard.months.at(-1)).toMatchObject({ net: 0, depositAmount: 0 });
+  });
+});
+
+const round = (value: number) => Math.round(value * 100) / 100;
+
 describe("tenant scope month total equals the month view total", () => {
   it("dashboard cashResult matches the month view's, for a closed past month and the in-progress current month", async () => {
     financeDayRows.push(
       complete(HOUSE_A, "2026-08-15", 1000, 100),
       complete(HOUSE_A, "2026-10-10", 2000, 200),
     );
-    fake.admin
-      .rows("tenant_finance_other_costs")
-      .push(
-        otherCost("c1", HOUSE_A, "2026-08-01", "CRM", 50),
-        otherCost("c2", HOUSE_A, "2026-10-01", "CRM", 80),
-      );
+    fake.admin.rows("tenant_finance_other_costs").push(
+      otherCost("c1", HOUSE_A, "2026-08-01", "CRM", 50),
+      otherCost("c2", HOUSE_A, "2026-10-01", "CRM", 80),
+      // Dated costs: mid-month, and the last day of a closed month.
+      otherCost("c3", HOUSE_A, "2026-10-20", "Equipe", 120.5, "Equipe"),
+      otherCost("c4", HOUSE_A, "2026-08-31", "Aluguel", 70.25, "Aluguel"),
+    );
     usageRows.push(
       { tenant_id: HOUSE_A, metric_date: "2026-08-10", amount: 20 },
+      { tenant_id: HOUSE_A, metric_date: "2026-08-10", item: "voice_30s", units: 7, amount: 0.238 },
+      { tenant_id: HOUSE_A, metric_date: "2026-08-11", item: "email", units: 9, amount: 0.0036 },
       { tenant_id: HOUSE_A, metric_date: "2026-10-05", amount: 15 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-06", item: "voice_30s", units: 5, amount: 0.17 },
+      { tenant_id: HOUSE_A, metric_date: "2026-10-07", item: "voice_30s", units: 1, amount: 0.034 },
     );
     feeRows.push(
       { tenant_id: HOUSE_A, month: "2026-08-01", amount: 300 },
@@ -504,6 +950,8 @@ describe("tenant scope month total equals the month view total", () => {
       month: "2026-08",
     });
     expect(augustDashboard.totals.current.cashResult).toBe(augustMonth.summary.cashResult);
+    expect(augustMonth.summary.otherCosts).toBe(120.25);
+    expect(augustDashboard.totals.current.otherCosts).toBe(120.25);
 
     const octoberDashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
       scope: { kind: "tenant", tenantId: HOUSE_A },
@@ -514,6 +962,153 @@ describe("tenant scope month total equals the month view total", () => {
       month: "2026-10",
     });
     expect(octoberDashboard.totals.current.cashResult).toBe(octoberMonth.summary.cashResult);
+    expect(octoberMonth.summary.otherCosts).toBe(200.5);
+    expect(octoberDashboard.totals.current.otherCosts).toBe(200.5);
+    // The channels are the same on both screens.
+    expect(octoberDashboard.sends).toEqual(
+      octoberMonth.monthSends.map((line) => ({
+        ...line,
+        previousAmount: octoberDashboard.sends.find((d) => d.item === line.item)?.previousAmount,
+      })),
+    );
+    expect(augustDashboard.waterfall.at(-1)?.end).toBeCloseTo(augustMonth.summary.cashResult, 2);
+  });
+
+  it("also matches for months with a monthly GGR total (closed and in progress)", async () => {
+    const day = (date: string, deposit: number, ggr: number | null) =>
+      dayRow(HOUSE_A, date, {
+        deposit_amount: deposit,
+        ad_spend: 10,
+        ggr,
+        ggr_fee_pct: 17,
+        movement_fee_pct: 2.7,
+      });
+    financeDayRows.push(
+      day("2026-09-01", 333.33, 999),
+      day("2026-09-15", 100, 999),
+      day("2026-09-30", 0, null),
+      day("2026-10-01", 120.5, 5),
+      day("2026-10-10", 80.25, 5),
+      day("2026-10-20", 0, 5),
+      day("2026-10-22", 50, 5),
+    );
+    fake.admin
+      .rows("tenant_finance_monthly_ggr")
+      .push(
+        { tenant_id: HOUSE_A, month: "2026-09-01", ggr: 1497.15, valid_through: "2026-09-30" },
+        { tenant_id: HOUSE_A, month: "2026-10-01", ggr: -321.07, valid_through: "2026-10-20" },
+      );
+
+    const septemberDashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      range: { from: "2026-09-01", to: "2026-09-30" },
+      compare: "previous",
+      preset: "custom",
+    });
+    const septemberMonth = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-09",
+    });
+    expect(septemberMonth.summary.ggr).toBe(1497.15);
+    expect(septemberDashboard.totals.current.ggr).toBe(1497.15);
+    expect(septemberDashboard.totals.current.cashResult).toBe(septemberMonth.summary.cashResult);
+    expect(septemberDashboard.totals.current.ggrEstimated).toBe(false);
+
+    const octoberDashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    const octoberMonth = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+    expect(octoberMonth.summary.ggr).toBe(-321.07);
+    expect(octoberDashboard.totals.current.ggr).toBe(-321.07);
+    expect(octoberDashboard.totals.current.cashResult).toBe(octoberMonth.summary.cashResult);
+    // The months series reads the same days.
+    expect(octoberDashboard.months.at(-1)?.cashResult).toBe(octoberMonth.summary.cashResult);
+    expect(octoberDashboard.months.at(-2)?.cashResult).toBe(septemberMonth.summary.cashResult);
+  });
+});
+
+describe("monthly GGR total in the dashboard", () => {
+  beforeEach(() => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-10-01", 100, 10),
+      complete(HOUSE_A, "2026-10-19", 100, 10),
+      complete(HOUSE_A, "2026-10-20", 200, 10),
+      complete(HOUSE_A, "2026-10-21", 100, 10),
+      complete(HOUSE_A, "2026-10-22", 100, 10),
+      complete(HOUSE_A, "2026-10-23", 100, 10),
+      complete(HOUSE_B, "2026-10-20", 100, 10),
+    );
+    fake.admin
+      .rows("tenant_finance_monthly_ggr")
+      .push({ tenant_id: HOUSE_A, month: "2026-10-01", ggr: 400, valid_through: "2026-10-20" });
+  });
+
+  it("a window with part of the allocated days is flagged as estimated; later days are pending", async () => {
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    // 400 split 100/100/200 over 01, 19, 20: the window (18..24) holds 19 and 20.
+    expect(dashboard.totals.current.ggr).toBe(300);
+    expect(dashboard.totals.current.ggrEstimated).toBe(true);
+    expect(dashboard.tenants[0].current.ggrEstimated).toBe(true);
+    expect(dashboard.tenants[0].pendingDates).toEqual(["2026-10-21", "2026-10-22", "2026-10-23"]);
+    expect(dashboard.tenants[0].ggrUpdatedThrough).toBe("2026-10-20");
+
+    const monthDashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+    expect(monthDashboard.totals.current.ggr).toBe(400);
+    expect(monthDashboard.totals.current.ggrEstimated).toBe(false);
+  });
+
+  it("group scope: only the house with the total is estimated; others keep daily GGR", async () => {
+    const dashboard = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+    const [a, b] = dashboard.tenants;
+    expect(a.id).toBe(HOUSE_A);
+    expect(a.current.ggrEstimated).toBe(true);
+    expect(b.current.ggrEstimated).toBe(false);
+    expect(b.ggrUpdatedThrough).toBeNull();
+    expect(dashboard.totals.current.ggrEstimated).toBe(true);
+  });
+
+  it("pending days not explained by the total keep ggrUpdatedThrough null", async () => {
+    financeDayRows.push(dayRow(HOUSE_A, "2026-10-18", { deposit_amount: 10 })); // no Anúncios
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(dashboard.tenants[0].pendingDates[0]).toBe("2026-10-18");
+    expect(dashboard.tenants[0].ggrUpdatedThrough).toBeNull();
+  });
+
+  it("allocates over the whole month even when the fetch span starts mid-month", async () => {
+    // Previous window of this ~10-month range starts on 2025-03-10.
+    financeDayRows.push(
+      complete(HOUSE_A, "2025-03-01", 100, 0),
+      complete(HOUSE_A, "2025-03-20", 100, 0),
+    );
+    fake.admin
+      .rows("tenant_finance_monthly_ggr")
+      .push({ tenant_id: HOUSE_A, month: "2025-03-01", ggr: 1000, valid_through: "2025-03-31" });
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      range: { from: "2026-01-01", to: "2026-10-24" },
+      compare: "previous",
+      preset: "custom",
+    });
+    expect(dashboard.compareRange?.from).toBe("2025-03-10");
+    expect(dashboard.totals.previous.ggr).toBe(500);
+    expect(dashboard.totals.previous.ggrEstimated).toBe(true);
   });
 });
 
@@ -531,6 +1126,7 @@ describe("group and all scopes", () => {
       }),
       // B: result 300 - 300 = 0 on 300 of ads -> ROI 0.
       complete(HOUSE_B, "2026-10-23", 300, 300),
+      // B: pending day (no Anúncios/GGR) still counts its 1 of deposits.
       dayRow(HOUSE_B, "2026-10-22", { deposit_amount: 1 }),
       complete(HOUSE_C, "2026-10-23", 999, 1),
     );
@@ -555,26 +1151,26 @@ describe("group and all scopes", () => {
     expect(dashboard.tenants.map((row) => row.nome)).toEqual(["Casa A", "Casa B"]);
     const [a, b] = dashboard.tenants;
     expect(a.current.cashResult).toBe(190);
-    expect(b.current.cashResult).toBe(-20);
+    expect(b.current.cashResult).toBe(-19);
     expect(b.pendingDates).toEqual(["2026-10-22"]);
-    // Row-level ROI: each house's own result over its own complete Anúncios.
+    // Row-level ROI: each house's own result over its own Anúncios.
     expect(a.current.roi).toBe(190 / 100);
-    expect(b.current.roi).toBe(-20 / 300);
-    expect(dashboard.totals.current.cashResult).toBe(170);
+    expect(b.current.roi).toBe(-19 / 300);
+    expect(dashboard.totals.current.cashResult).toBe(171);
     expect(dashboard.totals.current.betleadsUsage).toBe(30);
-    // Σresult / Σads = 170 / 400, not the mean of the houses.
-    expect(dashboard.totals.current.roi).toBe(170 / 400);
+    // Σresult / Σads = 171 / 400, not the mean of the houses.
+    expect(dashboard.totals.current.roi).toBe(171 / 400);
     expect(a.goals).toEqual([
       { metric: "roi", direction: "gte", target: 0, value: 1.9, status: "green" },
     ]);
     expect(b.goals).toEqual([]);
-    expect(dashboard.months.at(-1)!.byTenant).toEqual({ [HOUSE_A]: 190, [HOUSE_B]: -20 });
+    expect(dashboard.months.at(-1)!.byTenant).toEqual({ [HOUSE_A]: 190, [HOUSE_B]: -19 });
     // Group scope does not put a rate in the GGR label.
     expect(dashboard.costs.find((line) => line.key === "ggr_fee")?.label).toBe("Taxa de GGR");
     expect(financeDaysCalls[0]._tenants).toEqual([HOUSE_A, HOUSE_B]);
   });
 
-  it("group scope: other costs and fee enter a whole calendar month and its whole previous month", async () => {
+  it("group scope: other costs enter by date; the fee only a whole calendar month and its whole previous month", async () => {
     fake.admin
       .rows("tenant_finance_other_costs")
       .push(
@@ -606,8 +1202,44 @@ describe("group and all scopes", () => {
       compare: "previous",
       preset: "custom",
     });
-    expect(partial.totals.current.otherCosts).toBeNull();
+    // Dated on the 1st, inside the window; the fee waits for the month's close.
+    expect(partial.totals.current.otherCosts).toBe(125);
     expect(partial.totals.current.betleadsFee).toBeNull();
+  });
+
+  it("a cost dated inside a 7d window enters cashResult; the fee does not", async () => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-10-20", 1000, 100),
+      complete(HOUSE_A, "2026-10-12", 500, 50),
+    );
+    fake.admin.rows("tenant_finance_other_costs").push(
+      otherCost("c1", HOUSE_A, "2026-10-19", "Designer", 60, "Equipe"),
+      // Before the week (Oct 18-24), inside its comparison (Oct 11-17).
+      otherCost("c2", HOUSE_A, "2026-10-17", "Freela", 30, "Equipe"),
+    );
+    feeRows.push({ tenant_id: HOUSE_A, month: "2026-10-01", amount: 400 });
+
+    const week = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...last7Days,
+    });
+    expect(week.compareRange).toEqual({ from: "2026-10-11", to: "2026-10-17" });
+    expect(week.totals.current.otherCosts).toBe(60);
+    expect(week.totals.current.betleadsFee).toBeNull();
+    expect(week.totals.current.cashResult).toBe(1000 - 100 - 60);
+    expect(week.totals.previous.otherCosts).toBe(30);
+    expect(week.totals.previous.cashResult).toBe(500 - 50 - 30);
+    const house = week.tenants.find((tenant) => tenant.id === HOUSE_A);
+    expect(house?.current.otherCosts).toBe(60);
+    // Waterfall and cost lines carry the window's categories.
+    const equipe = week.waterfall.find((step) => step.key === "category:Equipe");
+    expect(equipe && round(equipe.start - equipe.end)).toBe(60);
+    expect(week.costs.find((line) => line.key === "category:Equipe")).toMatchObject({
+      amount: 60,
+      previous: 30,
+    });
+    // The month's point of the series has both costs and the fee.
+    expect(week.months.at(-1)?.cashResult).toBe(1000 - 100 + 500 - 50 - 60 - 30 - 400);
   });
 
   it("costs merges categories with the same name across houses", async () => {
@@ -749,10 +1381,11 @@ describe("group scope: cost-month rule and goals (ported from the group overview
       compare: "previous",
       preset: "custom",
     });
-    expect(row(partial, HOUSE_A).current.otherCosts).toBeNull();
+    expect(row(partial, HOUSE_A).current.otherCosts).toBe(150);
+    expect(row(partial, HOUSE_A).current.betleadsFee).toBeNull();
   });
 
-  it("Mês preset in progress includes the month's other costs; the same window as Personalizado does not", async () => {
+  it("other costs enter the Mês preset and the same window as Personalizado alike (by date)", async () => {
     financeDayRows.push(
       complete(HOUSE_A, "2026-10-05", 1000, 100),
       complete(HOUSE_A, "2026-09-05", 500, 100),
@@ -778,12 +1411,14 @@ describe("group scope: cost-month rule and goals (ported from the group overview
       ...monthToDate,
       preset: "custom",
     });
-    expect(row(custom, HOUSE_A).current.otherCosts).toBeNull();
-    expect(custom.totals.current.otherCosts).toBeNull();
-    expect(custom.totals.previous.otherCosts).toBeNull();
+    expect(row(custom, HOUSE_A).current.otherCosts).toBe(40);
+    expect(custom.totals.current.otherCosts).toBe(50);
+    // The previous 24 days (Sep 7-30) do not hold the cost dated Sep 1.
+    expect(custom.compareRange).toEqual({ from: "2026-09-07", to: "2026-09-30" });
+    expect(custom.totals.previous.otherCosts).toBe(0);
   });
 
-  it("Mês preset with a week-shifted comparison leaves other costs out of the comparison", async () => {
+  it("Mês preset with a week-shifted comparison counts the costs dated inside that comparison", async () => {
     fake.admin
       .rows("tenant_finance_other_costs")
       .push(
@@ -797,11 +1432,13 @@ describe("group scope: cost-month rule and goals (ported from the group overview
     });
     expect(dashboard.compareRange).toEqual({ from: "2026-09-24", to: "2026-10-17" });
     expect(row(dashboard, HOUSE_A).current.otherCosts).toBe(40);
-    expect(row(dashboard, HOUSE_A).previous.otherCosts).toBeNull();
-    expect(dashboard.totals.previous.otherCosts).toBeNull();
+    // Sep 24 - Oct 17 holds the cost of Oct 1, not the one of Sep 1.
+    expect(row(dashboard, HOUSE_A).previous.otherCosts).toBe(40);
+    expect(dashboard.totals.previous.otherCosts).toBe(40);
+    expect(dashboard.totals.previous.betleadsFee).toBeNull();
   });
 
-  it("Mês preset is not trusted for a range that is not month-to-date", async () => {
+  it("a range starting after a cost's date leaves it out", async () => {
     fake.admin
       .rows("tenant_finance_other_costs")
       .push(otherCost("c1", HOUSE_A, "2026-10-01", "CRM", 40));
@@ -811,8 +1448,10 @@ describe("group scope: cost-month rule and goals (ported from the group overview
       compare: "previous",
       preset: "month",
     });
-    expect(row(dashboard, HOUSE_A).current.otherCosts).toBeNull();
-    expect(dashboard.totals.current.otherCosts).toBeNull();
+    expect(row(dashboard, HOUSE_A).current.otherCosts).toBe(0);
+    expect(dashboard.totals.current.otherCosts).toBe(0);
+    // The Mês preset is not trusted for a range that is not month-to-date: no fee.
+    expect(dashboard.totals.current.betleadsFee).toBeNull();
   });
 
   it("Ontem compared with the same weekday last week", async () => {
@@ -825,7 +1464,7 @@ describe("group scope: cost-month rule and goals (ported from the group overview
     expect(dashboard.compareRange).toEqual({ from: "2026-10-16", to: "2026-10-16" });
   });
 
-  it("a pending today neither counts as pending nor grays a goal", async () => {
+  it("a pending today is not a pending day; its computed result enters the goal", async () => {
     financeDayRows.push(
       complete(HOUSE_A, "2026-10-23", 300, 100),
       dayRow(HOUSE_A, "2026-10-24", { deposit_amount: 50 }),
@@ -852,9 +1491,11 @@ describe("group scope: cost-month rule and goals (ported from the group overview
     const a = row(dashboard, HOUSE_A);
     expect(a.current.pendingDays).toBe(0);
     expect(a.pendingDates).toEqual([]);
-    expect(a.current.cashResult).toBe(200);
+    // Today (pending) counts its 50 of deposits: 200 + 50.
+    expect(a.current.cashResult).toBe(250);
+    // Both goal days (2 × 150) against 250: yellow (≥ 80% of 300), not gray.
     expect(a.goals).toEqual([
-      { metric: "cash_result", direction: "gte", target: 150, value: 200, status: "green" },
+      { metric: "cash_result", direction: "gte", target: 300, value: 250, status: "yellow" },
     ]);
     expect(dashboard.totals.current.pendingDays).toBe(0);
   });
@@ -987,7 +1628,13 @@ describe("PostgREST 1000-row cap", () => {
     for (const tenantId of HOUSES) {
       for (const date of span) {
         financeDayRows.push(complete(tenantId, date, 10, 1));
-        usageRows.push({ tenant_id: tenantId, metric_date: date, amount: 1 });
+        // Three channels a day (≤ 3 send rows per house-day) adding up to 1.
+        usageRows.push(
+          { tenant_id: tenantId, metric_date: date, item: "sms", units: 5, amount: 0.5 },
+          { tenant_id: tenantId, metric_date: date, item: "voice_30s", units: 3, amount: 0.3 },
+          { tenant_id: tenantId, metric_date: date, item: "email", units: 2, amount: 0.2 },
+        );
+        activityRows.push(activity(tenantId, date, { deposit_count: 2, depositor_count: 1 }));
       }
       for (const date of eachDay(range.from, range.to)) {
         for (const metric of ALL_METRICS) {
@@ -1016,6 +1663,15 @@ describe("PostgREST 1000-row cap", () => {
     expect(dashboard.totals.current.cashResult).toBe(5 * 30 * 8);
     expect(dashboard.totals.current.betleadsUsage).toBe(5 * 30);
     expect(dashboard.totals.previous.cashResult).toBe(5 * 30 * 8);
+    // Every send and activity row of both windows was read.
+    expect(dashboard.sends.map((line) => [line.item, line.units, line.amount])).toEqual([
+      ["sms", 5 * 30 * 5, 5 * 30 * 0.5],
+      ["voice_30s", 5 * 30 * 3, 5 * 30 * 0.3],
+      ["email", 5 * 30 * 2, 5 * 30 * 0.2],
+    ]);
+    expect(dashboard.kpis.current.ticketMedio).toBe(5);
+    expect(dashboard.kpis.current.depositorsPerDay).toBe(5);
+    expect(dashboard.kpis.previous.ticketMedio).toBe(5);
     for (const row of dashboard.tenants) {
       expect(row.current.cashResult).toBe(30 * 8);
       expect(row.previous.cashResult).toBe(30 * 8);
@@ -1117,9 +1773,75 @@ describe("fetch span", () => {
     });
 
     expect(dashboard.months[0].month).toBe("2025-11");
-    expect(dashboard.compareRange.from <= "2025-04-10").toBe(true);
+    expect((dashboard.compareRange?.from ?? "") <= "2025-04-10").toBe(true);
     const fetchedFrom = financeDaysCalls.map((call) => String(call._from)).sort()[0];
-    expect(fetchedFrom).toBe(dashboard.compareRange.from);
+    expect(fetchedFrom).toBe(dashboard.compareRange?.from);
     expect(dashboard.totals.previous.cashResult).toBe(400);
+  });
+});
+
+describe("comparison modes", () => {
+  const houseA = { kind: "tenant" as const, tenantId: HOUSE_A };
+
+  it("none fetches no previous window and returns an empty previous", async () => {
+    // A ~10-month range: with "previous" its comparison would reach 2025-03.
+    const range = { from: "2026-01-01", to: "2026-10-24" };
+    financeDayRows.push(
+      complete(HOUSE_A, "2025-04-10", 500, 100),
+      complete(HOUSE_A, "2026-09-10", 300, 100),
+      complete(HOUSE_A, "2026-10-10", 200, 50),
+    );
+    activityRows.push({ tenant_id: HOUSE_A, metric_date: "2025-04-10", depositors: 3 });
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2025-04-10", amount: 7 });
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: houseA,
+      range,
+      compare: "none",
+      preset: "custom",
+    });
+
+    expect(dashboard.compareRange).toBeNull();
+    // Only the 12-month series and the current window are read.
+    const fetchedFrom = financeDaysCalls.map((call) => String(call._from)).sort()[0];
+    expect(fetchedFrom).toBe("2025-11-01");
+    expect(dashboard.totals.previous.days).toBe(0);
+    expect(dashboard.totals.previous.cashResult).toBe(0);
+    expect(dashboard.totals.previous.depositAmount).toBe(0);
+    expect(dashboard.totals.previous.betleadsFee).toBeNull();
+    expect(dashboard.tenants[0].previous.days).toBe(0);
+    expect(dashboard.tenants[0].previous.cashResult).toBe(0);
+    expect(dashboard.kpis.previous.sendCost).toBe(0);
+    expect(dashboard.sends.every((line) => line.previousAmount === null)).toBe(true);
+    // The current window and the ROI reference are unaffected.
+    expect(dashboard.totals.current.cashResult).toBe(350);
+    expect(dashboard.roiReference.range).toEqual({ from: "2026-09-01", to: "2026-09-24" });
+    expect(dashboard.roiReference.roi).toBe(2);
+  });
+
+  it("same_period_last_year of the Mês preset is the same days a year before, with its fee", async () => {
+    financeDayRows.push(complete(HOUSE_A, "2025-10-05", 900, 100));
+    feeRows.push(
+      { tenant_id: HOUSE_A, month: "2026-10-01", amount: 400 },
+      { tenant_id: HOUSE_A, month: "2025-10-01", amount: 300 },
+    );
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: houseA,
+      ...monthToDate,
+      compare: "same_period_last_year",
+    });
+    expect(dashboard.compareRange).toEqual({ from: "2025-10-01", to: "2025-10-24" });
+    expect(dashboard.totals.previous.depositAmount).toBe(900);
+    expect(dashboard.totals.previous.betleadsFee).toBe(300);
+  });
+
+  it("same_period_last_year of a whole month is that month a year before", async () => {
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: houseA,
+      range: { from: "2026-09-01", to: "2026-09-30" },
+      compare: "same_period_last_year",
+      preset: "custom",
+    });
+    expect(dashboard.compareRange).toEqual({ from: "2025-09-01", to: "2025-09-30" });
   });
 });

@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   EmailDomainNotVerifiedError,
-  emailBillingColumns,
+  emailSendLogColumns,
   resolveSender,
   sendInfobipEmail,
 } from "./email-send.server";
@@ -18,6 +18,12 @@ import { resolveJourneyWorkerScope } from "./journey-worker-scope";
 import { channelBudget, type Admission } from "./rate-limit/channel-budget.server";
 import { captureServerException } from "./observability/sentry.server";
 import {
+  MAX_PLATFORM_HOLDS,
+  PLATFORM_HOLD_MS,
+  journeyPlatformFailure,
+} from "./journey-platform-failure";
+import { endStepMaxLoops } from "./journeys.shared";
+import {
   createClaimingSource,
   createTimeBudget,
   runBoundedPool,
@@ -32,15 +38,8 @@ import {
   ProviderSendError,
   classifyProviderFailure,
 } from "./rate-limit/provider-errors.server";
-import {
-  BREAKER_CACHE_MS,
-  acquireSmsSendGate,
-  breakerRetryAt,
-  cachedSmsBreaker,
-  readSmsBreaker,
-  releaseSmsProbe,
-  type SmsSendGate,
-} from "./sms-provider-breaker.server";
+import { PLATFORM_SMS_BREAKER_KEY, breakerRetryAt } from "./sms-provider-breaker.server";
+import { SmsAccountGates } from "./sms-account-gates.server";
 import { resolveDispatchWorkerConfig } from "./rate-limit/worker-config";
 import { brtDayStart } from "./tz";
 import { listDemoTenantIds } from "./tenant-access.server";
@@ -68,6 +67,7 @@ type JourneyRow = {
   entry_rules: Record<string, unknown>;
   daily_limit: number;
   cooldown_hours: number;
+  express?: boolean | null;
 };
 type EnrollmentRow = {
   id: string;
@@ -446,7 +446,7 @@ async function executeEnrollment(
   const { data: journeyRaw } = await db
     .from("journeys")
     .select(
-      "id,status,trigger_type,trigger_config,exit_rules,entry_rules,daily_limit,cooldown_hours",
+      "id,status,trigger_type,trigger_config,exit_rules,entry_rules,daily_limit,cooldown_hours,express",
     )
     .eq("id", enrollment.journey_id)
     .maybeSingle();
@@ -520,7 +520,11 @@ async function executeEnrollment(
     const run = await execution(enrollment, step, null);
     await finishExecution(run.id, { status: "sent", executed_at: new Date().toISOString() });
     const loopToPosition = Number(step.config.loop_to_position);
-    if (Number.isInteger(loopToPosition) && loopToPosition >= 0 && loopToPosition < step.position) {
+    const hasLoop =
+      Number.isInteger(loopToPosition) && loopToPosition >= 0 && loopToPosition < step.position;
+    const loopsDone = Number(enrollment.loop_iteration ?? 0);
+    const maxLoops = endStepMaxLoops(step.config);
+    if (hasLoop && loopsDone < maxLoops) {
       const { data: loopTarget } = await db
         .from("journey_steps")
         .select("id")
@@ -532,23 +536,29 @@ async function executeEnrollment(
       await release(enrollment, ctx, {
         status: "active",
         current_position: loopToPosition,
-        loop_iteration: Number(enrollment.loop_iteration ?? 0) + 1,
+        loop_iteration: loopsDone + 1,
         next_run_at: new Date().toISOString(),
         attempts: 0,
       });
       await event(enrollment, "loop_restarted", {
         step_position: step.position,
         loop_to_position: loopToPosition,
-        loop_iteration: Number(enrollment.loop_iteration ?? 0) + 1,
+        loop_iteration: loopsDone + 1,
+        max_loops: maxLoops,
       });
       return;
     }
+    // P0.2b: a loop repeats at most max_loops times (default DEFAULT_MAX_LOOPS).
+    const exitReason = hasLoop ? "max_loops" : "end_step";
     await release(enrollment, ctx, {
       status: "completed",
       completed_at: new Date().toISOString(),
-      exit_reason: "end_step",
+      exit_reason: exitReason,
     });
-    await event(enrollment, "completed", { step_position: step.position });
+    await event(enrollment, "completed", {
+      step_position: step.position,
+      ...(hasLoop ? { reason: exitReason, loop_iteration: loopsDone, max_loops: maxLoops } : {}),
+    });
     return;
   }
 
@@ -661,6 +671,8 @@ type ChannelGate = {
 };
 
 const SEND_CHANNELS = new Set(["sms", "email", "voice"]);
+/** A step held for lack of house balance comes back after this, so a recharge resumes it. */
+const NO_BALANCE_RETRY_MS = 15 * 60_000;
 
 /**
  * I2: admits a claimed item against the channel budget BEFORE the expensive
@@ -707,6 +719,12 @@ async function deliverStep(
   gate: ChannelGate,
 ): Promise<void> {
   const channel = step.step_type;
+  // The wallet already refused this house in this run: wait without reserving
+  // or calling the provider again (one wallet check per house per run).
+  if (ctx.noBalanceTenants.has(enrollment.tenant_id)) {
+    await holdForBalance(enrollment, ctx, channel, null);
+    return;
+  }
   const house = await loadHouseLinks(enrollment.tenant_id);
   const reservation = await reserveDelivery(enrollment, step, journey);
   // ENV-02: this step already has a sent execution (e.g. a previous attempt
@@ -891,7 +909,7 @@ async function deliverStep(
         subject: renderTemplate(template.subject, vars, house),
         status: "sent",
         sent_at: new Date().toISOString(),
-        ...emailBillingColumns(result),
+        ...emailSendLogColumns(result),
         provider_response: {
           journey_execution_id: run.id,
           provider: "infobip",
@@ -988,6 +1006,7 @@ async function deliverStep(
         provider_status_code: result.status,
         to_phone: to,
         billing_reference_id: result.billing?.referenceId ?? null,
+        provider_account_id: result.providerAccountId ?? null,
       });
       if (historyInsertError) logCallHistoryInsertError("journey", historyInsertError, result);
     }
@@ -1000,17 +1019,66 @@ async function deliverStep(
     throw new Error(`Passo ${step.step_type} ainda não está habilitado no dispatcher`);
   }
 
-  await release(enrollment, ctx, {
-    status: "active",
-    current_position: step.position + 1,
-    next_run_at: new Date().toISOString(),
-    attempts: 0,
-  });
+  // Leads mortos: N mensagens seguidas sem ação na casa. The RPC already
+  // exited this enrollment (keeping our lease); the fenced release below writes
+  // the same final state instead of advancing it. Express journeys are exempt.
+  const deadLead = (await checkDeadLeadAfterSend(enrollment, ctx)) && !journey.express;
+  await release(
+    enrollment,
+    ctx,
+    deadLead
+      ? { status: "exited", exited_at: new Date().toISOString(), exit_reason: "dead_lead" }
+      : {
+          status: "active",
+          current_position: step.position + 1,
+          next_run_at: new Date().toISOString(),
+          attempts: 0,
+        },
+  );
   await event(enrollment, "step_sent", {
     channel,
     step_position: step.position,
     execution_id: run.id,
   });
+}
+
+/**
+ * Leads mortos (opt-in per house, journey_contact_limits.dead_lead_enabled):
+ * after a message is recorded as sent, journey_dead_lead_check counts the
+ * player's consecutive journey messages since their last action in the house
+ * and, at the threshold, marks them dead and exits their open non-express
+ * enrollments, this one included (p_enrollment_id: the RPC keeps our lease so
+ * the fenced release still applies). Returns true when the player is dead.
+ * Best effort: an error never fails the send that already happened.
+ */
+async function checkDeadLeadAfterSend(
+  enrollment: EnrollmentRow,
+  ctx: DispatchContext,
+): Promise<boolean> {
+  if (!enrollment.player_id || ctx.deadLeadCheckUnavailable) return false;
+  try {
+    const { data, error } = await db.rpc("journey_dead_lead_check", {
+      p_tenant_id: enrollment.tenant_id,
+      p_player_id: enrollment.player_id,
+      p_enrollment_id: enrollment.id,
+    });
+    if (error) {
+      // Function not deployed yet (PGRST202): stop asking for the rest of the run.
+      if (error.code === "PGRST202") ctx.deadLeadCheckUnavailable = true;
+      console.warn("[journey dispatcher] dead lead check failed", {
+        enrollmentId: enrollment.id,
+        error: error.message,
+      });
+      return false;
+    }
+    return data === true;
+  } catch (error) {
+    console.warn("[journey dispatcher] dead lead check failed", {
+      enrollmentId: enrollment.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 }
 
 /**
@@ -1045,24 +1113,22 @@ type DispatchCounters = {
   leaseLost: number;
   /** SMS items held back (no attempt consumed) because the provider breaker is open. */
   providerSuspended: number;
-  /** Steps skipped because the house wallet had no balance (PG3 decision 6). */
-  skippedNoBalance: number;
+  /** Steps held on the same position because the house wallet had no balance. */
+  deferredNoBalance: number;
+  /** Steps held on the same position because the platform failed before sending. */
+  platformHeld: number;
 };
 
 /**
- * This run's view of the global SMS provider circuit breaker.
+ * This run's view of the SMS provider circuit breakers, one per provider
+ * account (SmsAccountGates). For the houses on an account:
  *   closed : SMS items are sent.
  *   open   : SMS items are not claimed (p_exclude) / handed back untouched.
  *   probe  : this worker holds the half-open probe: exactly ONE SMS item is
- *            sent (probeItem); the others wait for its verdict.
+ *            sent; the others wait for its verdict.
  */
 type SmsRunGate = {
-  mode: SmsSendGate["mode"];
-  holder: string;
-  probeItem: string | null;
-  heldProbe: boolean;
-  retryAt: string | null;
-  checkedAt: number;
+  gates: SmsAccountGates;
   /** Tenants of this run's scope, loaded only when SMS must be excluded from claims. */
   tenantIds: string[] | null;
 };
@@ -1075,46 +1141,22 @@ type DispatchContext = {
   executions: Map<string, string>;
   /** `${tenant_id}:${channel}` -> epoch ms until which its budget is exhausted. */
   exhausted: Map<string, number>;
+  /** Houses whose wallet refused a send in this run: their paid steps wait without reserving. */
+  noBalanceTenants: Set<string>;
+  /** `${tenant_id}:${reason}` platform failures already reported to Sentry in this run. */
+  platformReported: Set<string>;
   sms: SmsRunGate;
+  /** journey_dead_lead_check is missing (migration not applied): skip it for this run. */
+  deadLeadCheckUnavailable?: boolean;
 };
 
 function newSmsRunGate(holder: string): SmsRunGate {
-  return {
-    mode: "closed",
-    holder,
-    probeItem: null,
-    heldProbe: false,
-    retryAt: null,
-    checkedAt: 0,
-    tenantIds: null,
-  };
+  return { gates: new SmsAccountGates(holder), tenantIds: null };
 }
 
-function applySmsGate(ctx: DispatchContext, decision: SmsSendGate) {
-  ctx.sms.mode = decision.mode;
-  ctx.sms.retryAt = decision.mode === "closed" ? null : decision.snapshot.retryAt;
-  ctx.sms.checkedAt = Date.now();
-  if (decision.mode === "probe") ctx.sms.heldProbe = true;
-}
-
-/** Re-asks the global breaker (another process may have opened/closed it). */
-async function refreshSmsGate(ctx: DispatchContext, force = false) {
-  // While our probe is in flight its verdict decides; nothing else may send.
-  if (ctx.sms.probeItem) return;
-  if (!force && Date.now() - ctx.sms.checkedAt < BREAKER_CACHE_MS) return;
-  // Claimed before awaiting so concurrent pool slots do not all re-ask at once.
-  ctx.sms.checkedAt = Date.now();
-  applySmsGate(ctx, await acquireSmsSendGate(ctx.sms.holder));
-}
-
-/** SMS must not be sent by this run right now (open, or our single probe is taken). */
-function smsBlocked(ctx: DispatchContext): boolean {
-  return ctx.sms.mode === "open" || (ctx.sms.mode === "probe" && ctx.sms.probeItem !== null);
-}
-
-/** p_exclude keys that keep SMS items out of the claim while SMS is blocked. */
+/** p_exclude keys that keep SMS items of houses on a blocked account out of the claim. */
 async function smsExcludeKeys(ctx: DispatchContext, scopeTenantIds: string[]): Promise<string[]> {
-  if (!smsBlocked(ctx)) return [];
+  if (ctx.sms.gates.blockedKeys().size === 0) return [];
   if (!ctx.sms.tenantIds) {
     if (scopeTenantIds.length) {
       ctx.sms.tenantIds = scopeTenantIds;
@@ -1127,45 +1169,22 @@ async function smsExcludeKeys(ctx: DispatchContext, scopeTenantIds: string[]): P
       ctx.sms.tenantIds = ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
     }
   }
-  return (ctx.sms.tenantIds ?? []).map((tenantId) => `${tenantId}:sms`);
+  const blocked = await ctx.sms.gates.blockedTenants(ctx.sms.tenantIds ?? []);
+  return blocked.map((tenantId) => `${tenantId}:sms`);
 }
 
 /**
- * Admission of one claimed SMS item against the breaker. Returns false when
- * the item was handed back untouched (no attempt, no execution, next_run_at
- * kept); the claim RPC then excludes SMS for the rest of this run.
+ * Admission of one claimed SMS item against the breaker of its house's
+ * account. Returns false when the item was handed back untouched (no
+ * attempt, no execution, next_run_at kept); the claim RPC then excludes the
+ * houses on that account for the rest of this run.
  */
 async function admitSmsItem(row: ClaimedRow, ctx: DispatchContext): Promise<boolean> {
-  await refreshSmsGate(ctx);
-  if (ctx.sms.mode === "closed") return true;
-  if (ctx.sms.mode === "probe" && ctx.sms.probeItem === null) {
-    ctx.sms.probeItem = row.id;
-    console.warn("[journey dispatcher] sms breaker half-open: probing with one item", {
-      enrollmentId: row.id,
-      workerId: ctx.workerId,
-    });
-    return true;
-  }
+  const admission = await ctx.sms.gates.admit(row.tenant_id, row.id);
+  if (admission.mode !== "open") return true;
   ctx.counters.providerSuspended++;
   await release({ id: row.id } as EnrollmentRow, ctx, {});
   return false;
-}
-
-/** After the probe item: learn the verdict (closed / reopened / still ours). */
-async function settleSmsProbe(row: ClaimedRow, ctx: DispatchContext) {
-  if (ctx.sms.probeItem !== row.id) return;
-  ctx.sms.probeItem = null;
-  const snapshot = await readSmsBreaker({ force: true });
-  ctx.sms.checkedAt = Date.now();
-  if (snapshot.state === "closed") {
-    ctx.sms.mode = "closed";
-    ctx.sms.retryAt = null;
-  } else if (snapshot.state === "open") {
-    ctx.sms.mode = "open";
-    ctx.sms.retryAt = snapshot.retryAt;
-  }
-  // Still half_open: the probe never got a provider verdict (exit, consent,
-  // per-lead error...): the next SMS item of this run probes instead.
 }
 
 /** step_type is the current step's channel (claim RPC since I2; may be absent). */
@@ -1173,10 +1192,16 @@ type ClaimedRow = { id: string; tenant_id: string; step_type?: string | null };
 
 type ProviderDeferrals = { step_position: number; loop_iteration: number; count: number };
 
-/** Consecutive no-cost defers of the enrollment's CURRENT step (resets on a new step/loop). */
-function nextNoCostDeferral(enrollment: Record<string, unknown>): ProviderDeferrals {
+/**
+ * Consecutive no-cost defers of the enrollment's CURRENT step (resets on a new
+ * step/loop), kept in metadata[key]: `provider_deferrals` or `platform_holds`.
+ */
+function nextNoCostDeferral(
+  enrollment: Record<string, unknown>,
+  key: "provider_deferrals" | "platform_holds" = "provider_deferrals",
+): ProviderDeferrals {
   const metadata = (enrollment.metadata ?? {}) as Record<string, unknown>;
-  const previous = metadata.provider_deferrals as Partial<ProviderDeferrals> | undefined;
+  const previous = metadata[key] as Partial<ProviderDeferrals> | undefined;
   const position = Number(enrollment.current_position ?? 0);
   const loop = Number(enrollment.loop_iteration ?? 0);
   const sameStep = previous?.step_position === position && previous?.loop_iteration === loop;
@@ -1218,6 +1243,52 @@ async function finishOwnExecution(
 }
 
 /**
+ * The house wallet has no balance: the enrollment waits on the SAME step and
+ * comes back in NO_BALANCE_RETRY_MS, so a recharge resumes the journey where it
+ * stopped (skipping lost the first message of 11.6k betgreen enrollments on
+ * 2026-10-27). No attempt consumed. Time-sensitive steps (PIX, saque) still
+ * exit as `stale_message` once past max_delay_minutes.
+ * `refusal` is the wallet's message when this item was actually refused (its
+ * execution goes back to `retrying` and the house is alerted); null when the
+ * item is held because another item of the house was refused in this run.
+ */
+async function holdForBalance(
+  enrollment: EnrollmentRow,
+  ctx: DispatchContext,
+  channel: string | null,
+  refusal: string | null,
+) {
+  ctx.counters.deferredNoBalance++;
+  ctx.noBalanceTenants.add(enrollment.tenant_id);
+  const retryAt = new Date(Date.now() + NO_BALANCE_RETRY_MS).toISOString();
+  if (refusal !== null) {
+    await finishOwnExecution(ctx, enrollment.id, {
+      status: "retrying",
+      provider: "wallet",
+      error: refusal.slice(0, 1000),
+      completed_at: new Date().toISOString(),
+    });
+  }
+  // attempts intentionally unchanged.
+  await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt });
+  await event(enrollment, "step_deferred", {
+    channel,
+    step_position: Number(enrollment.current_position ?? 0),
+    reason: "saldo_insuficiente",
+    retry_at: retryAt,
+    attempt_consumed: false,
+  });
+  if (refusal === null) return;
+  // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
+  await notifyNoBalance(enrollment.tenant_id).catch((alertError: unknown) =>
+    console.error("[journey dispatcher] no balance alert failed", {
+      tenantId: enrollment.tenant_id,
+      error: alertError instanceof Error ? alertError.message : String(alertError),
+    }),
+  );
+}
+
+/**
  * Error path for one item (B1 / ENV-04):
  * - defer   (provider answered 429/5xx/402...): reschedule WITHOUT consuming an
  *           attempt, at most MAX_NO_COST_DEFERS times in a row per step; after
@@ -1228,10 +1299,10 @@ async function finishOwnExecution(
  *           execution stays `claimed`, so reserve_journey_delivery answers
  *           `in_flight` for 15 min; the item waits 15 min and an attempt is
  *           consumed; at max_attempts the enrollment fails.
- * - skip    (the HOUSE's wallet had no balance, PG3 decision 6): the step
- *           is skipped with reason `saldo_insuficiente` and the journey
- *           advances to the next step now. No retry, no attempt consumed;
- *           the house gets the hourly "Saldo insuficiente" alert.
+ * - skip    (the HOUSE's wallet had no balance): holdForBalance. The step
+ *           waits on the same position and is retried in 15 min, no attempt
+ *           consumed; the house gets the hourly "Saldo insuficiente" alert.
+ *           (Replaces PG3 decision 6, which skipped to the next step.)
  * - fail    : the journey's max_attempts/backoff policy; a misconfigured
  *           provider (missing credentials) is also reported to Sentry.
  */
@@ -1254,33 +1325,19 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
   }
   const enrollment = enrollmentRaw as EnrollmentRow & Record<string, unknown>;
 
+  // Leads mortos: journey_dead_lead_check already exited this enrollment after
+  // its send; a later failure (e.g. the release write) must not bring it back.
+  if (enrollment.status === "exited" && enrollment.exit_reason === "dead_lead") {
+    await release(enrollment, ctx, {});
+    return;
+  }
+
   if (decision.kind === "skip") {
-    ctx.counters.skippedNoBalance++;
-    const position = Number(enrollment.current_position ?? 0);
-    await finishOwnExecution(ctx, row.id, {
-      status: "skipped",
-      provider: "wallet",
-      error: message.slice(0, 1000),
-      completed_at: nowIso(),
-    });
-    await release(enrollment, ctx, {
-      status: "active",
-      current_position: position + 1,
-      next_run_at: nowIso(),
-      attempts: 0,
-    });
-    await event(enrollment, "step_skipped", {
-      channel: error instanceof ProviderSendError ? error.channel : (row.step_type ?? null),
-      step_position: position,
-      reason: "saldo_insuficiente",
-      attempt_consumed: false,
-    });
-    // PG3 Task 7: hourly "Saldo insuficiente" e-mail; never breaks the dispatcher.
-    await notifyNoBalance(row.tenant_id).catch((alertError: unknown) =>
-      console.error("[journey dispatcher] no balance alert failed", {
-        tenantId: row.tenant_id,
-        error: alertError instanceof Error ? alertError.message : String(alertError),
-      }),
+    await holdForBalance(
+      enrollment,
+      ctx,
+      error instanceof ProviderSendError ? error.channel : (row.step_type ?? null),
+      message,
     );
     return;
   }
@@ -1290,20 +1347,13 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     // get the same answer. No attempt consumed, no failure, no defer cap: the
     // item waits for the breaker (sendSmsInternal already reported it).
     ctx.counters.providerSuspended++;
-    if (
-      error instanceof ProviderSendError &&
-      error.channel === "sms" &&
-      ctx.sms.probeItem !== row.id
-    ) {
-      ctx.sms.mode = "open";
-      ctx.sms.checkedAt = Date.now();
-    }
-    const snapshot = cachedSmsBreaker();
-    const retryAt = breakerRetryAt(
-      snapshot.state === "closed" ? null : snapshot,
-      decision.retryAfterMs,
-    );
-    ctx.sms.retryAt = retryAt;
+    const sms = error instanceof ProviderSendError && error.channel === "sms";
+    // Only the house's own account stops; the probe item's verdict is read
+    // by settle() after it.
+    if (sms) await ctx.sms.gates.markOpen(row.tenant_id, row.id);
+    const retryAt = sms
+      ? await ctx.sms.gates.retryAt(row.tenant_id, decision.retryAfterMs)
+      : breakerRetryAt(null, decision.retryAfterMs);
     await finishOwnExecution(ctx, row.id, {
       status: "retrying",
       error: message.slice(0, 1000),
@@ -1359,6 +1409,53 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
       return;
     }
     // Cap reached: from now on the failure costs an attempt (below).
+  }
+
+  // P0.1b: the platform failed before anything was sent (Short.io, send log,
+  // schema, provider credentials). Hold the step instead of failing the player.
+  const platformReason =
+    decision.kind === "fail" ? journeyPlatformFailure(error, decision.reason) : null;
+  if (platformReason) {
+    const holds = nextNoCostDeferral(enrollment, "platform_holds");
+    if (holds.count <= MAX_PLATFORM_HOLDS) {
+      ctx.counters.platformHeld++;
+      const retryAt = new Date(Date.now() + PLATFORM_HOLD_MS).toISOString();
+      await finishOwnExecution(ctx, row.id, {
+        status: "retrying",
+        error: message.slice(0, 1000),
+        completed_at: nowIso(),
+      });
+      // attempts intentionally unchanged.
+      await release(enrollment, ctx, {
+        status: "waiting",
+        next_run_at: retryAt,
+        metadata: {
+          ...((enrollment.metadata ?? {}) as Record<string, unknown>),
+          platform_holds: holds,
+        },
+      });
+      await event(enrollment, "step_deferred", {
+        reason: "platform_error",
+        platform_reason: platformReason,
+        error: message.slice(0, 500),
+        retry_at: retryAt,
+        attempt_consumed: false,
+        platform_holds: holds.count,
+      });
+      // One report per house and reason per run, not one per player.
+      const reportKey = `${row.tenant_id}:${platformReason}`;
+      if (!ctx.platformReported.has(reportKey)) {
+        ctx.platformReported.add(reportKey);
+        captureServerException(error, {
+          job: "journey_dispatch",
+          tenantId: row.tenant_id,
+          tags: { reason: platformReason },
+          fingerprint: ["journey-platform-hold", platformReason],
+        });
+      }
+      return;
+    }
+    // Cap reached: the normal attempts policy decides (below).
   }
 
   const policy = await retryPolicy(enrollment.journey_id);
@@ -1513,10 +1610,13 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       outcomeUnknown: 0,
       leaseLost: 0,
       providerSuspended: 0,
-      skippedNoBalance: 0,
+      deferredNoBalance: 0,
+      platformHeld: 0,
     },
     executions: new Map(),
     exhausted: new Map(),
+    noBalanceTenants: new Set(),
+    platformReported: new Set(),
     sms: newSmsRunGate(workerId),
   };
   const owned = new Set<string>();
@@ -1549,9 +1649,16 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     // Best effort: never blocks the dispatch.
     const { error: sweepError } = await db.rpc("sweep_journey_exits", { p_limit: 1000 });
     if (sweepError) console.error("[journeys] exit sweep failed", sweepError.message);
+    // Leads mortos who acted again (deposit, login, game, PIX, click) are
+    // revived so they may enter journeys again. Set-based, demo houses skipped
+    // in SQL. Best effort, like the exit sweep.
+    const { error: reviveError } = await db.rpc("sweep_dead_lead_revivals", { p_tenant_id: null });
+    if (reviveError)
+      console.error("[journeys] dead lead revival sweep failed", reviveError.message);
     run.progress({ queue_before: queueBefore ?? 0 });
-    // Global SMS provider breaker: while open, SMS items are not claimed.
-    await refreshSmsGate(ctx, true);
+    // Platform SMS account's breaker up front: while it is open, SMS items of
+    // the houses on it are not claimed. Other accounts are learned per item.
+    await ctx.sms.gates.refresh(PLATFORM_SMS_BREAKER_KEY);
 
     keeper = startLeaseKeeper({
       intervalMs: config.renewIntervalMs,
@@ -1647,7 +1754,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
         } catch (error) {
           await handleItemFailure(row, ctx, error);
         } finally {
-          await settleSmsProbe(row, ctx);
+          await ctx.sms.gates.settle(row.id);
           if (gate && !gate.keepPermit) await channelBudget.release(gate.admission);
           owned.delete(row.id);
           ctx.executions.delete(row.id);
@@ -1670,8 +1777,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     const stopReason =
       outcome === "hard_deadline"
         ? "hard_deadline"
-        : ctx.sms.mode !== "closed" &&
-            (ctx.sms.mode === "open" || ctx.counters.providerSuspended > 0)
+        : ctx.sms.gates.blockedKeys().size > 0 || ctx.counters.providerSuspended > 0
           ? "provider_unavailable"
           : claimingSource.claimed === 0
             ? "queue_empty"
@@ -1697,8 +1803,9 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       outcomeUnknown: ctx.counters.outcomeUnknown,
       leaseLost: ctx.counters.leaseLost,
       providerSuspended: ctx.counters.providerSuspended,
-      skippedNoBalance: ctx.counters.skippedNoBalance,
-      smsBreaker: ctx.sms.mode,
+      deferredNoBalance: ctx.counters.deferredNoBalance,
+      platformHeld: ctx.counters.platformHeld,
+      smsBreaker: ctx.sms.gates.modeOf(PLATFORM_SMS_BREAKER_KEY),
       stopReason,
       scannerSeparated: true,
     };
@@ -1722,7 +1829,7 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     }
     await keeper?.stop();
     // A probe we took but never resolved goes back so the next worker can probe.
-    if (ctx.sms.heldProbe && ctx.sms.mode === "probe") await releaseSmsProbe(workerId);
+    await ctx.sms.gates.release();
     const { error: slotReleaseError } = await db.rpc("release_journey_dispatcher_slot", {
       p_slot: slot,
       p_holder: workerId,

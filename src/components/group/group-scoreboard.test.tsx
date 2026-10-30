@@ -23,7 +23,7 @@ function summary(overrides: Partial<ScoreboardRow["current"]> = {}) {
     net: 0,
     ggrFee: 0,
     movementFee: 0,
-    otherCosts: null,
+    otherCosts: 0,
     cashResult: 0,
     roi: null,
     costPerRegistration: null,
@@ -31,6 +31,7 @@ function summary(overrides: Partial<ScoreboardRow["current"]> = {}) {
     avgDailyCashResult: null,
     betleadsUsage: 0,
     betleadsFee: null,
+    ggrEstimated: false,
     ...overrides,
   };
 }
@@ -93,8 +94,9 @@ describe("GroupScoreboard", () => {
       {
         id: "a",
         nome: "Sorte Alta",
-        current: summary({ roi: 0.3 }),
-        previous: summary({ roi: 0.177 }),
+        current: summary({ roi: 0.3, adSpend: 1000 }),
+        // A previous ROI implies ad spend in that window.
+        previous: summary({ roi: 0.177, adSpend: 1000 }),
         goals: [],
       },
     ];
@@ -103,6 +105,25 @@ describe("GroupScoreboard", () => {
 
     expect(html).toContain("+12,3 p.p.");
     expect(html).not.toContain("69,5%");
+  });
+
+  it("an empty previous window (Sem comparação) shows no variation", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[
+          {
+            id: "a",
+            nome: "Sorte Alta",
+            current: summary({ cashResult: 500, depositAmount: 900, roi: 0.3, adSpend: 100 }),
+            previous: summary(),
+            goals: [],
+          },
+        ]}
+      />,
+    );
+    expect(html).not.toContain("▲");
+    expect(html).not.toContain("▼");
+    expect(html).not.toContain("p.p.");
   });
 
   it("an improvement from a negative previous is shown as a rise", () => {
@@ -160,5 +181,63 @@ describe("GroupScoreboard", () => {
 
     expect(sortScoreboardRows(withNull, "costPerFtd", "desc").at(-1)?.id).toBe("d");
     expect(sortScoreboardRows(withNull, "costPerFtd", "asc").at(-1)?.id).toBe("d");
+  });
+});
+
+describe("GroupScoreboard GGR column", () => {
+  it("labels the GGR column as Perdas na casa", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+        defaultMoreColumns
+      />,
+    );
+    expect(html).toContain("GGR (Perdas na casa)");
+  });
+});
+
+describe("GroupScoreboard one name per number", () => {
+  it("labels the cash-result column as Lucro líquido, not Resultado", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+      />,
+    );
+    expect(html).toContain("Lucro líquido");
+    expect(html).not.toContain("Resultado");
+  });
+
+  it("labels the net column with the full FINANCE_TERMS label, with a title and a tooltip", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+      />,
+    );
+    expect(html).toContain("Net (depósitos − saques)");
+    expect(html).toContain('title="Net (depósitos − saques)"');
+    // One "Como calculamos" tooltip trigger per header that maps to a term
+    // (net, cashResult, roi here; registrations/ggr only show with "mais
+    // colunas"): never a <button> nested inside the sort <button>.
+    expect(html.match(/aria-label="Como calculamos"/g)).toHaveLength(3);
+    expect(html).not.toContain("<button><button");
+  });
+
+  it("labels the ROI column with the full FINANCE_TERMS label and a tooltip", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+      />,
+    );
+    expect(html).toContain("Retorno (ROI)");
+  });
+
+  it("shows the GGR column's tooltip under mais colunas", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[{ id: "a", nome: "Casa A", current: summary(), previous: summary(), goals: [] }]}
+        defaultMoreColumns
+      />,
+    );
+    expect(html.match(/aria-label="Como calculamos"/g)).toHaveLength(4);
   });
 });

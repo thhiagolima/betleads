@@ -37,6 +37,26 @@ const CAMPAIGN_ID_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261016170000_sms_log_campaign_id.sql"),
   "utf8",
 );
+const FINISHED_WITHOUT_MESSAGE_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261120100000_journey_metrics_finished_without_message.sql"),
+  "utf8",
+);
+const DORMANT_FIRST_DEPOSIT_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261109100000_crm_influenced_dormant_first_deposit.sql"),
+  "utf8",
+);
+// The current refresh_crm_results_day reads the SMS price through
+// crm_sms_report_price (billing); stand-in with the legacy price chain.
+const REPORT_PRICE_STUB = `
+alter table public.sms_send_logs add column if not exists billed_units integer;
+create or replace function public.crm_sms_report_price(_tenant uuid, _at timestamptz)
+returns numeric language sql stable as $$
+  select coalesce(
+    (select sale_price_per_sms from public.tenant_sms_pricing where tenant_id = _tenant),
+    (select default_sale_price_per_sms from public.sms_credit_settings limit 1),
+    0.12)
+$$;
+`;
 
 const SCHEMA = `
 create role anon nologin;
@@ -50,7 +70,9 @@ create table public.journeys (id uuid primary key, tenant_id uuid);
 create table public.journey_enrollments (
   id uuid primary key default gen_random_uuid(), tenant_id uuid, journey_id uuid, status text,
   exit_reason text, current_position integer);
-create table public.players (id uuid primary key, tenant_id uuid, ftd_em timestamptz);
+create table public.players (
+  id uuid primary key, tenant_id uuid, ftd_em timestamptz,
+  created_at timestamptz not null default '2026-08-01');
 create table public.deposits (
   id uuid primary key default gen_random_uuid(), tenant_id uuid, player_id uuid,
   valor numeric, status text, created_at timestamptz);
@@ -59,7 +81,7 @@ create table public.sms_send_logs (
   trigger_name text, idempotency_key text, created_at timestamptz);
 create table public.journey_step_executions (
   id uuid primary key default gen_random_uuid(), idempotency_key uuid, step_position integer,
-  tenant_id uuid, journey_id uuid, channel text, status text);
+  tenant_id uuid, journey_id uuid, channel text, status text, enrollment_id uuid);
 create table public.sms_campaigns (
   id uuid primary key, tenant_id uuid, name text, created_at timestamptz, status text default 'enviado');
 create table public.link_dispatches (
@@ -89,11 +111,13 @@ create table public.sms_credit_ledger (
 const T = "00000000-0000-4000-8000-000000000001";
 const J1 = "00000000-0000-4000-8000-0000000000a1";
 const J2 = "00000000-0000-4000-8000-0000000000a2";
+const J3 = "00000000-0000-4000-8000-0000000000a3"; // welcome journey
 const CAMPAIGN = "00000000-0000-4000-8000-0000000000c1";
 const A = "00000000-0000-4000-8000-0000000000f1"; // cooling down, journey J1 step 2
 const B = "00000000-0000-4000-8000-0000000000f2"; // active, campaign
 const C = "00000000-0000-4000-8000-0000000000f3"; // never deposited, journey J2 step 0
 const D = "00000000-0000-4000-8000-0000000000f4"; // old depositor, first deposit in our history
+const E = "00000000-0000-4000-8000-0000000000f5"; // registered today, deposited after the welcome SMS
 const LD1 = "00000000-0000-4000-8000-0000000000d1";
 const LD2 = "00000000-0000-4000-8000-0000000000d2"; // campaign SMS clicked by the active player B
 const KEY_A = "00000000-0000-4000-8000-0000000000e1";
@@ -158,15 +182,22 @@ beforeAll(async () => {
   await db.exec(`begin; ${DIRECT_PLAYERS_MIGRATION}; commit;`);
   await db.exec(`begin; ${INCREMENTAL_MIGRATION}; commit;`);
   await db.exec(`begin; ${INCREMENTAL_MIGRATION}; commit;`);
+  await db.exec(REPORT_PRICE_STUB);
+  await db.exec(`begin; ${DORMANT_FIRST_DEPOSIT_MIGRATION}; commit;`);
+  await db.exec(`begin; ${DORMANT_FIRST_DEPOSIT_MIGRATION}; commit;`);
+  await db.exec(`begin; ${FINISHED_WITHOUT_MESSAGE_MIGRATION}; commit;`);
+  await db.exec(`begin; ${FINISHED_WITHOUT_MESSAGE_MIGRATION}; commit;`);
   // The home dashboard function reads tables this schema does not model.
   const reports = `begin; set local check_function_bodies = off; ${REPORTS_MIGRATION}; commit;`;
   await db.exec(reports);
   await db.exec(reports);
   await db.exec(`
     insert into tenants values ('${T}');
-    insert into journeys values ('${J1}', '${T}'), ('${J2}', '${T}');
+    insert into journeys values ('${J1}', '${T}'), ('${J2}', '${T}'), ('${J3}', '${T}');
     insert into players values ('${A}', '${T}', '2026-09-01'), ('${B}', '${T}', '2026-09-01'),
       ('${C}', '${T}', null), ('${D}', '${T}', '2026-08-01');
+    insert into players (id, tenant_id, ftd_em, created_at) values
+      ('${E}', '${T}', '${at("09:31")}', '${at("09:20")}');
     insert into sms_campaigns values ('${CAMPAIGN}', '${T}', 'Promo X', '2026-10-01');
     insert into journey_step_executions (idempotency_key, step_position) values
       ('${KEY_A}', 2), ('${KEY_C}', 0);
@@ -177,13 +208,15 @@ beforeAll(async () => {
       ('${T}', '${B}', 40, 'aprovado', '${at("11:00")}'),
       ('${T}', '${C}', 50, 'aprovado', '${at("12:00")}'),
       ('${T}', '${D}', 70, 'aprovado', '${at("13:00")}'),
+      ('${T}', '${E}', 25, 'aprovado', '${at("09:30")}'),
       ('${T}', '${C}', 999, 'pendente', '${at("12:30")}');
     insert into sms_send_logs (tenant_id, player_id, status, trigger_name, idempotency_key, created_at) values
       ('${T}', '${A}', 'sent', 'journey:${J1}', '${KEY_A}', '${at("10:00")}'),
       ('${T}', '${B}', 'sent', 'campanha:Promo X:iGaming', 'k-b1', '${at("09:00")}'),
       ('${T}', '${B}', 'error', 'campanha:Promo X:iGaming', 'k-b2', '${at("09:01")}'),
       ('${T}', '${C}', 'sent', 'journey:${J2}', '${KEY_C}', '${at("09:00")}'),
-      ('${T}', '${D}', 'sent', 'journey:${J2}', 'k-d', '${at("12:00")}');
+      ('${T}', '${D}', 'sent', 'journey:${J2}', 'k-d', '${at("12:00")}'),
+      ('${T}', '${E}', 'sent', 'journey:${J3}', 'k-e', '${at("09:21")}');
     insert into link_dispatches values
       ('${LD1}', '${T}', 'journey', '${J1}', 2, '${A}', '${at("10:00")}', '${at("10:00")}'),
       ('${LD2}', '${T}', 'campaign', '${CAMPAIGN}', null, '${B}', '${at("09:00")}', '${at("09:00")}');
@@ -245,6 +278,11 @@ describe("crm_results_daily (golden day)", () => {
     expect(Number(row?.influenced_revenue)).toBe(50);
   });
 
+  it("does not count a first deposit right after sign-up as a recovery (rule_version 4)", async () => {
+    const row = (await rows()).find((r) => r.source_key === J3);
+    expect(row).toMatchObject({ player_state: "sem_ftd", sent: 1, influenced_deposits: 0 });
+  });
+
   it("does not treat an old depositor's first deposit in our history as a recovery", async () => {
     const total = (await rows()).reduce((sum, r) => sum + Number(r.influenced_revenue), 0);
     expect(total).toBe(150);
@@ -252,7 +290,7 @@ describe("crm_results_daily (golden day)", () => {
 
   it("matches the day totals (invariants)", async () => {
     const all = await rows();
-    expect(all.reduce((sum, r) => sum + r.sent, 0)).toBe(4);
+    expect(all.reduce((sum, r) => sum + r.sent, 0)).toBe(5);
     expect(all.reduce((sum, r) => sum + r.failed, 0)).toBe(1);
     expect(all.reduce((sum, r) => sum + r.human_clicks, 0)).toBe(2);
     expect(all.reduce((sum, r) => sum + r.direct_conversions, 0)).toBe(1);
@@ -315,7 +353,7 @@ describe("daily consistency checks (Q-01)", () => {
     const { failed, byName } = await checks();
     expect(failed).toBe(0);
     expect(byName.sends).toMatchObject({ ok: true });
-    expect(Number(byName.sends.expected)).toBe(4);
+    expect(Number(byName.sends.expected)).toBe(5);
     expect(byName.direct).toMatchObject({ ok: true });
     expect(byName.cost).toBeUndefined();
   });
@@ -438,6 +476,33 @@ describe("click conversion excludes players already active (rule_version 3)", ()
     // A on J1: 100 + 40 (B-01 test) + 25 (next day). B's campaign deposit is not a journey.
     expect(Number(metrics.find((m) => m.journey_id === J1)?.metrics.recovered)).toBe(165);
     expect(Number(metrics.find((m) => m.journey_id === J2)?.metrics.recovered)).toBe(0);
+  });
+
+  it("counts people who left the journey without receiving any message", async () => {
+    const J4 = "00000000-0000-4000-8000-0000000000a4";
+    const [paidAfterSms, paidBeforeSms, onlyWaited, stillInside] = [1, 2, 3, 4].map(
+      (n) => `00000000-0000-4000-8000-0000000000e${n}`,
+    );
+    await db.exec(`
+      insert into journeys values ('${J4}', '${T}');
+      insert into journey_enrollments (id, tenant_id, journey_id, status, exit_reason, current_position) values
+        ('${paidAfterSms}', '${T}', '${J4}', 'exited', 'deposit', 1),
+        ('${paidBeforeSms}', '${T}', '${J4}', 'exited', 'deposit', 1),
+        ('${onlyWaited}', '${T}', '${J4}', 'completed', 'finished', 2),
+        ('${stillInside}', '${T}', '${J4}', 'waiting', null, 0);
+      insert into journey_step_executions (tenant_id, journey_id, enrollment_id, channel, status) values
+        ('${T}', '${J4}', '${paidAfterSms}', 'sms', 'sent'),
+        ('${T}', '${J4}', '${paidAfterSms}', null, 'sent'),
+        ('${T}', '${J4}', '${onlyWaited}', null, 'sent'),
+        ('${T}', '${J4}', '${onlyWaited}', 'sms', 'failed');
+    `);
+    const { rows: metrics } = await db.query<{
+      journey_id: string;
+      metrics: { finishedWithoutMessage: number; sentByChannel: Record<string, number> };
+    }>(`select * from list_journey_metrics($1)`, [T]);
+    const j4 = metrics.find((m) => m.journey_id === J4)?.metrics;
+    expect(j4?.finishedWithoutMessage).toBe(2);
+    expect(j4?.sentByChannel).toEqual({ sms: 1, other: 2 });
   });
 });
 

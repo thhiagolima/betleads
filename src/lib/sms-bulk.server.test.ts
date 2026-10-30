@@ -39,6 +39,11 @@ import { Route as SmsWebhookRoute } from "@/routes/api/public/sms-webhook";
 import { assertTenantNotDemoForSend } from "@/lib/tenant-access.server";
 import { BILLING_LOCKED_TEXT, TenantBillingLockedError } from "@/lib/billing/billing-locked-error";
 import { __resetShortenerDomainCacheForTests } from "./shortio.server";
+import {
+  __resetProviderAccountsCacheForTests,
+  DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+} from "./provider-accounts.server";
+import { encryptProviderCredentials } from "./secret-box.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 const CAMPAIGN = "11111111-1111-4111-8111-111111111111";
@@ -420,6 +425,133 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     expect(credits.charged()).toBe(0);
   });
 
+  describe("per-house SMS accounts", () => {
+    const OTHER = "00000000-0000-4000-8000-0000000000aa";
+    const OWN_ACCOUNT = "55555555-5555-4555-8555-555555555555";
+
+    async function giveOtherHouseOwnAccount(status = "active") {
+      vi.stubEnv("PROVIDER_CREDENTIALS_ENCRYPTION_KEY", "k".repeat(40));
+      fake.db.rows("provider_accounts").push({
+        id: OWN_ACCOUNT,
+        provider: "short_brasil",
+        label: "Short Brasil casa AA",
+        channels: ["sms"],
+        credentials_source: "db",
+        credentials_encrypted: await encryptProviderCredentials({ usuario: "own-user", chave: "own-key" }),
+        config: { bulk_url: "https://own.example.test/bot/bulk-sms.php" },
+        status,
+      });
+      fake.db.rows("tenant_channel_providers").push({
+        tenant_id: OTHER,
+        channel: "sms",
+        provider_account_id: OWN_ACCOUNT,
+      });
+      __resetProviderAccountsCacheForTests();
+    }
+
+    const bulkRequests = () =>
+      vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).includes("bulk-sms.php"))
+        .map(([url, init]) => ({
+          url: String(url),
+          usuario: (init?.headers as Record<string, string>).usuario,
+          parceiroIds: (JSON.parse(String(init?.body)) as SmsBody).bulk.map((b) => b.parceiroId),
+        }));
+
+    afterEach(() => __resetProviderAccountsCacheForTests());
+
+    it("houses on different accounts go out in separate requests, each with its own credentials", async () => {
+      settings("block");
+      await giveOtherHouseOwnAccount();
+      const other = { tenantId: OTHER, linkTrackingEnabled: false };
+      const r = await sendSmsBatch([item(1), item(2, other), item(3), item(4, other)]);
+
+      expect(r.outcomes.map((o) => o.status)).toEqual(["accepted", "accepted", "accepted", "accepted"]);
+      expect(bulkRequests()).toEqual([
+        {
+          url: "http://lp01-short.painelsms.com/bot/bulk-sms.php",
+          usuario: "user",
+          parceiroIds: [key(1), key(3)],
+        },
+        {
+          url: "https://own.example.test/bot/bulk-sms.php",
+          usuario: "own-user",
+          parceiroIds: [key(2), key(4)],
+        },
+      ]);
+      expect(logFor(key(1))[0].provider_account_id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
+      expect(logFor(key(2))[0].provider_account_id).toBe(OWN_ACCOUNT);
+    });
+
+    it("a house whose own account is disabled fails retryable, never via the platform account", async () => {
+      settings("block");
+      await giveOtherHouseOwnAccount("disabled");
+      const r = await sendSmsBatch([item(1), item(2, { tenantId: OTHER, linkTrackingEnabled: false })]);
+
+      expect(r.outcomes[0]).toMatchObject({ status: "accepted" });
+      expect(r.outcomes[1]).toMatchObject({
+        status: "failed",
+        retryable: true,
+        errorKind: "misconfigured",
+      });
+      expect(bulkRequests().map((b) => b.parceiroIds)).toEqual([[key(1)]]);
+      expect(logFor(key(2))).toHaveLength(0);
+      expect(credits.charged()).toBe(1);
+    });
+
+    it("a house on an Infobip account sends each SMS through Infobip, logged as infobip", async () => {
+      settings("block");
+      vi.stubEnv("PROVIDER_CREDENTIALS_ENCRYPTION_KEY", "k".repeat(40));
+      fake.db.rows("provider_accounts").push({
+        id: OWN_ACCOUNT,
+        provider: "infobip",
+        label: "Infobip casa AA",
+        channels: ["sms"],
+        credentials_source: "db",
+        credentials_encrypted: await encryptProviderCredentials({ api_key: "own-infobip-key" }),
+        config: { base_url: "https://own.api.infobip.test", sms_from: "CasaAA" },
+        status: "active",
+      });
+      fake.db
+        .rows("tenant_channel_providers")
+        .push({ tenant_id: OTHER, channel: "sms", provider_account_id: OWN_ACCOUNT });
+      __resetProviderAccountsCacheForTests();
+      const shortBrasil = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (url, init) => {
+        if (!String(url).includes("/sms/2/text/advanced")) return shortBrasil(url, init);
+        const body = JSON.parse(String(init?.body));
+        const messageId = body.messages[0].destinations[0].messageId;
+        return Response.json({
+          bulkId: "b-1",
+          messages: [{ messageId, status: { groupId: 1, groupName: "PENDING" } }],
+        });
+      });
+
+      const other = { tenantId: OTHER, linkTrackingEnabled: false };
+      const r = await sendSmsBatch([item(1), item(2, other)]);
+
+      expect(r.outcomes.map((o) => o.status)).toEqual(["accepted", "accepted"]);
+      const infobipCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).includes("/sms/2/text/advanced"));
+      expect(infobipCalls).toHaveLength(1);
+      const [url, init] = infobipCalls[0];
+      expect(String(url)).toBe("https://own.api.infobip.test/sms/2/text/advanced");
+      expect((init?.headers as Record<string, string>).Authorization).toBe("App own-infobip-key");
+      expect(JSON.parse(String(init?.body)).messages[0].from).toBe("CasaAA");
+      // The platform house still went through the Short Brasil bulk request.
+      expect(bulkRequests().map((b) => b.parceiroIds)).toEqual([[key(1)]]);
+      expect(logFor(key(2))[0]).toMatchObject({
+        provider: "infobip",
+        provider_account_id: OWN_ACCOUNT,
+        provider_message_id: key(2),
+        status: "sent",
+      });
+      expect(credits.charged()).toBe(2);
+    });
+  });
+
   it("missing credentials: nothing logged, charged or sent", async () => {
     vi.stubEnv("SHORT_BRASIL_SMS_USUARIO", "");
     const r = await sendSmsBatch([item(1)]);
@@ -702,9 +834,9 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     });
 
     it("UCS-2 content (forced by a non-GSM-7 character) reserves 1 segment at 70 units, 2 at 71", async () => {
-      // 'ã' is not in the GSM-7 alphabet (only 'à' is) -> forces UCS-2.
-      const ucs70 = "ã" + "a".repeat(69); // 70 units -> 1 segment
-      const ucs71 = "ã" + "a".repeat(70); // 71 units -> ceil(71/67) = 2 segments
+      // An emoji has no GSM-7 form (accents are rewritten by toGsm7Text) -> forces UCS-2.
+      const ucs70 = "😀" + "a".repeat(68); // 70 UTF-16 units -> 1 segment
+      const ucs71 = "😀" + "a".repeat(69); // 71 UTF-16 units -> ceil(71/67) = 2 segments
       const r1 = await sendSmsBatch([item(1, { content: ucs70, linkTrackingEnabled: false })]);
       expect(r1.outcomes[0].status).toBe("accepted");
       expect(credits.charged()).toBe(1);
@@ -712,6 +844,13 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
       const r2 = await sendSmsBatch([item(2, { content: ucs71, linkTrackingEnabled: false })]);
       expect(r2.outcomes[0].status).toBe("accepted");
       expect(credits.charged()).toBe(3); // 1 (first item) + 2 (this one)
+    });
+
+    it("an accented name does not force UCS-2: billed as one GSM-7 segment", async () => {
+      const content = "João, saque pago! Sua mare de sorte esta em alta: aproveite e redeposite agora em https://bmkt.click/n3K1mk Para sair, responda SAIR.";
+      const r = await sendSmsBatch([item(1, { content, linkTrackingEnabled: false })]);
+      expect(r.outcomes[0].status).toBe("accepted");
+      expect(credits.charged()).toBe(1);
     });
 
     it("insufficient balance for a multi-segment item fails with 'Saldo insuficiente', nothing sent", async () => {

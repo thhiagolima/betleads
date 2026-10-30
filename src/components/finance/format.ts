@@ -5,6 +5,9 @@
 
 const NA = "n.a.";
 
+/** The GGR value as the platforms' "GGR PAINEL" names it ("Taxa de GGR (x%)" stays as is). */
+export const GGR_COLUMN_LABEL = "GGR (Perdas na casa)";
+
 /** toLocaleString("pt-BR", {style:"currency"}) puts a NBSP after "R$"; normalize to a plain space. */
 function stripNbsp(value: string) {
   return value.replace(/[\u00a0\u202f]/g, " ");
@@ -41,6 +44,11 @@ export function formatRatio(value: number | null | undefined): string {
 export function formatInt(value: number | null | undefined): string {
   if (value === null || value === undefined) return NA;
   return new Intl.NumberFormat("pt-BR").format(value);
+}
+
+/** A count with its noun: "20 depósitos", "1 saque". */
+export function formatCount(value: number, singular: string, plural: string): string {
+  return `${formatInt(value)} ${value === 1 ? singular : plural}`;
 }
 
 /** A difference in percentage points (ROI vs ROI), signed: "+12,3 p.p.". */

@@ -8,7 +8,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
 import { formatPct } from "@/components/finance/format";
-import { currentMonth } from "@/components/finance/finance-month-grid";
+import { currentMonth } from "@/components/finance/day-entry";
 import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
 import { getTenantFinanceMonth, setFinanceRates, setFinanceViewer } from "@/lib/finance.functions";
 import { presetRange } from "@/lib/finance/calc";

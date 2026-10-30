@@ -19,8 +19,9 @@
 //   skip    : the HOUSE's own wallet refused the send (errorKind
 //             `insufficient_balance`, set by the wallet reservation before
 //             the provider is ever called). Nothing was sent nor charged.
-//             Journeys skip the step (`saldo_insuficiente`) and advance: no
-//             retry, no attempt consumed (spec decision 6).
+//             Journeys hold the step on the same position and retry it in
+//             15 min (`saldo_insuficiente`), no attempt consumed, so a
+//             recharge resumes them.
 //   fail    : definitely not accepted (invalid recipient, 4xx, request never
 //             left: DNS/ECONNREFUSED) or provider misconfigured (missing
 //             credentials) -> the caller's normal attempts/backoff policy.

@@ -17,54 +17,53 @@ export const adminGetSmsProviderConfig = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await assertSuperAdmin(context.userId);
+    const {
+      envInfobipAccount,
+      envShortBrasilAccount,
+      infobipConfigured,
+      shortBrasilConfigured,
+    } = await import("@/lib/provider-accounts.server");
+    // Contas padrão da plataforma. Contas por casa: tenant_channel_providers.
+    const sms = envShortBrasilAccount();
+    const infobip = envInfobipAccount();
     const webhookSecret = process.env.SHORT_BRASIL_WEBHOOK_SECRET ?? "SEU_WEBHOOK_SECRET";
     const appUrl = (process.env.PUBLIC_APP_URL ?? "https://betleads.io").replace(/\/$/, "");
-    const emailBase = (process.env.INFOBIP_BASE_URL ?? "").replace(/\/$/, "");
+    const smsProvider = sms.shortcodeToken ? "Short Code" : "Short Brasil (legado)";
+    const smsEndpoint = sms.shortcodeToken ? sms.shortcodeUrl : sms.singleUrl;
+    const smsCallbackUrl = `${appUrl}/api/public/sms-webhook?token=${encodeURIComponent(webhookSecret)}`;
     const channels = [
       {
         channel: "SMS",
-        provider: process.env.SHORTCODE_SMS_TOKEN ? "Short Code" : "Short Brasil (legado)",
-        configured: Boolean(
-          process.env.SHORTCODE_SMS_TOKEN ||
-          (process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
-        ),
-        endpoint: process.env.SHORTCODE_SMS_TOKEN
-          ? (process.env.SHORTCODE_SMS_URL ?? "https://api.shortcode.com.br/messages")
-          : (process.env.SHORT_BRASIL_SMS_SINGLE_URL ??
-            "http://lp01-short.painelsms.com/bot/single-sms.php"),
-        callbackUrl: `${appUrl}/api/public/sms-webhook?token=${encodeURIComponent(webhookSecret)}`,
+        provider: smsProvider,
+        configured: shortBrasilConfigured(sms),
+        endpoint: smsEndpoint,
+        callbackUrl: smsCallbackUrl,
       },
       {
         channel: "E-mail",
         provider: "Infobip",
-        configured: Boolean(emailBase && process.env.INFOBIP_API_KEY),
-        endpoint: `${emailBase}/email/3/send`,
+        configured: infobipConfigured(infobip),
+        endpoint: `${infobip.baseUrl}/email/3/send`,
         callbackUrl: `${appUrl}/api/public/infobip/email/events`,
       },
       {
         channel: "Voz",
         provider: "Infobip",
-        configured: Boolean(emailBase && process.env.INFOBIP_API_KEY),
-        endpoint: `${emailBase}/calls/1/calls`,
+        configured: infobipConfigured(infobip),
+        endpoint: `${infobip.baseUrl}/calls/1/calls`,
         callbackUrl: `${appUrl}/api/public/infobip/voice/events`,
       },
     ];
     return {
       channels,
-      configured: Boolean(
-        process.env.SHORTCODE_SMS_TOKEN ||
-        (process.env.SHORT_BRASIL_SMS_USUARIO && process.env.SHORT_BRASIL_SMS_CHAVE),
-      ),
-      provider: process.env.SHORTCODE_SMS_TOKEN ? "Short Code" : "Short Brasil (legado)",
-      endpoint: process.env.SHORTCODE_SMS_TOKEN
-        ? (process.env.SHORTCODE_SMS_URL ?? "https://api.shortcode.com.br/messages")
-        : (process.env.SHORT_BRASIL_SMS_SINGLE_URL ??
-          "http://lp01-short.painelsms.com/bot/single-sms.php"),
-      callbackUrl: `${appUrl}/api/public/sms-webhook?token=${encodeURIComponent(webhookSecret)}`,
+      configured: shortBrasilConfigured(sms),
+      provider: smsProvider,
+      endpoint: smsEndpoint,
+      callbackUrl: smsCallbackUrl,
       credentials: {
-        token: Boolean(process.env.SHORTCODE_SMS_TOKEN),
-        usuario: Boolean(process.env.SHORT_BRASIL_SMS_USUARIO),
-        chave: Boolean(process.env.SHORT_BRASIL_SMS_CHAVE),
+        token: Boolean(sms.shortcodeToken),
+        usuario: Boolean(sms.usuario),
+        chave: Boolean(sms.chave),
         webhookSecret: Boolean(process.env.SHORT_BRASIL_WEBHOOK_SECRET),
       },
     };

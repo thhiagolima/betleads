@@ -3,14 +3,29 @@
 // delete them, and surfaces affiliate ids with no expert yet. Everything
 // goes through the Task 6 server functions — no direct Supabase writes from
 // the browser.
+//
+// Fase 3, Task 7: a profile without user can be linked to someone of the
+// house team ("Vincular a alguém da equipe") as a performance profile; such
+// rows show "Equipe (Gestor)" etc. and "Desvincular" instead of "Remover
+// acesso" (the person keeps their own role).
+//
+// Relatório de rendimento, Task 7: this screen went back to cadastro e
+// configuração only — the period picker and the ranking metrics columns
+// (`listExpertsRanking`, Fase 3 Task 6) moved to "Rendimento da equipe"
+// (/rendimento/equipe), which also shows the "Regras de crédito" shortcut.
+// The expert's name now links to the person's report
+// (/rendimento/equipe/$expertId) instead of the old /experts/$expertId
+// (kept only as a redirect to there). Like `expert.leads.tsx`, this route
+// renders only its own list at the exact "/experts" path and defers to
+// <Outlet /> under the child path so the list doesn't render underneath the
+// detail.
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Plus, UserPlus } from "lucide-react";
+import { Plus, Settings, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -32,42 +47,38 @@ import {
   removeExpertAccess,
   setExpertActive,
 } from "@/lib/experts-admin.functions";
-import type { ExpertAcesso, ExpertAdminRow } from "@/lib/experts-admin.functions";
+import type { ExpertAdminRow } from "@/lib/experts-admin.functions";
+import { getExpertClickWindowHours } from "@/lib/expert-metrics.functions";
+import { acessoBadge, TIPO_LABEL } from "@/components/experts/expert-badges";
 import {
+  EXPERT_CLICK_WINDOW_QUERY_KEY,
   EXPERTS_QUERY_KEY,
   UNASSIGNED_AFFILIATES_QUERY_KEY,
 } from "@/components/experts/experts-query";
 import { ExpertFormDialog } from "@/components/experts/expert-form-dialog";
 import { ExpertInviteDialog } from "@/components/experts/expert-invite-dialog";
+import { ExpertSettingsDialog } from "@/components/experts/expert-settings-dialog";
+import { ExpertTeamLinkDialog } from "@/components/experts/expert-team-link-dialog";
 
 export const Route = createFileRoute("/experts")({
-  component: ExpertsPage,
+  component: ExpertsRoute,
 });
 
-const TIPO_LABEL: Record<ExpertAdminRow["tipo"], string> = {
-  restrito: "Restrito",
-  total: "Acesso total",
-};
-
-function acessoBadge(acesso: ExpertAcesso) {
-  switch (acesso) {
-    case "sem_acesso":
-      return <Badge variant="outline">Sem acesso</Badge>;
-    case "convite_pendente":
-      return <Badge className="bg-info/15 text-info">Convite pendente</Badge>;
-    case "ativo":
-      return <Badge className="bg-success/15 text-success">Ativo</Badge>;
-    case "inativo":
-      return <Badge variant="destructive">Inativo</Badge>;
-  }
+/** A detalhe é rota filha: nela só o <Outlet />, sem montar (nem buscar) a lista. */
+function ExpertsRoute() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const isDetailRoute = pathname.replace(/\/+$/, "") !== "/experts";
+  return isDetailRoute ? <Outlet /> : <ExpertsPage />;
 }
 
 function ExpertsPage() {
   const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const listExpertsFn = useServerFn(listExperts);
   const listUnassignedFn = useServerFn(listUnassignedAffiliates);
+  const clickWindowFn = useServerFn(getExpertClickWindowHours);
   const removeAccessFn = useServerFn(removeExpertAccess);
   const setActiveFn = useServerFn(setExpertActive);
   const deleteExpertFn = useServerFn(deleteExpert);
@@ -80,14 +91,21 @@ function ExpertsPage() {
     queryKey: UNASSIGNED_AFFILIATES_QUERY_KEY,
     queryFn: () => listUnassignedFn(),
   });
+  const clickWindowQuery = useQuery({
+    queryKey: EXPERT_CLICK_WINDOW_QUERY_KEY,
+    queryFn: () => clickWindowFn(),
+  });
 
   const experts = expertsQuery.data ?? [];
   const unassigned = unassignedQuery.data ?? [];
+  // null até carregar: o diálogo não salva um padrão por cima da janela real.
+  const janelaHoras = clickWindowQuery.data?.janelaHoras ?? null;
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingExpert, setEditingExpert] = useState<ExpertAdminRow | null>(null);
   const [prefillAffiliateId, setPrefillAffiliateId] = useState<string | null>(null);
   const [inviteExpertRow, setInviteExpertRow] = useState<ExpertAdminRow | null>(null);
+  const [teamLinkExpertRow, setTeamLinkExpertRow] = useState<ExpertAdminRow | null>(null);
 
   function refresh() {
     qc.invalidateQueries({ queryKey: EXPERTS_QUERY_KEY });
@@ -95,9 +113,10 @@ function ExpertsPage() {
   }
 
   const removeAccess = useMutation({
-    mutationFn: (expertId: string) => removeAccessFn({ data: { expertId } }),
-    onSuccess: () => {
-      toast.success("Acesso removido");
+    mutationFn: (vars: { expertId: string; equipe: boolean }) =>
+      removeAccessFn({ data: { expertId: vars.expertId } }),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.equipe ? "Perfil desvinculado" : "Acesso removido");
       refresh();
     },
     onError: (error: Error) => toast.error(error.message),
@@ -138,12 +157,18 @@ function ExpertsPage() {
       <PageHeader
         subtitle="Cadastre quem acompanha os leads da casa, por ID de afiliado ou com acesso total."
         actions={
-          <DemoDisabledTooltip active={isDemo}>
-            <Button className="gap-2" disabled={isDemo} onClick={() => openCreate()}>
-              <Plus className="h-4 w-4" />
-              Novo expert
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="gap-2" onClick={() => setSettingsOpen(true)}>
+              <Settings className="h-4 w-4" />
+              Regras de crédito
             </Button>
-          </DemoDisabledTooltip>
+            <DemoDisabledTooltip active={isDemo}>
+              <Button className="gap-2" disabled={isDemo} onClick={() => openCreate()}>
+                <Plus className="h-4 w-4" />
+                Novo expert
+              </Button>
+            </DemoDisabledTooltip>
+          </div>
         }
       />
 
@@ -166,7 +191,15 @@ function ExpertsPage() {
             <TableBody>
               {experts.map((expert) => (
                 <TableRow key={expert.id}>
-                  <TableCell className="font-medium">{expert.nome}</TableCell>
+                  <TableCell className="font-medium">
+                    <Link
+                      to="/rendimento/equipe/$expertId"
+                      params={{ expertId: expert.id }}
+                      className="hover:underline"
+                    >
+                      {expert.nome}
+                    </Link>
+                  </TableCell>
                   <TableCell>{TIPO_LABEL[expert.tipo]}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -184,7 +217,9 @@ function ExpertsPage() {
                     </div>
                   </TableCell>
                   <TableCell>{expert.leads}</TableCell>
-                  <TableCell>{acessoBadge(expert.acesso)}</TableCell>
+                  <TableCell>
+                    {acessoBadge(expert.acesso, expert.papelEquipe, expert.ativo)}
+                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <DemoDisabledTooltip active={isDemo}>
@@ -211,7 +246,43 @@ function ExpertsPage() {
                         </DemoDisabledTooltip>
                       )}
 
-                      {expert.acesso !== "sem_acesso" && (
+                      {expert.acesso === "sem_acesso" && (
+                        <DemoDisabledTooltip active={isDemo}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isDemo}
+                            onClick={() => setTeamLinkExpertRow(expert)}
+                          >
+                            Vincular a alguém da equipe
+                          </Button>
+                        </DemoDisabledTooltip>
+                      )}
+
+                      {expert.acesso === "equipe" && (
+                        <DemoDisabledTooltip active={isDemo}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isDemo || removeAccess.isPending}
+                            onClick={async () => {
+                              const confirmed = await requestConfirmation({
+                                title: `Desvincular o perfil ${expert.nome}?`,
+                                description:
+                                  "O perfil deixa de medir o rendimento dessa pessoa. O acesso dela à casa não muda, e o histórico do perfil continua.",
+                                confirmLabel: "Desvincular",
+                                destructive: true,
+                              });
+                              if (confirmed)
+                                removeAccess.mutate({ expertId: expert.id, equipe: true });
+                            }}
+                          >
+                            Desvincular
+                          </Button>
+                        </DemoDisabledTooltip>
+                      )}
+
+                      {expert.acesso !== "sem_acesso" && expert.acesso !== "equipe" && (
                         <DemoDisabledTooltip active={isDemo}>
                           <Button
                             size="sm"
@@ -225,7 +296,8 @@ function ExpertsPage() {
                                 confirmLabel: "Remover acesso",
                                 destructive: true,
                               });
-                              if (confirmed) removeAccess.mutate(expert.id);
+                              if (confirmed)
+                                removeAccess.mutate({ expertId: expert.id, equipe: false });
                             }}
                           >
                             Remover acesso
@@ -314,9 +386,7 @@ function ExpertsPage() {
               </div>
             ))}
             {unassigned.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                Nenhum ID de afiliado sem expert.
-              </p>
+              <p className="text-sm text-muted-foreground">Nenhum ID de afiliado sem expert.</p>
             )}
           </div>
         </CardContent>
@@ -334,6 +404,17 @@ function ExpertsPage() {
         onOpenChange={(open) => !open && setInviteExpertRow(null)}
         expertId={inviteExpertRow?.id ?? null}
         expertNome={inviteExpertRow?.nome ?? ""}
+      />
+      <ExpertTeamLinkDialog
+        open={!!teamLinkExpertRow}
+        onOpenChange={(open) => !open && setTeamLinkExpertRow(null)}
+        expertId={teamLinkExpertRow?.id ?? null}
+        expertNome={teamLinkExpertRow?.nome ?? ""}
+      />
+      <ExpertSettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        janelaHoras={janelaHoras}
       />
     </Page>
   );

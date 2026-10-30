@@ -109,6 +109,7 @@ export async function getExpertLeadSheetFor(
     claimRes,
     settingsRes,
     walletRes,
+    expertSettingsRes,
   ] = await Promise.all([
     scoped("deposits", "id,valor,created_at")
       .eq("status", "aprovado")
@@ -171,6 +172,9 @@ export async function getExpertLeadSheetFor(
       .eq("tenant_id", tenantId)
       .eq("id", playerId)
       .maybeSingle(),
+    // Janela de crédito por clique da casa (72h é o default do SQL), para a
+    // dica de link fixo na ação "Link da oferta".
+    db.from("expert_settings").select("click_window_hours").eq("tenant_id", tenantId).maybeSingle(),
   ]);
 
   const deposits = rowsOf<MoneyRow>(depositsRes);
@@ -188,6 +192,9 @@ export async function getExpertLeadSheetFor(
   const followups = rowsOf<FollowupRow>(followupsRes);
   if (claimRes.error) throw new Error(claimRes.error.message);
   if (walletRes.error) throw new Error(walletRes.error.message);
+  if (expertSettingsRes.error) throw new Error(expertSettingsRes.error.message);
+  const janelaHoras =
+    (expertSettingsRes.data as { click_window_hours?: number } | null)?.click_window_hours ?? 72;
   const wallet = walletRes.data as WalletRow | null;
   const saldoCarteira = Number(wallet?.saldo_carteira ?? 0);
   // template-vars formata {saldo}/{saldo_atual} a partir de saldo_carteira;
@@ -285,6 +292,7 @@ export async function getExpertLeadSheetFor(
     claim,
     retornosPendentes: pending.map((f) => ({ id: f.id, dueDate: f.due_date, nota: f.nota })),
     podeAssumir: expert.tipo === "total",
+    janelaHoras,
   };
 }
 

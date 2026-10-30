@@ -26,7 +26,7 @@ Queremos que o expert:
 **Não-objetivos**
 - Integrar com o WhatsApp do expert. A conversa acontece fora da plataforma; o CRM só abre o `wa.me` com o texto pronto.
 - Gerar o bônus no backoffice da casa. O expert faz isso lá e cola o link no CRM.
-- Pagar comissão ao expert. O sistema mede o rendimento; quanto se paga a ele fica fora do sistema.
+- Pagar comissão ao expert. O sistema mede o rendimento e entrega o extrato (seção 7.1); quanto se paga fica fora do sistema.
 - Carteira própria do expert. Quem paga é sempre a casa.
 
 **Anti-objetivos (seria fracasso mesmo funcionando)**
@@ -129,6 +129,17 @@ No ranking e nos painéis, o depositado atribuído aparece separado em **"por cl
   - desativar.
 
 Os mockups estão em `.superpowers/brainstorm/` (`ficha-lead-expert.html`, `paineis-expert-admin.html`).
+
+### 7.1 Perfil de rendimento para membros da equipe (adendo de 2026-10-27)
+
+Há gestores que também convertem conversando direto com os leads. Eles vão passar a ser comissionados sobre o rendimento, com a comissão paga por fora do sistema. Por isso:
+
+- **O perfil de rendimento fica separado do papel de acesso.** O admin cria um perfil na tela Experts e o vincula a alguém da equipe (admin, gestor ou membro), em vez de convidar. A pessoa continua com o papel dela. O perfil só mede e não muda o acesso.
+- **Link rastreado na ficha da casa.** Quem tem perfil vinculado ganha, na ficha do jogador da casa, o botão "Gerar link rastreado". O crédito segue a mesma regra da seção 6.
+- **No ranking,** essas pessoas aparecem como "Equipe (gestor)" (ou o papel delas), junto dos experts.
+- **Base da comissão: total depositado** pelos leads creditados no período. O sistema não calcula o valor da comissão.
+- **Extrato de créditos por pessoa e período,** exportável em CSV, com uma linha por depósito: data, lead, valor, por clique ou afiliado, oferta do link e hora do clique. Serve para conferir e defender a comissão.
+- **Estabilidade:** cada crédito guarda a janela e a versão da regra usadas. Recálculos só alcançam os últimos 8 dias. Um perfil com créditos não pode ser excluído, só desativado, para não apagar histórico de comissão.
 
 ## 8. Campanhas e fluxos do expert
 
