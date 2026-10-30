@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { campaignDeliveryKey } from "./campaign-recipients";
-import { resolveAudienceForTenant } from "./sms-audience-selection.server";
+import { resolveAudienceTargetsForTenant } from "./sms-audience-selection.server";
 import { createFakeDb } from "./sms-bulk.test-support";
 import {
   MAX_ZERO_GRANTS,
@@ -136,9 +136,9 @@ describe("processSmsCampaignTick", () => {
   it("dynamic audience: recalculates the saved rule at dispatch and drops the scheduling snapshot", async () => {
     const { state, deps } = world();
     const calls: unknown[] = [];
-    deps.resolveAudiencePhones = async (_tenant, criteria) => {
+    deps.resolveAudienceTargets = async (_tenant, criteria) => {
       calls.push(criteria);
-      return [phone(10), phone(20), phone(30)];
+      return [phone(10), phone(20), phone(30)].map((p) => ({ phone: p, playerId: null }));
     };
     const c = campaign([{ phone: phone(99), playerId: "p-old" }], {
       audience_criteria: { activity: { deposit: "yes" } },
@@ -152,12 +152,53 @@ describe("processSmsCampaignTick", () => {
     expect(state.sendCalls).not.toContain(await campaignDeliveryKey(c.id, "p-old"));
   });
 
+  it("dynamic selection audience: the selected player is validated, never re-resolved by a shared phone", async () => {
+    const { state, deps } = world();
+    const inputs: CampaignTarget[][] = [];
+    // Phone-only rows resolve to `p-<phone>` (most recently updated sharer);
+    // a claimed row keeps its claim.
+    deps.resolveRecipients = async (_tenant, rows) => {
+      inputs.push(rows.map((r) => ({ ...r })));
+      return {
+        resolved: [],
+        unresolved: [],
+        duplicates: 0,
+        assignments: rows.map((r) => ({
+          phone: r.phone,
+          playerId: r.playerId ?? `p-${r.phone}`,
+          reason: null,
+        })),
+      };
+    };
+    deps.resolveAudienceTargets = async () => [
+      { phone: phone(10), playerId: pid(7) },
+      { phone: phone(20), playerId: null },
+    ];
+    const c = campaign([], {
+      audience_criteria: { timing: "selection", playerIds: [pid(7)] },
+      audience_resolved_at: null,
+    });
+
+    const r = await processSmsCampaignTick(c, deps, { deadline: 45_000 });
+
+    expect(state.patches[0].recipients).toEqual([
+      { phone: phone(10), playerId: null, claimedPlayerId: pid(7) },
+      { phone: phone(20), playerId: null },
+    ]);
+    expect(inputs[0].map((t) => t.playerId)).toEqual([pid(7), null]);
+    expect(r.sent).toBe(2);
+    expect(state.sendCalls).toEqual([
+      await campaignDeliveryKey(c.id, pid(7)),
+      await campaignDeliveryKey(c.id, `p-${phone(20)}`),
+    ]);
+  });
+
   it("dynamic audience: resolved once; later ticks keep the materialized list", async () => {
     const { deps } = world();
     let calls = 0;
-    deps.resolveAudiencePhones = async () => {
+    deps.resolveAudienceTargets = async () => {
       calls++;
-      return [phone(10)];
+      return [{ phone: phone(10), playerId: null }];
     };
     const c = campaign([{ phone: phone(10), playerId: `p-${phone(10)}` }], {
       audience_criteria: { activity: { deposit: "yes" } },
@@ -169,7 +210,7 @@ describe("processSmsCampaignTick", () => {
 
   it("dynamic audience: nobody matches at send time → campaign fails with a clear reason", async () => {
     const { state, deps } = world();
-    deps.resolveAudiencePhones = async () => [];
+    deps.resolveAudienceTargets = async () => [];
     const c = campaign([{ phone: phone(10), playerId: "p-old" }], {
       audience_criteria: { activity: { deposit: "yes" } },
       audience_resolved_at: null,
@@ -182,7 +223,7 @@ describe("processSmsCampaignTick", () => {
 
   it("dynamic audience: a resolution error keeps the campaign for the next tick", async () => {
     const { state, deps } = world();
-    deps.resolveAudiencePhones = async () => {
+    deps.resolveAudienceTargets = async () => {
       throw new Error("timeout");
     };
     const c = campaign([{ phone: phone(10), playerId: "p-old" }], {
@@ -197,7 +238,7 @@ describe("processSmsCampaignTick", () => {
 
   it("selection audience deleted after scheduling → campaign fails closed, nothing sent", async () => {
     const { state, deps } = world();
-    deps.resolveAudiencePhones = async () => {
+    deps.resolveAudienceTargets = async () => {
       throw Object.assign(
         new Error("O público de seleção desta campanha foi excluído; nada será enviado."),
         {
@@ -226,8 +267,8 @@ describe("processSmsCampaignTick", () => {
   it("corrupted audience_criteria → campaign fails closed (permanent), nothing sent", async () => {
     const { state, deps } = world();
     const db = createFakeDb();
-    deps.resolveAudiencePhones = async (tenantId, criteria) =>
-      (await resolveAudienceForTenant(db.client, tenantId, criteria)).phones;
+    deps.resolveAudienceTargets = (tenantId, criteria) =>
+      resolveAudienceTargetsForTenant(db.client, tenantId, criteria);
     const c = campaign([{ phone: phone(10), playerId: "p-old" }], {
       audience_criteria: { timing: "selection", playerIds: "corrompido" },
       audience_resolved_at: null,

@@ -46,6 +46,8 @@ export type SmsCampaignRow = {
   unresolved_recipients?: unknown;
 };
 
+export type AudienceTarget = { phone: string; playerId: string | null };
+
 export type CampaignTarget = {
   phone: string;
   playerId: string | null;
@@ -53,6 +55,13 @@ export type CampaignTarget = {
   external?: boolean;
   /** Set once the recipient was classified as not sendable; it is skipped forever. */
   unresolvedReason?: UnresolvedReason | null;
+  /**
+   * Player the audience itself chose for this phone (dynamic selection
+   * audience). Dispatch-time resolution validates it (same house, the
+   * player's own phone, consent, control group) instead of re-resolving the
+   * phone, which with a shared phone could pick another player.
+   */
+  claimedPlayerId?: string | null;
 };
 
 export function isSendableTarget(t: CampaignTarget): boolean {
@@ -72,11 +81,13 @@ export function parseCampaignTargets(raw: unknown): CampaignTarget[] {
       continue;
     const pid = (r as { playerId?: unknown }).playerId;
     const reason = (r as { unresolvedReason?: unknown }).unresolvedReason;
+    const claimed = (r as { claimedPlayerId?: unknown }).claimedPlayerId;
     out.push({
       phone: (r as { phone: string }).phone,
       playerId: typeof pid === "string" && pid ? pid : null,
       ...((r as { external?: unknown }).external === true ? { external: true } : {}),
       ...(isUnresolvedReason(reason) ? { unresolvedReason: reason } : {}),
+      ...(typeof claimed === "string" && claimed ? { claimedPlayerId: claimed } : {}),
     });
   }
   return out;
@@ -150,8 +161,12 @@ export type CampaignDispatchDeps = {
   }) => Promise<SendOutcome[]>;
   /** SMS provider breaker; absent = always closed. */
   providerGate?: () => Promise<ProviderGateDecision>;
-  /** Phones matching a saved audience rule right now (dynamic audiences). */
-  resolveAudiencePhones?: (tenantId: string, criteria: unknown) => Promise<string[]>;
+  /**
+   * Recipients matching a saved audience right now (dynamic audiences): the
+   * phone and, when the audience is a selection of players, the player it
+   * chose (rule audiences only know phones: playerId null).
+   */
+  resolveAudienceTargets?: (tenantId: string, criteria: unknown) => Promise<AudienceTarget[]>;
   /** External lists: which of these phones registered as players meanwhile. */
   findRegisteredPhones?: (tenantId: string, phones: string[]) => Promise<Set<string>>;
 };
@@ -255,11 +270,11 @@ export async function processSmsCampaignTick(
     c.audience_criteria &&
     !c.audience_resolved_at &&
     (c.sent_cursor ?? 0) === 0 &&
-    deps.resolveAudiencePhones
+    deps.resolveAudienceTargets
   ) {
-    let phones: string[];
+    let audience: AudienceTarget[];
     try {
-      phones = await deps.resolveAudiencePhones(c.tenant_id, c.audience_criteria);
+      audience = await deps.resolveAudienceTargets(c.tenant_id, c.audience_criteria);
     } catch (error) {
       // Ex.: o público de seleção foi excluído depois do agendamento. Tentar de
       // novo não resolve: a campanha falha (fechado, nada é enviado).
@@ -283,7 +298,7 @@ export async function processSmsCampaignTick(
       });
       return { ...result, stopReason: "resolution_error" };
     }
-    if (phones.length === 0) {
+    if (audience.length === 0) {
       await deps.updateCampaign(c, {
         status: "falhou",
         recipients: [],
@@ -295,7 +310,13 @@ export async function processSmsCampaignTick(
       });
       return { ...result, status: "falhou", stopReason: "no_recipients" };
     }
-    const fresh: CampaignTarget[] = phones.map((phone) => ({ phone, playerId: null }));
+    // Not resolved yet (step 1 validates every target); the audience's own
+    // player choice travels as the claim.
+    const fresh: CampaignTarget[] = audience.map((t) => ({
+      phone: t.phone,
+      playerId: null,
+      ...(t.playerId ? { claimedPlayerId: t.playerId } : {}),
+    }));
     const resolvedAt = new Date(deps.now()).toISOString();
     const ok = await deps.updateCampaign(c, {
       recipients: fresh,
@@ -324,9 +345,11 @@ export async function processSmsCampaignTick(
   if (pendingIdx.length > 0) {
     let resolution: RecipientResolution;
     try {
+      // A claimed player (selection audience) is validated as the player of
+      // that row; only phone-only rows are looked up by phone.
       resolution = await deps.resolveRecipients(
         c.tenant_id,
-        pendingIdx.map((i) => targets[i]),
+        pendingIdx.map((i) => ({ ...targets[i], playerId: targets[i].claimedPlayerId ?? null })),
       );
     } catch (error) {
       await deps.updateCampaign(c, {
