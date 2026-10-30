@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
-import { supabase } from "@/integrations/supabase/client";
+import { EMAIL_IMAGE_MAX_BYTES, uploadEmailImage } from "@/lib/email-image-upload";
 import {
   OBJETIVOS,
   MODELOS,
@@ -772,20 +772,13 @@ function ImageField({
 
   async function handleFile(file: File) {
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > EMAIL_IMAGE_MAX_BYTES) {
       toast.error("Imagem muito grande (máx 5MB)");
       return;
     }
     setUploading(true);
     try {
-      const ext = file.name.split(".").pop()?.toLowerCase() || "png";
-      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-      const { error } = await supabase.storage
-        .from("email-images")
-        .upload(path, file, { contentType: file.type, upsert: false });
-      if (error) throw error;
-      const { data } = supabase.storage.from("email-images").getPublicUrl(path);
-      onChange(data.publicUrl);
+      onChange(await uploadEmailImage(file));
       toast.success("Imagem enviada");
     } catch (e: any) {
       toast.error(e?.message || "Falha no upload");
