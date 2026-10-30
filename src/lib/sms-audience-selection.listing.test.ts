@@ -38,6 +38,10 @@ function listingDb(opts: { rules: Row[]; selections: Row[] }) {
           builder
         ),
         or: (expr: string) => (read.filters.push(`or:${expr}`), builder),
+        is: (column: string, value: unknown) => (
+          read.filters.push(`is:${column}=${value}`),
+          builder
+        ),
         then: (resolve: (v: unknown) => unknown) => {
           const isSelection = read.filters.includes("eq:criteria->>timing=selection");
           return Promise.resolve({
@@ -64,6 +68,8 @@ describe("listTenantAudiences: listagem leve e tolerante", () => {
     const list = await listTenantAudiences(db, TENANT);
     expect(db.reads).toHaveLength(2);
     for (const read of db.reads) expect(read.filters).toContain(`eq:tenant_id=${TENANT}`);
+    // Área do Expert: as telas da casa nunca listam públicos de expert.
+    for (const read of db.reads) expect(read.filters).toContain("is:expert_id=null");
     const selectionRead = db.reads.find((r) =>
       r.filters.includes("eq:criteria->>timing=selection"),
     )!;

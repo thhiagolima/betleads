@@ -39,20 +39,33 @@ const AUDIENCE_COLUMNS = "id,name,description,created_at,updated_at";
  * critério completo; de seleção só com a contagem gravada (sem ler a lista de
  * até 50 mil ids), na forma de referência. Uma linha inválida é registrada e
  * pulada, sem derrubar a listagem. Exportado para testes.
+ *
+ * Área do Expert: sem `owner`, só os públicos da CASA (expert_id nulo; as
+ * telas da casa nunca listam públicos de expert). Com `owner`, só os do
+ * expert informado.
  */
-export async function listTenantAudiences(s: any, tenantId: string) {
+export async function listTenantAudiences(
+  s: any,
+  tenantId: string,
+  owner: { expertId: string } | null = null,
+) {
+  const byOwner = (q: any) =>
+    owner ? q.eq("expert_id", owner.expertId) : q.is("expert_id", null);
   const [rules, selections] = await Promise.all([
-    s
-      .from("sms_audiences")
-      .select(`${AUDIENCE_COLUMNS},criteria`)
-      .eq("tenant_id", tenantId)
+    byOwner(
+      s
+        .from("sms_audiences")
+        .select(`${AUDIENCE_COLUMNS},criteria`)
+        .eq("tenant_id", tenantId),
+    )
       // `neq` sozinho descartaria critérios sem `timing` (null).
       .or("criteria->>timing.is.null,criteria->>timing.neq.selection"),
-    s
-      .from("sms_audiences")
-      .select(`${AUDIENCE_COLUMNS},selection_count:criteria->selectionCount`)
-      .eq("tenant_id", tenantId)
-      .eq("criteria->>timing", "selection"),
+    byOwner(
+      s
+        .from("sms_audiences")
+        .select(`${AUDIENCE_COLUMNS},selection_count:criteria->selectionCount`)
+        .eq("tenant_id", tenantId),
+    ).eq("criteria->>timing", "selection"),
   ]);
   if (rules.error) throw new Error(rules.error.message);
   if (selections.error) throw new Error(selections.error.message);
@@ -123,6 +136,7 @@ export async function resolveCriteriaToSave(
       .select("criteria")
       .eq("id", id)
       .eq("tenant_id", tenantId)
+      .is("expert_id", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (existing) {
@@ -158,6 +172,8 @@ export const saveSmsAudience = createServerFn({ method: "POST" })
           .update(payload)
           .eq("id", data.id)
           .eq("tenant_id", tenantId)
+          // Públicos de expert não são editados pela casa.
+          .is("expert_id", null)
           .select()
           .single()
       : s.from("sms_audiences").insert(payload).select().single();
@@ -171,7 +187,12 @@ export const deleteSmsAudience = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const s: any = context.supabase;
     const t = await resolveSmsAudienceTenant(s);
-    const { error } = await s.from("sms_audiences").delete().eq("id", data.id).eq("tenant_id", t);
+    const { error } = await s
+      .from("sms_audiences")
+      .delete()
+      .eq("id", data.id)
+      .eq("tenant_id", t)
+      .is("expert_id", null);
     if (error) throw new Error(error.message);
     return { ok: true };
   });

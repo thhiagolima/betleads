@@ -75,6 +75,8 @@ describe("resolveExpertContext", () => {
       nome: "Fulano",
       tipo: "total",
       affiliateIds: [],
+      envioModo: "livre",
+      tetoMensal: null,
     });
   });
 
