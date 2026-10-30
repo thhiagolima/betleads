@@ -38,6 +38,7 @@ import { listEmailCampaigns, sendEmailCampaignNow } from "@/lib/email.functions"
 import {
   EMAIL_CAMPAIGN_RESEND_NOTE,
   alreadySentSuffix,
+  campaignContinuesInBatchesMessage,
   campaignInterruptedMessage,
   campaignPausedForBalanceMessage,
   type EmailCampaignRunResult,
@@ -201,6 +202,8 @@ export function CampaignsHub() {
           toast.warning(campaignPausedForBalanceMessage(r), { id: toastId });
         } else if (r.interrompida) {
           toast.warning(campaignInterruptedMessage(r), { id: toastId });
+        } else if (r.continuaEmLotes) {
+          toast.success(campaignContinuesInBatchesMessage(r), { id: toastId });
         } else {
           toast.success(
             `Campanha enviada: ${r.enviados ?? 0} ok, ${r.pendentes ?? 0} pendentes, ${r.falhas ?? 0} falhas (${r.total ?? 0} destinatários).${alreadySentSuffix(r)}`,

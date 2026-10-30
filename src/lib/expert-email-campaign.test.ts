@@ -136,3 +136,35 @@ describe("runCampaignSend: campanha de expert", () => {
     await expect(assertNotExpertEmailCampaign("camp-x")).rejects.toThrow(EXPERT_CAMPAIGN_HOUSE_REFUSED);
   });
 });
+
+describe("runCampaignSend: expert campaign in batches", () => {
+  it("cap reached in the second batch pauses it; no recipient is sent twice", async () => {
+    seed();
+    const { EMAIL_CAMPAIGN_BATCH_SIZE } = await import("./email.functions");
+    for (let i = 10; i < EMAIL_CAMPAIGN_BATCH_SIZE + 30; i++)
+      fake.db.rows("players").push({ id: pid(i), tenant_id: T, email: `p${i}@x.com`, nome: "P", affiliate_id: "AFF1" });
+    const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void) => {
+      fn();
+      return 0;
+    }) as never);
+    let calls = 0;
+    vi.mocked(sendInfobipEmail).mockImplementation(async () => {
+      calls += 1;
+      return (calls === EMAIL_CAMPAIGN_BATCH_SIZE + 5
+        ? { ok: false, status: 0, body: {}, idempotencyKey: "k", temporary: false, errorKind: "expert_cap" }
+        : ok(calls)) as never;
+    });
+    const first = await runCampaignSend("camp-x");
+    expect(first).toMatchObject({ enviados: EMAIL_CAMPAIGN_BATCH_SIZE, continuaEmLotes: true });
+    const camp = fake.db.rows("email_campaigns")[0];
+    expect(camp.status).toBe("agendada");
+    Object.assign(camp, { status: "enviando" });
+    const second = await runCampaignSend("camp-x");
+    expect(second).toMatchObject({ pausadaPorTeto: true, enviados: 4, continuaEmLotes: false });
+    expect(camp.status).toBe("pausada");
+    expect(notifyExpertCapReached).toHaveBeenCalledWith(T, EXPERT);
+    const tos = vi.mocked(sendInfobipEmail).mock.calls.map(([a]) => a.to);
+    expect(new Set(tos).size).toBe(tos.length);
+    timer.mockRestore();
+  });
+});

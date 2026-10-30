@@ -4,7 +4,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { runCampaignSend } from "@/lib/email.functions";
+import { EMAIL_CAMPAIGN_TICK_BUDGET_MS, runCampaignSend } from "@/lib/email.functions";
 import { deferIfOutsideWindow } from "@/lib/send-window.server";
 import { recordRun } from "@/lib/dispatch-rate.server";
 import { requireSharedSecret } from "@/lib/cron-auth.server";
@@ -56,9 +56,22 @@ export const Route = createFileRoute("/api/public/email-campaigns/tick")({
           const results: Array<{ id: string; ok: boolean; error?: string }> = [];
           let errors = 0;
           let lastErr: string | null = null;
+          // One time budget per tick, shared by the claimed campaigns; a big
+          // campaign sends a batch and goes back to 'agendada' for the next tick.
+          const deadline = startedAt + EMAIL_CAMPAIGN_TICK_BUDGET_MS;
           for (const c of due) {
+            if (Date.now() >= deadline) {
+              let release = supabaseAdmin
+                .from("email_campaigns")
+                .update({ status: "agendada", locked_at: null, locked_by: null })
+                .eq("id", c.id)
+                .eq("status", "enviando");
+              if (c.locked_by) release = release.eq("locked_by", c.locked_by);
+              await release;
+              continue;
+            }
             try {
-              await runCampaignSend(c.id, { lockToken: c.locked_by });
+              await runCampaignSend(c.id, { lockToken: c.locked_by, deadline });
               results.push({ id: c.id, ok: true });
             } catch (e) {
               const msg = e instanceof Error ? e.message : String(e);

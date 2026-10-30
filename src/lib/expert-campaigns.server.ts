@@ -83,11 +83,8 @@ export const EXPERT_VOICE_SOURCE_UNAVAILABLE = "Roteiro ou áudio da casa indisp
 export const EXPERT_SCHEDULE_TOO_SOON = "O horário agendado precisa estar pelo menos 1 minuto no futuro";
 export const EXPERT_SCHEDULE_INVALID = "Data/hora inválida";
 export const EXPERT_REJECT_REASON_REQUIRED = "Informe o motivo da recusa.";
-/** E-mail: runCampaignSend envia no máximo 50 destinatários por execução (IMMEDIATE_SEND_LIMIT). */
-export const EXPERT_EMAIL_MAX_RECIPIENTS = 50;
 /** Voz: mesmo limite da voz em massa da casa. */
 export const EXPERT_VOICE_MAX_RECIPIENTS = 200;
-export const EXPERT_EMAIL_TOO_MANY = `Campanhas de e-mail aceitam até ${EXPERT_EMAIL_MAX_RECIPIENTS} destinatários por envio. Escolha um público menor.`;
 export const EXPERT_VOICE_TOO_MANY = `Voz aceita até ${EXPERT_VOICE_MAX_RECIPIENTS} destinatários por campanha.`;
 export const EXPERT_CAP_BLOCKED =
   "Seu teto mensal de envios é R$ 0,00: os envios estão bloqueados. Fale com o admin da casa.";
@@ -496,8 +493,6 @@ async function prepareAudience(
   const criteria = await buildExpertCampaignCriteria(scope, rawCriteria, playerIds);
   const resolution = await resolveScopedAudience(scope, criteria, channel);
   if (resolution.eligibleTotal === 0) throw new Error(EXPERT_NO_RECIPIENTS);
-  if (channel === "email" && resolution.eligibleTotal > EXPERT_EMAIL_MAX_RECIPIENTS)
-    throw new Error(EXPERT_EMAIL_TOO_MANY);
   if (channel === "voice" && resolution.eligibleTotal > EXPERT_VOICE_MAX_RECIPIENTS)
     throw new Error(EXPERT_VOICE_TOO_MANY);
   const estimatedCost = await estimateCampaignCost(scope.tenantId, channel, resolution.eligibleTotal, opts);
@@ -690,6 +685,14 @@ export async function saveExpertEmailCampaignFor(
   };
   let saved: { id: string; status: string; approval_status: string | null } | null;
   if (data.id) {
+    // A batched send in progress goes back to 'agendada' between batches:
+    // once anything was sent, the campaign is no longer editable.
+    const { count, error: logsError } = await db()
+      .from("email_send_logs")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", data.id);
+    if (logsError) throw new Error(logsError.message);
+    if ((count ?? 0) > 0) throw new Error(EXPERT_CAMPAIGN_NOT_EDITABLE);
     const { data: updated, error } = await db()
       .from("email_campaigns")
       .update(row)
@@ -1234,8 +1237,6 @@ async function revalidateForApproval(tenantId: string, channel: ExpertChannel, r
   }
   const resolution = await resolveScopedAudience(scope, criteria, channel);
   if (resolution.eligibleTotal === 0) throw new Error(EXPERT_NO_RECIPIENTS);
-  if (channel === "email" && resolution.eligibleTotal > EXPERT_EMAIL_MAX_RECIPIENTS)
-    throw new Error(EXPERT_EMAIL_TOO_MANY);
   const voiceSeconds =
     channel === "voice"
       ? await voiceSourceSeconds(tenantId, { script_id: row.script_id, asset_id: row.voice_asset_id })

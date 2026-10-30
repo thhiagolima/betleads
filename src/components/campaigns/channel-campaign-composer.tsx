@@ -90,6 +90,7 @@ import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
 import { UNRESOLVED_REASONS, type UnresolvedReason } from "@/lib/campaign-recipients";
 import {
   alreadySentSuffix,
+  campaignContinuesInBatchesMessage,
   campaignInterruptedMessage,
   campaignPausedForBalanceMessage,
   type EmailCampaignRunResult,
@@ -733,6 +734,12 @@ export function ChannelCampaignComposer({
       }
       if (emailRun?.interrompida) {
         toast.warning(campaignInterruptedMessage(emailRun));
+        onCreated();
+        onOpenChange(false);
+        return;
+      }
+      if (emailRun?.continuaEmLotes) {
+        toast.success(campaignContinuesInBatchesMessage(emailRun));
         onCreated();
         onOpenChange(false);
         return;
