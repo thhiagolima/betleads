@@ -22,6 +22,7 @@ vi.mock("./tenant-access.server", () => ({
 import { verifyClickTokenSignature } from "./click-tracking.server";
 import {
   __resetShortenerDomainCacheForTests,
+  assertDestinationAllowed,
   createTrackedLinkForRecipient,
   DestinationNotAllowedError,
   ShortenerUnavailableError,
@@ -254,5 +255,62 @@ describe("createTrackedLinkForRecipient", () => {
     expect(fake.db.rows("link_dispatches")).toHaveLength(0);
     expect(fake.db.rows("tracked_links")).toHaveLength(0);
     error.mockRestore();
+  });
+});
+
+describe("assertDestinationAllowed", () => {
+  const allowed = (url: string, strict?: boolean) =>
+    assertDestinationAllowed({ tenantId: TENANT, url, strict }).then(
+      () => true,
+      (error: unknown) => {
+        if (error instanceof DestinationNotAllowedError) return false;
+        throw error;
+      },
+    );
+  const seedSite = (siteUrl: string | null) =>
+    fake.db.rows("tenants").push({ id: TENANT, site_url: siteUrl });
+
+  it("default (house): unchanged — any public http(s) host when the house set no allowlist", async () => {
+    seedSettings({ allowed_destination_hosts: [] });
+    seedSite(null);
+    expect(await allowed("https://qualquer.example/oferta")).toBe(true);
+    expect(await allowed("https://casa.bet/login?token=abc")).toBe(false);
+    expect(await allowed("http://127.0.0.1/x")).toBe(false);
+    expect(await allowed("javascript:alert(1)")).toBe(false);
+  });
+
+  it("default (house): the configured allowlist applies", async () => {
+    seedSettings({ allowed_destination_hosts: ["casa.bet"] });
+    expect(await allowed("https://app.casa.bet/x")).toBe(true);
+    expect(await allowed("https://outra.bet/x")).toBe(false);
+  });
+
+  it("strict: fail-closed when the house has no allowlist and no site", async () => {
+    seedSettings({ allowed_destination_hosts: [] });
+    seedSite(null);
+    expect(await allowed("https://qualquer.example/oferta", true)).toBe(false);
+  });
+
+  it("strict: without settings or tenant row at all, nothing is allowed", async () => {
+    expect(await allowed("https://qualquer.example/oferta", true)).toBe(false);
+  });
+
+  it("strict: the house's own site (and subdomains, with or without www) is allowed", async () => {
+    seedSettings({ allowed_destination_hosts: [] });
+    seedSite("https://www.Casa.bet/");
+    expect(await allowed("https://casa.bet/bonus", true)).toBe(true);
+    expect(await allowed("https://www.casa.bet/bonus", true)).toBe(true);
+    expect(await allowed("https://app.casa.bet/bonus", true)).toBe(true);
+    expect(await allowed("https://casa.bet.evil.com/bonus", true)).toBe(false);
+    expect(await allowed("https://outra.bet/bonus", true)).toBe(false);
+    expect(await allowed("https://casa.bet/login?token=abc", true)).toBe(false);
+  });
+
+  it("strict: configured hosts plus the site", async () => {
+    seedSettings({ allowed_destination_hosts: ["parceiro.com"] });
+    seedSite("casa.bet");
+    expect(await allowed("https://parceiro.com/x", true)).toBe(true);
+    expect(await allowed("https://casa.bet/x", true)).toBe(true);
+    expect(await allowed("https://outra.bet/x", true)).toBe(false);
   });
 });
