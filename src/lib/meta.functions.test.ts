@@ -1,14 +1,19 @@
-// meta.functions (MB0 + MB1): papel de admin nas ações que mexem na conexão, demo e
-// casa suspensa no "Atualizar agora", token só cifrado, conta presa à conexão da
-// mesma casa, lock renovado antes de cada job do worker, RPCs transacionais de
-// conectar/selecionar/desconectar, escolha da chave no worker, blocos de 30 dias e
-// redescoberta diária. O compilador do TanStack Start
+// meta.functions (MB0 + MB1 + MB2): papel de admin nas ações que mexem na conexão,
+// demo e casa suspensa no "Atualizar agora", token só cifrado (e só no cabeçalho),
+// conta presa à conexão da mesma casa, lock renovado antes de cada job do worker, RPCs
+// transacionais de conectar/selecionar/desconectar, escolha da chave no worker, blocos
+// de 30 dias, redescoberta diária, `debug_token` ao conectar/testar, checagem de saúde,
+// rate limit sem gastar tentativa, uso da cota, relatório assíncrono e a política de
+// agendamento. O cliente da Graph API real (`meta-graph.server`) roda sobre o fetch
+// falso; só o relatório assíncrono é trocado (ver `graphMocks`). O compilador do TanStack Start
 // troca o corpo do handler por um stub fora do servidor, então os testes chamam os
 // `*For` que os handlers delegam.
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Row = Record<string, unknown>;
-type Filter = { op: "eq" | "neq" | "in" | "is" | "gte"; column: string; value: unknown };
+type Filter = { op: "eq" | "neq" | "in" | "is" | "gte" | "or"; column: string; value: unknown };
 type Call = {
   table: string;
   action: "select" | "insert" | "update" | "upsert" | "delete";
@@ -34,9 +39,38 @@ const access = vi.hoisted(() => ({
   billingLockedTenants: new Set<string>(),
   // Falha de leitura da casa (não é bloqueio).
   lookupErrorTenants: new Set<string>(),
+  // Chamado no início de cada `assertTenantCanOperate`: simula outro tick agindo
+  // entre a leitura das chaves e o registro da tentativa.
+  onOperate: null as ((tenantId: string) => void) | null,
 }));
 
 const token = vi.hoisted(() => ({ decrypt: vi.fn(async (value: string) => `plain:${value}`) }));
+
+// O relatório assíncrono real espera 3 s entre consultas. No teste ele é trocado por
+// um que chama `onPoll` uma vez e lê `/{act}/insights` pelo cliente real (fetch falso),
+// então os erros e o uso da cota continuam vindo do nível do fetch.
+type AsyncInsights = (
+  path: string,
+  token: string,
+  params: Record<string, string>,
+  opts?: { onPoll?: () => Promise<boolean> },
+) => Promise<{ rows: unknown[]; usage: { maxPct: number; regainAfterMs: number | null } }>;
+const graphMocks = vi.hoisted(() => ({
+  asyncInsights: null as unknown as ReturnType<typeof vi.fn<AsyncInsights>>,
+  defaultAsync: null as unknown as AsyncInsights,
+}));
+
+vi.mock("@/lib/meta-graph.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/meta-graph.server")>();
+  graphMocks.defaultAsync = async (path, accessToken, params, opts) => {
+    if (opts?.onPoll && !(await opts.onPoll())) {
+      throw new actual.MetaApiError("Leitura interrompida.", { type: "aborted" });
+    }
+    return actual.metaGetAllPages(`${path}/insights`, accessToken, params);
+  };
+  graphMocks.asyncInsights = vi.fn<AsyncInsights>(graphMocks.defaultAsync);
+  return { ...actual, loadMetaInsightsAsync: graphMocks.asyncInsights };
+});
 
 vi.mock("@/integrations/supabase/auth-middleware", () => ({ requireSupabaseAuth: {} }));
 vi.mock("@/lib/meta-token.server", () => ({
@@ -63,6 +97,7 @@ vi.mock("@/lib/tenant-access.server", async () => {
       if (access.demo) throw new Error("DEMO_ACTION_BLOCKED");
     }),
     assertTenantCanOperate: vi.fn(async (tenantId: string, actor?: unknown) => {
+      access.onOperate?.(tenantId);
       if (access.operateError) throw new Error(access.operateError);
       if (access.lookupErrorTenants.has(tenantId)) throw new Error("connection reset");
       if (access.blockedTenants.has(tenantId)) throw new Error(TENANT_BLOCKED);
@@ -81,13 +116,27 @@ function valueAt(row: Row, column: string): unknown {
   }, row);
 }
 
+// `.or("col.is.null,col.lt.<valor>")`: só os operadores `is.null` e `lt` usados aqui.
+function matchesOr(row: Row, expression: string) {
+  return expression.split(",").some((part) => {
+    const [column, op, ...rest] = part.split(".");
+    const value = rest.join(".");
+    const actual = valueAt(row, column);
+    if (op === "is" && value === "null") return (actual ?? null) === null;
+    if (op === "lt") return actual != null && String(actual) < value;
+    throw new Error(`filtro or não suportado: ${part}`);
+  });
+}
+
 function matches(row: Row, filters: Filter[]) {
   return filters.every(({ op, column, value }) => {
+    if (op === "or") return matchesOr(row, String(value));
     const actual = valueAt(row, column);
     if (op === "eq") return actual === value;
     if (op === "neq") return actual !== value;
     if (op === "in") return (value as unknown[]).includes(actual);
     if (op === "is") return (actual ?? null) === value;
+    if (typeof actual === "number" && typeof value === "number") return actual >= value;
     return String(actual) >= String(value);
   });
 }
@@ -134,6 +183,10 @@ function query(table: string) {
       return builder;
     };
   }
+  builder.or = (expression: string) => {
+    call.filters.push({ op: "or", column: "", value: expression });
+    return builder;
+  };
   return builder;
 }
 
@@ -173,15 +226,41 @@ const fetchMock = vi.fn(
   async (_input: string | URL, _init?: unknown) => new Response("{}", { status: 500 }),
 );
 
-// Graph API falsa: cada teste responde por caminho e token.
-type MetaReply = { status?: number; body: unknown } | undefined;
+/** O token de uma chamada: só no cabeçalho `Authorization: Bearer …` (MB2-02). */
+function bearerOf(init: unknown) {
+  const headers = new Headers((init as RequestInit | undefined)?.headers);
+  return headers.get("authorization")?.replace(/^Bearer /, "") ?? null;
+}
+
+// Graph API falsa: cada teste responde por caminho e token. `/debug_token` responde
+// por `meta.debug` (por padrão, chave válida de Usuário do Sistema do app1).
+type MetaReply = { status?: number; body: unknown; headers?: Record<string, string> } | undefined;
+const debugBody = (overrides: Row = {}) => ({
+  body: {
+    data: {
+      is_valid: true,
+      type: "SYSTEM_USER",
+      app_id: "app1",
+      user_id: "su1",
+      expires_at: 0,
+      data_access_expires_at: 0,
+      scopes: ["ads_read"],
+      ...overrides,
+    },
+  },
+});
+const meta = { debug: (_token: string | null): MetaReply => debugBody() };
 function graph(route: (path: string, token: string | null, url: URL) => MetaReply) {
-  fetchMock.mockImplementation(async (input: string | URL) => {
+  fetchMock.mockImplementation(async (input: string | URL, init?: unknown) => {
     const url = new URL(String(input));
     const path = url.pathname.replace(/^\/v[^/]+/, "");
-    const reply = route(path, url.searchParams.get("access_token"), url);
+    const accessToken = bearerOf(init);
+    const reply = path === "/debug_token" ? meta.debug(accessToken) : route(path, accessToken, url);
     if (!reply) return new Response("{}", { status: 404 });
-    return new Response(JSON.stringify(reply.body), { status: reply.status ?? 200 });
+    return new Response(JSON.stringify(reply.body), {
+      status: reply.status ?? 200,
+      headers: reply.headers,
+    });
   });
 }
 const metaError = (code: number, message: string, status = 400, subcode?: number): MetaReply => ({
@@ -201,9 +280,9 @@ function eligibleAccess(accountId: string, tenantId: string): Row {
 }
 
 const fetchedPaths = () =>
-  fetchMock.mock.calls.map(([input]) => {
+  fetchMock.mock.calls.map(([input, init]) => {
     const url = new URL(String(input));
-    return `${url.pathname.replace(/^\/v[^/]+/, "")}?${url.searchParams.get("access_token")}`;
+    return `${url.pathname.replace(/^\/v[^/]+/, "")}?${bearerOf(init)}`;
   });
 
 // `meta_record_account_sync_success` como o RPC: só com o acesso ativo e a chave
@@ -263,10 +342,14 @@ beforeEach(() => {
   access.blockedTenants = new Set();
   access.billingLockedTenants = new Set();
   access.lookupErrorTenants = new Set();
+  access.onOperate = null;
   token.decrypt.mockClear();
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => new Response("{}", { status: 500 }));
   vi.stubGlobal("fetch", fetchMock);
+  meta.debug = () => debugBody();
+  graphMocks.asyncInsights.mockReset();
+  graphMocks.asyncInsights.mockImplementation(graphMocks.defaultAsync);
 });
 
 describe("papel: só o admin da casa mexe na conexão", () => {
@@ -386,8 +469,10 @@ describe("processMetaSyncQueue", () => {
       Object.assign(connection, {
         id: connection.id ?? CONNECTION_ID,
         auth_type: "system_user_token",
-        // Lista recém-lida: a redescoberta não mexe nestas conexões.
+        // Lista recém-lida e chave recém-conferida: a redescoberta e a checagem de
+        // saúde não mexem nestas conexões.
         accounts_discovered_at: connection.accounts_discovered_at ?? new Date().toISOString(),
+        health_checked_at: connection.health_checked_at ?? new Date().toISOString(),
       }),
     );
     db.tables.meta_connections = rows;
@@ -477,10 +562,41 @@ describe("processMetaSyncQueue", () => {
         if (item.table === "meta_ad_accounts") return "load";
         return "status" in payload ? `finish:${id}` : `renew:${id}`;
       });
-    expect(sequence).toEqual(["renew:j1", "load", "finish:j1", "renew:j2", "load", "finish:j2"]);
+    // Cada renovação cobre todos os jobs ainda pendentes do tick, não só o em andamento.
+    expect(sequence).toEqual(["renew:j1,j2", "load", "finish:j1", "renew:j2", "load", "finish:j2"]);
     const renew = jobUpdates()[0];
     expect(Object.keys(renew.payload as Row)).toEqual(["locked_at"]);
-    expect(renew.filters.map((filter) => filter.column)).toEqual(["id", "worker_id", "status"]);
+    expect(renew.filters).toEqual([
+      { op: "in", column: "id", value: ["j1", "j2"] },
+      { op: "eq", column: "worker_id", value: renew.filters[1].value },
+      { op: "eq", column: "status", value: "running" },
+    ]);
+    // A conclusão só vale para o job ainda deste worker e em andamento.
+    const finish = jobUpdates().find((item) => "status" in (item.payload as Row));
+    expect(finish?.filters.map((filter) => filter.column)).toEqual(["id", "worker_id", "status"]);
+  });
+
+  it("job não começado que outro worker pegou durante o anterior é pulado", async () => {
+    claim([job("j1"), job("j2")]);
+    account({ tenant_id: "t1", status: "connected", encrypted_access_token: "enc" });
+    graph((path) => {
+      // Enquanto o j1 lê, outro worker reclama o j2.
+      if (path === "/act_1/ads") db.tables.meta_sync_jobs[1].worker_id = "meta-outro";
+      if (path === "/me/permissions")
+        return { body: { data: [{ permission: "ads_read", status: "granted" }] } };
+      if (path === "/act_1/ads" || path === "/act_1/insights") return { body: { data: [] } };
+      return undefined;
+    });
+    db.rpc.replace_meta_ad_metrics = () => 0;
+
+    const result = await processMetaSyncQueue(2);
+
+    expect(result).toMatchObject({ claimed: 2, completed: 1, released: 0 });
+    expect(db.calls.filter(isAccountLoad)).toHaveLength(1);
+    expect(db.tables.meta_sync_jobs[1]).toMatchObject({
+      status: "running",
+      worker_id: "meta-outro",
+    });
   });
 
   it("pula o job cujo lock outro worker já pegou", async () => {
@@ -524,7 +640,7 @@ describe("processMetaSyncQueue", () => {
     const parked = jobUpdates().find(
       (item) => item.filters.find((filter) => filter.column === "id")?.value === "j2",
     );
-    expect(parked?.filters.map((filter) => filter.column)).toEqual(["id", "worker_id"]);
+    expect(parked?.filters.map((filter) => filter.column)).toEqual(["id", "worker_id", "status"]);
     const payload = parked?.payload as Row;
     expect(payload).toMatchObject({ status: "retry", attempt_count: 0, locked_at: null });
     const nextAttempt = Date.parse(String(payload.next_attempt_at));
@@ -792,29 +908,113 @@ describe("processMetaSyncQueue", () => {
       return Math.round((nextAttempt - Date.now()) / 60_000);
     };
 
+    // MB2-01: rate limit não gasta tentativa nas 3 primeiras vezes do job. Espera
+    // 15 min × 2^rate_limited_count (ou o que a Meta pede, se maior), até 60 min, + 0–20 %.
     it.each([
-      [4, 1, 15],
-      [17, 2, 30],
-      [613, 3, 60],
-      [80004, 1, 15],
-    ])("rate limit (código %i) na tentativa %i volta em %i min", async (code, attempt, minutes) => {
-      claim([job("j1", { attempt_count: attempt, max_attempts: 5 })]);
-      const first = conn(C1);
-      account(first, conn(C2));
+      [4, 0, 15],
+      [17, 1, 30],
+      [613, 2, 60],
+      [80004, 0, 15],
+    ])(
+      "rate limit (código %i) com rate_limited_count %i volta em %i min sem gastar tentativa",
+      async (code, rateLimitedCount, minutes) => {
+        claim([
+          job("j1", { attempt_count: 2, max_attempts: 3, rate_limited_count: rateLimitedCount }),
+        ]);
+        const first = conn(C1);
+        account(first, conn(C2));
+        readsWith((path) =>
+          path === "/act_1/insights" ? metaError(code, "User request limit reached") : undefined,
+        );
+
+        const result = await processMetaSyncQueue(1, { random: () => 0 });
+
+        expect(result).toMatchObject({ completed: 0, retried: 1, failed: 0, rateLimited: 1 });
+        const park = jobUpdates().at(-1);
+        expect(park?.filters.map((filter) => filter.column)).toEqual(["id", "worker_id", "status"]);
+        expect(park?.payload).toMatchObject({
+          status: "retry",
+          attempt_count: 1,
+          rate_limited_count: rateLimitedCount + 1,
+          locked_at: null,
+          last_error: "User request limit reached",
+        });
+        expect(retryDelayMinutes()).toBe(minutes);
+        // Rate limit é leitura: sem trocar de chave nem revogar.
+        expect(first.status).toBe("connected");
+        expect(accessRow(C1).status).toBe("active");
+        expect(fetchedPaths().some((path) => path.endsWith(tokenOf(C2)))).toBe(false);
+        expect(db.tables.meta_ad_accounts[0].sync_status).toBe("queued");
+      },
+    );
+
+    it("rate limit espera o tempo pedido pela Meta quando ele é maior, mais a folga", async () => {
+      claim([job("j1", { rate_limited_count: 0 })]);
+      account(conn(C1));
       readsWith((path) =>
-        path === "/act_1/insights" ? metaError(code, "User request limit reached") : undefined,
+        path === "/act_1/insights"
+          ? {
+              ...(metaError(
+                80000,
+                "There have been too many calls from this ad-account",
+              ) as NonNullable<MetaReply>),
+              headers: {
+                "x-business-use-case-usage": JSON.stringify({
+                  "1": [
+                    { type: "ads_insights", call_count: 100, estimated_time_to_regain_access: 90 },
+                  ],
+                }),
+              },
+            }
+          : undefined,
       );
 
-      const result = await processMetaSyncQueue(1);
+      await processMetaSyncQueue(1, { random: () => 1 });
 
-      expect(result).toMatchObject({ completed: 0, retried: 1 });
-      expect(finalJob()).toMatchObject({ status: "retry" });
-      expect(retryDelayMinutes()).toBe(minutes);
-      // Rate limit é leitura: sem trocar de chave nem revogar.
-      expect(first.status).toBe("connected");
-      expect(accessRow(C1).status).toBe("active");
-      expect(fetchedPaths().some((path) => path.endsWith(tokenOf(C2)))).toBe(false);
+      // 90 min pedidos pela Meta, limitados a 60 min, + 20 % de folga.
+      expect(retryDelayMinutes()).toBe(72);
+      expect(finalJob()).toMatchObject({ status: "retry", rate_limited_count: 1 });
     });
+
+    it("a folga do rate limit fica entre 0 e 20 % da espera", async () => {
+      claim([job("j1", { rate_limited_count: 1 })]);
+      account(conn(C1));
+      readsWith((path) =>
+        path === "/act_1/insights" ? metaError(17, "User request limit reached") : undefined,
+      );
+
+      await processMetaSyncQueue(1, { random: () => 0.5 });
+
+      expect(retryDelayMinutes()).toBe(33);
+    });
+
+    it.each([
+      [1, 3, "retry", 15],
+      [2, 3, "retry", 30],
+      [3, 3, "failed", null],
+    ] as const)(
+      "depois de 3 rate limits, a tentativa %i/%i segue a regra normal (%s)",
+      async (attempt, maxAttempts, status, minutes) => {
+        claim([
+          job("j1", { attempt_count: attempt, max_attempts: maxAttempts, rate_limited_count: 3 }),
+        ]);
+        account(conn(C1));
+        readsWith((path) =>
+          path === "/act_1/insights"
+            ? metaError(4, "Application request limit reached")
+            : undefined,
+        );
+
+        const result = await processMetaSyncQueue(1, { random: () => 0 });
+
+        expect(result.rateLimited).toBe(0);
+        const payload = finalJob();
+        expect(payload).toMatchObject({ status });
+        expect(payload).not.toHaveProperty("attempt_count");
+        expect(payload).not.toHaveProperty("rate_limited_count");
+        if (minutes !== null) expect(retryDelayMinutes()).toBe(minutes);
+      },
+    );
 
     it("outro erro de leitura mantém a espera de 2^n min", async () => {
       claim([job("j1", { attempt_count: 2, max_attempts: 5 })]);
@@ -856,12 +1056,14 @@ describe("processMetaSyncQueue", () => {
         String(input).includes("/insights"),
       );
       expect(insightCalls).toHaveLength(3);
+      // Blocos de 30 dias vão pelo relatório assíncrono (MB2-07).
+      expect(graphMocks.asyncInsights).toHaveBeenCalledTimes(3);
       expect(finalJob()).toMatchObject({ status: "completed", rows_imported: 15 });
-      // O lock é renovado antes do job e entre os blocos.
+      // O lock é renovado antes do job, entre os blocos e a cada consulta do relatório.
       const renewals = jobUpdates().filter(
         (item) => Object.keys(item.payload as Row).join() === "locked_at",
       );
-      expect(renewals).toHaveLength(3);
+      expect(renewals).toHaveLength(6);
     });
 
     it("falha no segundo bloco falha o job; o primeiro bloco já gravado fica", async () => {
@@ -1023,6 +1225,237 @@ describe("processMetaSyncQueue", () => {
       consoleWarn.mockRestore();
     });
 
+    describe("MB2 worker: uso da cota e relatório assíncrono", () => {
+      const usageHeader = (pct: number) => ({
+        "x-app-usage": JSON.stringify({ call_count: pct, total_cputime: 1, total_time: 1 }),
+      });
+      const releases = () =>
+        jobUpdates().filter((item) => (item.payload as Row).status === "queued");
+
+      it("uso da cota ≥ 90 % termina o job e devolve os seguintes, sem checagem nem redescoberta", async () => {
+        claim([job("j1"), job("j2", { attempt_count: 2 }), job("j3")]);
+        account(conn(C1));
+        db.tables.meta_connections.push({
+          id: "c-stale",
+          tenant_id: "t1",
+          status: "connected",
+          auth_type: "system_user_token",
+          encrypted_access_token: "enc-stale",
+          accounts_discovered_at: null,
+          health_checked_at: null,
+        });
+        readsWith((path) =>
+          path === "/act_1/insights"
+            ? { body: { data: [{ ad_id: "ad1", spend: "1" }] }, headers: usageHeader(95) }
+            : undefined,
+        );
+
+        const result = await processMetaSyncQueue(3);
+
+        expect(result).toMatchObject({
+          completed: 1,
+          released: 2,
+          throttled: true,
+          healthChecked: 0,
+          discovered: 0,
+        });
+        expect(releases().map((item) => item.filters[0].value)).toEqual(["j2", "j3"]);
+        expect(releases()[0].payload).toEqual({
+          status: "queued",
+          locked_at: null,
+          attempt_count: 1,
+        });
+        expect(releases()[0].filters.map((filter) => filter.column)).toEqual([
+          "id",
+          "worker_id",
+          "status",
+        ]);
+        expect(db.calls.filter(isAccountLoad)).toHaveLength(1);
+        expect(
+          fetchedPaths().some(
+            (path) => path.startsWith("/debug_token") || path.startsWith("/me/adaccounts"),
+          ),
+        ).toBe(false);
+      });
+
+      it("uso abaixo de 90 % não devolve nada", async () => {
+        claim([job("j1"), job("j2")]);
+        account(conn(C1));
+        readsWith((path) =>
+          path === "/act_1/insights"
+            ? { body: { data: [{ ad_id: "ad1", spend: "1" }] }, headers: usageHeader(89) }
+            : undefined,
+        );
+
+        const result = await processMetaSyncQueue(2);
+
+        expect(result).toMatchObject({ completed: 2, released: 0, throttled: false });
+      });
+
+      it("uso ≥ 90 % num job que falha também devolve os seguintes", async () => {
+        claim([job("j1"), job("j2")]);
+        account(conn(C1));
+        readsWith((path) => {
+          if (path === "/act_1/ads") return { body: { data: [] }, headers: usageHeader(92) };
+          if (path === "/act_1/insights")
+            return metaError(2, "Service temporarily unavailable", 503);
+          return undefined;
+        });
+
+        const result = await processMetaSyncQueue(2);
+
+        expect(result).toMatchObject({ retried: 1, released: 1, throttled: true });
+      });
+
+      it("job que falha por rate limit devolve os seguintes, sem checagem nem redescoberta", async () => {
+        claim([job("j1"), job("j2", { attempt_count: 2 })]);
+        account(conn(C1));
+        db.tables.meta_connections.push({
+          id: "c-stale",
+          tenant_id: "t1",
+          status: "connected",
+          auth_type: "system_user_token",
+          encrypted_access_token: "enc-stale",
+          accounts_discovered_at: null,
+          health_checked_at: null,
+        });
+        readsWith((path) =>
+          path === "/act_1/insights" ? metaError(17, "User request limit reached") : undefined,
+        );
+
+        const result = await processMetaSyncQueue(2, { random: () => 0 });
+
+        expect(result).toMatchObject({
+          rateLimited: 1,
+          released: 1,
+          throttled: true,
+          healthChecked: 0,
+          discovered: 0,
+        });
+        expect(releases().map((item) => item.filters[0].value)).toEqual(["j2"]);
+        expect(db.calls.filter(isAccountLoad)).toHaveLength(1);
+        expect(
+          fetchedPaths().some(
+            (path) => path.startsWith("/debug_token") || path.startsWith("/me/adaccounts"),
+          ),
+        ).toBe(false);
+      });
+
+      it("rate limit já fora da cota de voltas (via tentativa normal) também devolve os seguintes", async () => {
+        claim([job("j1", { rate_limited_count: 3 }), job("j2")]);
+        account(conn(C1));
+        readsWith((path) =>
+          path === "/act_1/insights"
+            ? metaError(4, "Application request limit reached")
+            : undefined,
+        );
+
+        const result = await processMetaSyncQueue(2);
+
+        expect(result).toMatchObject({ rateLimited: 0, retried: 1, released: 1, throttled: true });
+      });
+
+      const notReady = () =>
+        new MetaApiError("O relatório da Meta ainda não ficou pronto.", {
+          type: "not_ready",
+          retryAfterMs: 5 * 60_000,
+        });
+
+      it("relatório assíncrono que não ficou pronto volta para a fila como rate limit, sem gastar tentativa", async () => {
+        claim([job("j1", { days: 28, attempt_count: 2, rate_limited_count: 0 })]);
+        account(conn(C1));
+        readsWith();
+        graphMocks.asyncInsights.mockImplementation(async () => {
+          throw notReady();
+        });
+
+        const result = await processMetaSyncQueue(1, { random: () => 0 });
+
+        expect(result).toMatchObject({ rateLimited: 1, retried: 1, failed: 0, throttled: false });
+        expect(finalJob()).toMatchObject({
+          status: "retry",
+          attempt_count: 1,
+          rate_limited_count: 1,
+          last_error: "O relatório da Meta ainda não ficou pronto.",
+        });
+        // max(5 min pedidos, 15 min × 2^0).
+        expect(retryDelayMinutes()).toBe(15);
+        expect(db.tables.meta_connections[0].status).toBe("connected");
+        expect(accessRow(C1).status).toBe("active");
+      });
+
+      it("relatório que não ficou pronto depois de 3 voltas segue a tentativa normal", async () => {
+        claim([job("j1", { days: 28, attempt_count: 1, max_attempts: 3, rate_limited_count: 3 })]);
+        account(conn(C1));
+        readsWith();
+        graphMocks.asyncInsights.mockImplementation(async () => {
+          throw notReady();
+        });
+
+        const result = await processMetaSyncQueue(1, { random: () => 0 });
+
+        expect(result).toMatchObject({ rateLimited: 0, retried: 1, throttled: false });
+        expect(finalJob()).toMatchObject({ status: "retry" });
+        expect(finalJob()).not.toHaveProperty("attempt_count");
+        expect(retryDelayMinutes()).toBe(2);
+      });
+
+      it("bloco de 28 dias vai pelo relatório assíncrono com onPoll renovando o lock; 7 dias, leitura direta", async () => {
+        claim([job("j1", { days: 28 }), job("j2", { days: 7 })]);
+        account(conn(C1));
+        readsWith();
+
+        const result = await processMetaSyncQueue(2);
+
+        expect(result).toMatchObject({ completed: 2, failed: 0 });
+        expect(graphMocks.asyncInsights).toHaveBeenCalledTimes(1);
+        const [path, tokenArg, params, opts] = graphMocks.asyncInsights.mock.calls[0];
+        expect(path).toBe("/act_1");
+        expect(tokenArg).toBe(tokenOf(C1));
+        expect(params).toMatchObject({ level: "ad", time_increment: "1" });
+        expect(params).not.toHaveProperty("access_token");
+        const range = JSON.parse(params.time_range) as { since: string; until: string };
+        expect((Date.parse(range.until) - Date.parse(range.since)) / 86_400_000 + 1).toBe(28);
+        expect(typeof opts?.onPoll).toBe("function");
+        // j1: antes do job + a consulta do relatório; j2: antes do job.
+        const renewals = jobUpdates().filter(
+          (item) => Object.keys(item.payload as Row).join() === "locked_at",
+        );
+        expect(renewals).toHaveLength(3);
+        expect(renewals.map((item) => item.filters.map((filter) => filter.column))).toEqual([
+          ["id", "worker_id", "status"],
+          ["id", "worker_id", "status"],
+          ["id", "worker_id", "status"],
+        ]);
+        // O token nunca vai na URL.
+        for (const [input] of fetchMock.mock.calls) {
+          expect(String(input)).not.toContain("access_token");
+          expect(String(input)).not.toContain(tokenOf(C1));
+        }
+      });
+
+      it("lock perdido durante o relatório assíncrono interrompe o job sem marcá-lo", async () => {
+        claim([job("j1", { days: 28 })]);
+        account(conn(C1));
+        readsWith();
+        graphMocks.asyncInsights.mockImplementation(async (path, accessToken, params, opts) => {
+          // Outro worker pega o job enquanto a Meta gera o relatório.
+          db.tables.meta_sync_jobs[0].worker_id = "meta-outro";
+          return graphMocks.defaultAsync(path, accessToken, params, opts);
+        });
+        const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        const result = await processMetaSyncQueue(1);
+
+        expect(result).toMatchObject({ completed: 0, failed: 0, retried: 0, released: 0 });
+        expect(db.rpcCalls.some((item) => item.name === "replace_meta_ad_metrics")).toBe(false);
+        expect(jobUpdates().every((item) => !("status" in (item.payload as Row)))).toBe(true);
+        expect(db.tables.meta_connections[0].status).toBe("connected");
+        expect(accessRow(C1).status).toBe("active");
+        consoleWarn.mockRestore();
+      });
+    });
+
     describe("orçamento do tick", () => {
       // Relógio do orçamento: avança quando o teste manda.
       function clock() {
@@ -1054,7 +1487,11 @@ describe("processMetaSyncQueue", () => {
         expect(result).toMatchObject({ completed: 1, released: 1, discovered: 0 });
         const [release] = releases();
         expect(release.payload).toEqual({ status: "queued", locked_at: null, attempt_count: 1 });
-        expect(release.filters.map((filter) => filter.column)).toEqual(["id", "worker_id"]);
+        expect(release.filters.map((filter) => filter.column)).toEqual([
+          "id",
+          "worker_id",
+          "status",
+        ]);
         expect(release.filters[0].value).toBe("j2");
         expect(db.calls.filter(isAccountLoad)).toHaveLength(1);
         expect(fetchedPaths().some((path) => path.startsWith("/me/adaccounts"))).toBe(false);
@@ -1101,6 +1538,60 @@ describe("processMetaSyncQueue", () => {
         const [release] = releases();
         expect(release.filters[0].value).toBe("j2");
         expect(release.payload).toEqual({ status: "queued", locked_at: null, attempt_count: 0 });
+      });
+
+      const updateIndex = (id: string, status: string) =>
+        jobUpdates().findIndex(
+          (item) => item.filters[0]?.value === id && (item.payload as Row).status === status,
+        );
+
+      it("primeiro job longo que passa do orçamento devolve já os não começados (entre blocos)", async () => {
+        claim([job("j1", { days: 90 }), job("j2", { attempt_count: 2 }), job("j3")]);
+        account(conn(C1));
+        const { state, now } = clock();
+        readsWith((path) => {
+          if (path === "/act_1/insights") state.t += 41_000;
+          return undefined;
+        });
+
+        const result = await processMetaSyncQueue(3, { now });
+
+        expect(result).toMatchObject({ completed: 1, released: 2 });
+        expect(releases().map((item) => item.filters[0].value)).toEqual(["j2", "j3"]);
+        expect(releases()[0].payload).toEqual({
+          status: "queued",
+          locked_at: null,
+          attempt_count: 1,
+        });
+        // Devolvidos antes de o j1 terminar, não depois.
+        expect(updateIndex("j2", "queued")).toBeLessThan(updateIndex("j1", "completed"));
+        expect(updateIndex("j3", "queued")).toBeLessThan(updateIndex("j1", "completed"));
+        // O j1 lê os 3 blocos; as renovações seguintes já não incluem j2/j3.
+        expect(db.rpcCalls.filter((item) => item.name === "replace_meta_ad_metrics")).toHaveLength(
+          3,
+        );
+        const lastRenew = jobUpdates()
+          .filter((item) => Object.keys(item.payload as Row).join() === "locked_at")
+          .at(-1);
+        expect(lastRenew?.filters[0]).toEqual({ op: "in", column: "id", value: ["j1"] });
+        expect(db.calls.filter(isAccountLoad)).toHaveLength(1);
+      });
+
+      it("primeiro job que passa do orçamento durante o relatório assíncrono devolve já os não começados", async () => {
+        claim([job("j1", { days: 28 }), job("j2")]);
+        account(conn(C1));
+        const { state, now } = clock();
+        readsWith();
+        graphMocks.asyncInsights.mockImplementation(async (path, accessToken, params, opts) => {
+          state.t += 41_000;
+          return graphMocks.defaultAsync(path, accessToken, params, opts);
+        });
+
+        const result = await processMetaSyncQueue(2, { now });
+
+        expect(result).toMatchObject({ completed: 1, released: 1 });
+        expect(updateIndex("j2", "queued")).toBeGreaterThan(-1);
+        expect(updateIndex("j2", "queued")).toBeLessThan(updateIndex("j1", "completed"));
       });
 
       it("o primeiro job nunca é interrompido pelo orçamento", async () => {
@@ -1392,7 +1883,7 @@ describe("MB1-02 conectar via RPC", () => {
     graph((path) => {
       if (path === "/me/permissions") return { body: { data: [] } };
       if (path === "/me/adaccounts") return { body: { data: [{ id: "act_1" }] } };
-      return { body: { id: "x" } };
+      return { body: { id: "app1" } };
     });
     await expect(call(connectMetaSystemUserTokenFor, { accessToken: TOKEN })).rejects.toThrow(
       "ads_read",
@@ -1559,6 +2050,7 @@ describe("MB1-06 redescoberta diária", () => {
       auth_type: "system_user_token",
       encrypted_access_token: `enc-${id}`,
       accounts_discovered_at: discoveredAt,
+      health_checked_at: new Date().toISOString(),
     });
     const transient = connection("cB", new Date(Date.now() - 3 * day).toISOString());
     const revoked = connection("cC", new Date(Date.now() - 2 * day).toISOString());
@@ -1627,6 +2119,7 @@ describe("MB1-06 redescoberta diária", () => {
     auth_type: "system_user_token",
     encrypted_access_token: `enc-${id}`,
     accounts_discovered_at: null,
+    health_checked_at: new Date().toISOString(),
     ...extra,
   });
 
@@ -1690,6 +2183,40 @@ describe("MB1-06 redescoberta diária", () => {
     consoleError.mockRestore();
   });
 
+  it("tick sobreposto: a chave registrada por outro tick depois da leitura não é relida", async () => {
+    const connection = stale("cO", { permissions_checked_at: null });
+    db.tables.meta_connections = [connection];
+    graph((path) =>
+      path === "/me/adaccounts" ? { body: { data: [{ id: "act_1" }] } } : undefined,
+    );
+    access.onOperate = () => {
+      connection.permissions_checked_at = new Date().toISOString();
+    };
+
+    const result = await processMetaSyncQueue(1);
+
+    expect(result.discovered).toBe(0);
+    expect(fetchedPaths().some((path) => path.startsWith("/me/adaccounts"))).toBe(false);
+    const claimStamp = db.calls.find(
+      (item) =>
+        item.table === "meta_connections" &&
+        item.action === "update" &&
+        "permissions_checked_at" in (item.payload as Row),
+    );
+    expect(claimStamp?.filters).toEqual(
+      expect.arrayContaining([
+        { op: "neq", column: "status", value: "disabled" },
+        {
+          op: "or",
+          column: "",
+          value: expect.stringMatching(
+            /^permissions_checked_at\.is\.null,permissions_checked_at\.lt\.\d{4}-/,
+          ),
+        },
+      ]),
+    );
+  });
+
   it("não ressuscita a chave desconectada durante a redescoberta", async () => {
     const connection = stale("cD");
     db.tables.meta_connections = [connection];
@@ -1734,5 +2261,647 @@ describe("validar não ressuscita chave desconectada", () => {
       (item) => item.table === "meta_connections" && item.action === "update",
     );
     expect(update?.filters).toContainEqual({ op: "neq", column: "status", value: "disabled" });
+  });
+});
+
+describe("MB2-03 conectar: debug_token", () => {
+  const TOKEN = `EAAG${"y".repeat(60)}`;
+
+  function connectGraph() {
+    graph((path) => {
+      if (path === "/me") return { body: { id: "su1", name: "Mídia Interna" } };
+      if (path === "/app") return { body: { id: "app1", name: "Betleads Ads" } };
+      if (path === "/me/permissions")
+        return { body: { data: [{ permission: "ads_read", status: "granted" }] } };
+      if (path === "/me/adaccounts") return { body: { data: [{ id: "act_1" }] } };
+      return undefined;
+    });
+    db.rpc.meta_connect_token = () => ({ connection_id: CONNECTION_ID, created: true });
+  }
+
+  it.each([
+    ["inválida", { is_valid: false }, "A chave de acesso é inválida ou expirou."],
+    [
+      "de usuário comum com expiração",
+      { type: "USER", expires_at: 1_798_761_600 },
+      "Use a chave de um Usuário do Sistema: chaves de usuário comum expiram em até 60 dias.",
+    ],
+    ["de outro app", { app_id: "app2" }, "A chave foi gerada por outro app da Meta."],
+  ] as const)("recusa a chave %s sem chamar o RPC", async (_label, debug, message) => {
+    connectGraph();
+    meta.debug = () => debugBody(debug);
+
+    await expect(call(connectMetaSystemUserTokenFor, { accessToken: TOKEN })).rejects.toThrow(
+      message,
+    );
+    expect(db.rpcCalls).toEqual([]);
+  });
+
+  it("debug_token com erro 190 é chave inválida", async () => {
+    connectGraph();
+    meta.debug = () => metaError(190, "Invalid OAuth access token");
+
+    await expect(call(connectMetaSystemUserTokenFor, { accessToken: TOKEN })).rejects.toThrow(
+      "A chave de acesso é inválida ou expirou.",
+    );
+    expect(db.rpcCalls).toEqual([]);
+  });
+
+  it.each([
+    ["tipo ausente", { type: undefined }],
+    ["usuário sem expiração", { type: "USER", expires_at: 0 }],
+    ["app não informado", { app_id: undefined }],
+  ] as const)("aceita a chave com %s", async (_label, debug) => {
+    connectGraph();
+    meta.debug = () => debugBody(debug);
+
+    await call(connectMetaSystemUserTokenFor, { accessToken: TOKEN });
+
+    expect(db.rpcCalls.map((item) => item.name)).toEqual(["meta_connect_token"]);
+  });
+
+  it.each([
+    [
+      "#100 (pede chave de app)",
+      () => metaError(100, "(#100) You must provide an app access token"),
+    ],
+    ["instabilidade (503)", () => metaError(2, "Service temporarily unavailable", 503)],
+  ] as const)(
+    "debug_token com erro que não é da chave (%s): conecta com tipo e expirações nulos",
+    async (_label, reply) => {
+      connectGraph();
+      meta.debug = () => reply();
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await call(connectMetaSystemUserTokenFor, { accessToken: TOKEN });
+
+      const rpc = db.rpcCalls.find((item) => item.name === "meta_connect_token");
+      expect(rpc?.args.p_connection).toMatchObject({
+        app_id: "app1",
+        token_type: null,
+        token_expires_at: null,
+        data_access_expires_at: null,
+      });
+      expect(consoleWarn).toHaveBeenCalledWith("[meta-connect debug_token]", expect.any(String));
+      consoleWarn.mockRestore();
+    },
+  );
+
+  it("grava tipo e expirações em p_connection e manda o token só no cabeçalho", async () => {
+    connectGraph();
+    meta.debug = () => debugBody({ expires_at: 0, data_access_expires_at: 1_798_761_600 });
+
+    await call(connectMetaSystemUserTokenFor, { accessToken: TOKEN });
+
+    const rpc = db.rpcCalls.find((item) => item.name === "meta_connect_token");
+    expect(rpc?.args.p_connection).toMatchObject({
+      token_type: "SYSTEM_USER",
+      token_expires_at: null,
+      data_access_expires_at: new Date(1_798_761_600 * 1000).toISOString(),
+    });
+    expect(JSON.stringify(db.rpcCalls)).not.toContain(TOKEN);
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(5);
+    for (const [input, init] of fetchMock.mock.calls) {
+      expect(String(input)).not.toContain("access_token");
+      expect(String(input).replace(/input_token=[^&]*/, "")).not.toContain(TOKEN);
+      expect(bearerOf(init)).toBe(TOKEN);
+    }
+  });
+});
+
+describe("MB2-03/04 testar a conexão", () => {
+  function connection(extra: Row = {}): Row {
+    return {
+      id: CONNECTION_ID,
+      tenant_id: "t1",
+      status: "connected",
+      app_id: "app1",
+      encrypted_access_token: "enc-c",
+      ...extra,
+    };
+  }
+  const okRoutes = (path: string): MetaReply => {
+    if (path === "/app") return { body: { id: "app1" } };
+    if (path === "/me/permissions")
+      return { body: { data: [{ permission: "ads_read", status: "granted" }] } };
+    if (path === "/me/adaccounts") return { body: { data: [{ id: "act_1" }] } };
+    return undefined;
+  };
+  const connectionUpdates = () =>
+    db.calls.filter((item) => item.table === "meta_connections" && item.action === "update");
+
+  it.each([
+    ["rate limit", () => metaError(17, "User request limit reached"), "User request limit reached"],
+    [
+      "instabilidade (503)",
+      () => metaError(2, "Service temporarily unavailable", 503),
+      "Service temporarily unavailable",
+    ],
+  ] as const)(
+    "erro de leitura (%s) devolve a mensagem e mantém o status",
+    async (_l, reply, message) => {
+      const row = connection();
+      db.tables.meta_connections = [row];
+      graph((path) => (path === "/me/adaccounts" ? reply() : okRoutes(path)));
+
+      await expect(
+        call(validateMetaConnectionFor, { connectionId: CONNECTION_ID }),
+      ).rejects.toThrow(message);
+
+      expect(row.status).toBe("connected");
+      expect(row.last_error).toBeUndefined();
+      expect(connectionUpdates()).toEqual([]);
+    },
+  );
+
+  it("falha de rede devolve a mensagem e mantém o status em erro", async () => {
+    const row = connection({ status: "error", last_error: "antes" });
+    db.tables.meta_connections = [row];
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError("fetch failed");
+    });
+
+    await expect(call(validateMetaConnectionFor, { connectionId: CONNECTION_ID })).rejects.toThrow(
+      "Não foi possível acessar a API da Meta.",
+    );
+
+    expect(row).toMatchObject({ status: "error", last_error: "antes" });
+    expect(connectionUpdates()).toEqual([]);
+  });
+
+  it("chave inválida no debug_token põe a conexão em erro", async () => {
+    const row = connection();
+    db.tables.meta_connections = [row];
+    graph(okRoutes);
+    meta.debug = () => debugBody({ is_valid: false });
+
+    await expect(call(validateMetaConnectionFor, { connectionId: CONNECTION_ID })).rejects.toThrow(
+      "A chave de acesso é inválida ou expirou.",
+    );
+
+    expect(row).toMatchObject({
+      status: "error",
+      last_error: "A chave de acesso é inválida ou expirou.",
+    });
+    expect(row.health_checked_at).toEqual(expect.any(String));
+    expect(connectionUpdates()[0].filters).toContainEqual({
+      op: "neq",
+      column: "status",
+      value: "disabled",
+    });
+  });
+
+  it("erro da chave numa chamada (190) põe em erro mesmo com debug_token falhando por leitura", async () => {
+    const row = connection();
+    db.tables.meta_connections = [row];
+    graph((path) => (path === "/app" ? metaError(190, "Session has expired") : okRoutes(path)));
+    meta.debug = () => metaError(2, "Service temporarily unavailable", 503);
+
+    await expect(call(validateMetaConnectionFor, { connectionId: CONNECTION_ID })).rejects.toThrow(
+      "Session has expired",
+    );
+
+    expect(row).toMatchObject({ status: "error", last_error: "Session has expired" });
+  });
+
+  it("debug_token recusado sem ser pela chave (#100): valida com tipo e expirações nulos", async () => {
+    const row = connection({ status: "error", token_type: "SYSTEM_USER" });
+    db.tables.meta_connections = [row];
+    graph(okRoutes);
+    meta.debug = () => metaError(100, "(#100) You must provide an app access token");
+    db.rpc.meta_upsert_connection_accounts = () => ({ accounts_total: 1 });
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await call(validateMetaConnectionFor, { connectionId: CONNECTION_ID });
+
+    expect(result).toMatchObject({ ok: true, accounts: 1 });
+    expect(row).toMatchObject({
+      status: "connected",
+      last_error: null,
+      token_type: null,
+      token_expires_at: null,
+      data_access_expires_at: null,
+    });
+    expect(consoleWarn).toHaveBeenCalledWith("[meta-connect debug_token]", expect.any(String));
+    consoleWarn.mockRestore();
+  });
+
+  it("sucesso grava tipo, expirações e health_checked_at", async () => {
+    const row = connection({ status: "error" });
+    db.tables.meta_connections = [row];
+    graph(okRoutes);
+    meta.debug = () => debugBody({ expires_at: 0, data_access_expires_at: 1_798_761_600 });
+    db.rpc.meta_upsert_connection_accounts = () => ({ accounts_total: 1 });
+
+    await call(validateMetaConnectionFor, { connectionId: CONNECTION_ID });
+
+    expect(row).toMatchObject({
+      status: "connected",
+      last_error: null,
+      token_type: "SYSTEM_USER",
+      token_expires_at: null,
+      data_access_expires_at: new Date(1_798_761_600 * 1000).toISOString(),
+    });
+    expect(row.health_checked_at).toEqual(expect.any(String));
+  });
+});
+
+describe("MB2-03/04 checagem de saúde das chaves", () => {
+  const hour = 60 * 60 * 1000;
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  function key(id: string, extra: Row = {}): Row {
+    return {
+      id,
+      tenant_id: "t1",
+      status: "connected",
+      auth_type: "system_user_token",
+      encrypted_access_token: `enc-${id}`,
+      accounts_discovered_at: new Date().toISOString(),
+      health_checked_at: null,
+      ...extra,
+    };
+  }
+  const debugTokens = () =>
+    fetchedPaths()
+      .filter((path) => path.startsWith("/debug_token?"))
+      .map((path) => path.split("?")[1]);
+
+  it("chave inválida vai para erro com a mensagem de revogada", async () => {
+    const row = key("cI");
+    db.tables.meta_connections = [row];
+    graph(() => undefined);
+    meta.debug = () => debugBody({ is_valid: false });
+
+    const result = await processMetaSyncQueue(1);
+
+    expect(result.healthChecked).toBe(1);
+    expect(row).toMatchObject({
+      status: "error",
+      last_error: "A chave foi revogada ou expirou. Gere uma nova no Business Manager.",
+    });
+    expect(row.health_checked_at).toEqual(expect.any(String));
+  });
+
+  it("chave válida grava tipo e expirações, sem reler as contas", async () => {
+    const row = key("cV");
+    db.tables.meta_connections = [row];
+    graph(() => undefined);
+    meta.debug = () => debugBody({ expires_at: 1_798_761_600, data_access_expires_at: 0 });
+
+    await processMetaSyncQueue(1);
+
+    expect(row).toMatchObject({
+      status: "connected",
+      token_type: "SYSTEM_USER",
+      token_expires_at: new Date(1_798_761_600 * 1000).toISOString(),
+      data_access_expires_at: null,
+    });
+    expect(Date.parse(String(row.health_checked_at))).toBeGreaterThan(Date.now() - 60_000);
+    expect(fetchedPaths().some((path) => path.startsWith("/me/adaccounts"))).toBe(false);
+  });
+
+  it("chave em erro que voltou a valer: relê as contas, volta a connected e não é relida de novo pela redescoberta", async () => {
+    const row = key("cR", {
+      status: "error",
+      last_error: "Session has expired",
+      accounts_discovered_at: null,
+      health_checked_at: ago(7 * hour),
+    });
+    db.tables.meta_connections = [row];
+    graph((path) =>
+      path === "/me/adaccounts" ? { body: { data: [{ id: "act_1", name: "SA 01" }] } } : undefined,
+    );
+    db.rpc.meta_upsert_connection_accounts = () => ({ accounts_total: 1 });
+
+    const result = await processMetaSyncQueue(1);
+
+    expect(result).toMatchObject({ healthChecked: 1, recovered: 1, discovered: 0 });
+    expect(row).toMatchObject({ status: "connected", last_error: null });
+    const upserts = db.rpcCalls.filter((item) => item.name === "meta_upsert_connection_accounts");
+    expect(upserts.map((item) => item.args.p_connection_id)).toEqual(["cR"]);
+    expect(fetchedPaths().filter((path) => path.startsWith("/me/adaccounts"))).toHaveLength(1);
+    const recover = db.calls.find(
+      (item) =>
+        item.table === "meta_connections" &&
+        item.action === "update" &&
+        (item.payload as Row).status === "connected",
+    );
+    expect(recover?.filters).toContainEqual({ op: "neq", column: "status", value: "disabled" });
+  });
+
+  it("chave em erro que segue sem contas continua em erro", async () => {
+    const row = key("cE", { status: "error", last_error: "antes" });
+    db.tables.meta_connections = [row];
+    graph((path) => (path === "/me/adaccounts" ? { body: { data: [] } } : undefined));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await processMetaSyncQueue(1);
+
+    expect(result.recovered).toBe(0);
+    expect(row.status).toBe("error");
+    expect(db.rpcCalls.some((item) => item.name === "meta_upsert_connection_accounts")).toBe(false);
+    consoleError.mockRestore();
+  });
+
+  it("erro de leitura no debug_token mantém o status e registra a checagem", async () => {
+    const row = key("cT");
+    db.tables.meta_connections = [row];
+    graph(() => undefined);
+    meta.debug = () => metaError(2, "Service temporarily unavailable", 503);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await processMetaSyncQueue(1);
+
+    expect(row.status).toBe("connected");
+    expect(row.health_checked_at).toEqual(expect.any(String));
+    consoleError.mockRestore();
+  });
+
+  it("debug_token recusado sem ser pela chave (#100) não muda o status nem dá a chave como saudável", async () => {
+    const ok = key("cOk", { token_type: "SYSTEM_USER", token_expires_at: null });
+    const broken = key("cErr", {
+      status: "error",
+      last_error: "antes",
+      accounts_discovered_at: new Date().toISOString(),
+      health_checked_at: ago(7 * hour),
+    });
+    db.tables.meta_connections = [ok, broken];
+    graph((path) =>
+      path === "/me/adaccounts" ? { body: { data: [{ id: "act_1" }] } } : undefined,
+    );
+    meta.debug = () => metaError(100, "(#100) You must provide an app access token");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await processMetaSyncQueue(1);
+
+    expect(result).toMatchObject({ healthChecked: 2, recovered: 0 });
+    expect(ok).toMatchObject({ status: "connected", token_type: "SYSTEM_USER" });
+    expect(broken).toMatchObject({ status: "error", last_error: "antes" });
+    // A tentativa fica registrada nas duas.
+    for (const row of [ok, broken]) {
+      expect(Date.parse(String(row.health_checked_at))).toBeGreaterThan(Date.now() - 60_000);
+    }
+    // Nenhuma releitura de contas pela checagem, nem gravação de tipo/expiração/status.
+    expect(fetchedPaths().some((path) => path.startsWith("/me/adaccounts"))).toBe(false);
+    const payloads = db.calls
+      .filter((item) => item.table === "meta_connections" && item.action === "update")
+      .map((item) => item.payload as Row);
+    expect(payloads.some((payload) => "token_type" in payload || "status" in payload)).toBe(false);
+    consoleError.mockRestore();
+  });
+
+  it("tick sobreposto: a chave registrada por outro tick depois da leitura não é conferida", async () => {
+    const row = key("cS");
+    db.tables.meta_connections = [row];
+    graph(() => undefined);
+    access.onOperate = () => {
+      row.health_checked_at = new Date().toISOString();
+    };
+
+    const result = await processMetaSyncQueue(1);
+
+    expect(result.healthChecked).toBe(0);
+    expect(debugTokens()).toEqual([]);
+    const claimStamp = db.calls.find(
+      (item) =>
+        item.table === "meta_connections" &&
+        item.action === "update" &&
+        "health_checked_at" in (item.payload as Row),
+    );
+    expect(claimStamp?.filters).toEqual(
+      expect.arrayContaining([
+        { op: "neq", column: "status", value: "disabled" },
+        {
+          op: "or",
+          column: "",
+          value: expect.stringMatching(
+            /^health_checked_at\.is\.null,health_checked_at\.lt\.\d{4}-/,
+          ),
+        },
+      ]),
+    );
+  });
+
+  it("cadência: 24 h para a conectada, 6 h para a em erro; desconectada nunca", async () => {
+    const disabled = key("cDis", { status: "disabled" });
+    db.tables.meta_connections = [
+      key("cOk7", { health_checked_at: ago(7 * hour) }),
+      key("cOk25", { health_checked_at: ago(25 * hour) }),
+      key("cErr7", { status: "error", health_checked_at: ago(7 * hour) }),
+      key("cErr5", { status: "error", health_checked_at: ago(5 * hour) }),
+      disabled,
+    ];
+    graph((path) =>
+      path === "/me/adaccounts" ? metaError(1, "An unknown error occurred", 500) : undefined,
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await processMetaSyncQueue(1);
+
+    expect(result.healthChecked).toBe(2);
+    expect(new Set(debugTokens())).toEqual(new Set(["plain:enc-cOk25", "plain:enc-cErr7"]));
+    expect(disabled).toMatchObject({ status: "disabled", health_checked_at: null });
+    const touchedIds = db.calls
+      .filter((item) => item.table === "meta_connections" && item.action === "update")
+      .map((item) => item.filters.find((filter) => filter.column === "id")?.value);
+    expect(touchedIds).not.toContain("cDis");
+    // A checagem lê só chaves não desconectadas de Usuário do Sistema.
+    const lookup = db.calls.find(
+      (item) =>
+        item.table === "meta_connections" &&
+        item.action === "select" &&
+        item.filters.some((filter) => filter.op === "neq" && filter.column === "status"),
+    );
+    expect(lookup?.filters).toEqual(
+      expect.arrayContaining([
+        { op: "neq", column: "status", value: "disabled" },
+        { op: "eq", column: "auth_type", value: "system_user_token" },
+      ]),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("não começa checagem depois do orçamento do tick", async () => {
+    db.tables.meta_connections = [key("cB")];
+    graph(() => undefined);
+    const state = { t: Date.now() };
+    db.rpc.claim_meta_sync_jobs = () => {
+      state.t += 41_000;
+      return [];
+    };
+
+    const result = await processMetaSyncQueue(1, { now: () => state.t });
+
+    expect(result.healthChecked).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("MB2-06 política de agendamento", () => {
+  // 03:30 e 10:00 em Brasília (UTC-3).
+  const AT_0330 = Date.parse("2026-10-30T06:30:00Z");
+  const AT_1000 = Date.parse("2026-10-30T13:00:00Z");
+  const iso = (at: number, minusMs: number) => new Date(at - minusMs).toISOString();
+  const minute = 60_000;
+  const runInserts = () =>
+    db.calls.filter((item) => item.table === "meta_sync_runs" && item.action === "insert");
+
+  beforeEach(() => {
+    db.tables.meta_ad_account_access = [eligibleAccess("a1", "t1")];
+  });
+
+  it("às 03:30 cria o run agendado de 28 dias", async () => {
+    const result = await processMetaSyncQueue(1, { now: () => AT_0330 });
+
+    expect(result.scheduled).toBe(1);
+    expect(runInserts().map((item) => item.payload)).toEqual([
+      expect.objectContaining({ trigger_type: "scheduled", days: 28, tenant_id: "t1" }),
+    ]);
+    const jobs = db.calls.find(
+      (item) => item.table === "meta_sync_jobs" && item.action === "insert",
+    );
+    expect(jobs?.payload).toEqual([expect.objectContaining({ account_id: "a1", days: 28 })]);
+  });
+
+  it("às 03:30, com o de 28 dias feito há 10 h, cai no de 3 dias", async () => {
+    db.tables.meta_sync_runs = [
+      {
+        id: "r28",
+        tenant_id: "t1",
+        trigger_type: "scheduled",
+        days: 28,
+        status: "completed",
+        created_at: iso(AT_0330, 10 * 60 * minute),
+      },
+    ];
+
+    await processMetaSyncQueue(1, { now: () => AT_0330 });
+
+    expect(runInserts().map((item) => (item.payload as Row).days)).toEqual([3]);
+  });
+
+  it("às 03:30, um agendado de 3 dias não conta como o de 28", async () => {
+    db.tables.meta_sync_runs = [
+      {
+        id: "r3",
+        tenant_id: "t1",
+        trigger_type: "scheduled",
+        days: 3,
+        status: "completed",
+        created_at: iso(AT_0330, 10 * minute),
+      },
+    ];
+
+    await processMetaSyncQueue(1, { now: () => AT_0330 });
+
+    expect(runInserts().map((item) => (item.payload as Row).days)).toEqual([28]);
+  });
+
+  it("às 10:00 cria o de 3 dias se não houve agendado nos últimos 55 min", async () => {
+    db.tables.meta_sync_runs = [
+      {
+        id: "r-old",
+        tenant_id: "t1",
+        trigger_type: "scheduled",
+        days: 3,
+        status: "completed",
+        created_at: iso(AT_1000, 56 * minute),
+      },
+    ];
+
+    const result = await processMetaSyncQueue(1, { now: () => AT_1000 });
+
+    expect(result.scheduled).toBe(1);
+    expect(runInserts().map((item) => (item.payload as Row).days)).toEqual([3]);
+  });
+
+  it("às 10:00 não cria nada se houve agendado há 30 min", async () => {
+    db.tables.meta_sync_runs = [
+      {
+        id: "r-new",
+        tenant_id: "t1",
+        trigger_type: "scheduled",
+        days: 3,
+        status: "completed",
+        created_at: iso(AT_1000, 30 * minute),
+      },
+    ];
+
+    const result = await processMetaSyncQueue(1, { now: () => AT_1000 });
+
+    expect(result.scheduled).toBe(0);
+    expect(runInserts()).toEqual([]);
+  });
+
+  it("o run manual recente não bloqueia o agendado", async () => {
+    db.tables.meta_sync_runs = [
+      {
+        id: "r-manual",
+        tenant_id: "t1",
+        trigger_type: "manual",
+        days: 7,
+        status: "completed",
+        created_at: iso(AT_1000, 5 * minute),
+      },
+    ];
+
+    const result = await processMetaSyncQueue(1, { now: () => AT_1000 });
+
+    expect(result.scheduled).toBe(1);
+    expect(runInserts().map((item) => (item.payload as Row).days)).toEqual([3]);
+  });
+
+  it("um run ativo (não backfill) bloqueia o agendado; o backfill ativo não", async () => {
+    db.tables.meta_sync_runs = [
+      {
+        id: "r-active",
+        tenant_id: "t1",
+        trigger_type: "manual",
+        days: 7,
+        status: "running",
+        created_at: iso(AT_0330, 2 * 60 * minute),
+      },
+    ];
+
+    const blocked = await processMetaSyncQueue(1, { now: () => AT_0330 });
+
+    expect(blocked.scheduled).toBe(0);
+    expect(runInserts()).toEqual([]);
+
+    db.calls = [];
+    db.tables.meta_sync_runs = [
+      {
+        id: "r-backfill",
+        tenant_id: "t1",
+        trigger_type: "backfill",
+        days: 90,
+        status: "running",
+        created_at: iso(AT_0330, 10 * minute),
+      },
+    ];
+
+    const free = await processMetaSyncQueue(1, { now: () => AT_0330 });
+
+    expect(free.scheduled).toBe(1);
+    expect(runInserts().map((item) => (item.payload as Row).days)).toEqual([28]);
+  });
+});
+
+describe("tick", () => {
+  it("o cron processa até 6 jobs por tick", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/routes/api/public/meta-sync/tick.ts"),
+      "utf8",
+    );
+    expect(source).toContain("processMetaSyncQueue(6)");
+  });
+});
+
+describe("token fora da URL", () => {
+  it("meta.functions não monta parâmetro access_token", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/lib/meta.functions.ts"), "utf8");
+    // `encrypted_access_token` é a coluna do token cifrado, não parâmetro da Meta.
+    expect(source).not.toMatch(/\baccess_token\s*:/);
+    expect(source).not.toMatch(/["']access_token["']/);
   });
 });

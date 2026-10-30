@@ -13,7 +13,7 @@ export const Route = createFileRoute("/api/public/meta-sync/tick")({
         }
 
         try {
-          const result = await processMetaSyncQueue(2);
+          const result = await processMetaSyncQueue(6);
           return Response.json({ ok: true, ...result });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Falha no worker Meta.";
