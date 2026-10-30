@@ -159,6 +159,12 @@ export const EXPERT_SECTIONS: NavSection[] = [
       link("Modelos", "/expert/modelos", FileText),
     ],
   },
+  {
+    // Same /campanhas and /publicos screens as the house, adapted to the
+    // expert (campaign-data-source.ts): own campaigns and audiences only.
+    label: "Envios",
+    items: [link("Campanhas", "/campanhas", Megaphone), link("Públicos", "/publicos", PieChart)],
+  },
 ];
 
 /** Lives in the account menu (header avatar). */
@@ -171,10 +177,7 @@ export const GROUP_SECTIONS: NavSection[] = [
   { items: [link("Financeiro do grupo", "/grupo", Trophy)] },
   {
     label: "Grupo",
-    items: [
-      link("Metas", "/grupo/metas", Target),
-      link("Pessoas", "/grupo/pessoas", Users),
-    ],
+    items: [link("Metas", "/grupo/metas", Target), link("Pessoas", "/grupo/pessoas", Users)],
   },
   { items: [link("Voltar às casas", "/", Home)] },
 ];
@@ -210,6 +213,8 @@ export const EXPERT_MOBILE_TABS: MobileTab[] = [
   { title: "Leads", to: "/expert/leads", icon: Users },
   { title: "Rendimento", to: "/expert/rendimento", icon: TrendingUp },
   { title: "Modelos", to: "/expert/modelos", icon: FileText },
+  // One tab for both shared screens: Públicos is reached from inside Campanhas.
+  { title: "Envios", to: "/campanhas", icon: Megaphone, alsoActiveOn: ["/publicos"] },
 ];
 
 export const MOBILE_TABS: MobileTab[] = [
@@ -385,15 +390,30 @@ export function visibleSections(
  * account-only route can be added here without touching the redirect.
  */
 export function isExpertAllowedPath(pathname: string): boolean {
-  return isPathUnder(pathname, "/expert");
+  return isPathUnder(pathname, "/expert") || isExpertSharedPath(pathname);
+}
+
+/**
+ * House screens the expert also uses, role-adapted (campaign-data-source.ts):
+ * the campaigns hub (the composer is a dialog inside it) and Públicos. Only
+ * the screens themselves: house subpages such as the campaign report
+ * (/campanhas/$id/relatorio) still send the expert back to /expert.
+ */
+export const EXPERT_SHARED_PATHS = ["/campanhas", "/publicos"] as const;
+
+export function isExpertSharedPath(pathname: string): boolean {
+  const clean = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  return (EXPERT_SHARED_PATHS as readonly string[]).includes(clean);
 }
 
 /**
  * What the shell's main area shows. Until the active house's role is known,
  * a house route renders nothing: otherwise a pure expert landing on it would
  * mount that page (and fire its house server functions) before the redirect
- * to /expert. Expert routes render right away; once the role is known (or
- * its lookup failed, role null), every role behaves as before.
+ * to /expert. Expert routes render right away; the shared screens
+ * (/campanhas, /publicos) also wait for the role, since it decides which
+ * data source they use. Once the role is known (or its lookup failed, role
+ * null), every role behaves as before.
  */
 export type ShellContentState = "waiting_role" | "redirect_expert" | "render";
 
@@ -402,9 +422,9 @@ export function shellContentState(
   roleLoading: boolean,
   pathname: string,
 ): ShellContentState {
-  if (isExpertAllowedPath(pathname)) return "render";
+  if (isPathUnder(pathname, "/expert")) return "render";
   if (roleLoading) return "waiting_role";
-  if (role === "expert") return "redirect_expert";
+  if (role === "expert" && !isExpertAllowedPath(pathname)) return "redirect_expert";
   return "render";
 }
 

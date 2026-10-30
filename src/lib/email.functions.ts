@@ -643,6 +643,8 @@ function campanhaRowToUI(r: any) {
     cliques: stats.cliques ?? 0,
     descadastros: stats.descadastros ?? 0,
     falhas: stats.falhas ?? 0,
+    /** A batched send is between two batches (shown as "Enviando em lotes"). */
+    loteEmAndamento: stats.lote_em_andamento === true,
     data: new Date(r.created_at).toLocaleDateString("pt-BR"),
     trackLinks: r.track_links !== false,
   };

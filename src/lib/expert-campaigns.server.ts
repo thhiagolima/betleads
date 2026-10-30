@@ -1029,6 +1029,8 @@ export type ExpertCampaignListItem = {
   sentCount: number;
   failedCount: number;
   estimatedCost: number | null;
+  /** E-mail: a batched send is between two batches (`stats.lote_em_andamento`). */
+  batchInProgress?: boolean;
   expertId: string;
   /** Filled in the admin list. */
   expertNome?: string;
@@ -1053,6 +1055,7 @@ function toListItem(channel: ExpertChannel, r: any): ExpertCampaignListItem {
     ),
     failedCount: Number(channel === "email" ? (stats.falhas ?? 0) : (r.failed_count ?? 0)),
     estimatedCost: r.expert_estimated_cost == null ? null : Number(r.expert_estimated_cost),
+    batchInProgress: channel === "email" && (r.stats as { lote_em_andamento?: boolean } | null)?.lote_em_andamento === true,
     expertId: r.expert_id,
   };
 }

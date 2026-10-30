@@ -72,11 +72,79 @@ export function isPausedCampaignStatus(status: string | null | undefined): boole
   return PAUSED_STATUSES.includes((status ?? "").trim().toLowerCase());
 }
 
+/** Prefix of every "monthly cap reached" pause reason (wallet, SMS, e-mail, voice). */
+export const EXPERT_CAP_PAUSE_PREFIX = "Teto mensal do expert atingido";
+
+/** Extra context some statuses need to be told apart. */
+export type ChannelOperationContext = {
+  /** Why the campaign stopped (`last_error` / `blocked_reason`). */
+  lastError?: string | null;
+  /** E-mail: a batched send is between two batches (`stats.lote_em_andamento`). */
+  batchInProgress?: boolean;
+};
+
+/** True when the pause/stop reason is the expert's monthly cap. */
+export function isExpertCapReason(reason: string | null | undefined): boolean {
+  return (reason ?? "").trim().startsWith(EXPERT_CAP_PAUSE_PREFIX);
+}
+
 export function getChannelOperationState(
   status: string | null | undefined,
   channel: ChannelOperation,
+  context: ChannelOperationContext = {},
 ): ChannelOperationState {
   const normalized = (status ?? "").trim().toLowerCase();
+
+  if (normalized === "aguardando_aprovacao") {
+    return {
+      label: "Aguardando aprovação",
+      description: "A campanha foi enviada ao admin da casa e só sai depois de aprovada.",
+      nextAction: "Aguarde a aprovação; o agendamento vale a partir dela.",
+      actionLabel: "Ver campanhas",
+      actionTo: "/campanhas",
+      tone: "border-info/30 bg-info/10 text-info",
+    };
+  }
+
+  if (normalized === "recusada") {
+    return {
+      label: "Recusada",
+      description: "O admin da casa recusou a campanha; nada foi enviado.",
+      nextAction: "Veja o motivo da recusa e crie uma nova campanha.",
+      actionLabel: "Ver campanhas",
+      actionTo: "/campanhas",
+      tone: "border-danger/30 bg-danger/10 text-danger",
+    };
+  }
+
+  if (
+    ["paused", "pausada", "paused_limit"].includes(normalized) &&
+    isExpertCapReason(context.lastError)
+  ) {
+    return {
+      label: "Pausada pelo teto",
+      description: "O teto mensal de envios do expert foi atingido durante o envio.",
+      nextAction: "O envio volta quando o mês virar ou o admin aumentar o teto.",
+      actionLabel: "Ver campanhas",
+      actionTo: "/campanhas",
+      tone: "border-warning/30 bg-warning/10 text-warning",
+    };
+  }
+
+  if (
+    channel === "email" &&
+    context.batchInProgress &&
+    ["agendada", "enviando"].includes(normalized)
+  ) {
+    return {
+      label: "Enviando em lotes",
+      description: "A campanha é enviada em lotes; o próximo lote sai automaticamente.",
+      nextAction: "Acompanhe os envios no relatório da campanha.",
+      actionLabel: "Ver histórico",
+      actionTo: HISTORY_DESTINATION[channel],
+      tone: "border-info/30 bg-info/10 text-info",
+    };
+  }
 
   if (["rascunho", "draft"].includes(normalized)) {
     return {
@@ -164,9 +232,16 @@ export function getChannelOperationState(
   }
 
   if (
-    ["enviando", "running", "processing", "dispatched", "in_progress", "waiting_provider"].includes(
-      normalized,
-    )
+    [
+      "enviando",
+      "running",
+      "processing",
+      "dispatched",
+      "in_progress",
+      "waiting_provider",
+      // Expert voice campaign: approved, its calls are in the queue.
+      "enfileirada",
+    ].includes(normalized)
   ) {
     return {
       label: "Enviando",
