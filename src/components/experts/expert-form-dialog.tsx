@@ -3,7 +3,7 @@
 // unassigned affiliate ids), send mode, monthly cap and claim deadline.
 // Saves through `saveExpert` (Task 6); the demo tenant's refusal reaches the
 // caller as a toast via the mutation's `onError`.
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { X } from "lucide-react";
@@ -28,7 +28,13 @@ import {
 } from "@/components/ui/select";
 import { saveExpert } from "@/lib/experts-admin.functions";
 import type { ExpertAdminRow } from "@/lib/experts-admin.functions";
-import { EXPERTS_QUERY_KEY, UNASSIGNED_AFFILIATES_QUERY_KEY } from "@/components/experts/experts-query";
+import {
+  EXPERT_USAGE_ADMIN_QUERY_KEY,
+  EXPERTS_QUERY_KEY,
+  UNASSIGNED_AFFILIATES_QUERY_KEY,
+} from "@/components/experts/experts-query";
+import { useExpertUsageAdmin } from "@/components/experts/use-expert-campaigns-admin";
+import { formatBrlInput, parseBrlInput } from "@/lib/brl-input";
 
 type ExpertTipo = "restrito" | "total";
 type ExpertEnvioModo = "livre" | "aprovacao";
@@ -53,12 +59,12 @@ function nomeError(nome: string): string | null {
   return null;
 }
 
+/** pt-BR: "1.500,00" → 1500 (parseBrlInput). Empty = sem teto, valid. */
 function tetoMensalError(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null; // empty = sem teto, valid
-  const value = Number(trimmed.replace(",", "."));
+  const value = parseBrlInput(raw);
+  if (value === null) return null;
   if (!Number.isFinite(value) || value < 0) {
-    return "Informe um valor válido (ou deixe vazio para sem teto).";
+    return "Informe um valor como 1.500,00 (ou deixe vazio para sem teto).";
   }
   return null;
 }
@@ -89,6 +95,17 @@ export function ExpertFormDialog({
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveExpert);
+  const fieldId = useId();
+  const ids = {
+    nome: `${fieldId}-nome`,
+    envio: `${fieldId}-envio`,
+    envioHelp: `${fieldId}-envio-help`,
+    envioPending: `${fieldId}-envio-pending`,
+    teto: `${fieldId}-teto`,
+    tetoHelp: `${fieldId}-teto-help`,
+    tetoError: `${fieldId}-teto-error`,
+    prazo: `${fieldId}-prazo`,
+  };
 
   const [nome, setNome] = useState("");
   const [tipo, setTipo] = useState<ExpertTipo>("restrito");
@@ -107,9 +124,15 @@ export function ExpertFormDialog({
     setAffiliateInput("");
     setAffiliateHint(null);
     setEnvioModo(expert?.envioModo ?? "livre");
-    setTetoMensal(expert?.tetoMensal != null ? String(expert.tetoMensal) : "");
+    setTetoMensal(formatBrlInput(expert?.tetoMensal));
     setAssumirPrazoDias(String(expert?.assumirPrazoDias ?? 3));
   }, [open, expert, initialAffiliateId]);
+
+  // Com aprovação → Livre não libera as pendentes: avisa quantas continuam na fila.
+  const leavingApproval =
+    open && !!expert && expert.envioModo === "aprovacao" && envioModo === "livre";
+  const usageQuery = useExpertUsageAdmin(expert?.id ?? null, { enabled: leavingApproval });
+  const pendingApprovals = leavingApproval ? (usageQuery.data?.items[0]?.pendentes ?? 0) : 0;
 
   const nomeHint = nomeError(nome);
   const tetoHint = tetoMensalError(tetoMensal);
@@ -123,7 +146,7 @@ export function ExpertFormDialog({
 
   const save = useMutation({
     mutationFn: () => {
-      const teto = tetoMensal.trim() ? Number(tetoMensal.trim().replace(",", ".")) : null;
+      const teto = parseBrlInput(tetoMensal);
       const prazo = Number(assumirPrazoDias.trim());
       return saveFn({
         data: {
@@ -141,6 +164,7 @@ export function ExpertFormDialog({
       toast.success(expert ? "Expert atualizado" : "Expert cadastrado");
       qc.invalidateQueries({ queryKey: EXPERTS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: UNASSIGNED_AFFILIATES_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: EXPERT_USAGE_ADMIN_QUERY_KEY });
       onOpenChange(false);
     },
     onError: (error: Error) => toast.error(error.message),
@@ -185,8 +209,9 @@ export function ExpertFormDialog({
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Nome</Label>
+            <Label htmlFor={ids.nome}>Nome</Label>
             <Input
+              id={ids.nome}
               value={nome}
               onChange={(e) => setNome(e.target.value)}
               placeholder="ex: Queiroz"
@@ -268,40 +293,80 @@ export function ExpertFormDialog({
             )}
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Envio de campanhas</Label>
-              <Select
-                value={envioModo}
-                onValueChange={(value) => setEnvioModo(value as ExpertEnvioModo)}
+          <div className="space-y-2">
+            <Label htmlFor={ids.envio}>Envio de campanhas</Label>
+            <Select
+              value={envioModo}
+              onValueChange={(value) => setEnvioModo(value as ExpertEnvioModo)}
+            >
+              <SelectTrigger
+                id={ids.envio}
+                aria-describedby={
+                  pendingApprovals > 0 ? `${ids.envioHelp} ${ids.envioPending}` : ids.envioHelp
+                }
               >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="livre">Livre</SelectItem>
-                  <SelectItem value="aprovacao">Com aprovação</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Teto mensal (R$)</Label>
-              <Input
-                inputMode="decimal"
-                value={tetoMensal}
-                onChange={(e) => setTetoMensal(e.target.value)}
-                placeholder="vazio = sem teto"
-              />
-              {tetoHint && <p className="text-xs text-destructive">{tetoHint}</p>}
-            </div>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="livre">Livre</SelectItem>
+                <SelectItem value="aprovacao">Com aprovação</SelectItem>
+              </SelectContent>
+            </Select>
+            <p id={ids.envioHelp} className="text-xs text-muted-foreground">
+              Livre: as campanhas do expert disparam direto. Com aprovação: cada campanha fica
+              pendente até você aprovar ou recusar.
+            </p>
+            {pendingApprovals > 0 && (
+              <p id={ids.envioPending} className="text-xs text-warning">
+                {pendingApprovals === 1
+                  ? "1 campanha aguardando aprovação continua pendente"
+                  : `${pendingApprovals} campanhas aguardando aprovação continuam pendentes`}
+                : aprove ou recuse na aba Campanhas do expert.
+              </p>
+            )}
           </div>
-          <p className="text-xs text-muted-foreground">
-            Vale para as campanhas e fluxos do expert.
-          </p>
 
           <div className="space-y-2">
-            <Label>Prazo para assumir lead (dias)</Label>
+            <Label htmlFor={ids.teto}>Teto mensal</Label>
+            <div className="relative">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground"
+              >
+                R$
+              </span>
+              <Input
+                id={ids.teto}
+                inputMode="decimal"
+                className="pl-9"
+                value={tetoMensal}
+                onChange={(e) => setTetoMensal(e.target.value)}
+                onBlur={() => {
+                  const value = parseBrlInput(tetoMensal);
+                  if (value !== null && Number.isFinite(value) && value >= 0)
+                    setTetoMensal(formatBrlInput(value));
+                }}
+                placeholder="Sem teto"
+                aria-invalid={!!tetoHint}
+                aria-describedby={tetoHint ? `${ids.tetoHelp} ${ids.tetoError}` : ids.tetoHelp}
+              />
+            </div>
+            <p id={ids.tetoHelp} className="text-xs text-muted-foreground">
+              Soma de SMS, e-mail e voz no mês, pelo preço cobrado da casa. Ao atingir, os envios do
+              expert param e você é avisado. Vazio = sem limite; 0 = bloqueia os envios.
+            </p>
+            {tetoHint && (
+              <p id={ids.tetoError} className="text-xs text-destructive">
+                {tetoHint}
+              </p>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">Vale para as campanhas do expert.</p>
+
+          <div className="space-y-2">
+            <Label htmlFor={ids.prazo}>Prazo para assumir lead (dias)</Label>
             <Input
+              id={ids.prazo}
               type="number"
               min={PRAZO_MIN}
               max={PRAZO_MAX}
