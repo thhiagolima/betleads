@@ -193,4 +193,15 @@ export type DateRange = { from: string; to: string };
 
 export type PeriodPreset = "today" | "yesterday" | "7d" | "month" | "custom";
 
-export type CompareMode = "previous" | "same_weekday_last_week" | "last_week";
+/**
+ * "previous" is the window right before (the previous month for a month);
+ * "same_weekday_last_week" and "last_week" shift by 7 days (kept for
+ * compatibility); "same_period_last_year" shifts by one year; "none" has no
+ * comparison window.
+ */
+export type CompareMode =
+  | "previous"
+  | "same_weekday_last_week"
+  | "last_week"
+  | "same_period_last_year"
+  | "none";

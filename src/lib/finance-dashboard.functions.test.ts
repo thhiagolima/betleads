@@ -1106,7 +1106,7 @@ describe("monthly GGR total in the dashboard", () => {
       compare: "previous",
       preset: "custom",
     });
-    expect(dashboard.compareRange.from).toBe("2025-03-10");
+    expect(dashboard.compareRange?.from).toBe("2025-03-10");
     expect(dashboard.totals.previous.ggr).toBe(500);
     expect(dashboard.totals.previous.ggrEstimated).toBe(true);
   });
@@ -1773,9 +1773,75 @@ describe("fetch span", () => {
     });
 
     expect(dashboard.months[0].month).toBe("2025-11");
-    expect(dashboard.compareRange.from <= "2025-04-10").toBe(true);
+    expect((dashboard.compareRange?.from ?? "") <= "2025-04-10").toBe(true);
     const fetchedFrom = financeDaysCalls.map((call) => String(call._from)).sort()[0];
-    expect(fetchedFrom).toBe(dashboard.compareRange.from);
+    expect(fetchedFrom).toBe(dashboard.compareRange?.from);
     expect(dashboard.totals.previous.cashResult).toBe(400);
+  });
+});
+
+describe("comparison modes", () => {
+  const houseA = { kind: "tenant" as const, tenantId: HOUSE_A };
+
+  it("none fetches no previous window and returns an empty previous", async () => {
+    // A ~10-month range: with "previous" its comparison would reach 2025-03.
+    const range = { from: "2026-01-01", to: "2026-10-24" };
+    financeDayRows.push(
+      complete(HOUSE_A, "2025-04-10", 500, 100),
+      complete(HOUSE_A, "2026-09-10", 300, 100),
+      complete(HOUSE_A, "2026-10-10", 200, 50),
+    );
+    activityRows.push({ tenant_id: HOUSE_A, metric_date: "2025-04-10", depositors: 3 });
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2025-04-10", amount: 7 });
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: houseA,
+      range,
+      compare: "none",
+      preset: "custom",
+    });
+
+    expect(dashboard.compareRange).toBeNull();
+    // Only the 12-month series and the current window are read.
+    const fetchedFrom = financeDaysCalls.map((call) => String(call._from)).sort()[0];
+    expect(fetchedFrom).toBe("2025-11-01");
+    expect(dashboard.totals.previous.days).toBe(0);
+    expect(dashboard.totals.previous.cashResult).toBe(0);
+    expect(dashboard.totals.previous.depositAmount).toBe(0);
+    expect(dashboard.totals.previous.betleadsFee).toBeNull();
+    expect(dashboard.tenants[0].previous.days).toBe(0);
+    expect(dashboard.tenants[0].previous.cashResult).toBe(0);
+    expect(dashboard.kpis.previous.sendCost).toBe(0);
+    expect(dashboard.sends.every((line) => line.previousAmount === null)).toBe(true);
+    // The current window and the ROI reference are unaffected.
+    expect(dashboard.totals.current.cashResult).toBe(350);
+    expect(dashboard.roiReference.range).toEqual({ from: "2026-09-01", to: "2026-09-24" });
+    expect(dashboard.roiReference.roi).toBe(2);
+  });
+
+  it("same_period_last_year of the Mês preset is the same days a year before, with its fee", async () => {
+    financeDayRows.push(complete(HOUSE_A, "2025-10-05", 900, 100));
+    feeRows.push(
+      { tenant_id: HOUSE_A, month: "2026-10-01", amount: 400 },
+      { tenant_id: HOUSE_A, month: "2025-10-01", amount: 300 },
+    );
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: houseA,
+      ...monthToDate,
+      compare: "same_period_last_year",
+    });
+    expect(dashboard.compareRange).toEqual({ from: "2025-10-01", to: "2025-10-24" });
+    expect(dashboard.totals.previous.depositAmount).toBe(900);
+    expect(dashboard.totals.previous.betleadsFee).toBe(300);
+  });
+
+  it("same_period_last_year of a whole month is that month a year before", async () => {
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: houseA,
+      range: { from: "2026-09-01", to: "2026-09-30" },
+      compare: "same_period_last_year",
+      preset: "custom",
+    });
+    expect(dashboard.compareRange).toEqual({ from: "2025-09-01", to: "2025-09-30" });
   });
 });

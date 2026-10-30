@@ -115,7 +115,8 @@ export type FinanceDashboard = {
   /** House name, group name or "Todas as casas". */
   label: string;
   range: DateRange;
-  compareRange: DateRange;
+  /** The comparison window; null for "Sem comparação" (previous values are then empty). */
+  compareRange: DateRange | null;
   totals: { current: PeriodSummary; previous: PeriodSummary };
   costs: CostLine[];
   /** 12 points, oldest first, ending at the month of range.to; empty for a scope with no house. */
@@ -316,7 +317,8 @@ export async function getFinanceDashboardFor(
   const today = todaySaoPaulo();
   const previousRange = compareRange(data.range, data.compare, data.preset);
   const current = clampToToday(data.range, today);
-  const previous = clampToToday(previousRange, today);
+  // "none": no comparison window, so every previous summary is empty (no days).
+  const previous = previousRange ? clampToToday(previousRange, today) : null;
   const feeMonths = costMonthsFor(data.range, data.compare, data.preset);
 
   const lastMonth = monthStartOf(data.range.to);

@@ -450,9 +450,36 @@ export function isWholeMonth(r: DateRange): boolean {
   return d === 1 && r.to === endOfMonth(y, m);
 }
 
-export function compareRange(r: DateRange, mode: CompareMode, preset: PeriodPreset): DateRange {
+/** The same date one year before; Feb 29 becomes Feb 28. */
+function minusOneYear(s: string): string {
+  const { y, m, d } = parseDateParts(s);
+  const day = m === 2 && d === 29 ? 28 : d;
+  return `${y - 1}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** The comparison window of `r`; null for "none" (no comparison). */
+export function compareRange(
+  r: DateRange,
+  mode: Exclude<CompareMode, "none">,
+  preset: PeriodPreset,
+): DateRange;
+export function compareRange(r: DateRange, mode: CompareMode, preset: PeriodPreset): DateRange | null;
+export function compareRange(
+  r: DateRange,
+  mode: CompareMode,
+  preset: PeriodPreset,
+): DateRange | null {
+  if (mode === "none") return null;
   if (mode === "last_week" || mode === "same_weekday_last_week") {
     return { from: addDays(r.from, -7), to: addDays(r.to, -7) };
+  }
+  if (mode === "same_period_last_year") {
+    // A whole month maps to the same whole month (a leap February included).
+    if (isWholeMonth(r)) {
+      const { y, m } = parseDateParts(r.from);
+      return { from: minusOneYear(r.from), to: endOfMonth(y - 1, m) };
+    }
+    return { from: minusOneYear(r.from), to: minusOneYear(r.to) };
   }
 
   // mode === "previous"

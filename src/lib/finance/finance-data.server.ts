@@ -487,7 +487,9 @@ export function costMonthsFor(
   // calendar month: a range covering exactly one month, or the "Mês" preset (also
   // while in progress). The preset is only trusted when the range really is
   // a month-to-date window, and its comparison window counts only for
-  // "previous" (the previous month to the same day), never a 7-day shift.
+  // "previous" (the previous month to the same day) or "same_period_last_year"
+  // (the same days of that month a year before), never a 7-day shift.
+  // "none" has no comparison window.
   const monthToDate =
     preset === "month" &&
     range.from.endsWith("-01") &&
@@ -496,7 +498,9 @@ export function costMonthsFor(
   return {
     current: monthToDate || isWholeMonth(range) ? monthOf(range) : null,
     previous:
-      (monthToDate && compare === "previous") || isWholeMonth(previousRange)
+      previousRange &&
+      ((monthToDate && (compare === "previous" || compare === "same_period_last_year")) ||
+        isWholeMonth(previousRange))
         ? monthOf(previousRange)
         : null,
   };
@@ -514,5 +518,11 @@ export const dateRange = z
   .refine((range) => range.from <= range.to, "Período inválido")
   .refine((range) => daysInclusive(range) <= MAX_RANGE_DAYS, "Período longo demais");
 
-export const compareMode = z.enum(["previous", "same_weekday_last_week", "last_week"]);
+export const compareMode = z.enum([
+  "previous",
+  "same_weekday_last_week",
+  "last_week",
+  "same_period_last_year",
+  "none",
+]);
 export const periodPreset = z.enum(["today", "yesterday", "7d", "month", "custom"]);

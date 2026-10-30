@@ -697,6 +697,44 @@ describe("compareRange", () => {
       to: "2026-10-17",
     });
   });
+
+  it("same_period_last_year: one day is the same date a year before", () => {
+    expect(
+      compareRange({ from: "2026-10-29", to: "2026-10-29" }, "same_period_last_year", "today"),
+    ).toEqual({ from: "2025-10-29", to: "2025-10-29" });
+  });
+
+  it("same_period_last_year: a whole month is the same whole month of the previous year", () => {
+    expect(
+      compareRange({ from: "2026-09-01", to: "2026-09-30" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2025-09-01", to: "2025-09-30" });
+    // February of a common year maps to the whole (29-day) February of a leap year.
+    expect(
+      compareRange({ from: "2025-02-01", to: "2025-02-28" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2024-02-01", to: "2024-02-29" });
+  });
+
+  it("same_period_last_year: month-to-date maps to the same days", () => {
+    expect(
+      compareRange({ from: "2026-10-01", to: "2026-10-29" }, "same_period_last_year", "month"),
+    ).toEqual({ from: "2025-10-01", to: "2025-10-29" });
+  });
+
+  it("same_period_last_year: Feb 29 becomes Feb 28", () => {
+    expect(
+      compareRange({ from: "2028-02-29", to: "2028-02-29" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2027-02-28", to: "2027-02-28" });
+    expect(
+      compareRange({ from: "2028-02-29", to: "2028-03-06" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2027-02-28", to: "2027-03-06" });
+    expect(
+      compareRange({ from: "2028-02-01", to: "2028-02-29" }, "same_period_last_year", "custom"),
+    ).toEqual({ from: "2027-02-01", to: "2027-02-28" });
+  });
+
+  it("none has no comparison window", () => {
+    expect(compareRange({ from: "2026-10-01", to: "2026-10-29" }, "none", "month")).toBeNull();
+  });
 });
 
 describe("pctChange", () => {
