@@ -96,6 +96,7 @@ No ranking e nos painéis, o depositado atribuído aparece separado em **"por cl
 - Clique recente vence afiliado.
 - Entre experts, vence o último clique dentro da janela.
 - Um depósito nunca conta para dois experts.
+- *(adendo de 2026-10-30, rule_version 2 — `20261125100000_expert_hardening.sql`)* O clique de um expert não leva o depósito de um lead cujo ID de afiliado pertence a **outro** expert elegível no momento do depósito (o dono do afiliado fica com ele; só os cliques do próprio dono contam para esse lead). Os créditos guardam a versão da regra e o recálculo dos crons cobre só os últimos 8 dias, então créditos antigos mantêm a versão 1.
 
 **Janela:** 72 horas por padrão, configurável por casa. *(o sistema atual usa 7 dias para campanhas e jornadas; a janela do expert é separada)*
 
