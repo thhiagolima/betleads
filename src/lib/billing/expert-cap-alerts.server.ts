@@ -30,7 +30,19 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#39;");
 }
 
-export function expertCapEmail(houseName: string, expertName: string, teto: number | null) {
+const APP_BASE_URL = "https://betleads.io";
+
+/** Aba "Campanhas" do expert no app (fila de aprovação, pausar/retomar e uso × teto). */
+export function expertCampaignsUrl(expertId: string): string {
+  return `${APP_BASE_URL}/rendimento/equipe/${encodeURIComponent(expertId)}?aba=campanhas`;
+}
+
+export function expertCapEmail(
+  houseName: string,
+  expertName: string,
+  teto: number | null,
+  expertId?: string,
+) {
   const subject = `Teto mensal do expert ${expertName} atingido`;
   const tetoText =
     teto == null ? "" : ` (${brl(teto).replace(new RegExp(String.fromCharCode(160), "g"), " ")})`;
@@ -42,7 +54,14 @@ export function expertCapEmail(houseName: string, expertName: string, teto: numb
 <html>
   <body style="margin:0; padding:24px; background:#f5f5f5; font-family:Arial,Helvetica,sans-serif;">
     <div style="max-width:480px; margin:0 auto; background:#ffffff; border-radius:8px; padding:24px; color:#1f2937;">
-      <p style="font-size:16px; line-height:1.5; margin:0;">${body}</p>
+      <p style="font-size:16px; line-height:1.5; margin:0;">${body}</p>${
+        expertId
+          ? `
+      <p style="text-align:center; margin:20px 0 0;">
+        <a href="${escapeHtml(expertCampaignsUrl(expertId))}" style="background:#2563eb; color:#ffffff; padding:12px 24px; border-radius:6px; text-decoration:none; font-weight:bold; display:inline-block;">Ver campanhas do expert</a>
+      </p>`
+          : ""
+      }
     </div>
   </body>
 </html>`;
@@ -81,6 +100,7 @@ async function sendExpertCapAlert(tenantId: string, expertId: string, now: Date)
     tenant.nome?.trim() || "sua casa",
     String(expert?.nome ?? "").trim() || "sem nome",
     Number.isFinite(teto) ? teto : null,
+    expertId,
   );
   let accepted = 0;
   for (const [index, to] of recipients.entries()) {
