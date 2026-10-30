@@ -35,6 +35,7 @@ vi.mock("./tenant-access.server", () => ({
   listDemoTenantIds: vi.fn(async () => []),
 }));
 
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { classifyVoiceDispatchResult, runVoiceQueueDispatcher } from "./calls.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
@@ -349,5 +350,92 @@ describe("runVoiceQueueDispatcher reservation cap (addendum d)", () => {
       expect.anything(),
       expect.objectContaining({ maxSeconds: null }),
     );
+  });
+});
+
+describe("runVoiceQueueDispatcher claim (double dial)", () => {
+  const okCall = {
+    ok: true,
+    status: 200,
+    body: {},
+    idempotencyKey: "corr-1",
+    providerCallId: "call-1",
+  };
+
+  it("two dispatchers racing on the same item dial it once", async () => {
+    seedQueueItem();
+    voice.callInfobipVoice.mockResolvedValue(okCall);
+
+    // The cron tick and "Disparar agora" (runVoiceQueueDispatcher(1, id)).
+    const [cron, now] = await Promise.all([
+      runVoiceQueueDispatcher(10),
+      runVoiceQueueDispatcher(1, "q1"),
+    ]);
+
+    expect(voice.callInfobipVoice).toHaveBeenCalledTimes(1);
+    expect(cron.dispatched + now.dispatched).toBe(1);
+    expect(cron.notClaimed + now.notClaimed).toBe(1);
+    expect(fake.db.rows("call_history")).toHaveLength(1);
+    expect(queueItem().status).toBe("waiting_provider");
+  });
+
+  it("an item another worker already claimed is skipped", async () => {
+    seedQueueItem();
+    voice.callInfobipVoice.mockImplementation(async () => {
+      throw new Error("must not dial");
+    });
+    // Selected as audio_ready, but claimed (calling) by another worker
+    // right after this worker's select ran.
+    const admin = supabaseAdmin as unknown as { from: (table: string) => any };
+    const original = admin.from;
+    let selects = 0;
+    admin.from = (table: string) => {
+      const builder = original(table);
+      if (table !== "call_queue") return builder;
+      const limit = builder.limit;
+      builder.limit = (...args: unknown[]) => {
+        const query = limit(...args);
+        return {
+          then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+            Promise.resolve(query)
+              .then((value: unknown) => {
+                if (selects++ === 0) queueItem().status = "calling";
+                return value;
+              })
+              .then(resolve, reject),
+        };
+      };
+      return builder;
+    };
+    try {
+      const result = await runVoiceQueueDispatcher(10);
+      expect(result).toMatchObject({ due: 1, dispatched: 0, failed: 0, notClaimed: 1 });
+    } finally {
+      admin.from = original;
+    }
+    expect(voice.callInfobipVoice).not.toHaveBeenCalled();
+    expect(queueItem().status).toBe("calling");
+  });
+
+  it("bills per queue item: the wallet delivery key is the queue id", async () => {
+    seedQueueItem();
+    voice.callInfobipVoice.mockResolvedValue(okCall);
+    await runVoiceQueueDispatcher(10);
+    expect(voice.callInfobipVoice.mock.calls[0][2]).toMatchObject({ billingKey: "q1" });
+    expect(voice.callInfobipVoice.mock.calls[0][2].idempotencyKey).toBeUndefined();
+  });
+
+  it("a transient failure releases the claim back to audio_ready", async () => {
+    seedQueueItem();
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: false,
+      status: 503,
+      body: {},
+      idempotencyKey: "corr-1",
+      providerCallId: null,
+    });
+    const result = await runVoiceQueueDispatcher(10);
+    expect(result.deferred).toBe(1);
+    expect(queueItem()).toMatchObject({ status: "audio_ready", provider_status: "provider_unavailable" });
   });
 });
