@@ -44,6 +44,10 @@ export type SmsCampaignRow = {
   /** 'external_list': phones that are not players (see campaign-external-list.ts). */
   recipient_source?: string | null;
   unresolved_recipients?: unknown;
+  /** Área do Expert: owner of the campaign (null = house). */
+  expert_id?: string | null;
+  /** Área do Expert: 'pendente' | 'aprovada' | 'recusada'; null = house / free mode. */
+  approval_status?: string | null;
 };
 
 export type CampaignTarget = {
@@ -98,11 +102,24 @@ export type SendOutcome = {
    * before this recipient and the campaign is paused until "Retomar".
    */
   insufficientBalance?: boolean;
+  /**
+   * Área do Expert: the EXPERT's monthly cap refused the reservation. Cut
+   * like `insufficientBalance`, but pauses only this campaign with its own
+   * reason and never the house's no-balance alert.
+   */
+  expertCap?: boolean;
+  /** Área do Expert: the owner was deactivated meanwhile; the campaign is cancelled. */
+  expertInactive?: boolean;
   error?: string;
 };
 
 /** last_error of a campaign paused because the house ran out of balance. */
 export const SMS_CAMPAIGN_NO_BALANCE_MESSAGE = "Saldo insuficiente";
+/** last_error of an expert campaign paused at the expert's monthly cap. */
+export const SMS_CAMPAIGN_EXPERT_CAP_MESSAGE = "Teto mensal do expert atingido";
+/** last_error of an expert campaign whose owner was deactivated. */
+export const SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE =
+  "O expert dono desta campanha foi desativado; nada será enviado.";
 
 /**
  * SMS provider circuit breaker, asked before every batch:
@@ -162,8 +179,8 @@ export type CampaignTickResult = {
   failed: number;
   /** Recipients the cursor moved past in this tick (sendable + skipped). */
   advanced: number;
-  /** "pausada": stopped for lack of house balance; resumed by hand ("Retomar"). */
-  status: "enviado" | "enviando" | "falhou" | "pausada";
+  /** "pausada": stopped for lack of house balance (or the expert's cap); resumed by hand. */
+  status: "enviado" | "enviando" | "falhou" | "pausada" | "cancelada";
   stopReason:
     | "done"
     | "quota"
@@ -174,7 +191,9 @@ export type CampaignTickResult = {
     | "no_recipients"
     | "none_resolved"
     | "provider_unavailable"
-    | "insufficient_balance";
+    | "insufficient_balance"
+    | "expert_cap"
+    | "expert_inactive";
   /** ENV-10: sends whose provider outcome is unknown (counted in `sent`). */
   pendingConfirmation?: number;
 };
@@ -575,13 +594,27 @@ export async function processSmsCampaignTick(
     const firstRetryable =
       deferredError !== null
         ? 0
-        : outcomes.findIndex((o) => !o?.ok && (o?.retryable || o?.insufficientBalance));
+        : outcomes.findIndex(
+            (o) =>
+              !o?.ok &&
+              (o?.retryable || o?.insufficientBalance || o?.expertCap || o?.expertInactive),
+          );
     if (firstRetryable >= 0) {
-      const noBalance = deferredError === null && outcomes[firstRetryable]?.insufficientBalance === true;
-      lastError = noBalance
-        ? SMS_CAMPAIGN_NO_BALANCE_MESSAGE
-        : (deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível");
-      stop = noBalance ? "insufficient_balance" : "provider_unavailable";
+      const cut = deferredError === null ? outcomes[firstRetryable] : undefined;
+      const noBalance = cut?.insufficientBalance === true;
+      const expertStop = cut?.expertInactive
+        ? ("expert_inactive" as const)
+        : cut?.expertCap
+          ? ("expert_cap" as const)
+          : null;
+      lastError = expertStop
+        ? expertStop === "expert_cap"
+          ? SMS_CAMPAIGN_EXPERT_CAP_MESSAGE
+          : SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE
+        : noBalance
+          ? SMS_CAMPAIGN_NO_BALANCE_MESSAGE
+          : (deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível");
+      stop = expertStop ?? (noBalance ? "insufficient_balance" : "provider_unavailable");
       const cutKey = sends[firstRetryable]?.key;
       const cutAt = batch.findIndex((it) => it.kind === "send" && it.key === cutKey);
       batch = cutAt >= 0 ? batch.slice(0, cutAt) : [];
@@ -607,6 +640,8 @@ export async function processSmsCampaignTick(
     // Ruling (final-2): an earlier failure or pending confirmation in this
     // batch must not replace the pause reason.
     if (stop === "insufficient_balance") lastError = SMS_CAMPAIGN_NO_BALANCE_MESSAGE;
+    if (stop === "expert_cap") lastError = SMS_CAMPAIGN_EXPERT_CAP_MESSAGE;
+    if (stop === "expert_inactive") lastError = SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE;
     result.sent += batchSent;
     result.deduplicated += batchDedup;
     result.failed += batchFailed;
@@ -635,9 +670,11 @@ export async function processSmsCampaignTick(
     ? totalSent + totalDedup === 0
       ? "falhou"
       : "enviado"
-    : stop === "insufficient_balance"
+    : stop === "insufficient_balance" || stop === "expert_cap"
       ? "pausada"
-      : "enviando";
+      : stop === "expert_inactive"
+        ? "cancelada"
+        : "enviando";
   result.stopReason = isDone ? "done" : (stop ?? "quota");
   const patch: Record<string, unknown> = {
     status: result.status,
@@ -646,7 +683,9 @@ export async function processSmsCampaignTick(
   };
   if (
     result.stopReason === "provider_unavailable" ||
-    result.stopReason === "insufficient_balance"
+    result.stopReason === "insufficient_balance" ||
+    result.stopReason === "expert_cap" ||
+    result.stopReason === "expert_inactive"
   )
     patch.last_error = lastError;
   await deps.updateCampaign(c, patch);

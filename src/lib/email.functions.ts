@@ -32,6 +32,15 @@ import { isSendBlockedError } from "./billing/billing-locked-error";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
 import { tenantReads } from "@/lib/active-tenant-filter";
+import {
+  EMAIL_CAMPAIGN_EXPERT_CAP_MESSAGE,
+  EXPERT_SCOPE_INACTIVE,
+  assertNotExpertEmailCampaign,
+  loadExpertEmailOwner,
+  loadExpertEmailRecipients,
+} from "./expert-email-campaign.server";
+import { notifyExpertCapReached } from "./billing/expert-cap-alerts.server";
+import { expertNamesById } from "./expert-names.server";
 
 // ============ Helpers ============
 
@@ -648,7 +657,20 @@ export const listEmailCampaigns = createServerFn({ method: "GET" })
       .select("*")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return { items: (data ?? []).map(campanhaRowToUI) };
+    // Área do Expert: expert campaigns come with the owner's name.
+    const rows = (data ?? []) as any[];
+    const names = await expertNamesById(
+      rows[0]?.tenant_id ?? "",
+      rows.map((r) => r.expert_id ?? null),
+    );
+    return {
+      items: rows.map((r) => ({
+        ...campanhaRowToUI(r),
+        expertId: (r.expert_id as string | null | undefined) ?? null,
+        expertNome: r.expert_id ? (names.get(r.expert_id) ?? "") : null,
+        approvalStatus: (r.approval_status as string | null | undefined) ?? null,
+      })),
+    };
   });
 
 export const saveEmailCampaign = createServerFn({ method: "POST" })
@@ -866,6 +888,7 @@ export const sendEmailCampaignNow = createServerFn({ method: "POST" })
       .eq("tenant_id", tenantId)
       .maybeSingle();
     if (!campaign) throw new Error("Campanha não encontrada nesta tenant");
+    await assertNotExpertEmailCampaign(data.campaignId);
     try {
       return await runCampaignSend(data.campaignId);
     } catch (err) {
@@ -890,24 +913,45 @@ export async function runCampaignSend(campaignId: string) {
   // 'pending' rows, email_send_logs): a demo campaign never starts.
   await assertTenantNotDemoForSend(camp.tenant_id);
 
-  if (!camp.template_id) throw new Error("Selecione um template antes de enviar.");
+  // Área do Expert: re-checked at every run (approval, owner active, scope).
+  const expertOwner = await loadExpertEmailOwner(camp as any);
+  const expertId: string | null = (camp as any).expert_id ?? null;
+  if (expertOwner?.inactive) {
+    await supabaseAdmin
+      .from("email_campaigns")
+      .update({ status: "pausada", blocked_reason: EXPERT_SCOPE_INACTIVE, locked_at: null, locked_by: null })
+      .eq("id", campaignId);
+    return { enviados: 0, falhas: 0, pendentes: 0, total: 0, jaEnviados: 0, pausadaPorSaldo: false, pausadaPorTeto: false };
+  }
+  const expertTpl = expertId ? (camp.template_snapshot as Record<string, any> | null) : null;
+  if (expertId && !expertTpl?.body_html) throw new Error("O conteúdo desta campanha não foi encontrado.");
 
-  const { data: liveTpl, error: tErr } = await supabaseAdmin
-    .from("email_templates")
-    .select("*")
-    .eq("id", camp.template_id)
-    .eq("tenant_id", camp.tenant_id)
-    .maybeSingle();
-  if (tErr || !liveTpl) throw new Error("Template da campanha não encontrado.");
-  if (liveTpl.lifecycle_status !== "published") {
-    throw new Error("O template desta campanha não está publicado.");
+  if (!camp.template_id && !expertTpl) throw new Error("Selecione um template antes de enviar.");
+
+  let liveTpl: any = null;
+  if (!expertTpl) {
+    const { data: loadedTpl, error: tErr } = await supabaseAdmin
+      .from("email_templates")
+      .select("*")
+      .eq("id", camp.template_id!)
+      .eq("tenant_id", camp.tenant_id)
+      .maybeSingle();
+    if (tErr || !loadedTpl) throw new Error("Template da campanha não encontrado.");
+    if (loadedTpl.lifecycle_status !== "published") {
+      throw new Error("O template desta campanha não está publicado.");
+    }
+    liveTpl = loadedTpl;
   }
   // O snapshot preserva a versão aprovada no momento em que a campanha foi criada.
   // Campanhas legadas, sem snapshot, seguem usando o template publicado atual.
-  const tpl = (camp.template_snapshot as Record<string, any> | null) ?? liveTpl;
+  const tpl = expertTpl ?? (camp.template_snapshot as Record<string, any> | null) ?? liveTpl;
 
   // Only a sender on a verified e-mail domain of the house; before any write.
-  const sender = await resolveSender({ tenantId: camp.tenant_id, senderId: camp.sender_id });
+  // Expert: always the house default sender (never an override).
+  const sender = await resolveSender({
+    tenantId: camp.tenant_id,
+    senderId: expertId ? null : camp.sender_id,
+  });
   if (!sender) {
     const blocked = new EmailDomainNotVerifiedError(
       camp.sender_id ? STALE_SENDER_MESSAGE : undefined,
@@ -948,7 +992,9 @@ export async function runCampaignSend(campaignId: string) {
       : Array.isArray(af.extra_emails) && af.extra_emails.length > 0
         ? "emails"
         : "segmento");
-  if (audienceMode === "emails") {
+  if (expertOwner && !expertOwner.inactive) {
+    players = await loadExpertEmailRecipients(camp.tenant_id, af as any, expertOwner.scope);
+  } else if (audienceMode === "emails") {
     players = [];
   } else if (audienceMode === "leads") {
     if (!Array.isArray(af.target_player_ids) || af.target_player_ids.length === 0) {
@@ -972,7 +1018,7 @@ export async function runCampaignSend(campaignId: string) {
       .filter(Boolean),
   );
   const extras =
-    audienceMode === "leads"
+    audienceMode === "leads" || expertId
       ? []
       : Array.from(
           new Set(
@@ -1032,7 +1078,7 @@ export async function runCampaignSend(campaignId: string) {
       .from("email_campaigns")
       .update({ status: "concluida", blocked_reason: null, stats: stats(0, 0) })
       .eq("id", campaignId);
-    return { enviados: 0, falhas: 0, pendentes: 0, total: players.length, jaEnviados, pausadaPorSaldo: false };
+    return { enviados: 0, falhas: 0, pendentes: 0, total: players.length, jaEnviados, pausadaPorSaldo: false, pausadaPorTeto: false };
   }
 
   await supabaseAdmin
@@ -1047,6 +1093,9 @@ export async function runCampaignSend(campaignId: string) {
   // wallet refuses; the campaign is left "pausada" and the house reruns it
   // after a top-up (no automatic resume).
   let pausadaPorSaldo = false;
+  // Área do Expert: the expert's monthly cap (or deactivation) refused a send.
+  let pausadaPorTeto = false;
+  let expertStopReason: string | null = null;
 
   const house = await loadHouseLinks(camp.tenant_id);
 
@@ -1069,14 +1118,22 @@ export async function runCampaignSend(campaignId: string) {
         idempotencyKey: crypto.randomUUID(),
         linkTracking: {
           tenantId: camp.tenant_id,
-          sourceType: "campaign",
-          sourceId: campaignId,
+          sourceType: expertId ? "expert" : "campaign",
+          sourceId: expertId ?? campaignId,
           recipientPlayerId: p.id,
           messageLogType: "email_send_logs",
           enabled: camp.track_links !== false,
-          shortDomainId: camp.short_domain_id,
+          shortDomainId: expertId ? null : camp.short_domain_id,
         },
+        ...(expertId ? { expertId } : {}),
       });
+      if (!r.ok && (r.errorKind === "expert_cap" || r.errorKind === "expert_inactive")) {
+        // Nothing was sent nor charged; only this expert's campaign pauses.
+        pausadaPorTeto = true;
+        expertStopReason =
+          r.errorKind === "expert_cap" ? EMAIL_CAMPAIGN_EXPERT_CAP_MESSAGE : EXPERT_SCOPE_INACTIVE;
+        break;
+      }
       if (!r.ok && r.errorKind === "insufficient_balance") {
         // Nothing was sent nor charged: not a delivery attempt, no log row.
         pausadaPorSaldo = true;
@@ -1150,13 +1207,16 @@ export async function runCampaignSend(campaignId: string) {
     .update({
       // Falhas temporárias ficam como pendentes no log; não contam como falha
       // definitiva porque o provedor pode aceitar o próximo retry.
-      status: pausadaPorSaldo ? "pausada" : "concluida",
+      status: pausadaPorSaldo || pausadaPorTeto ? "pausada" : "concluida",
       ...(pausadaPorSaldo ? { blocked_reason: EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE } : {}),
+      ...(pausadaPorTeto ? { blocked_reason: expertStopReason } : {}),
       stats: stats(enviados, falhas),
     })
     .eq("id", campaignId);
+  if (pausadaPorTeto && expertId && expertStopReason === EMAIL_CAMPAIGN_EXPERT_CAP_MESSAGE)
+    await notifyExpertCapReached(camp.tenant_id, expertId);
 
-  return { enviados, falhas, pendentes, total: players.length, jaEnviados, pausadaPorSaldo };
+  return { enviados, falhas, pendentes, total: players.length, jaEnviados, pausadaPorSaldo, pausadaPorTeto };
 }
 
 /**

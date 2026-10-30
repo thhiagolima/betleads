@@ -66,8 +66,10 @@ import {
   deliveryBillingReference,
   reserveForDelivery,
   refundForDelivery,
+  type ExpertWalletRefusal,
 } from "./billing/wallet.server";
 import { countSmsSegments, toGsm7Text } from "./sms-segments";
+import { expertNamesById } from "./expert-names.server";
 import { captureServerException } from "@/lib/observability/sentry.server";
 import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 import { externalListBlockedVariables, externalListVariablesError } from "./campaign-external-list";
@@ -752,7 +754,12 @@ export async function reserveSmsCreditForDelivery(
   tenantId: string,
   deliveryKey: string | null | undefined,
   segments: number,
-): Promise<{ ok: true; referenceId: string } | { ok: false; referenceId: string; error: string }> {
+  /** Área do Expert: the send of an expert campaign (monthly cap checked atomically). */
+  expertId?: string | null,
+): Promise<
+  | { ok: true; referenceId: string }
+  | { ok: false; referenceId: string; error: string; refusal?: ExpertWalletRefusal }
+> {
   const units = Math.max(1, segments);
   const reservation = await reserveForDelivery(supabaseAdmin, {
     tenantId,
@@ -761,10 +768,16 @@ export async function reserveSmsCreditForDelivery(
     deliveryKey,
     units,
     referenceType: "sms_send",
+    ...(expertId ? { expertId } : {}),
   });
   return reservation.ok
     ? { ok: true, referenceId: reservation.referenceId }
-    : { ok: false, referenceId: reservation.referenceId, error: reservation.reason };
+    : {
+        ok: false,
+        referenceId: reservation.referenceId,
+        error: reservation.reason,
+        ...(reservation.refusal ? { refusal: reservation.refusal } : {}),
+      };
 }
 
 /** Log of a previous send of this delivery that the provider already accepted. */
@@ -809,6 +822,8 @@ export async function sendSmsInternal(args: {
    * case: campaign/bulk/test sends pass raw content + `variables` and rely
    * on this function to render them). */
   house?: HouseLinks | null;
+  /** Área do Expert: owner of the campaign; the reservation checks his monthly cap. */
+  expertId?: string | null;
 }) {
   // Demo guard first: before the phone check, billing, link tracking or any
   // sms_send_logs / sms_credit_ledger / link_dispatches write. Fail-closed: a
@@ -925,11 +940,14 @@ export async function sendSmsInternal(args: {
   // variables and link shortening), never the template or preview text.
   const billedUnits = Math.max(1, countSmsSegments(preparedContent).segments);
   if (billingTenantId) {
-    const reservation = await reserveSmsCreditForDelivery(
-      billingTenantId,
-      args.deliveryKey,
-      billedUnits,
-    );
+    const reservation = args.expertId
+      ? await reserveSmsCreditForDelivery(
+          billingTenantId,
+          args.deliveryKey,
+          billedUnits,
+          args.expertId,
+        )
+      : await reserveSmsCreditForDelivery(billingTenantId, args.deliveryKey, billedUnits);
     billingReferenceId = reservation.referenceId;
     if (!reservation.ok) {
       await logSend({
@@ -954,7 +972,9 @@ export async function sendSmsInternal(args: {
         ok: false as const,
         status: 402,
         error: reservation.error,
-        errorKind: "insufficient_balance" as ProviderErrorKind,
+        // An expert refusal (cap / deactivated) pauses only that expert.
+        errorKind: (("refusal" in reservation && reservation.refusal) ||
+          "insufficient_balance") as ProviderErrorKind,
       };
     }
     creditReserved = true;
@@ -2380,12 +2400,21 @@ export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
         .order("scheduled_at", { ascending: true })
         .limit(200);
     // `unresolved_count` (ENV-06) arrives with migration 20261015113000; until
-    // it is applied the list keeps working without the badge.
-    let { data, error } = await list(`${baseColumns}, unresolved_count`);
+    // it is applied the list keeps working without the badge. `expert_id`
+    // (Área do Expert, 20261126100000): expert campaigns are listed with the
+    // owner's name (they are sent/approved only through the expert screens).
+    let { data, error } = await list(`${baseColumns}, unresolved_count, expert_id, approval_status`);
+    if (error && isMissingColumnError(error))
+      ({ data, error } = await list(`${baseColumns}, unresolved_count`));
     if (error && isMissingColumnError(error)) ({ data, error } = await list(baseColumns));
     if (error) throw new Error(error.message);
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    const expertNames = await expertNamesById(
+      tenantId,
+      rows.map((row) => (row.expert_id as string | null | undefined) ?? null),
+    );
     return {
-      campaigns: ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      campaigns: rows.map((row) => ({
         id: String(row.id),
         name: (row.name as string | null) ?? null,
         scheduled_at: String(row.scheduled_at),
@@ -2398,6 +2427,9 @@ export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
         created_at: String(row.created_at),
         updated_at: String(row.updated_at),
         unresolved_count: Number(row.unresolved_count ?? 0),
+        expertId: (row.expert_id as string | null | undefined) ?? null,
+        expertNome: row.expert_id ? (expertNames.get(String(row.expert_id)) ?? "") : null,
+        approvalStatus: (row.approval_status as string | null | undefined) ?? null,
       })),
     };
   });
