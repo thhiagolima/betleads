@@ -67,6 +67,8 @@ function DashboardBody({
 }) {
   const multi = dashboard.scope.kind !== "tenant";
   const { totals, tenants, kpis } = dashboard;
+  // "Sem comparação": the server sends no comparison window.
+  const comparing = dashboard.compareRange !== null;
   // The 12-month chart's metric: its card title follows it.
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("cashResult");
 
@@ -86,6 +88,7 @@ function DashboardBody({
           kpis={kpis}
           roiReference={dashboard.roiReference}
           houseCount={multi ? tenants.length : undefined}
+          comparing={comparing}
         />
         <Section
           title={multi ? "Do depósito ao lucro (somado)" : "Do depósito ao lucro"}
@@ -116,7 +119,7 @@ function DashboardBody({
         </Section>
         {multi && (
           <Section title="Lucro por casa">
-            <TenantProfitTable rows={tenants} onOpenTenant={onOpenTenant} />
+            <TenantProfitTable rows={tenants} onOpenTenant={onOpenTenant} comparing={comparing} />
           </Section>
         )}
         {multi && <GroupScoreboard rows={tenants} onRowClick={onOpenTenant} />}

@@ -64,7 +64,7 @@ export function sortTenantProfitRows<T extends TenantProfitRow>(
 
 function ProfitChange({ row }: { row: TenantProfitRow }) {
   const change = numericValue(row, "profitChange");
-  if (change === null) return <span className="text-muted-foreground">n.a.</span>;
+  if (change === null) return <span className="text-muted-foreground">—</span>;
   return (
     <span className={change >= 0 ? "text-emerald-400" : "text-rose-400"}>
       {change >= 0 ? "▲" : "▼"} {formatPct(Math.abs(change))}
@@ -75,10 +75,14 @@ function ProfitChange({ row }: { row: TenantProfitRow }) {
 export function TenantProfitTable({
   rows,
   onOpenTenant,
+  comparing = true,
 }: {
   rows: TenantProfitRow[];
   onOpenTenant?: (tenantId: string) => void;
+  /** False for "Sem comparação": the Δ lucro column is hidden. */
+  comparing?: boolean;
 }) {
+  const columns = comparing ? COLUMNS : COLUMNS.filter((column) => column.key !== "profitChange");
   const [sort, setSort] = useState<{
     column: TenantProfitColumn;
     direction: "asc" | "desc";
@@ -101,7 +105,7 @@ export function TenantProfitTable({
       <table className="w-full min-w-[42rem] text-sm">
         <thead>
           <tr className="border-b border-border/40 text-xs uppercase text-muted-foreground">
-            {COLUMNS.map((column) => (
+            {columns.map((column) => (
               <th
                 key={column.key}
                 className={cn("px-3 py-2", column.key === "nome" ? "text-left" : "text-right")}
@@ -155,14 +159,16 @@ export function TenantProfitTable({
                 {formatBRL(row.current.adSpend)}
               </td>
               <td className="whitespace-nowrap px-3 py-2 text-right">{formatBRL(row.sendCost)}</td>
-              <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
-                <ProfitChange row={row} />
-              </td>
+              {comparing && (
+                <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
+                  <ProfitChange row={row} />
+                </td>
+              )}
             </tr>
           ))}
           {!sortedRows.length && (
             <tr>
-              <td colSpan={COLUMNS.length} className="px-3 py-8 text-center text-muted-foreground">
+              <td colSpan={columns.length} className="px-3 py-8 text-center text-muted-foreground">
                 Nenhuma casa neste recorte.
               </td>
             </tr>

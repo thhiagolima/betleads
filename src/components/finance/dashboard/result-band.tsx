@@ -17,6 +17,8 @@ import { periodHasData } from "./display";
 import { hasVariation, Variation } from "./variation";
 
 export const NO_COMPARE_TEXT = "Sem período anterior para comparar";
+/** The meta fallback when the user picked "Sem comparação". */
+export const COMPARE_OFF_TEXT = "Sem comparação";
 
 const signClass = (value: number | null) =>
   value === null || value === 0 ? undefined : value < 0 ? "text-rose-400" : "text-emerald-400";
@@ -74,6 +76,7 @@ export function ResultBand({
   kpis,
   roiReference,
   houseCount,
+  comparing = true,
 }: {
   current: PeriodSummary;
   previous: PeriodSummary;
@@ -81,12 +84,15 @@ export function ResultBand({
   roiReference: { roi: number | null; range: DateRange };
   /** Group/all scope: shown as "Lucro líquido (N casas)". */
   houseCount?: number;
+  /** False for "Sem comparação": no variation, and the meta says so. */
+  comparing?: boolean;
 }) {
   const profitLabel =
     houseCount !== undefined && houseCount > 1
       ? `${FINANCE_TERMS.cashResult.label} (${houseCount} casas)`
       : FINANCE_TERMS.cashResult.label;
-  const hasPrevious = periodHasData(previous);
+  const hasPrevious = comparing && periodHasData(previous);
+  const noCompareText = comparing ? NO_COMPARE_TEXT : COMPARE_OFF_TEXT;
 
   const profitMeta = hasVariation(current.cashResult, previous.cashResult, hasPrevious) ? (
     <Variation
@@ -95,7 +101,7 @@ export function ResultBand({
       hasPrevious={hasPrevious}
     />
   ) : hasPrevious ? null : (
-    NO_COMPARE_TEXT
+    noCompareText
   );
 
   const adsMeta = hasVariation(current.adSpend, previous.adSpend, hasPrevious) ? (
@@ -108,7 +114,7 @@ export function ResultBand({
   ) : current.adSpend === 0 && current.pendingDays > 0 ? (
     "Nenhum dia lançado"
   ) : hasPrevious ? null : (
-    NO_COMPARE_TEXT
+    noCompareText
   );
 
   return (

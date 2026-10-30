@@ -97,4 +97,23 @@ describe("ResultBand", () => {
     expect(roi).not.toContain("mês anterior");
     expect(card(html, "adSpend")).toContain("Nenhum dia lançado");
   });
+
+  it("Sem comparação: the meta reads Sem comparação and no variation shows", () => {
+    const html = render(
+      <ResultBand
+        current={summary({ cashResult: 2000, adSpend: 500, roi: 4 })}
+        previous={summary({ cashResult: 1000, adSpend: 1000, roi: 1 })}
+        kpis={{ current: kpis(), previous: kpis() }}
+        roiReference={{ roi: 1, range: { from: "2026-09-01", to: "2026-09-30" } }}
+        comparing={false}
+      />,
+    );
+    expect(card(html, "cashResult")).toContain("Sem comparação");
+    expect(card(html, "adSpend")).toContain("Sem comparação");
+    expect(html).not.toContain("Sem período anterior para comparar");
+    expect(html).not.toContain("▲");
+    expect(html).not.toContain("▼");
+    // The ROI reference is separate and stays.
+    expect(card(html, "roi")).toContain("mês anterior");
+  });
 });

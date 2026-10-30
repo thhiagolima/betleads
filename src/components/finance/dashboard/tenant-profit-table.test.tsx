@@ -38,7 +38,7 @@ const rows: TenantProfitRow[] = [
 ];
 
 describe("TenantProfitTable", () => {
-  it("renders Casa, Lucro líquido, Margem, ROI, Anúncios, Envios and Δ lucro, n.a. for nulls", () => {
+  it("renders Casa, Lucro líquido, Margem, ROI, Anúncios, Envios and Δ lucro, — without a comparable previous", () => {
     const html = renderToStaticMarkup(<TenantProfitTable rows={rows} />);
 
     const headers = ["Casa", "Lucro líquido", "Margem", "ROI", "Anúncios", "Envios", "Δ lucro"];
@@ -50,7 +50,17 @@ describe("TenantProfitTable", () => {
     expect(html).toContain("overflow-x-auto");
     expect(html).toContain("-R$ 7.000,00");
     expect(html).toContain("▼ 8,0%"); // Bravabet 88300 vs 96000
-    expect(html).toContain("n.a."); // Casa X: ROI null and Δ over a zero previous
+    expect(html).toContain("n.a."); // Casa X: ROI null
+    // Casa X: Δ over a zero previous has no comparable value.
+    expect(html).toContain(`<span class="text-muted-foreground">—</span>`);
+  });
+
+  it("Sem comparação hides the Δ lucro column", () => {
+    const html = renderToStaticMarkup(<TenantProfitTable rows={rows} comparing={false} />);
+    expect(html).not.toContain("Δ lucro");
+    expect(html).not.toContain("▼");
+    expect(html).not.toContain("▲");
+    expect(html).toContain(">Envios</button>");
   });
 
   it("sorts by profit, nulls last, desc then asc", () => {
