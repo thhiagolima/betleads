@@ -73,6 +73,7 @@ import {
   JOURNEY_STATUS_LABELS,
   journeyExitReasonLabel,
   journeyInProgress,
+  journeyMessagesSent,
   journeyTriggerLabel,
   priorityPauseReasonLabel,
 } from "@/components/journeys/journey-editor-config";
@@ -340,10 +341,7 @@ export function JourneysHub() {
         (total, journey) => {
           const metrics = journey.metrics ?? {};
           total.recovered += Number(metrics.recovered ?? 0);
-          total.sent += Object.values(metrics.sentByChannel ?? {}).reduce(
-            (sum, value) => sum + Number(value),
-            0,
-          );
+          total.sent += journeyMessagesSent(metrics.sentByChannel);
           total.queued += journeyInProgress(metrics.byStatus);
           if (journey.status === "active") total.active += 1;
           return total;
@@ -888,10 +886,7 @@ function JourneyRow({
   const metrics = journey.metrics ?? {};
   const inProgress = journeyInProgress(metrics.byStatus);
   const finished = Number(metrics.byStatus?.completed ?? 0) + Number(metrics.byStatus?.exited ?? 0);
-  const sent = Object.values(metrics.sentByChannel ?? {}).reduce(
-    (total, value) => total + Number(value),
-    0,
-  );
+  const sent = journeyMessagesSent(metrics.sentByChannel);
   const active = journey.status === "active";
   return (
     <li className="grid gap-4 px-4 py-4 sm:px-5 xl:grid-cols-[minmax(16rem,1fr)_auto_auto] xl:items-center xl:gap-6">

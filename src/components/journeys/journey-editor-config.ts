@@ -143,6 +143,18 @@ export function journeyInProgress(byStatus: Record<string, number> | null | unde
   );
 }
 
+/** Messages actually sent (SMS, e-mail, voice). `sentByChannel` also carries the
+ * internal wait/end steps under "other", which are not messages. */
+export function journeyMessagesSent(
+  sentByChannel: Record<string, number> | null | undefined,
+): number {
+  return (
+    Number(sentByChannel?.sms ?? 0) +
+    Number(sentByChannel?.email ?? 0) +
+    Number(sentByChannel?.voice ?? 0)
+  );
+}
+
 // Override/extend the player page labels with the Automações vocabulary (Pausar, not Desligar).
 const EXTRA_EXIT_REASON_LABELS: Record<string, string> = {
   journey_paused_closed: "encerrada ao pausar a jornada",
