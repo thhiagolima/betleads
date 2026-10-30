@@ -37,7 +37,12 @@ vi.mock("./email-send.server", async (importOriginal) => ({
   sendInfobipEmail: vi.fn(),
 }));
 
-import { emailCampaignStatusPatch, runCampaignSend } from "./email.functions";
+import {
+  claimEmailCampaignForSendNow,
+  EMAIL_CAMPAIGN_STATUS_CHECK_EVERY,
+  emailCampaignStatusPatch,
+  runCampaignSend,
+} from "./email.functions";
 import { sendInfobipEmail } from "./email-send.server";
 
 const A = "00000000-0000-4000-8000-00000000000a";
@@ -151,6 +156,8 @@ describe("runCampaignSend re-run (fix round 1)", () => {
     await runCampaignSend("camp-a");
     expect(fake.db.rows("email_campaigns")[0].status).toBe("pausada");
 
+    // The house sends it again: "Enviar agora" claims it back to enviando.
+    fake.db.rows("email_campaigns")[0].status = "enviando";
     vi.mocked(sendInfobipEmail).mockReset();
     let n = 10;
     vi.mocked(sendInfobipEmail).mockImplementation(async () => ok(n++) as never);
@@ -271,5 +278,122 @@ describe("emailCampaignStatusPatch", () => {
 
   it("other statuses only clear the blocked reason", () => {
     expect(emailCampaignStatusPatch("agendada")).toEqual({ status: "agendada", blocked_reason: null });
+  });
+});
+
+describe("runCampaignSend run lock (pause / cancel / concurrent send)", () => {
+  const emails = (n: number) => Array.from({ length: n }, (_, i) => `r${i}@x.com`);
+  const camp = () => fake.db.rows("email_campaigns")[0];
+
+  it("a pause while running stops at the next status check and is not overwritten", async () => {
+    seed(emails(25));
+    camp().locked_by = "lock-1";
+    let n = 0;
+    vi.mocked(sendInfobipEmail).mockImplementation(async () => {
+      n++;
+      // The house pauses after the 3rd e-mail (emailCampaignStatusPatch).
+      if (n === 3) Object.assign(camp(), emailCampaignStatusPatch("pausada"));
+      return ok(n) as never;
+    });
+
+    const result = await runCampaignSend("camp-a", { lockToken: "lock-1" });
+
+    expect(sendInfobipEmail).toHaveBeenCalledTimes(EMAIL_CAMPAIGN_STATUS_CHECK_EVERY);
+    expect(result).toMatchObject({ enviados: EMAIL_CAMPAIGN_STATUS_CHECK_EVERY, interrompida: true });
+    expect(camp().status).toBe("pausada");
+    expect(camp().stats).toMatchObject({ enviados: EMAIL_CAMPAIGN_STATUS_CHECK_EVERY, total: 25 });
+  });
+
+  it("a cancel also stops the run", async () => {
+    seed(emails(25));
+    let n = 0;
+    vi.mocked(sendInfobipEmail).mockImplementation(async () => {
+      n++;
+      if (n === 1) camp().status = "cancelada";
+      return ok(n) as never;
+    });
+
+    const result = await runCampaignSend("camp-a");
+
+    expect(sendInfobipEmail).toHaveBeenCalledTimes(EMAIL_CAMPAIGN_STATUS_CHECK_EVERY);
+    expect(result.interrompida).toBe(true);
+    expect(camp().status).toBe("cancelada");
+  });
+
+  it("a pause after the last check is not overwritten with concluida", async () => {
+    seed(["a@x.com", "b@x.com"]);
+    let n = 0;
+    vi.mocked(sendInfobipEmail).mockImplementation(async () => {
+      n++;
+      if (n === 2) Object.assign(camp(), emailCampaignStatusPatch("pausada"));
+      return ok(n) as never;
+    });
+
+    const result = await runCampaignSend("camp-a");
+
+    expect(result).toMatchObject({ enviados: 2, interrompida: true });
+    expect(camp().status).toBe("pausada");
+    expect(camp().stats).toMatchObject({ enviados: 2, total: 2 });
+  });
+
+  it("a campaign claimed by another run (other lock) sends nothing", async () => {
+    seed(["a@x.com"]);
+    camp().locked_by = "someone-else";
+    vi.mocked(sendInfobipEmail).mockResolvedValue(ok(1) as never);
+
+    const result = await runCampaignSend("camp-a", { lockToken: "mine" });
+
+    expect(sendInfobipEmail).not.toHaveBeenCalled();
+    expect(result.interrompida).toBe(true);
+    expect(camp()).toMatchObject({ status: "enviando", locked_by: "someone-else" });
+  });
+
+  it("a campaign that is not claimed (not enviando) sends nothing", async () => {
+    seed(["a@x.com"]);
+    camp().status = "pausada";
+    vi.mocked(sendInfobipEmail).mockResolvedValue(ok(1) as never);
+
+    const result = await runCampaignSend("camp-a");
+
+    expect(sendInfobipEmail).not.toHaveBeenCalled();
+    expect(result.interrompida).toBe(true);
+    expect(camp().status).toBe("pausada");
+  });
+
+  it("a finished run concludes and releases its lock", async () => {
+    seed(["a@x.com"]);
+    camp().locked_by = "lock-1";
+    camp().locked_at = "2026-10-30T00:00:00Z";
+    vi.mocked(sendInfobipEmail).mockResolvedValue(ok(1) as never);
+
+    const result = await runCampaignSend("camp-a", { lockToken: "lock-1" });
+
+    expect(result.interrompida).toBe(false);
+    expect(camp()).toMatchObject({ status: "concluida", locked_by: null, locked_at: null });
+  });
+});
+
+describe("claimEmailCampaignForSendNow", () => {
+  const camp = () => fake.db.rows("email_campaigns")[0];
+
+  it("claims from an allowed status once; a second send-now or a running campaign is refused", async () => {
+    for (const from of ["rascunho", "agendada", "pausada", "concluida"]) {
+      seed(["a@x.com"]);
+      camp().status = from;
+      const token = await claimEmailCampaignForSendNow("camp-a", A);
+      expect(token, from).toEqual(expect.any(String));
+      expect(camp()).toMatchObject({ status: "enviando", locked_by: token });
+      expect(await claimEmailCampaignForSendNow("camp-a", A), from).toBeNull();
+      expect(camp().locked_by).toBe(token);
+    }
+  });
+
+  it("never claims a campaign of another house or in another status", async () => {
+    seed(["a@x.com"]);
+    camp().status = "rascunho";
+    expect(await claimEmailCampaignForSendNow("camp-a", "00000000-0000-4000-8000-00000000000b")).toBeNull();
+    camp().status = "cancelada";
+    expect(await claimEmailCampaignForSendNow("camp-a", A)).toBeNull();
+    expect(camp().status).toBe("cancelada");
   });
 });

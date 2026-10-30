@@ -866,20 +866,95 @@ export const sendEmailCampaignNow = createServerFn({ method: "POST" })
       .eq("tenant_id", tenantId)
       .maybeSingle();
     if (!campaign) throw new Error("Campanha não encontrada nesta tenant");
+    // Before the claim: a demo campaign is never moved to "enviando".
+    await assertTenantNotDemoForSend(tenantId);
+    const lockToken = await claimEmailCampaignForSendNow(data.campaignId, tenantId);
+    if (!lockToken) throw new Error(EMAIL_CAMPAIGN_ALREADY_SENDING_MESSAGE);
     try {
-      return await runCampaignSend(data.campaignId);
+      return await runCampaignSend(data.campaignId, { lockToken });
     } catch (err) {
       await supabaseAdmin
         .from("email_campaigns")
-        .update({ status: "rascunho" })
+        .update({ status: "rascunho", locked_at: null, locked_by: null })
         .eq("id", data.campaignId)
-        .eq("status", "enviando");
+        .eq("status", "enviando")
+        .eq("locked_by", lockToken);
       throw err;
     }
   });
 
-/** Executor interno reutilizado pela rota pública agendada. */
-export async function runCampaignSend(campaignId: string) {
+/** Statuses "Enviar agora" may start a campaign from ("enviando" is a run in progress). */
+export const EMAIL_CAMPAIGN_SEND_NOW_FROM = ["rascunho", "agendada", "pausada", "concluida"] as const;
+
+export const EMAIL_CAMPAIGN_ALREADY_SENDING_MESSAGE =
+  "Esta campanha já está sendo enviada ou não pode ser enviada agora.";
+
+/** A run rechecks the campaign status every this many recipients (pause/cancel stop it). */
+export const EMAIL_CAMPAIGN_STATUS_CHECK_EVERY = 10;
+
+/**
+ * Atomic claim of an immediate send, the counterpart of the worker's
+ * claim_due_email_campaigns: one conditional UPDATE moves the campaign to
+ * "enviando" with a fresh lock only from EMAIL_CAMPAIGN_SEND_NOW_FROM. A
+ * concurrent "Enviar agora" or a tick that already claimed it matches no row.
+ * Returns the lock token (locked_by), or null when not claimed.
+ */
+export async function claimEmailCampaignForSendNow(
+  campaignId: string,
+  tenantId: string,
+): Promise<string | null> {
+  const lockToken = crypto.randomUUID();
+  const { data, error } = await supabaseAdmin
+    .from("email_campaigns")
+    .update({ status: "enviando", locked_at: new Date().toISOString(), locked_by: lockToken })
+    .eq("id", campaignId)
+    .eq("tenant_id", tenantId)
+    .in("status", [...EMAIL_CAMPAIGN_SEND_NOW_FROM])
+    .select("id");
+  if (error) throw new Error(error.message);
+  return data && data.length > 0 ? lockToken : null;
+}
+
+/**
+ * Executor interno reutilizado pela rota pública agendada. The campaign must
+ * already be claimed ("enviando": claim_due_email_campaigns in the tick,
+ * claimEmailCampaignForSendNow in "Enviar agora"); `lockToken` is that
+ * claim's locked_by. Every status write is conditional on the run still
+ * owning the campaign (status "enviando" and, with a token, the same
+ * locked_by), the status is rechecked every EMAIL_CAMPAIGN_STATUS_CHECK_EVERY
+ * recipients, and a pause/cancel (or any other status change) stops the run
+ * without being overwritten (`interrompida`).
+ */
+export async function runCampaignSend(
+  campaignId: string,
+  opts: { lockToken?: string | null } = {},
+) {
+  const lockToken = opts.lockToken ?? null;
+  /** Writes `patch` only while this run owns the campaign; true when it did. */
+  const updateOwnRun = async (patch: Record<string, unknown>) => {
+    let query = supabaseAdmin
+      .from("email_campaigns")
+      .update(patch as never)
+      .eq("id", campaignId)
+      .eq("status", "enviando");
+    if (lockToken) query = query.eq("locked_by", lockToken);
+    const { data, error } = await query.select("id");
+    if (error) {
+      console.error(`[email.functions] campaign ${campaignId} update failed:`, error.message);
+      return false;
+    }
+    return Array.isArray(data) && data.length > 0;
+  };
+  const stillOwned = async () => {
+    const { data, error } = await supabaseAdmin
+      .from("email_campaigns")
+      .select("status, locked_by")
+      .eq("id", campaignId)
+      .maybeSingle();
+    // A failed read stops the run (fail closed: never keep sending blind).
+    if (error || !data) return false;
+    return data.status === "enviando" && (!lockToken || data.locked_by === lockToken);
+  };
   const { data: camp, error: cErr } = await supabaseAdmin
     .from("email_campaigns")
     .select("*")
@@ -989,20 +1064,19 @@ export async function runCampaignSend(campaignId: string) {
 
   const IMMEDIATE_SEND_LIMIT = 50;
   if (players.length > IMMEDIATE_SEND_LIMIT) {
-    await supabaseAdmin
-      .from("email_campaigns")
-      .update({
-        status: "rascunho",
-        stats: {
-          enviados: 0,
-          entregues: 0,
-          abertos: 0,
-          cliques: 0,
-          falhas: 0,
-          total: players.length,
-        },
-      })
-      .eq("id", campaignId);
+    await updateOwnRun({
+      status: "rascunho",
+      locked_at: null,
+      locked_by: null,
+      stats: {
+        enviados: 0,
+        entregues: 0,
+        abertos: 0,
+        cliques: 0,
+        falhas: 0,
+        total: players.length,
+      },
+    });
     throw new Error(
       `Esta campanha tem ${players.length} destinatários. Para evitar travamento, envie agora apenas até ${IMMEDIATE_SEND_LIMIT} destinatários ou selecione e-mails/leads específicos.`,
     );
@@ -1028,17 +1102,37 @@ export async function runCampaignSend(campaignId: string) {
   });
 
   if (remaining.length === 0) {
-    await supabaseAdmin
-      .from("email_campaigns")
-      .update({ status: "concluida", blocked_reason: null, stats: stats(0, 0) })
-      .eq("id", campaignId);
-    return { enviados: 0, falhas: 0, pendentes: 0, total: players.length, jaEnviados, pausadaPorSaldo: false };
+    const concluded = await updateOwnRun({
+      status: "concluida",
+      blocked_reason: null,
+      stats: stats(0, 0),
+      locked_at: null,
+      locked_by: null,
+    });
+    return {
+      enviados: 0,
+      falhas: 0,
+      pendentes: 0,
+      total: players.length,
+      jaEnviados,
+      pausadaPorSaldo: false,
+      interrompida: !concluded,
+    };
   }
 
-  await supabaseAdmin
-    .from("email_campaigns")
-    .update({ status: "enviando", stats: stats(0, 0) })
-    .eq("id", campaignId);
+  // Never sends a campaign this run does not own (paused, cancelled or
+  // claimed by another run since).
+  if (!(await updateOwnRun({ stats: stats(0, 0) }))) {
+    return {
+      enviados: 0,
+      falhas: 0,
+      pendentes: 0,
+      total: players.length,
+      jaEnviados,
+      pausadaPorSaldo: false,
+      interrompida: true,
+    };
+  }
 
   let enviados = 0;
   let falhas = 0;
@@ -1047,11 +1141,19 @@ export async function runCampaignSend(campaignId: string) {
   // wallet refuses; the campaign is left "pausada" and the house reruns it
   // after a top-up (no automatic resume).
   let pausadaPorSaldo = false;
+  // Paused/cancelled (or taken over) while running: stop, keep that status.
+  let interrompida = false;
+  let processed = 0;
 
   const house = await loadHouseLinks(camp.tenant_id);
 
   for (const p of remaining) {
     if (!p.email) continue;
+    if (processed > 0 && processed % EMAIL_CAMPAIGN_STATUS_CHECK_EVERY === 0 && !(await stillOwned())) {
+      interrompida = true;
+      break;
+    }
+    processed++;
     // Known once the provider answered: the throw-path log row keeps it.
     let r: Awaited<ReturnType<typeof sendInfobipEmail>> | null = null;
     try {
@@ -1136,27 +1238,43 @@ export async function runCampaignSend(campaignId: string) {
     }
     // Atualização parcial a cada 25 envios para o usuário acompanhar progresso.
     if ((enviados + falhas) % 25 === 0) {
-      await supabaseAdmin
-        .from("email_campaigns")
-        .update({ stats: stats(enviados, falhas) })
-        .eq("id", campaignId);
+      await updateOwnRun({ stats: stats(enviados, falhas) });
     }
     // small breath to avoid bursts
     await new Promise((r) => setTimeout(r, 30));
   }
 
-  await supabaseAdmin
-    .from("email_campaigns")
-    .update({
+  if (!interrompida) {
+    // Conditional: a pause/cancel after the last check is never overwritten.
+    const finished = await updateOwnRun({
       // Falhas temporárias ficam como pendentes no log; não contam como falha
       // definitiva porque o provedor pode aceitar o próximo retry.
       status: pausadaPorSaldo ? "pausada" : "concluida",
       ...(pausadaPorSaldo ? { blocked_reason: EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE } : {}),
       stats: stats(enviados, falhas),
-    })
-    .eq("id", campaignId);
+      locked_at: null,
+      locked_by: null,
+    });
+    if (!finished) interrompida = true;
+  }
+  if (interrompida) {
+    // Progress only, never the status; skipped if another run is sending.
+    await supabaseAdmin
+      .from("email_campaigns")
+      .update({ stats: stats(enviados, falhas) })
+      .eq("id", campaignId)
+      .neq("status", "enviando");
+  }
 
-  return { enviados, falhas, pendentes, total: players.length, jaEnviados, pausadaPorSaldo };
+  return {
+    enviados,
+    falhas,
+    pendentes,
+    total: players.length,
+    jaEnviados,
+    pausadaPorSaldo,
+    interrompida,
+  };
 }
 
 /**

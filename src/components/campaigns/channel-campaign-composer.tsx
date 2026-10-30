@@ -90,6 +90,7 @@ import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
 import { UNRESOLVED_REASONS, type UnresolvedReason } from "@/lib/campaign-recipients";
 import {
   alreadySentSuffix,
+  campaignInterruptedMessage,
   campaignPausedForBalanceMessage,
   type EmailCampaignRunResult,
 } from "@/lib/email-campaign-messages";
@@ -684,7 +685,8 @@ export function ChannelCampaignComposer({
             senderId,
             shortDomainId,
             agendadoPara: scheduleAt ?? null,
-            status: when === "schedule" ? "agendada" : "enviando",
+            // "Enviar agora" claims it from rascunho (claimEmailCampaignForSendNow).
+            status: when === "schedule" ? "agendada" : "rascunho",
             targetPlayerIds: audience!.eligiblePlayerIds,
             extraEmails: [],
             trackLinks,
@@ -725,6 +727,12 @@ export function ChannelCampaignComposer({
       if (emailRun?.pausadaPorSaldo) {
         // PG3: the e-mail run stopped at the first send the wallet refused.
         toast.warning(campaignPausedForBalanceMessage(emailRun));
+        onCreated();
+        onOpenChange(false);
+        return;
+      }
+      if (emailRun?.interrompida) {
+        toast.warning(campaignInterruptedMessage(emailRun));
         onCreated();
         onOpenChange(false);
         return;
