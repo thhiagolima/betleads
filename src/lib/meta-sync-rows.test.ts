@@ -6,6 +6,7 @@ import {
   catalogRowsFromInsights,
   insightRow,
   syncWindow,
+  syncWindows,
 } from "./meta-sync-rows";
 
 describe("AL1-02 janela no fuso da conta", () => {
@@ -32,6 +33,36 @@ describe("AL1-02 janela no fuso da conta", () => {
       since: "2026-10-18",
       until: "2026-10-18",
     });
+  });
+});
+
+describe("D4 janela partida em blocos de 30 dias", () => {
+  const now = new Date("2026-10-19T01:30:00Z"); // 18/10 em Brasília
+
+  it("até 30 dias é um bloco só, igual ao syncWindow", () => {
+    expect(syncWindows("America/Sao_Paulo", 7, now)).toEqual([
+      syncWindow("America/Sao_Paulo", 7, now),
+    ]);
+    expect(syncWindows("America/Sao_Paulo", 30, now)).toEqual([
+      syncWindow("America/Sao_Paulo", 30, now),
+    ]);
+  });
+
+  it("90 dias viram 3 blocos consecutivos, do mais antigo ao mais recente", () => {
+    const chunks = syncWindows("America/Sao_Paulo", 90, now);
+    expect(chunks).toEqual([
+      { since: "2026-07-21", until: "2026-08-19" },
+      { since: "2026-08-20", until: "2026-09-18" },
+      { since: "2026-09-19", until: "2026-10-18" },
+    ]);
+    expect(chunks[0].since).toBe(syncWindow("America/Sao_Paulo", 90, now).since);
+  });
+
+  it("o último bloco é menor quando a janela não divide por 30, no fuso da conta", () => {
+    expect(syncWindows("Europe/Lisbon", 31, now)).toEqual([
+      { since: "2026-09-19", until: "2026-10-18" },
+      { since: "2026-10-19", until: "2026-10-19" },
+    ]);
   });
 });
 

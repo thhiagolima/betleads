@@ -291,3 +291,5 @@ D1–D9 respondidas antes do MB1. BM de teste (D9) pronta antes do aceite.
 | ID | Status | Commit | Evidência | Data |
 |---|---|---|---|---|
 | — | proposto | — | Leitura em produção em 30/10/2026: 0 conexões por token, 0 runs, token legado em texto puro, `authenticated` com escrita em `meta_ad_accounts` | 30/10/2026 |
+| MB0 | em produção | `0a368c2` + migration `20261116100000` | Admin-only nas ações da Meta, sem token em texto puro, reaper da fila, membros só com SELECT em contas e integrações. Conferido em produção após aplicar | 30/10/2026 |
+| MB1 | implementado, aguarda produção | branch `feat/meta-mb1` + migration `20261118100000` | Conexão por token (D1), `meta_ad_account_access` N:N (D2), RPCs transacionais de conectar/selecionar/desconectar/revogar, backfill de 90 dias em blocos de 30 (D4), redescoberta diária, erros por nível (chave × conta × nova tentativa), orçamento de 40 s por tick e cron com timeout de 55 s. Duas revisões independentes; `npm test` 3969/3970 (a falha é a de SMS já existente na main) | 30/10/2026 |

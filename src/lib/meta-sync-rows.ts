@@ -87,6 +87,39 @@ export function syncWindow(
   return { since: start.toISOString().slice(0, 10), until };
 }
 
+/** Tamanho máximo de cada leitura de insights (D4: backfill de 90 dias em blocos de 30). */
+export const META_SYNC_CHUNK_DAYS = 30;
+
+/**
+ * A mesma janela de `syncWindow`, partida em blocos consecutivos de até `chunkDays`
+ * dias, do mais antigo para o mais recente. Uma janela de até `chunkDays` dias vira
+ * um bloco só, igual ao `syncWindow`.
+ */
+export function syncWindows(
+  timezone: string | null | undefined,
+  days: number,
+  now: Date = new Date(),
+  chunkDays: number = META_SYNC_CHUNK_DAYS,
+) {
+  const window = syncWindow(timezone, days, now);
+  const size = Math.max(1, Math.floor(chunkDays));
+  const end = new Date(`${window.until}T00:00:00Z`);
+  const chunks: Array<{ since: string; until: string }> = [];
+  const cursor = new Date(`${window.since}T00:00:00Z`);
+  while (cursor <= end) {
+    const chunkEnd = new Date(cursor);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + size - 1);
+    const until = chunkEnd < end ? chunkEnd : end;
+    chunks.push({
+      since: cursor.toISOString().slice(0, 10),
+      until: until.toISOString().slice(0, 10),
+    });
+    cursor.setTime(until.getTime());
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return chunks;
+}
+
 /** Linha para replace_meta_ad_metrics. A moeda vem da Meta e, na falta, da conta. */
 export function insightRow(row: MetaInsight, accountCurrency: string | null | undefined) {
   return {

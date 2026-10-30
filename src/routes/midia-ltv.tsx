@@ -459,7 +459,11 @@ function VisualizacaoSection({
                   >
                     <span>
                       {syncStatusLabel(run.status)} ·{" "}
-                      {run.trigger_type === "manual" ? "manual" : "automática"}
+                      {run.trigger_type === "manual"
+                        ? "manual"
+                        : run.trigger_type === "backfill"
+                          ? "importação inicial"
+                          : "automática"}
                     </span>
                     <span>
                       {run.processed_accounts}/{run.total_accounts} contas ·{" "}

@@ -4611,6 +4611,7 @@ export type Database = {
       meta_connections: {
         Row: {
           access_token: string | null;
+          accounts_discovered_at: string | null;
           app_id: string | null;
           app_name: string | null;
           auth_type: string;
@@ -4639,6 +4640,7 @@ export type Database = {
         };
         Insert: {
           access_token?: string | null;
+          accounts_discovered_at?: string | null;
           app_id?: string | null;
           app_name?: string | null;
           auth_type?: string;
@@ -4667,6 +4669,7 @@ export type Database = {
         };
         Update: {
           access_token?: string | null;
+          accounts_discovered_at?: string | null;
           app_id?: string | null;
           app_name?: string | null;
           auth_type?: string;

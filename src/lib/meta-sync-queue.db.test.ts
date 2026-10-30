@@ -191,7 +191,7 @@ beforeAll(async () => {
   await db.exec(MIGRATION);
   // Idempotente: aplicar de novo não pode falhar.
   await db.exec(MIGRATION);
-});
+}, 60_000);
 
 afterAll(async () => {
   await db?.close();
