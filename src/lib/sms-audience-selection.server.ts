@@ -180,6 +180,10 @@ async function rpcAudience(
   });
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Sem acesso aos jogadores desta conta.");
+  // Leads mortos: um RPC anterior à migration 20261117100000 ignora o critério
+  // e devolveria a casa inteira. Falha fechado em vez de enviar para todos.
+  if (criteria.deadLeads && (data as { deadLeadsFilter?: unknown }).deadLeadsFilter !== true)
+    throw new Error("O público Leads mortos ainda não está disponível nesta conta.");
   return data as ResolvedSmsAudience;
 }
 

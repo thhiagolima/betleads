@@ -67,6 +67,7 @@ type JourneyRow = {
   entry_rules: Record<string, unknown>;
   daily_limit: number;
   cooldown_hours: number;
+  express?: boolean | null;
 };
 type EnrollmentRow = {
   id: string;
@@ -445,7 +446,7 @@ async function executeEnrollment(
   const { data: journeyRaw } = await db
     .from("journeys")
     .select(
-      "id,status,trigger_type,trigger_config,exit_rules,entry_rules,daily_limit,cooldown_hours",
+      "id,status,trigger_type,trigger_config,exit_rules,entry_rules,daily_limit,cooldown_hours,express",
     )
     .eq("id", enrollment.journey_id)
     .maybeSingle();
@@ -1018,17 +1019,66 @@ async function deliverStep(
     throw new Error(`Passo ${step.step_type} ainda não está habilitado no dispatcher`);
   }
 
-  await release(enrollment, ctx, {
-    status: "active",
-    current_position: step.position + 1,
-    next_run_at: new Date().toISOString(),
-    attempts: 0,
-  });
+  // Leads mortos: N mensagens seguidas sem ação na casa. The RPC already
+  // exited this enrollment (keeping our lease); the fenced release below writes
+  // the same final state instead of advancing it. Express journeys are exempt.
+  const deadLead = (await checkDeadLeadAfterSend(enrollment, ctx)) && !journey.express;
+  await release(
+    enrollment,
+    ctx,
+    deadLead
+      ? { status: "exited", exited_at: new Date().toISOString(), exit_reason: "dead_lead" }
+      : {
+          status: "active",
+          current_position: step.position + 1,
+          next_run_at: new Date().toISOString(),
+          attempts: 0,
+        },
+  );
   await event(enrollment, "step_sent", {
     channel,
     step_position: step.position,
     execution_id: run.id,
   });
+}
+
+/**
+ * Leads mortos (opt-in per house, journey_contact_limits.dead_lead_enabled):
+ * after a message is recorded as sent, journey_dead_lead_check counts the
+ * player's consecutive journey messages since their last action in the house
+ * and, at the threshold, marks them dead and exits their open non-express
+ * enrollments, this one included (p_enrollment_id: the RPC keeps our lease so
+ * the fenced release still applies). Returns true when the player is dead.
+ * Best effort: an error never fails the send that already happened.
+ */
+async function checkDeadLeadAfterSend(
+  enrollment: EnrollmentRow,
+  ctx: DispatchContext,
+): Promise<boolean> {
+  if (!enrollment.player_id || ctx.deadLeadCheckUnavailable) return false;
+  try {
+    const { data, error } = await db.rpc("journey_dead_lead_check", {
+      p_tenant_id: enrollment.tenant_id,
+      p_player_id: enrollment.player_id,
+      p_enrollment_id: enrollment.id,
+    });
+    if (error) {
+      // Function not deployed yet (PGRST202): stop asking for the rest of the run.
+      if (error.code === "PGRST202") ctx.deadLeadCheckUnavailable = true;
+      console.warn("[journey dispatcher] dead lead check failed", {
+        enrollmentId: enrollment.id,
+        error: error.message,
+      });
+      return false;
+    }
+    return data === true;
+  } catch (error) {
+    console.warn("[journey dispatcher] dead lead check failed", {
+      enrollmentId: enrollment.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 }
 
 /**
@@ -1096,6 +1146,8 @@ type DispatchContext = {
   /** `${tenant_id}:${reason}` platform failures already reported to Sentry in this run. */
   platformReported: Set<string>;
   sms: SmsRunGate;
+  /** journey_dead_lead_check is missing (migration not applied): skip it for this run. */
+  deadLeadCheckUnavailable?: boolean;
 };
 
 function newSmsRunGate(holder: string): SmsRunGate {
@@ -1272,6 +1324,13 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     return;
   }
   const enrollment = enrollmentRaw as EnrollmentRow & Record<string, unknown>;
+
+  // Leads mortos: journey_dead_lead_check already exited this enrollment after
+  // its send; a later failure (e.g. the release write) must not bring it back.
+  if (enrollment.status === "exited" && enrollment.exit_reason === "dead_lead") {
+    await release(enrollment, ctx, {});
+    return;
+  }
 
   if (decision.kind === "skip") {
     await holdForBalance(
@@ -1590,6 +1649,12 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
     // Best effort: never blocks the dispatch.
     const { error: sweepError } = await db.rpc("sweep_journey_exits", { p_limit: 1000 });
     if (sweepError) console.error("[journeys] exit sweep failed", sweepError.message);
+    // Leads mortos who acted again (deposit, login, game, PIX, click) are
+    // revived so they may enter journeys again. Set-based, demo houses skipped
+    // in SQL. Best effort, like the exit sweep.
+    const { error: reviveError } = await db.rpc("sweep_dead_lead_revivals", { p_tenant_id: null });
+    if (reviveError)
+      console.error("[journeys] dead lead revival sweep failed", reviveError.message);
     run.progress({ queue_before: queueBefore ?? 0 });
     // Platform SMS account's breaker up front: while it is open, SMS items of
     // the houses on it are not claimed. Other accounts are learned per item.

@@ -38,6 +38,8 @@ export type Journey = {
   entry_rules: Record<string, unknown>;
   exit_rules?: Record<string, unknown> | null;
   cooldown_hours: number;
+  /** Express journeys (PIX gerado, Saque pago) start from the player's own action. */
+  express?: boolean | null;
 };
 
 export type Player = Record<string, unknown> & {
@@ -60,7 +62,7 @@ type ScanBatchResult = {
 };
 
 export const JOURNEY_SELECT_COLUMNS =
-  "id,tenant_id,version,status,trigger_type,trigger_config,entry_rules,exit_rules,cooldown_hours";
+  "id,tenant_id,version,status,trigger_type,trigger_config,entry_rules,exit_rules,cooldown_hours,express";
 
 /**
  * Every player column read by the matchers (audience, detectTriggersForPlayer /
@@ -197,6 +199,37 @@ async function recentCooldownPlayers(journey: Journey, playerIds: string[]) {
   return blocked;
 }
 
+/** Player ids per `in(...)` filter of the dead lead lookup (short PostgREST URLs). */
+const DEAD_LEAD_ID_CHUNK = 300;
+
+/**
+ * Leads mortos (journey_dead_leads, revived_at null) of a house with the rule
+ * on: they do not enter non-express journeys. The enrollment trigger drops
+ * those inserts anyway; filtering here keeps eligible/duplicate accurate.
+ * Missing configuration (or columns not deployed yet) = rule off.
+ */
+async function deadLeadPlayers(journey: Journey, playerIds: string[]) {
+  const blocked = new Set<string>();
+  if (journey.express || !playerIds.length) return blocked;
+  const { data: limits, error: limitsError } = await db
+    .from("journey_contact_limits")
+    .select("dead_lead_enabled")
+    .eq("tenant_id", journey.tenant_id)
+    .maybeSingle();
+  if (limitsError || !limits?.dead_lead_enabled) return blocked;
+  for (let i = 0; i < playerIds.length; i += DEAD_LEAD_ID_CHUNK) {
+    const { data, error } = await db
+      .from("journey_dead_leads")
+      .select("player_id")
+      .eq("tenant_id", journey.tenant_id)
+      .in("player_id", playerIds.slice(i, i + DEAD_LEAD_ID_CHUNK))
+      .is("revived_at", null);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) if (row.player_id) blocked.add(String(row.player_id));
+  }
+  return blocked;
+}
+
 // ------------------------------------------------------------------
 // Shared enrollment (scanner, webhook events, threshold crossing)
 // ------------------------------------------------------------------
@@ -237,11 +270,14 @@ export async function enrollPlayersInJourney(
     .map((player) => ({ player, match: matchJourneyScanPlayer(journey, player, occurrences) }))
     .filter(({ match }) => match.matches);
   if (!matched.length) return empty;
-  const cooldownBlocked = await recentCooldownPlayers(
-    journey,
-    matched.map(({ player }) => player.id),
+  const matchedIds = matched.map(({ player }) => player.id);
+  const [cooldownBlocked, deadBlocked] = await Promise.all([
+    recentCooldownPlayers(journey, matchedIds),
+    deadLeadPlayers(journey, matchedIds),
+  ]);
+  const eligible = matched.filter(
+    ({ player }) => !cooldownBlocked.has(player.id) && !deadBlocked.has(player.id),
   );
-  const eligible = matched.filter(({ player }) => !cooldownBlocked.has(player.id));
   if (!eligible.length) return empty;
   const rows = eligible.map(({ player, match }) => ({
     tenant_id: journey.tenant_id,

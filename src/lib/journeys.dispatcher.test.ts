@@ -723,10 +723,12 @@ describe("runJourneyDispatcher", () => {
       createSignedUrl: async () => ({ data: { signedUrl: "https://a/x.mp3" }, error: null }),
     } as never);
     const originalFrom = fake.client.from;
-    const from = vi.spyOn(fake.client, "from").mockImplementation(((table: string) =>
-      table === "call_history"
-        ? { insert: async () => ({ error: { message: "insert failed" } }) }
-        : originalFrom(table)) as never);
+    const from = vi
+      .spyOn(fake.client, "from")
+      .mockImplementation(((table: string) =>
+        table === "call_history"
+          ? { insert: async () => ({ error: { message: "insert failed" } }) }
+          : originalFrom(table)) as never);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     voice.callInfobipVoice.mockResolvedValue({
       ok: true,
@@ -1307,5 +1309,77 @@ describe("runJourneyDispatcher email step", () => {
       detail: expect.objectContaining({ channel: "email", reason: "saldo_insuficiente" }),
     });
     expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
+  });
+});
+
+describe("runJourneyDispatcher with the dead lead rule (Leads mortos)", () => {
+  it("checks the player after each sent message, with this enrollment", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    fake.rpcs.journey_dead_lead_check = () => false;
+    await runJourneyDispatcher(1000);
+    const check = fake.rpcCalls.find((c) => c.name === "journey_dead_lead_check")!;
+    expect(check.args).toEqual({ p_tenant_id: TENANT, p_player_id: PLAYER, p_enrollment_id: "e1" });
+    expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 1 });
+  });
+
+  it("a lead marked dead does not continue to the next step and its lease is released", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    fake.rpcs.journey_dead_lead_check = () => {
+      // The RPC exits the enrollment but keeps the caller's lease.
+      Object.assign(enrollment("e1"), {
+        status: "exited",
+        exit_reason: "dead_lead",
+        exited_at: new Date().toISOString(),
+      });
+      return true;
+    };
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ processed: 1, failed: 0, leaseLost: 0 });
+    expect(enrollment("e1")).toMatchObject({
+      status: "exited",
+      exit_reason: "dead_lead",
+      current_position: 0,
+      claimed_by: null,
+    });
+    expect(fake.tables.journey_step_executions[0].status).toBe("sent");
+    expect(fake.tables.journey_events.map((e) => e.event_type)).toContain("step_sent");
+  });
+
+  it("an express journey keeps going even when the player is dead", async () => {
+    seed(["e1"]);
+    fake.tables.journeys[0].express = true;
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    fake.rpcs.journey_dead_lead_check = () => true;
+    await runJourneyDispatcher(1000);
+    expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 1 });
+  });
+
+  it("a failing check never fails the send", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    fake.rpcs.journey_dead_lead_check = () => {
+      throw new Error("boom");
+    };
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 1 });
+  });
+
+  it("does not check skipped (holdout) steps", async () => {
+    seed(["e1"]);
+    fake.tables.journey_enrollments[0].is_holdout = true;
+    await runJourneyDispatcher(1000);
+    expect(rpcNames()).not.toContain("journey_dead_lead_check");
+  });
+
+  it("runs the revival sweep on every dispatch", async () => {
+    seed([]);
+    await runJourneyDispatcher(1000);
+    expect(fake.rpcCalls).toContainEqual({
+      name: "sweep_dead_lead_revivals",
+      args: { p_tenant_id: null },
+    });
   });
 });

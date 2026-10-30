@@ -148,6 +148,7 @@ const EXTRA_EXIT_REASON_LABELS: Record<string, string> = {
   journey_paused_closed: "encerrada ao pausar a jornada",
   duplicate_lower_priority: "entrada duplicada em jornada de menor prioridade",
   lock_expired_recovered: "envio retomado após travamento",
+  dead_lead: "lead morto: várias mensagens seguidas sem nenhuma ação na casa",
 };
 
 /** Readable (pt-BR) exit reason. Known keys are translated; anything else is

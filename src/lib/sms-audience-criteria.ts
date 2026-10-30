@@ -39,6 +39,11 @@ export const smsAudienceCriteriaSchema = z.object({
   daysWithoutLogin: z.number().int().min(1).max(3650).nullable().default(null),
   daysSinceRegistration: z.number().int().min(1).max(3650).nullable().default(null),
   /**
+   * Só leads mortos (journey_dead_leads ativo: N mensagens de jornada seguidas
+   * sem nenhuma ação na casa). Resolvido no RPC `resolve_sms_audience_v2`.
+   */
+  deadLeads: z.boolean().optional(),
+  /**
    * Público de seleção, forma gravada em `sms_audiences`: exatamente estes
    * jogadores (sempre restritos à casa). Exige `timing: "selection"` e
    * nenhuma regra.
@@ -81,6 +86,9 @@ export const EMPTY_SMS_AUDIENCE: SmsAudienceCriteria = {
   daysSinceRegistration: null,
 };
 
+/** Público de sistema dos leads mortos (regra "Leads mortos" das jornadas). */
+export const DEAD_LEADS_SYSTEM_AUDIENCE_ID = "system:dead-leads";
+
 export const SYSTEM_SMS_AUDIENCES: Array<{
   id: string;
   name: string;
@@ -122,6 +130,13 @@ export const SYSTEM_SMS_AUDIENCES: Array<{
     name: "Black VIP",
     description: "Jogadores classificados no nível Black VIP.",
     criteria: { ...EMPTY_SMS_AUDIENCE, level: "black" },
+  },
+  {
+    id: DEAD_LEADS_SYSTEM_AUDIENCE_ID,
+    name: "Leads mortos (sem resposta às jornadas)",
+    description:
+      "Jogadores que receberam várias mensagens de jornada seguidas sem nenhuma ação na casa.",
+    criteria: { ...EMPTY_SMS_AUDIENCE, deadLeads: true },
   },
 ];
 
@@ -226,7 +241,8 @@ export function hasNoAudienceRules(criteria: SmsAudienceCriteria) {
     criteria.level === null &&
     (criteria.timing === "any" || criteria.timing === "selection") &&
     criteria.daysWithoutLogin === null &&
-    criteria.daysSinceRegistration === null
+    criteria.daysSinceRegistration === null &&
+    !criteria.deadLeads
   );
 }
 
@@ -240,6 +256,7 @@ export function selectionAudienceLabel(count: number) {
 export function describeSmsAudience(criteria: SmsAudienceCriteria) {
   const parts: string[] = [];
   if (isSelectionAudience(criteria)) parts.push(selectionAudienceLabel(selectionCountOf(criteria)));
+  if (criteria.deadLeads) parts.push("leads mortos (sem resposta às jornadas)");
   if (criteria.activity.deposit === "yes") parts.push("já depositou");
   if (criteria.activity.deposit === "never") parts.push("nunca depositou");
   if (criteria.activity.pixUnpaid) parts.push("gerou PIX e não pagou");

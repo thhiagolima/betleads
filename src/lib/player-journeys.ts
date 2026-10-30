@@ -29,6 +29,7 @@ export const EXIT_REASON_LABELS: Record<string, string> = {
   journey_removed: "jornada removida",
   journey_paused_closed: "encerrada ao desligar a jornada",
   journey_player_daily_cap: "limite diário de mensagens desta jornada",
+  dead_lead: "lead morto (sem resposta)",
   merged_duplicate: "entrada duplicada unificada",
   audit_cleanup_inactivity_band: "ajuste de faixa (auditoria)",
 };
