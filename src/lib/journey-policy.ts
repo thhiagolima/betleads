@@ -286,14 +286,94 @@ export function activationTriggerConfig(
 /** Explicit "whole base" start for an event journey (see activationTriggerConfig). */
 export const INCLUDE_BASE_START_AFTER = "1970-01-01T00:00:00.000Z";
 
+/** Player fields the audience and entry filters read. */
+export type AudiencePlayer = {
+  status?: string | null;
+  vip?: boolean | null;
+  ftd_em?: string | null;
+  total_depositado?: number | string | null;
+  ultimo_deposito?: string | null;
+};
+
 /** Whether a player belongs to the journey's audience (entry and every step, E-06). */
 export function audienceMatches(
   journey: { entry_rules?: Record<string, unknown> | null },
-  player: { status?: string | null; vip?: boolean | null },
+  player: AudiencePlayer,
+  now = Date.now(),
 ) {
   const audience = String(journey.entry_rules?.audience ?? "all_active");
   if (audience === "manual") return false;
   if (audience === "all_active" && player.status !== "ativo") return false;
   if (audience === "vip" && player.vip !== true) return false;
+  return entryFiltersMatch(journeyEntryFilters(journey.entry_rules), player, now);
+}
+
+/**
+ * Who may be in the journey beyond the audience (P1.1,
+ * docs/ESCOPO_AUDITORIA_JORNADAS_CUSTO_RECUPERACAO_2026-10-29.md), kept in
+ * `entry_rules.filters`. Checked with the audience: at entry and before each
+ * step, so a player who stops matching leaves the journey.
+ */
+export type JourneyEntryFilters = {
+  /** Only players who already made a first deposit. */
+  require_ftd?: boolean;
+  /** Total deposited (R$) at least / at most. */
+  min_total_deposited?: number;
+  max_total_deposited?: number;
+  /** Leave out a player who deposited within this many hours. */
+  no_deposit_within_hours?: number;
+  /** Only players whose last deposit is within this many days. */
+  last_deposit_within_days?: number;
+};
+
+const FILTER_NUMBER_KEYS = [
+  "min_total_deposited",
+  "max_total_deposited",
+  "no_deposit_within_hours",
+  "last_deposit_within_days",
+] as const;
+
+/** The usable filters of `entry_rules.filters`; invalid values are dropped. */
+export function journeyEntryFilters(
+  entryRules: Record<string, unknown> | null | undefined,
+): JourneyEntryFilters {
+  const raw = entryRules?.filters;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const source = raw as Record<string, unknown>;
+  const filters: JourneyEntryFilters = {};
+  if (source.require_ftd === true) filters.require_ftd = true;
+  for (const key of FILTER_NUMBER_KEYS) {
+    const value = source[key];
+    if (value === null || value === undefined || value === "") continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) filters[key] = parsed;
+  }
+  return filters;
+}
+
+export function entryFiltersMatch(
+  filters: JourneyEntryFilters,
+  player: AudiencePlayer,
+  now = Date.now(),
+): boolean {
+  const total = Number(player.total_depositado ?? 0) || 0;
+  const lastDeposit = Date.parse(String(player.ultimo_deposito ?? ""));
+  if (filters.require_ftd && !player.ftd_em && total <= 0) return false;
+  if (filters.min_total_deposited != null && total < filters.min_total_deposited) return false;
+  if (filters.max_total_deposited != null && total > filters.max_total_deposited) return false;
+  if (
+    filters.no_deposit_within_hours != null &&
+    Number.isFinite(lastDeposit) &&
+    now - lastDeposit < filters.no_deposit_within_hours * 3600_000
+  )
+    return false;
+  if (
+    filters.last_deposit_within_days != null &&
+    !(
+      Number.isFinite(lastDeposit) &&
+      now - lastDeposit <= filters.last_deposit_within_days * 86400_000
+    )
+  )
+    return false;
   return true;
 }

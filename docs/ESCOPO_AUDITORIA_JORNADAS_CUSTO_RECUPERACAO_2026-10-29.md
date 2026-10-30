@@ -317,6 +317,21 @@ Critério de ordem:
 - **UI:** um bloco "Quem pode entrar" no editor, com contagem estimada em tempo real.
 - **Aceite:** é possível montar "Dormindo, depositou R$ 200 ou mais, sem depósito em 48h"
   e a contagem bate com uma consulta SQL de conferência.
+- **Status: primeira versão implementada no branch `feat/journeys-entry-filters`** (falta
+  deploy; não precisa de migração):
+  - `entry_rules.filters` com `require_ftd`, `min_total_deposited`, `max_total_deposited`,
+    `no_deposit_within_hours` e `last_deposit_within_days` (`journeyEntryFilters` e
+    `entryFiltersMatch` em `journey-policy.ts`). Valores inválidos são ignorados.
+  - Os filtros ficam dentro de `audienceMatches`, então valem nos mesmos pontos do público:
+    na entrada (scanner, webhook, cruzamento) e antes de cada etapa. Quem deixa de cumprir
+    sai da jornada. Exceção já existente: Nível, Cashback e Manual não reavaliam o público
+    entre as etapas, então para elas os filtros valem só na entrada.
+  - Editor: bloco de filtros na seção "Público". Campo vazio não filtra; jornadas existentes
+    não mudam.
+  - **Ficou de fora:**
+    - tags: nenhum jogador de nenhuma casa tem `tags` preenchidas;
+    - número de depósitos: exige agregar `deposits`;
+    - a contagem estimada em tempo real (P1.2).
 
 #### P1.2 Prévia de público e custo ao ativar
 - **Ajuste:** o diálogo de ativação (`journey-status-control.tsx`) mostra:

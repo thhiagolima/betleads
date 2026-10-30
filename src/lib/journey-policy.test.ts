@@ -8,6 +8,7 @@ import {
   eventMaxAgeHours,
   eventYoungEnough,
   inactivityUpperBoundHours,
+  journeyEntryFilters,
   journeyEntryKey,
   nextJourneyWindowOpen,
   pickSmsVariant,
@@ -240,5 +241,64 @@ describe("audienceMatches (E-06)", () => {
     expect(audienceMatches({ entry_rules: { audience: "manual" } }, { status: "ativo" })).toBe(
       false,
     );
+  });
+});
+
+describe("entry filters (P1.1)", () => {
+  const now = Date.parse("2026-10-29T12:00:00.000Z");
+  const hoursAgo = (h: number) => new Date(now - h * 3600_000).toISOString();
+  const rules = (filters: Record<string, unknown>) => ({
+    entry_rules: { audience: "system:all-leads", filters },
+  });
+
+  it("keeps only valid filters", () => {
+    expect(journeyEntryFilters(undefined)).toEqual({});
+    expect(journeyEntryFilters({ filters: [] })).toEqual({});
+    expect(
+      journeyEntryFilters({
+        filters: {
+          require_ftd: true,
+          min_total_deposited: "200",
+          max_total_deposited: -1,
+          no_deposit_within_hours: "",
+          last_deposit_within_days: "x",
+        },
+      }),
+    ).toEqual({ require_ftd: true, min_total_deposited: 200 });
+  });
+
+  it("no filters: everyone in the audience matches (existing journeys unchanged)", () => {
+    expect(audienceMatches(rules({}), { status: "ativo" }, now)).toBe(true);
+  });
+
+  it("require_ftd and total deposited bounds", () => {
+    expect(audienceMatches(rules({ require_ftd: true }), { total_depositado: 0 }, now)).toBe(false);
+    expect(audienceMatches(rules({ require_ftd: true }), { ftd_em: hoursAgo(500) }, now)).toBe(
+      true,
+    );
+    const valuable = rules({ min_total_deposited: 200, max_total_deposited: 999 });
+    expect(audienceMatches(valuable, { total_depositado: "150" }, now)).toBe(false);
+    expect(audienceMatches(valuable, { total_depositado: 200 }, now)).toBe(true);
+    expect(audienceMatches(valuable, { total_depositado: 1000 }, now)).toBe(false);
+  });
+
+  it("leaves out recent depositors and keeps only recent-enough ones", () => {
+    const notActive = rules({ no_deposit_within_hours: 48 });
+    expect(audienceMatches(notActive, { ultimo_deposito: hoursAgo(10) }, now)).toBe(false);
+    expect(audienceMatches(notActive, { ultimo_deposito: hoursAgo(72) }, now)).toBe(true);
+    expect(audienceMatches(notActive, { ultimo_deposito: null }, now)).toBe(true);
+
+    const recent = rules({ last_deposit_within_days: 30 });
+    expect(audienceMatches(recent, { ultimo_deposito: hoursAgo(24 * 20) }, now)).toBe(true);
+    expect(audienceMatches(recent, { ultimo_deposito: hoursAgo(24 * 40) }, now)).toBe(false);
+    expect(audienceMatches(recent, { ultimo_deposito: null }, now)).toBe(false);
+  });
+
+  it("filters combine with the audience rule", () => {
+    const journey = {
+      entry_rules: { audience: "all_active", filters: { min_total_deposited: 50 } },
+    };
+    expect(audienceMatches(journey, { status: "inativo", total_depositado: 500 }, now)).toBe(false);
+    expect(audienceMatches(journey, { status: "ativo", total_depositado: 500 }, now)).toBe(true);
   });
 });
