@@ -102,19 +102,31 @@ export function AudienceCard({
   description,
   labels,
   menu,
+  badge,
 }: {
   audienceId: string;
   name: string;
   description?: string | null;
   labels?: string[];
   menu?: AudienceMenuItem[];
+  /** Short tag next to the name (e.g. "Da casa · somente leitura"). */
+  badge?: string;
 }) {
   const regular = (menu ?? []).filter((item) => !item.destructive);
   const destructive = (menu ?? []).filter((item) => item.destructive);
   return (
     <article className="flex flex-col gap-3 rounded-xl border border-border bg-background/30 p-3.5 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0 flex-1">
-        <h3 className="truncate text-body font-semibold">{name}</h3>
+        {badge ? (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 className="truncate text-body font-semibold">{name}</h3>
+            <span className="shrink-0 rounded-full border border-border bg-secondary/50 px-2 py-0.5 text-meta text-muted-foreground">
+              {badge}
+            </span>
+          </div>
+        ) : (
+          <h3 className="truncate text-body font-semibold">{name}</h3>
+        )}
         {description && <p className="mt-0.5 text-meta text-muted-foreground">{description}</p>}
         {labels && labels.length > 0 && (
           <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Regras do público">

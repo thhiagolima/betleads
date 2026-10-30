@@ -68,7 +68,7 @@ function matchesStatus(filter: CampaignStatus, status: string) {
   if (filter === "pausadas") return isPausedCampaignStatus(status);
   return isFinishedCampaignStatus(status);
 }
-type Campaign = {
+export type Campaign = {
   id: string;
   name: string | null;
   scheduled_at: string;
@@ -101,6 +101,10 @@ type Campaign = {
   cancellable?: boolean;
   /** SMS paused for lack of balance: "Retomar" puts it back in the queue. */
   resumable?: boolean;
+  /** E-mail: a batched send is between two batches ("Enviando em lotes"). */
+  batch_in_progress?: boolean;
+  /** Expert campaign refused by the admin: why. */
+  rejection_reason?: string | null;
 };
 
 type EmailCampaignRow = {
@@ -113,9 +117,10 @@ type EmailCampaignRow = {
   blockedReason?: string | null;
   enviados: number;
   falhas: number;
+  loteEmAndamento?: boolean;
 };
 
-type DraftSummary = {
+export type DraftSummary = {
   id: string;
   name: string;
   channel: "sms" | "email" | "voice";
@@ -247,6 +252,7 @@ export function CampaignsHub() {
         sent_count: campaign.enviados,
         failed_count: campaign.falhas,
         blocked_reason: campaign.blockedReason ?? null,
+        batch_in_progress: campaign.loteEmAndamento === true,
         has_planned_total: false,
         channel: "email" as const,
         cancellable: false,
@@ -349,65 +355,16 @@ export function CampaignsHub() {
         />
       </div>
 
-      {draftItems.length > 0 && (
-        <HomeCard>
-          <div className="border-b border-border px-4 py-3">
-            <h2 className="text-section">Rascunhos</h2>
-            <p className="text-meta text-muted-foreground">
-              Salvos automaticamente enquanto você edita.
-            </p>
-          </div>
-          <ul>
-            {draftItems.map((draft) => {
-              const draftName = draft.name || "Campanha sem nome";
-              return (
-                <li
-                  key={draft.id}
-                  className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-2.5 last:border-b-0"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-body font-medium">{draftName}</p>
-                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
-                      <ChannelBadge channel={draft.channel} className="py-0" />
-                      editado em{" "}
-                      {new Date(draft.updatedAt).toLocaleString("pt-BR", {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      })}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setActiveDraftId(draft.id);
-                        setInitialChannel(draft.channel);
-                        setComposerOpen(true);
-                      }}
-                    >
-                      Continuar
-                    </Button>
-                    <IconButton
-                      label={`Excluir rascunho ${draftName}`}
-                      icon={<Trash2 />}
-                      disabled={removeDraft.isPending}
-                      onClick={async () => {
-                        const confirmed = await requestConfirmation({
-                          title: "Excluir rascunho?",
-                          description: `O rascunho "${draftName}" será apagado e não poderá ser recuperado.`,
-                          confirmLabel: "Excluir rascunho",
-                          destructive: true,
-                        });
-                        if (confirmed) removeDraft.mutate(draft.id);
-                      }}
-                    />
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </HomeCard>
-      )}
+      <CampaignDraftsCard
+        items={draftItems}
+        deleting={removeDraft.isPending}
+        onContinue={(draft) => {
+          setActiveDraftId(draft.id);
+          setInitialChannel(draft.channel);
+          setComposerOpen(true);
+        }}
+        onDelete={(id) => removeDraft.mutate(id)}
+      />
 
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
         <SegmentedFilter
@@ -562,22 +519,93 @@ export function CampaignsHub() {
   );
 }
 
-const ROW_GRID =
+/** Drafts saved by the composer's autosave (house or expert drafts, same shape). */
+export function CampaignDraftsCard({
+  items,
+  deleting,
+  onContinue,
+  onDelete,
+}: {
+  items: DraftSummary[];
+  deleting: boolean;
+  onContinue: (draft: DraftSummary) => void;
+  onDelete: (id: string) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <HomeCard>
+      <div className="border-b border-border px-4 py-3">
+        <h2 className="text-section">Rascunhos</h2>
+        <p className="text-meta text-muted-foreground">
+          Salvos automaticamente enquanto você edita.
+        </p>
+      </div>
+      <ul>
+        {items.map((draft) => {
+          const draftName = draft.name || "Campanha sem nome";
+          return (
+            <li
+              key={draft.id}
+              className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-2.5 last:border-b-0"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-body font-medium">{draftName}</p>
+                <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
+                  <ChannelBadge channel={draft.channel} className="py-0" />
+                  editado em{" "}
+                  {new Date(draft.updatedAt).toLocaleString("pt-BR", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  })}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button variant="outline" onClick={() => onContinue(draft)}>
+                  Continuar
+                </Button>
+                <IconButton
+                  label={`Excluir rascunho ${draftName}`}
+                  icon={<Trash2 />}
+                  disabled={deleting}
+                  onClick={async () => {
+                    const confirmed = await requestConfirmation({
+                      title: "Excluir rascunho?",
+                      description: `O rascunho "${draftName}" será apagado e não poderá ser recuperado.`,
+                      confirmLabel: "Excluir rascunho",
+                      destructive: true,
+                    });
+                    if (confirmed) onDelete(draft.id);
+                  }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </HomeCard>
+  );
+}
+
+export const ROW_GRID =
   "xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,10rem)_minmax(0,6rem)_minmax(0,6rem)_minmax(0,6rem)_minmax(0,13rem)] xl:items-center xl:gap-4 px-4";
 
-function CampaignRow({
+export function CampaignRow({
   campaign,
   cancelPending,
   resumePending,
   onCancel,
   onResume,
+  variant = "house",
 }: {
   campaign: Campaign;
   cancelPending: boolean;
   resumePending: boolean;
   onCancel: () => void;
   onResume: () => void;
+  /** "expert": no campaign report, resume or wallet links (house-only pages/actions). */
+  variant?: "house" | "expert";
 }) {
+  const isExpertRow = variant === "expert";
   const total = Number(campaign.total_count ?? 0);
   const sentCount = Number(campaign.sent_count ?? 0);
   const repeated = Number(campaign.deduplicated_count ?? 0);
@@ -588,13 +616,18 @@ function CampaignRow({
   const hasPlannedTotal = campaign.has_planned_total ?? total > 0;
   const progress =
     hasPlannedTotal && total > 0 ? `${Math.min(100, Math.round((done / total) * 100))}%` : "—";
-  const operation = getChannelOperationState(campaign.status, campaign.channel);
+  const operation = getChannelOperationState(campaign.status, campaign.channel, {
+    lastError: campaign.last_error ?? campaign.blocked_reason,
+    batchInProgress: campaign.batch_in_progress,
+  });
   const reason =
+    (campaign.status === "recusada" ? (campaign.rejection_reason ?? null) : null) ??
     campaignStopReason(campaign.status, campaign.last_error, campaign.updated_at) ??
     campaign.blocked_reason ??
     null;
   const unresolved = Number(campaign.unresolved_count ?? 0);
-  const pausedForBalance = campaign.channel === "sms" && campaign.status === "pausada";
+  const pausedForBalance =
+    !isExpertRow && campaign.channel === "sms" && campaign.status === "pausada";
   const when = campaign.date_is_creation
     ? `criada em ${new Date(campaign.scheduled_at).toLocaleDateString("pt-BR")}`
     : new Date(campaign.scheduled_at).toLocaleString("pt-BR", {
@@ -604,7 +637,9 @@ function CampaignRow({
   const meta = [
     `${num(total)} ${total === 1 ? "destinatário" : "destinatários"}`,
     when,
-    isVoice ? `${num(Number(campaign.completed_count ?? 0))} concluídas` : null,
+    isVoice && campaign.completed_count != null
+      ? `${num(Number(campaign.completed_count))} concluídas`
+      : null,
     repeated > 0 ? `${num(repeated)} repetidos ignorados` : null,
   ].filter(Boolean);
 
@@ -646,7 +681,10 @@ function CampaignRow({
         </p>
         {reason ? (
           <p className="mt-1 text-meta text-foreground/80">
-            <span className="font-medium">Motivo:</span> {reason}
+            <span className="font-medium">
+              {campaign.status === "recusada" ? "Motivo da recusa:" : "Motivo:"}
+            </span>{" "}
+            {reason}
           </p>
         ) : null}
       </div>
@@ -657,14 +695,16 @@ function CampaignRow({
         <CampaignMetric label="Progresso" value={progress} />
       </dl>
       <div className="flex flex-wrap gap-2 xl:justify-end">
-        {campaign.has_report === false ? null : (
+        {campaign.has_report === false || isExpertRow ? null : (
           <Button size="sm" variant="outline" asChild>
             <Link to="/campanhas/$campaignId/relatorio" params={{ campaignId: campaign.id }}>
               Relatório
             </Link>
           </Button>
         )}
-        {campaign.resumable && (campaign.channel === "sms" || campaign.channel === "email") ? (
+        {!isExpertRow &&
+        campaign.resumable &&
+        (campaign.channel === "sms" || campaign.channel === "email") ? (
           <Button size="sm" variant="outline" disabled={resumePending} onClick={onResume}>
             Retomar
           </Button>

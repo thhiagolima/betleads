@@ -27,6 +27,9 @@ import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { CentralPeriodPicker } from "@/components/crm-results/shared";
 import { actionErrorMessage, formatDueDate } from "@/components/expert/sheet-format";
 import { ExpertMetricCards } from "@/components/expert/expert-metric-cards";
+import { ExpertUsageCard } from "@/components/campaigns/expert-usage-card";
+import { getExpertCampaignUsage } from "@/lib/expert-campaigns.functions";
+import { EXPERT_USAGE_QUERY_KEY, type ExpertCampaignUsageData } from "@/lib/expert-campaign-usage";
 import { CHART_COLORS, chartAxisProps, chartGridProps } from "@/lib/chart-theme";
 import { expertAccessErrorMessage } from "@/lib/expert-access-message";
 import {
@@ -275,6 +278,29 @@ const TIPO_LABEL: Record<"restrito" | "total", string> = {
   total: "Acesso total",
 };
 
+/** Sending cap of the month (used x cap + waiting for approval), linking to Campanhas. */
+function MeuConsumoCard() {
+  const usageFn = useServerFn(getExpertCampaignUsage);
+  const usage = useQuery({ queryKey: EXPERT_USAGE_QUERY_KEY, queryFn: () => usageFn() });
+  return (
+    <ExpertUsageCard
+      title="Meu consumo"
+      usage={usage.data as ExpertCampaignUsageData | undefined}
+      loading={usage.isLoading}
+      failed={usage.isError}
+      className="max-w-xl"
+      action={
+        <Button asChild variant="outline" size="sm" className="gap-2">
+          <Link to="/campanhas">
+            Ver campanhas
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </Button>
+      }
+    />
+  );
+}
+
 function ExpertHomePage() {
   const [period, setPeriod] = useState<PeriodKey>(DEFAULT_EXPERT_PERIOD);
 
@@ -349,6 +375,8 @@ function ExpertHomePage() {
       )}
 
       <ParaChamarHojeCard />
+
+      <MeuConsumoCard />
 
       <Card className="w-fit">
         <CardHeader>
