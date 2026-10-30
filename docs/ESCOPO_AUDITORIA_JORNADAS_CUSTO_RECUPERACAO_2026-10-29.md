@@ -340,6 +340,23 @@ Critério de ordem:
     `crm_sms_report_price`);
   - autonomia da carteira depois da ativação.
 - **Aceite:** o valor estimado fica dentro de ±15% do custo real das primeiras 24h.
+- **Status: primeira versão implementada no branch `feat/journeys-activation-preview`**
+  (falta deploy; não precisa de migração):
+  - `journey-activation-preview.server.ts` conta os elegíveis com o próprio matcher do
+    scanner (`matchJourneyScanPlayer`), simulando o `trigger_config` de "Incluir a base
+    atual". Assim respeita o público, os filtros (P1.1), `start_after` e a idade máxima do
+    evento (P0.3). Antes, a contagem vinha do SQL `journey_activation_estimate`, que
+    ignorava tudo isso. Exemplo: "Cadastrou e não depositou" da Sorte Alta (sem descontar
+    matrículas abertas) mostraria 7.398 jogadores, e a regra real deixa entrar 46.
+  - PIX e saque buscam primeiro os eventos recentes e depois só os jogadores deles; os
+    demais gatilhos leem os jogadores da casa em páginas de 1.000.
+  - O custo considera os segmentos do 1º SMS (antes, 1 por jogador). O diálogo também mostra
+    o custo da jornada completa (todos os SMS de uma passada) para quem entra.
+  - **Ainda não feito:**
+    - estimativa de entradas por dia;
+    - autonomia da carteira depois da ativação;
+    - conferir a precisão (±15%) contra o custo real.
+    A função SQL `journey_activation_estimate` continua no banco, sem uso pelo app.
 
 #### P1.3 Orçamento em R$
 - **Hoje:** só `daily_limit` em número de mensagens. `channel_budget_buckets` é um limite

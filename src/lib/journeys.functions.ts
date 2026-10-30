@@ -11,6 +11,7 @@ import {
   legacyEmailBlockSenderConfig,
 } from "./journeys.shared";
 import { activationTriggerConfig, journeyEntryKey } from "./journey-policy";
+import { previewJourneyActivation } from "./journey-activation-preview.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
 import { toggleJourneyExpress } from "./journey-express";
 import { assertTenantEmailSender } from "./campaign-refs.server";
@@ -972,27 +973,31 @@ export const saveJourneyContactLimits = createServerFn({ method: "POST" })
 
 /**
  * P3: impact of publishing a journey "including the current base" — players
- * that would enter now and the cost of their first message.
+ * that would enter now and the cost of their first message. P1.2: counted
+ * with the scanner's matcher (audience, entry filters, max event age) and
+ * priced by SMS segments, plus the SMS cost of one full pass per player.
  */
 export const getJourneyActivationEstimate = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((value: unknown) => z.object({ id: z.string().uuid() }).parse(value))
   .handler(async ({ data, context }) => {
     const tenantId = await tenant(context);
-    const userDb = context.supabase as any;
-    const { data: rows, error } = await userDb.rpc("journey_activation_estimate", {
-      _journey: data.id,
-    });
-    if (error) throw new Error("Não foi possível estimar o impacto da publicação.");
-    const row = (rows ?? [])[0] as
-      { eligible: number | string | null; supported: boolean } | undefined;
+    let preview: Awaited<ReturnType<typeof previewJourneyActivation>>;
+    try {
+      preview = await previewJourneyActivation(data.id, tenantId);
+    } catch {
+      throw new Error("Não foi possível estimar o impacto da publicação.");
+    }
+    if (!preview) throw new Error("Jornada não encontrada.");
     const prices = await getEffectivePrices(tenantId);
     const price = prices.sms.unitPrice;
-    const eligible = row?.eligible == null ? null : Number(row.eligible);
+    const eligible = preview.eligible;
     return {
-      supported: Boolean(row?.supported),
+      supported: preview.supported,
       eligible,
       pricePerSms: price,
-      firstSendCost: eligible == null ? null : eligible * price,
+      firstSendCost: eligible == null ? null : eligible * price * preview.firstSmsSegments,
+      smsSteps: preview.smsSteps,
+      costPerPlayerPass: price * preview.segmentsPerPass,
     };
   });

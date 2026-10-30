@@ -197,10 +197,22 @@ export function useJourneyStatusControl() {
                     style: "currency",
                     currency: "BRL",
                   })}
-                  {estimate.data.eligible > 0 &&
-                    " · se a jornada envia todo dia, o custo se repete a cada dia"}
+                  {estimate.data.eligible > 0 && estimate.data.smsSteps > 0 && (
+                    <>
+                      {" "}
+                      · jornada completa ({estimate.data.smsSteps} SMS) ≈{" "}
+                      {(estimate.data.eligible * estimate.data.costPerPlayerPass).toLocaleString(
+                        "pt-BR",
+                        { style: "currency", currency: "BRL" },
+                      )}{" "}
+                      se ninguém sair antes
+                    </>
+                  )}
                 </span>
               ) : null}
+              <span className="mt-1 block text-xs">
+                A contagem já considera o público, os filtros de entrada e a idade máxima do evento.
+              </span>
             </ChoiceCard>
           </RadioGroup>
           <DialogFooter>
