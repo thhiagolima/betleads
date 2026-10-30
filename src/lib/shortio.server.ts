@@ -634,6 +634,50 @@ export class DestinationNotAllowedError extends Error {
   }
 }
 
+/** Host of the house's own site (tenants.site_url), without a leading "www."; null if unset. */
+async function houseSiteHost(tenantId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("tenants")
+    .select("site_url")
+    .eq("id", tenantId)
+    .maybeSingle();
+  if (error) throw new Error(`Falha ao carregar o site da casa: ${error.message}`);
+  const raw = (data as { site_url?: string | null } | null)?.site_url?.trim();
+  if (!raw) return null;
+  try {
+    const host = normalizeHost(new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname);
+    return host.replace(/^www\./, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Throws DestinationNotAllowedError unless `url` may be the destination of a
+ * tracked link of the house. Always refused: protected URLs (login, tokens,
+ * signatures), non-http(s), localhost/private hosts.
+ * - strict=false (default, house sends): unchanged house behavior — the
+ *   house's allowed_destination_hosts apply only when it configured any.
+ * - strict=true (expert sends): fail-closed — only the configured hosts or
+ *   the house's own site (tenants.site_url host and its subdomains); a house
+ *   with neither allows nothing.
+ */
+export async function assertDestinationAllowed(input: {
+  tenantId: string;
+  url: string;
+  strict?: boolean;
+}): Promise<void> {
+  if (isProtectedDestination(input.url)) throw new DestinationNotAllowedError();
+  const base = await baseSettingsForTenant(input.tenantId);
+  let allowedHosts = base.allowed_destination_hosts;
+  if (input.strict) {
+    const siteHost = await houseSiteHost(input.tenantId);
+    allowedHosts = siteHost ? [...allowedHosts, siteHost] : allowedHosts;
+    if (allowedHosts.length === 0) throw new DestinationNotAllowedError();
+  }
+  if (!isShortioEligibleUrl(input.url, { allowedHosts })) throw new DestinationNotAllowedError();
+}
+
 /**
  * tracked_links row for a link that goes out unshortened (first-party
  * redirect only): link_dispatches.tracked_link_id is NOT NULL. Same shape as
@@ -706,12 +750,8 @@ export async function createTrackedLinkForRecipient(input: {
     deliveryKey: input.deliveryKey,
     messageLogType: "expert_links",
   };
+  await assertDestinationAllowed({ tenantId: input.tenantId, url: input.originalUrl });
   const base = await baseSettingsForTenant(input.tenantId);
-  if (
-    isProtectedDestination(input.originalUrl) ||
-    !isShortioEligibleUrl(input.originalUrl, { allowedHosts: base.allowed_destination_hosts })
-  )
-    throw new DestinationNotAllowedError();
 
   const trackingToken = await deterministicToken(context, 0);
   const firstPartyRedirect = await buildFirstPartyClickUrl(trackingToken);

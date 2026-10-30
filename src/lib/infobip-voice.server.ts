@@ -73,6 +73,13 @@ export type InfobipVoiceOptions = {
   maxSeconds?: number | null;
   /** Área do Expert: owner of the call; the reservation checks his monthly cap. */
   expertId?: string | null;
+  /**
+   * Wallet delivery key when it must differ from `idempotencyKey` (e.g. the
+   * call_queue item id: one reservation `voice:<queue id>[:gen]` per item,
+   * while each dial keeps its own correlation). Defaults to the idempotency
+   * key, else the fresh uuid.
+   */
+  billingKey?: string | null;
 };
 
 export type InfobipVoiceContent =
@@ -199,7 +206,7 @@ export async function callInfobipVoice(
     tenantId: options.tenantId,
     item: "voice_30s",
     prefix: "voice",
-    deliveryKey: idempotencyKey,
+    deliveryKey: options.billingKey || idempotencyKey,
     units,
     referenceType: "voice_call",
     ...(options.expertId ? { expertId: options.expertId } : {}),

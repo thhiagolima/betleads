@@ -51,14 +51,14 @@ export const Route = createFileRoute("/api/public/email-campaigns/tick")({
             { p_limit: 5 },
           );
           if (claimErr) throw new Error(claimErr.message);
-          const due = (claimed ?? []) as Array<{ id: string }>;
+          const due = (claimed ?? []) as Array<{ id: string; locked_by: string | null }>;
 
           const results: Array<{ id: string; ok: boolean; error?: string }> = [];
           let errors = 0;
           let lastErr: string | null = null;
           for (const c of due) {
             try {
-              await runCampaignSend(c.id);
+              await runCampaignSend(c.id, { lockToken: c.locked_by });
               results.push({ id: c.id, ok: true });
             } catch (e) {
               const msg = e instanceof Error ? e.message : String(e);
@@ -67,7 +67,9 @@ export const Route = createFileRoute("/api/public/email-campaigns/tick")({
               lastErr = msg.slice(0, 800);
               // Devolve à fila se temporário (rate limit/timeout); senão deixa como erro.
               const transient = /rate|throttle|timeout|temporar|busy|5\d\d/i.test(msg);
-              await supabaseAdmin
+              // Only while this tick still owns the run: a pause/cancel made
+              // meanwhile is never overwritten.
+              let release = supabaseAdmin
                 .from("email_campaigns")
                 .update(
                   transient
@@ -79,7 +81,10 @@ export const Route = createFileRoute("/api/public/email-campaigns/tick")({
                       }
                     : { status: "rascunho", locked_at: null, locked_by: null },
                 )
-                .eq("id", c.id);
+                .eq("id", c.id)
+                .eq("status", "enviando");
+              if (c.locked_by) release = release.eq("locked_by", c.locked_by);
+              await release;
               results.push({ id: c.id, ok: false, error: msg });
             }
           }

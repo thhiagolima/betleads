@@ -282,6 +282,65 @@ export async function resolveAudienceForTenant(
   return resolvePlayerIdsAudience(db, tenantId, playerIds, affiliateIds);
 }
 
+/**
+ * Destinatários de um público no envio de uma campanha agendada. Seleção de
+ * jogadores: um alvo por telefone (só dígitos, 10+), na ordem da seleção,
+ * com o id do jogador escolhido — com telefone compartilhado, fica o
+ * primeiro jogador selecionado, nunca outro jogador que só divide o número.
+ * Regras: os telefones do RPC, sem jogador (resolvidos depois pelo telefone).
+ */
+export async function resolveAudienceTargetsForTenant(
+  db: SelectionDb,
+  tenantId: string,
+  rawCriteria: unknown,
+  /** Área do Expert: escopo do dono, recarregado pelo worker a cada tick. */
+  expertScope?: ExpertAudienceScope,
+): Promise<Array<{ phone: string; playerId: string | null }>> {
+  const criteria = normalizeOrPermanent(rawCriteria, "O público desta campanha está inválido");
+  const affiliateIds = expertScope ? expertScope.affiliateIds : null;
+  if (!isSelectionAudience(criteria)) {
+    // Restrito sem afiliado nenhum: ninguém, sem consultar.
+    if (affiliateIds && affiliateIds.length === 0) return [];
+    const data = await rpcAudience(db, tenantId, criteria, affiliateIds);
+    const phones = Array.isArray(data.phones) ? data.phones : [];
+    return phones
+      .filter((p): p is string => typeof p === "string")
+      .map((phone) => ({ phone, playerId: null }));
+  }
+  const playerIds =
+    criteria.playerIds ??
+    (await loadSelectionPlayerIds(
+      db,
+      tenantId,
+      criteria.audienceId!,
+      expertScope
+        ? { expertId: expertScope.expertId, allowHouse: expertScope.affiliateIds === null }
+        : undefined,
+    ));
+  const loaded = await loadTenantPlayersByIds<SelectedPlayer & { affiliate_id?: string | null }>(
+    db,
+    tenantId,
+    playerIds,
+    affiliateIds ? "id,telefone,email,affiliate_id" : "id,telefone,email",
+  );
+  const allowed = affiliateIds ? new Set(affiliateIds.map((id) => id.trim()).filter(Boolean)) : null;
+  const players = allowed
+    ? loaded.filter((p) => allowed.has((p.affiliate_id ?? "").trim()))
+    : loaded;
+  const byId = new Map(players.map((p) => [p.id, p]));
+  const seenPhones = new Set<string>();
+  const targets: Array<{ phone: string; playerId: string | null }> = [];
+  for (const id of new Set(playerIds)) {
+    const player = byId.get(id);
+    if (!player) continue;
+    const phone = phoneDigits(player.telefone);
+    if (phone.length < 10 || seenPhones.has(phone)) continue;
+    seenPhones.add(phone);
+    targets.push({ phone, playerId: player.id });
+  }
+  return targets;
+}
+
 /** "Seleção de Jogadores · dd/mm hh:mm" no horário de Brasília. */
 export function selectionAudienceName(now: Date) {
   const parts = new Intl.DateTimeFormat("pt-BR", {

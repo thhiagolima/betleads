@@ -1,5 +1,8 @@
 // Expert RLS — SQL tests for
-// supabase/migrations/20261025100200_expert_rls.sql
+// supabase/migrations/20261025100200_expert_rls.sql, as hardened by the
+// expert_pii section of 20261125100000_expert_hardening.sql (the
+// players/deposits/withdrawals expert policies are gone: an expert reads
+// nothing of them over PostgREST; its server functions use supabaseAdmin).
 //
 // Runs the expert migrations (Tasks 1 and 2) inside an in-memory Postgres
 // (PGlite) on top of a schema that copies the production tenant helpers
@@ -7,14 +10,16 @@
 // withdrawals and one representative house table (sms_campaigns). Each
 // persona query runs as `authenticated` with a simulated Supabase JWT
 // (request.jwt.claims) and optional X-Active-Tenant header
-// (request.headers), and asserts that an expert sees only the players its
-// type allows — and nothing else of the house.
+// (request.headers), and asserts that an expert sees no player, deposit or
+// withdrawal — and nothing else of the house — while admins are unaffected.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { EXPERT_HARDENING, migrationSection } from "./migration-section.test-support";
 
 const root = resolve(__dirname, "../..");
 const migration = (file: string) =>
@@ -329,43 +334,13 @@ async function addExpert(
   }
 }
 
-// Runs `sql` like asUser, with function-call tracking on, and returns how
-// many times each named public function ran during it (rolled back).
-async function functionCallsAsUser(
-  userId: string,
-  sql: string,
-  functions: string[],
-): Promise<Record<string, number>> {
-  await db.query("BEGIN");
-  try {
-    await db.exec("SET LOCAL track_functions = 'all'");
-    await db.query(`select set_config('request.jwt.claims', $1, true)`, [
-      JSON.stringify({ sub: userId, role: "authenticated" }),
-    ]);
-    await db.query(`select set_config('request.headers', '{}', true)`);
-    await db.exec("SET LOCAL ROLE authenticated");
-    await db.query(sql);
-    await db.exec("RESET ROLE");
-    const calls: Record<string, number> = {};
-    for (const fn of functions) {
-      const { rows } = await db.query<{ calls: string | number | null }>(
-        `select pg_stat_get_xact_function_calls($1::regproc::oid) as calls`,
-        [`public.${fn}`],
-      );
-      calls[fn] = Number(rows[0].calls ?? 0);
-    }
-    return calls;
-  } finally {
-    await db.query("ROLLBACK");
-  }
-}
-
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(SCHEMA);
   await db.exec(MIGRATION_ROLE);
   await db.exec(MIGRATION_MODEL);
   await db.exec(MIGRATION_RLS);
+  await db.exec(migrationSection(EXPERT_HARDENING, "expert_pii"));
 
   await db.query(`insert into public.tenants (id, nome) values ($1, 'Casa A'), ($2, 'Casa B')`, [
     TENANT_A,
@@ -434,63 +409,58 @@ afterAll(async () => {
   await db.close();
 });
 
-describe("expert RLS", () => {
-  it("restricted expert sees only players of own affiliate ids", async () => {
-    const players = await asUser<{ id: string; tenant_id: string }>(
-      RESTRITO_A,
-      `select id, tenant_id from public.players`,
-    );
-    expect(players).toEqual([{ id: playerAff1A, tenant_id: TENANT_A }]);
+const EXPERTS = [
+  RESTRITO_A,
+  TOTAL_A,
+  RESTRITO_VAZIO_A,
+  INATIVO_A,
+  INATIVO_TOTAL_A,
+  SEM_ROLE_A,
+  SEM_VINCULO_A,
+  DUAS_CASAS,
+];
 
-    const deposits = await asUser<{ player_id: string }>(
-      RESTRITO_A,
-      `select player_id from public.deposits`,
-    );
-    expect(deposits).toEqual([{ player_id: playerAff1A }]);
-
-    const withdrawals = await asUser<{ player_id: string }>(
-      RESTRITO_A,
-      `select player_id from public.withdrawals`,
-    );
-    expect(withdrawals).toEqual([{ player_id: playerAff1A }]);
-  });
-
-  it("total expert sees all players of the house and none of other houses", async () => {
-    const players = await asUser<{ tenant_id: string }>(
-      TOTAL_A,
-      `select tenant_id from public.players`,
-    );
-    expect(players).toHaveLength(3);
-    expect(players.every((p) => p.tenant_id === TENANT_A)).toBe(true);
-
-    // Same result with its own house as the active tenant.
-    const withHeader = await asUser(TOTAL_A, `select id from public.players`, {
-      activeTenant: TENANT_A,
-    });
-    expect(withHeader).toHaveLength(3);
-
-    const deposits = await asUser<{ tenant_id: string }>(
-      TOTAL_A,
-      `select tenant_id from public.deposits`,
-    );
-    expect(deposits).toHaveLength(3);
-    expect(deposits.every((d) => d.tenant_id === TENANT_A)).toBe(true);
-  });
-
-  it("restricted expert without ids sees no players", async () => {
-    expect(await asUser(RESTRITO_VAZIO_A, `select id from public.players`)).toHaveLength(0);
-    expect(await asUser(RESTRITO_VAZIO_A, `select id from public.deposits`)).toHaveLength(0);
-  });
-
-  it("deactivated expert sees nothing", async () => {
-    for (const user of [INATIVO_A, INATIVO_TOTAL_A]) {
-      expect(await asUser(user, `select id from public.players`)).toHaveLength(0);
-      expect(await asUser(user, `select id from public.deposits`)).toHaveLength(0);
-      expect(await asUser(user, `select id from public.withdrawals`)).toHaveLength(0);
-      expect(await asUser(user, `select id from public.expert_affiliates`)).toHaveLength(
-        user === INATIVO_A ? 1 : 0,
-      );
+describe("expert RLS (hardened)", () => {
+  it("no expert reads players, deposits or withdrawals over REST, with or without a house header", async () => {
+    for (const user of EXPERTS) {
+      for (const activeTenant of [undefined, TENANT_A, TENANT_B]) {
+        for (const table of ["players", "deposits", "withdrawals"]) {
+          expect(
+            await asUser(user, `select * from public.${table}`, { activeTenant }),
+            `${user} ${table} ${activeTenant ?? "-"}`,
+          ).toHaveLength(0);
+        }
+      }
     }
+    // Not even the columns the expert screens show.
+    expect(
+      await asUser(RESTRITO_A, `select id, affiliate_id from public.players where id = '${playerAff1A}'`),
+    ).toHaveLength(0);
+    expect(
+      await asUser(DUAS_CASAS, `select id from public.players where id = '${playerAff1B}'`, {
+        activeTenant: TENANT_B,
+      }),
+    ).toHaveLength(0);
+  });
+
+  it("the expert policies and their helpers are gone", async () => {
+    const { rows: policies } = await db.query<{ policyname: string }>(
+      `select policyname from pg_policies
+       where schemaname = 'public' and tablename in ('players', 'deposits', 'withdrawals')
+         and policyname like '%expert%'`,
+    );
+    expect(policies).toEqual([]);
+    const { rows: fns } = await db.query<{ proname: string }>(
+      `select proname from pg_proc
+       where pronamespace = 'public'::regnamespace and proname like 'current_expert_%'`,
+    );
+    expect(fns).toEqual([]);
+  });
+
+  it("re-running the section is a no-op", async () => {
+    await db.exec(migrationSection(EXPERT_HARDENING, "expert_pii"));
+    expect(await asUser(TOTAL_A, `select id from public.players`)).toHaveLength(0);
+    expect(await asUser(ADMIN_A, `select id from public.players`)).toHaveLength(3);
   });
 
   it("expert is outside house membership", async () => {
@@ -512,16 +482,7 @@ describe("expert RLS", () => {
     ).toHaveLength(0);
   });
 
-  it("expert with x-active-tenant of another house sees nothing", async () => {
-    expect(
-      await asUser(TOTAL_A, `select id from public.players`, { activeTenant: TENANT_B }),
-    ).toHaveLength(0);
-    expect(
-      await asUser(TOTAL_A, `select id from public.deposits`, { activeTenant: TENANT_B }),
-    ).toHaveLength(0);
-  });
-
-  it("admin of the house still sees all players", async () => {
+  it("admin of the house still sees all players, deposits and withdrawals", async () => {
     const players = await asUser<{ tenant_id: string }>(
       ADMIN_A,
       `select tenant_id from public.players`,
@@ -529,6 +490,7 @@ describe("expert RLS", () => {
     expect(players).toHaveLength(3);
     expect(players.every((p) => p.tenant_id === TENANT_A)).toBe(true);
     expect(await asUser(ADMIN_A, `select id from public.deposits`)).toHaveLength(3);
+    expect(await asUser(ADMIN_A, `select id from public.withdrawals`)).toHaveLength(3);
     // Every experts row of house A (DUAS_CASAS also has one in house B).
     expect(await asUser(ADMIN_A, `select id from public.experts`)).toHaveLength(8);
   });
@@ -545,31 +507,6 @@ describe("expert RLS", () => {
       `select affiliate_id from public.expert_affiliates`,
     );
     expect(affiliates).toEqual([{ affiliate_id: "AFF1" }]);
-  });
-
-  it("expert without the user_roles expert row sees nothing", async () => {
-    expect(await asUser(SEM_ROLE_A, `select id from public.players`)).toHaveLength(0);
-    expect(await asUser(SEM_ROLE_A, `select id from public.deposits`)).toHaveLength(0);
-  });
-
-  it("expert role without a linked experts row sees nothing", async () => {
-    expect(await asUser(SEM_VINCULO_A, `select id from public.players`)).toHaveLength(0);
-    expect(await asUser(SEM_VINCULO_A, `select id from public.deposits`)).toHaveLength(0);
-  });
-
-  it("expert of two houses sees the first house by default and the header house otherwise", async () => {
-    // TENANT_A < TENANT_B, so without a header the active house is A.
-    const noHeader = await asUser<{ tenant_id: string }>(
-      DUAS_CASAS,
-      `select tenant_id from public.players`,
-    );
-    expect(noHeader).toHaveLength(3);
-    expect(noHeader.every((p) => p.tenant_id === TENANT_A)).toBe(true);
-
-    const headerB = await asUser<{ id: string }>(DUAS_CASAS, `select id from public.players`, {
-      activeTenant: TENANT_B,
-    });
-    expect(headerB).toEqual([{ id: playerAff1B }]);
   });
 
   it("expert cannot write players, deposits or withdrawals", async () => {
@@ -606,20 +543,7 @@ describe("expert RLS", () => {
     expect(rows[0].expert).toBeNull();
   });
 
-  it("expert policies keep the tenant_id index usable for non-experts", async () => {
-    // Measured in PGlite (20 extra houses x 500 players, ANALYZE, as admin_A),
-    // EXPLAIN ANALYZE of `select * from players where tenant_id = A`, the
-    // shape every app query has:
-    //   Index Scan using players_tenant_ftd_idx on players
-    //     Index Cond: (tenant_id = A)
-    //     Filter: ((InitPlan 1) OR (tenant_id = (InitPlan 2)) OR
-    //              ((tenant_id = (InitPlan 3)) AND ((InitPlan 4) IS NOT NULL)
-    //               AND ((InitPlan 5) = 'total' OR btrim(affiliate_id) = ANY (InitPlan 6))))
-    //     InitPlan 3 / InitPlan 4 (current_expert_tenant_id): never executed
-    // Same plan and cost as with no expert policy at all. Note that an
-    // unfiltered `select * from players` is a Seq Scan even WITHOUT any expert
-    // policy: players_tenant_rls's own `(select is_super_admin()) OR …` arm
-    // cannot drive an index, so that case is not asserted here.
+  it("the tenant_id index stays usable for house members", async () => {
     await db.exec(`
       insert into public.tenants (id, nome)
         select ('00000000-0000-4000-8000-0000000001' || lpad(g::text, 2, '0'))::uuid, 'Casa ' || g
@@ -642,75 +566,4 @@ describe("expert RLS", () => {
     // Still only house A's three players for the admin.
     expect(await asUser(ADMIN_A, `select id from public.players`)).toHaveLength(3);
   });
-
-  it("expert policy helpers run once per query (InitPlan), not once per row", async () => {
-    // 3000 extra players in house A; a third carry the restricted expert's
-    // id as ' AFF1 ' (surrounding spaces keep the btrim rule covered at
-    // volume and tag the bulk rows for the cleanup below).
-    await db.exec(`
-      insert into public.players (tenant_id, affiliate_id)
-        select '${TENANT_A}', case when n % 3 = 0 then ' AFF1 ' else 'BULK' || (n % 5) end
-        from generate_series(1, 3000) n;
-      insert into public.deposits (tenant_id, player_id)
-        select tenant_id, id from public.players
-          where affiliate_id like 'BULK%' or affiliate_id = ' AFF1 ';
-      analyze public.players;
-      analyze public.deposits;
-    `);
-    try {
-      for (const [user, expected] of [
-        [RESTRITO_A, 1001],
-        [TOTAL_A, 3003],
-      ] as const) {
-        const plan = await asUser<{ "QUERY PLAN": string }>(
-          user,
-          `explain (analyze, costs off, timing off, summary off) select id from public.players`,
-        );
-        const text = plan.map((r) => r["QUERY PLAN"]).join("\n");
-        // The tipo and affiliate-id helpers are InitPlans, never a per-row SubPlan.
-        expect(text).toContain("InitPlan");
-        expect(text).not.toContain("SubPlan");
-        // Every node, the InitPlans included, ran exactly once.
-        const loops = [...text.matchAll(/loops=(\d+)/g)].map((m) => Number(m[1]));
-        expect(loops.length).toBeGreaterThan(0);
-        expect(new Set(loops)).toEqual(new Set([1]));
-        expect(await asUser(user, `select id from public.players`)).toHaveLength(expected);
-      }
-
-      // Counted directly: over ~3000 rows each helper runs a handful of
-      // times (its InitPlans), never once per row.
-      const HELPERS = [
-        "current_expert_tenant_id",
-        "current_expert_tipo",
-        "current_expert_affiliate_ids",
-      ];
-      for (const sql of [`select id from public.players`, `select id from public.deposits`]) {
-        const calls = await functionCallsAsUser(RESTRITO_A, sql, HELPERS);
-        expect(calls.current_expert_tipo).toBeGreaterThanOrEqual(1);
-        expect(calls.current_expert_affiliate_ids).toBeGreaterThanOrEqual(1);
-        for (const fn of HELPERS) expect(calls[fn]).toBeLessThan(20);
-      }
-
-      // deposits pay the players rule again through the EXISTS: it becomes a
-      // single hashed SubPlan (the players scan runs once), whose own expert
-      // helpers are InitPlans — nothing re-runs per deposit row.
-      const depositsPlan = await asUser<{ "QUERY PLAN": string }>(
-        RESTRITO_A,
-        `explain (analyze, costs off, timing off, summary off) select id from public.deposits`,
-      );
-      const depositsText = depositsPlan.map((r) => r["QUERY PLAN"]).join("\n");
-      expect(depositsText).toContain("InitPlan");
-      const subPlanRefs = [...depositsText.matchAll(/(hashed )?SubPlan \d+\)/g)];
-      expect(subPlanRefs.every((m) => m[1] === "hashed ")).toBe(true);
-      const depositLoops = [...depositsText.matchAll(/loops=(\d+)/g)].map((m) => Number(m[1]));
-      expect(new Set(depositLoops)).toEqual(new Set([1]));
-      expect(await asUser(RESTRITO_A, `select id from public.deposits`)).toHaveLength(1001);
-    } finally {
-      await db.exec(`
-        delete from public.deposits d using public.players p
-          where p.id = d.player_id and (p.affiliate_id like 'BULK%' or p.affiliate_id = ' AFF1 ');
-        delete from public.players where affiliate_id like 'BULK%' or affiliate_id = ' AFF1 ';
-      `);
-    }
-  }, 60_000);
 });

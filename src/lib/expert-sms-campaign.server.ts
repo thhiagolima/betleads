@@ -16,16 +16,20 @@ import {
   type ExpertScope,
 } from "./expert-campaign-scope.server";
 import type { ExpertAudienceScope } from "./sms-audience-selection.server";
-import type { CampaignDispatchDeps, SmsCampaignRow } from "./sms-campaign-dispatch.server";
+import type {
+  AudienceTarget,
+  CampaignDispatchDeps,
+  SmsCampaignRow,
+} from "./sms-campaign-dispatch.server";
 
 export type ExpertCampaignIo = {
   loadScope: (expertId: string, tenantId: string) => Promise<ExpertScope | null>;
   filterVisible: (scope: ExpertScope, playerIds: string[]) => Promise<string[]>;
-  resolveAudiencePhones: (
+  resolveAudienceTargets: (
     tenantId: string,
     criteria: unknown,
     scope: ExpertAudienceScope,
-  ) => Promise<string[]>;
+  ) => Promise<AudienceTarget[]>;
 };
 
 /** Approval states the worker must never send. */
@@ -41,7 +45,7 @@ export function isBlockedApproval(status: string | null | undefined): boolean {
 export async function expertCampaignDeps(
   c: SmsCampaignRow,
   base: CampaignDispatchDeps,
-  io: Partial<ExpertCampaignIo> & Pick<ExpertCampaignIo, "resolveAudiencePhones">,
+  io: Partial<ExpertCampaignIo> & Pick<ExpertCampaignIo, "resolveAudienceTargets">,
 ): Promise<CampaignDispatchDeps | null> {
   if (!c.expert_id) return base;
   const loadScope = io.loadScope ?? ((id, tenantId) => loadExpertScope(id, tenantId));
@@ -68,8 +72,8 @@ export async function expertCampaignDeps(
   const { sendBatch: _bulk, ...rest } = base;
   return {
     ...rest,
-    resolveAudiencePhones: (tenantId, criteria) =>
-      io.resolveAudiencePhones(tenantId, criteria, audienceScopeOf(scope)),
+    resolveAudienceTargets: (tenantId, criteria) =>
+      io.resolveAudienceTargets(tenantId, criteria, audienceScopeOf(scope)),
     async loadPlayerVariables(playerIds, tenantId) {
       const allowed = await filterVisible(scope, playerIds);
       visible.clear();

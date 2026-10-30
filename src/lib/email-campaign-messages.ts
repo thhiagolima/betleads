@@ -8,6 +8,8 @@ export type EmailCampaignRunResult = {
   total?: number;
   jaEnviados?: number;
   pausadaPorSaldo?: boolean;
+  /** The campaign was paused/cancelled while running: the run stopped there. */
+  interrompida?: boolean;
 };
 
 /** Confirmation shown before a (re)send: a re-run never sends twice. */
@@ -17,6 +19,12 @@ export const EMAIL_CAMPAIGN_RESEND_NOTE = "Quem já recebeu esta campanha não r
 export function campaignPausedForBalanceMessage(r: EmailCampaignRunResult) {
   const sent = Number(r.jaEnviados ?? 0) + Number(r.enviados ?? 0);
   return `Campanha pausada por saldo insuficiente: ${sent} de ${Number(r.total ?? 0)} e-mails enviados. Recarregue a carteira e envie novamente.`;
+}
+
+/** The campaign was paused/cancelled while this run was sending it. */
+export function campaignInterruptedMessage(r: EmailCampaignRunResult) {
+  const sent = Number(r.jaEnviados ?? 0) + Number(r.enviados ?? 0);
+  return `Envio interrompido: a campanha foi pausada ou alterada durante o envio. ${sent} de ${Number(r.total ?? 0)} e-mails enviados.`;
 }
 
 /** Recipients a re-run skipped because this campaign already reached them. */

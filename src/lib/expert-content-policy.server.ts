@@ -1,90 +1,24 @@
 // Links no conteúdo de campanhas de expert (Área do Expert §8): texto/HTML
-// livre, mas todo link precisa apontar para um destino da casa.
-//
-// STUB — `assertDestinationAllowed` abaixo é provisória. O branch
-// fix/expert-hardening adiciona a versão oficial, com esta mesma assinatura,
-// em shortio.server.ts. Depois do merge, troque o corpo desta função por
-//   export { assertDestinationAllowed } from "./shortio.server";
-// (ou importe de lá em `assertExpertContentLinksAllowed`) e apague o stub.
-//
-// Regra do stub (fecha por padrão): o host precisa ser o do site da casa
-// (tenants.site_url, ou um subdomínio dele), um domínio cadastrado da casa
-// (tenant_domains não removido) ou um host liberado em
-// shortio_settings.allowed_destination_hosts. Sem nenhum desses, nada passa.
+// livre, mas todo link precisa apontar para um destino da casa. A regra é a
+// de `assertDestinationAllowed` (shortio.server.ts) em modo estrito: só os
+// hosts liberados em shortio_settings.allowed_destination_hosts ou o site da
+// casa (tenants.site_url e subdomínios — as URLs rápidas ficam nele); uma
+// casa sem nenhum dos dois não libera nada. Domínios de encurtador da casa
+// não entram de propósito: um link curto colado esconderia o destino.
 
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { assertDestinationAllowed, DestinationNotAllowedError } from "./shortio.server";
+
+export { DestinationNotAllowedError };
 
 export const EXPERT_LINK_NOT_ALLOWED = (host: string) =>
-  `Link não permitido: ${host}. Use apenas links da casa (site, URLs rápidas ou domínios cadastrados).`;
-
-export class DestinationNotAllowedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DestinationNotAllowedError";
-  }
-}
+  `Link não permitido: ${host}. Use apenas links do site da casa (inclusive as URLs rápidas) ou dos domínios liberados pelo admin.`;
 
 function hostOf(raw: string): string | null {
   try {
-    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    return url.hostname.toLowerCase().replace(/\.$/, "");
+    return new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname.toLowerCase();
   } catch {
     return null;
   }
-}
-
-function hostMatches(host: string, allowed: string): boolean {
-  const a = allowed.toLowerCase().replace(/^www\./, "");
-  const h = host.replace(/^www\./, "");
-  return h === a || h.endsWith(`.${a}`);
-}
-
-/* eslint-disable @typescript-eslint/no-explicit-any -- shortio_settings/tenant_domains columns are read loosely. */
-async function houseAllowedHosts(tenantId: string): Promise<string[]> {
-  const db = supabaseAdmin as any;
-  const [tenant, domains, settings] = await Promise.all([
-    db.from("tenants").select("site_url").eq("id", tenantId).maybeSingle(),
-    db.from("tenant_domains").select("hostname").eq("tenant_id", tenantId).is("removed_at", null),
-    db
-      .from("shortio_settings")
-      .select("allowed_destination_hosts")
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
-  ]);
-  for (const r of [tenant, domains, settings]) if (r.error) throw new Error(r.error.message);
-  const hosts: string[] = [];
-  const site = tenant.data?.site_url ? hostOf(String(tenant.data.site_url)) : null;
-  if (site) hosts.push(site);
-  for (const d of (domains.data ?? []) as Array<{ hostname?: string | null }>) {
-    const h = d.hostname ? hostOf(String(d.hostname)) : null;
-    if (h) hosts.push(h);
-  }
-  const extra = settings.data?.allowed_destination_hosts;
-  if (Array.isArray(extra))
-    for (const e of extra) {
-      const h = hostOf(String(e ?? ""));
-      if (h) hosts.push(h);
-    }
-  return Array.from(new Set(hosts));
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
-/**
- * STUB (ver cabeçalho). Lança `DestinationNotAllowedError` quando `url` não é
- * um destino da casa. `strict` = fecha por padrão (sem allowlist, recusa).
- */
-export async function assertDestinationAllowed(args: {
-  tenantId: string;
-  url: string;
-  strict: boolean;
-}): Promise<void> {
-  const host = hostOf(args.url);
-  if (!host) throw new DestinationNotAllowedError(EXPERT_LINK_NOT_ALLOWED(args.url.slice(0, 80)));
-  const allowed = await houseAllowedHosts(args.tenantId);
-  if (allowed.length === 0 && !args.strict) return;
-  if (!allowed.some((a) => hostMatches(host, a)))
-    throw new DestinationNotAllowedError(EXPERT_LINK_NOT_ALLOWED(host));
 }
 
 const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<>"'()]+/gi;
@@ -124,9 +58,16 @@ export async function assertExpertContentLinksAllowed(
 ): Promise<void> {
   for (const content of contents) {
     if (!content) continue;
-    for (const url of extractContentUrls(content)) {
-      if (isOwnStorageAsset(url)) continue;
-      await assertDestinationAllowed({ tenantId, url, strict: true });
+    for (const raw of extractContentUrls(content)) {
+      if (isOwnStorageAsset(raw)) continue;
+      const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+      try {
+        await assertDestinationAllowed({ tenantId, url, strict: true });
+      } catch (error) {
+        if (error instanceof DestinationNotAllowedError)
+          throw new DestinationNotAllowedError(EXPERT_LINK_NOT_ALLOWED(hostOf(raw) ?? raw.slice(0, 80)));
+        throw error;
+      }
     }
   }
 }

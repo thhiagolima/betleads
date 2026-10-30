@@ -14,6 +14,7 @@ import {
   loadTenantPlayersByIds,
   PermanentAudienceError,
   resolveAudienceForTenant,
+  resolveAudienceTargetsForTenant,
   SELECTION_AUDIENCE_MISSING,
   SELECTION_ID_CHUNK,
   selectionAudienceName,
@@ -438,5 +439,43 @@ describe("Públicos (listar e salvar)", () => {
     const fake = createFakeDb();
     const saved = await resolveCriteriaToSave(fake.client, TENANT, undefined, { level: "gold" });
     expect(saved).toEqual(normalizeSmsAudienceCriteria({ level: "gold" }));
+  });
+});
+
+describe("resolveAudienceTargetsForTenant", () => {
+  it("seleção: cada telefone leva o jogador selecionado, mesmo com o número compartilhado", async () => {
+    const fake = createFakeDb();
+    fake.rows("players").push(
+      // pid(9) divide o telefone de pid(1), foi atualizado depois e NÃO está na seleção.
+      { id: pid(9), tenant_id: TENANT, telefone: "+55 11 99999-0001", updated_at: "2026-10-30" },
+      { id: pid(1), tenant_id: TENANT, telefone: "+55 11 99999-0001", updated_at: "2026-01-01" },
+      { id: pid(2), tenant_id: TENANT, telefone: "5511999990002" },
+      // Mesmo número de pid(2): fica só o primeiro selecionado.
+      { id: pid(3), tenant_id: TENANT, telefone: "5511999990002" },
+      { id: pid(4), tenant_id: TENANT, telefone: "123" },
+      { id: pid(5), tenant_id: OTHER, telefone: "5511999990005" },
+    );
+    const targets = await resolveAudienceTargetsForTenant(
+      fake.client,
+      TENANT,
+      selection([pid(2), pid(1), pid(3), pid(4), pid(5)]),
+    );
+    expect(targets).toEqual([
+      { phone: "5511999990002", playerId: pid(2) },
+      { phone: "5511999990001", playerId: pid(1) },
+    ]);
+  });
+
+  it("regras: telefones do RPC, sem jogador", async () => {
+    const fake = createFakeDb();
+    fake.onRpc("resolve_sms_audience_v2", () => ({
+      data: { phones: ["5511999990001", "5511999990002"] },
+      error: null,
+    }));
+    const targets = await resolveAudienceTargetsForTenant(fake.client, TENANT, { level: "gold" });
+    expect(targets).toEqual([
+      { phone: "5511999990001", playerId: null },
+      { phone: "5511999990002", playerId: null },
+    ]);
   });
 });

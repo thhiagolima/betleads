@@ -6,6 +6,15 @@ vi.mock("@/lib/expert-access.server", () => ({
   requireExpertContext: (...args: unknown[]) => mockRequireExpertContext(...args),
 }));
 
+// The queries go through supabaseAdmin (experts have no RLS on players);
+// each makeSupabaseStub() call installs itself as the admin client.
+const adminStub: { current: unknown } = { current: null };
+vi.mock("@/integrations/supabase/client.server", () => ({
+  get supabaseAdmin() {
+    return adminStub.current;
+  },
+}));
+
 import { getExpertHomeFor, listExpertLeadsFor } from "./expert-leads.functions";
 
 type Call = [string, ...unknown[]];
@@ -51,6 +60,7 @@ function makeSupabaseStub(result: { data?: unknown[]; count?: number } = {}) {
       return builder;
     },
   };
+  adminStub.current = supabase;
   return { supabase, calls };
 }
 
@@ -187,6 +197,28 @@ describe("listExpertLeadsFor", () => {
         risco: "baixo",
         vip: true,
       },
+    ]);
+  });
+});
+
+describe("admin client", () => {
+  it("never reads players through the caller's own (RLS) client", async () => {
+    mockRequireExpertContext.mockResolvedValue(RESTRICTED_CTX);
+    const { calls } = makeSupabaseStub({ data: [], count: 0 });
+    const userClient = {
+      from: () => {
+        throw new Error("user client must not be used");
+      },
+    };
+
+    await listExpertLeadsFor({ userId: "u1", supabase: userClient, activeTenantId: null } as any, {
+      page: 0,
+    });
+    await getExpertHomeFor({ userId: "u1", supabase: userClient, activeTenantId: null } as any);
+
+    expect(calls.filter((c) => c[0] === "from")).toEqual([
+      ["from", "players"],
+      ["from", "players"],
     ]);
   });
 });

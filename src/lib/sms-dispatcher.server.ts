@@ -29,7 +29,7 @@ import {
 } from "./dispatch-pause-insufficient.server";
 import { pingHeartbeat, startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { SMS_CAMPAIGN_RUN_BUDGET_MS, SMS_CAMPAIGN_TICK_SECONDS } from "./campaign-recipients";
-import { resolveAudienceForTenant, type SelectionDb } from "./sms-audience-selection.server";
+import { resolveAudienceTargetsForTenant, type SelectionDb } from "./sms-audience-selection.server";
 import {
   findAcceptedDeliveryKeys,
   findRegisteredPhones,
@@ -960,17 +960,15 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
       await persistCampaignUnresolved(campaignDb, campaignId, unresolved);
     },
     acquireSendBudget: acquireCampaignSendBudget,
-    async resolveAudiencePhones(tenantId, criteria) {
+    resolveAudienceTargets(tenantId, criteria) {
       // Mesmo avaliador do compositor: seleção carrega a lista do público pelo
-      // id + casa; regras vão ao RPC de sempre. Critério corrompido → erro
-      // permanente (a campanha falha, sem reenvio).
-      const data = await resolveAudienceForTenant(
+      // id + casa (e leva o id de cada jogador); regras vão ao RPC de sempre.
+      // Critério corrompido → erro permanente (a campanha falha, sem reenvio).
+      return resolveAudienceTargetsForTenant(
         supabaseAdmin as unknown as SelectionDb,
         tenantId,
         criteria,
       );
-      const phones = (data as { phones?: unknown }).phones;
-      return Array.isArray(phones) ? phones.filter((p): p is string => typeof p === "string") : [];
     },
     findAcceptedDeliveryKeys: (keys) => findAcceptedDeliveryKeys(campaignDb, keys),
     findRegisteredPhones: (tenantId, phones) => findRegisteredPhones(campaignDb, tenantId, phones),
@@ -1165,15 +1163,13 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
       // Área do Expert: re-scoped per tick, never the bulk path; null = nothing to send.
       const scoped = c.expert_id
         ? await expertCampaignDeps(c, campaignDeps(false), {
-            resolveAudiencePhones: async (tenantId, criteria, scope) => {
-              const data = await resolveAudienceForTenant(
+            resolveAudienceTargets: (tenantId, criteria, scope) =>
+              resolveAudienceTargetsForTenant(
                 supabaseAdmin as unknown as SelectionDb,
                 tenantId,
                 criteria,
                 scope,
-              );
-              return (data.phones ?? []).filter((p): p is string => typeof p === "string");
-            },
+              ),
           })
         : campaignDeps(await campaignUsesBulk(c.tenant_id));
       if (!scoped) continue;

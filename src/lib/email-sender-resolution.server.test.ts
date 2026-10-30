@@ -381,7 +381,8 @@ describe("runCampaignSend sender", () => {
   it("sends from the campaign's verified sender and passes its short domain to link tracking", async () => {
     seedDomains();
     seedSenders();
-    seedCampaign({ sender_id: S_PROMO, short_domain_id: DOM_SHORT });
+    // Claimed for this run (runCampaignSend only sends a claimed campaign).
+    seedCampaign({ sender_id: S_PROMO, short_domain_id: DOM_SHORT, status: "enviando" });
 
     await runCampaignSend("camp-1");
     expect(send.sendInfobipEmail).toHaveBeenCalledTimes(1);

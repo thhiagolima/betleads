@@ -257,13 +257,14 @@ describe("resolvedor de público com escopo do expert", () => {
 describe("links no conteúdo do expert", () => {
   beforeEach(() => {
     fake.admin.rows("tenants").push({ id: TENANT, site_url: "https://www.casa.bet" });
-    fake.admin.rows("tenant_domains").push({ tenant_id: TENANT, hostname: "go.casa.link", removed_at: null });
+    fake.admin.rows("shortio_settings").push({ tenant_id: TENANT, enabled: true, allowed_destination_hosts: ["parceiro.com"] });
   });
 
-  it("aceita site/subdomínio/domínio da casa e recusa o resto", async () => {
+  it("aceita site/subdomínio da casa e hosts liberados; recusa o resto (inclusive encurtador)", async () => {
     await expect(
-      assertExpertContentLinksAllowed(TENANT, "Veja https://casa.bet/x e https://app.casa.bet e https://go.casa.link/a."),
+      assertExpertContentLinksAllowed(TENANT, "Veja https://casa.bet/x e https://app.casa.bet e https://parceiro.com/a e www.casa.bet."),
     ).resolves.toBeUndefined();
+    await expect(assertExpertContentLinksAllowed(TENANT, "https://bit.ly/abc")).rejects.toThrow(/bit.ly/);
     await expect(assertExpertContentLinksAllowed(TENANT, "golpe www.evil.com/x")).rejects.toThrow(
       /Link não permitido: www.evil.com/,
     );
@@ -295,7 +296,7 @@ describe("worker de SMS: campanha de expert pendente/recusada", () => {
       const deps = await expertCampaignDeps(
         { id: "c", tenant_id: TENANT, expert_id: EXPERT, approval_status } as any,
         base,
-        { resolveAudiencePhones: vi.fn(), loadScope: vi.fn(async () => scope()) },
+        { resolveAudienceTargets: vi.fn(), loadScope: vi.fn(async () => scope()) },
       );
       expect(deps).toBeNull();
     }
