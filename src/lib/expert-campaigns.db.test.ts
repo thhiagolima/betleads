@@ -76,7 +76,9 @@ create table public.campaign_drafts (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid,
   audience_id text,
-  audience_criteria jsonb
+  audience_criteria jsonb,
+  status text not null default 'draft',
+  updated_at timestamptz not null default now()
 );
 create table public.players (
   id uuid primary key default gen_random_uuid(),

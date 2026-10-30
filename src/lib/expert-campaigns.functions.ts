@@ -22,6 +22,11 @@ import { requireExpertAdminTenant } from "@/lib/experts-admin.functions";
 import {
   approveExpertCampaignCore,
   cancelExpertCampaignFor,
+  deleteExpertCampaignDraftFor,
+  getExpertCampaignDraftFor,
+  listExpertCampaignDraftsFor,
+  saveExpertCampaignDraftFor,
+  submitExpertCampaignDraftFor,
   createExpertSelectionAudienceFor,
   deleteExpertAudienceFor,
   getExpertCampaignUsageFor,
@@ -41,6 +46,7 @@ import {
   type ExpertServerContext,
 } from "@/lib/expert-campaigns.server";
 import { MAX_SELECTION_PLAYER_IDS, campaignAudienceCriteriaInput } from "@/lib/sms-audience-criteria";
+import { campaignDraftSaveSchema } from "@/lib/campaign-drafts.functions";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type AdminContext = Parameters<typeof requireExpertAdminTenant>[0];
@@ -245,3 +251,34 @@ export const resumeExpertCampaign = createServerFn({ method: "POST" })
     const tenantId = await requireExpertAdminTenant(context as unknown as AdminContext);
     return resumeExpertCampaignCore(tenantId, context.userId, data);
   });
+
+// ─── Rascunhos do expert (mesmas formas de campaign-drafts.functions) ──────
+//   listCampaignDrafts  → listExpertCampaignDrafts
+//   getCampaignDraft    → getExpertCampaignDraft
+//   saveCampaignDraft   → saveExpertCampaignDraft
+//   deleteCampaignDraft → deleteExpertCampaignDraft
+//   submitCampaignDraft → submitExpertCampaignDraft (envia pelo caminho do expert)
+
+export const listExpertCampaignDrafts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => listExpertCampaignDraftsFor(ctxOf(context)));
+
+export const getExpertCampaignDraft = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ id: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => getExpertCampaignDraftFor(ctxOf(context), data));
+
+export const saveExpertCampaignDraft = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => campaignDraftSaveSchema.parse(v))
+  .handler(async ({ data, context }) => saveExpertCampaignDraftFor(ctxOf(context), data));
+
+export const deleteExpertCampaignDraft = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ id: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => deleteExpertCampaignDraftFor(ctxOf(context), data));
+
+export const submitExpertCampaignDraft = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ id: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => submitExpertCampaignDraftFor(ctxOf(context), data));

@@ -40,6 +40,11 @@ import { expertCapMonth } from "@/lib/billing/expert-cap-alerts.server";
 import {
   approveExpertCampaignCore,
   createExpertSelectionAudienceFor,
+  deleteExpertCampaignDraftFor,
+  getExpertCampaignDraftFor,
+  listExpertCampaignDraftsFor,
+  saveExpertCampaignDraftFor,
+  submitExpertCampaignDraftFor,
   deleteExpertAudienceFor,
   EXPERT_AUDIENCE_NOT_FOUND,
   EXPERT_CAMPAIGN_NOT_PENDING,
@@ -552,5 +557,73 @@ describe("campanha de voz do expert", () => {
     const approved = await approveExpertCampaignCore(TENANT, ADMIN, { channel: "voice", id: r.id });
     expect(approved.status).toBe("enfileirada");
     expect(fake.admin.rows("call_queue")).toHaveLength(2);
+  });
+});
+
+describe("rascunhos do expert", () => {
+  const KEY = "11111111-1111-4111-8111-111111111111";
+  const draft = (overrides: Row = {}) => ({
+    channel: "sms" as const,
+    name: "Rascunho",
+    content: "Oi https://casa.bet",
+    audienceCriteria: rulesCriteria,
+    trackLinks: true,
+    payload: {},
+    idempotencyKey: KEY,
+    ...overrides,
+  });
+
+  it("salva com o expert como dono; repetir a chave devolve o mesmo rascunho", async () => {
+    const a = await saveExpertCampaignDraftFor(CTX, draft());
+    const b = await saveExpertCampaignDraftFor(CTX, draft());
+    expect(b.id).toBe(a.id);
+    expect(fake.admin.rows("campaign_drafts")).toHaveLength(1);
+    expect(fake.admin.rows("campaign_drafts")[0]).toMatchObject({ expert_id: ME, tenant_id: TENANT });
+    const updated = await saveExpertCampaignDraftFor(CTX, draft({ id: a.id, version: a.version, name: "Novo" }));
+    expect(updated).toMatchObject({ name: "Novo", version: 2 });
+    await expect(
+      saveExpertCampaignDraftFor(CTX, draft({ id: a.id, version: 1, name: "Velho" })),
+    ).rejects.toThrow(/alterado em outra sessão/);
+  });
+
+  it("nunca vê nem altera rascunho da casa ou de outro expert (nem pela chave)", async () => {
+    fake.admin.rows("campaign_drafts").push(
+      { id: "house-d", tenant_id: TENANT, expert_id: null, status: "draft", name: "Casa", idempotency_key: KEY, version: 1 },
+      { id: "other-d", tenant_id: TENANT, expert_id: OTHER_EXPERT, status: "draft", name: "Dele", idempotency_key: "k2", version: 1 },
+    );
+    expect((await listExpertCampaignDraftsFor(CTX)).items).toEqual([]);
+    await expect(getExpertCampaignDraftFor(CTX, { id: "house-d" })).rejects.toThrow(/Rascunho não encontrado/);
+    await expect(getExpertCampaignDraftFor(CTX, { id: "other-d" })).rejects.toThrow(/Rascunho não encontrado/);
+    await expect(saveExpertCampaignDraftFor(CTX, draft())).rejects.toThrow(/Não foi possível criar/);
+    expect(fake.admin.rows("campaign_drafts").find((d) => d.id === "house-d")!.name).toBe("Casa");
+    await deleteExpertCampaignDraftFor(CTX, { id: "house-d" });
+    expect(fake.admin.rows("campaign_drafts")).toHaveLength(2);
+  });
+
+  it("enviar o rascunho passa pelo caminho do expert (aprovação) e o marca como enviado", async () => {
+    setExpert({ envioModo: "aprovacao" });
+    const d = await saveExpertCampaignDraftFor(CTX, draft({ payload: { playerIds: [pid(1), pid(3)] } }));
+    const r = await submitExpertCampaignDraftFor(CTX, { id: d.id });
+    expect(r).toMatchObject({ ok: true, draftId: d.id, channel: "sms", approvalStatus: "pendente", totalCount: 1 });
+    expect(fake.admin.rows("campaign_drafts")[0].status).toBe("submitted");
+    expect(fake.admin.rows("sms_campaigns")[0]).toMatchObject({ expert_id: ME, status: "aguardando_aprovacao" });
+    await expect(submitExpertCampaignDraftFor(CTX, { id: d.id })).rejects.toThrow(/Rascunho não encontrado/);
+  });
+
+  it("rascunho com link fora da casa não é enviado e continua rascunho", async () => {
+    const d = await saveExpertCampaignDraftFor(CTX, draft({ content: "https://evil.com" }));
+    await expect(submitExpertCampaignDraftFor(CTX, { id: d.id })).rejects.toThrow(/Link não permitido/);
+    expect(fake.admin.rows("campaign_drafts")[0].status).toBe("draft");
+    expect(fake.admin.rows("sms_campaigns")).toHaveLength(0);
+  });
+
+  it("rascunho de e-mail vira campanha de e-mail do expert", async () => {
+    const d = await saveExpertCampaignDraftFor(
+      CTX,
+      draft({ channel: "email", content: "<p>Oi</p>", payload: { assunto: "Assunto" } }),
+    );
+    const r = await submitExpertCampaignDraftFor(CTX, { id: d.id });
+    expect(r).toMatchObject({ channel: "email", status: "agendada", totalCount: 2 });
+    expect((fake.admin.rows("email_campaigns")[0].template_snapshot as Row).subject).toBe("Assunto");
   });
 });

@@ -2,9 +2,10 @@
 -- (spec docs/superpowers/specs/2026-10-23-area-expert-design.md §8).
 --
 -- O QUE ESTA MIGRAÇÃO FAZ (aditiva; nada da casa muda de comportamento)
---   1. Dono: expert_id em sms_audiences (cascade), sms_campaigns e
---      email_campaigns (restrict: campanha guarda histórico de envio e
---      consumo; expert com campanha é desativado, não excluído). NULL = casa.
+--   1. Dono: expert_id em sms_audiences e campaign_drafts (cascade),
+--      sms_campaigns e email_campaigns (restrict: campanha guarda histórico
+--      de envio e consumo; expert com campanha é desativado, não excluído).
+--      NULL = casa.
 --   2. sms_audiences: o nome único por casa passa a valer só entre os
 --      públicos da casa; cada expert tem o próprio espaço de nomes.
 --   3. Aprovação em sms_campaigns/email_campaigns: approval_status
@@ -14,7 +15,8 @@
 --      'recusada' ou 'cancelada' (CHECK), e claim_due_sms_campaigns /
 --      claim_due_email_campaigns só pegam 'agendada'/'enviando': nenhum worker
 --      dispara uma campanha antes da aprovação, por construção.
---   4. Linhas de expert (sms_audiences/sms_campaigns/email_campaigns com
+--   4. Linhas de expert (sms_audiences/sms_campaigns/email_campaigns/
+--      campaign_drafts com
 --      expert_id) só são gravadas por server functions (service_role): o
 --      REST da casa (authenticated) não cria, edita, aprova nem apaga.
 --   5. expert_voice_campaigns: a voz em massa da casa não guarda campanha
@@ -49,7 +51,7 @@
 --   drop table public.expert_cap_alerts, public.expert_usage_entries, public.expert_monthly_usage;
 --   alter table public.call_queue drop column expert_voice_campaign_id, drop column expert_id;
 --   drop table public.expert_voice_campaigns;
---   drop trigger ..._expert_service_only (3 tabelas); drop function public.expert_rows_service_only();
+--   drop trigger ..._expert_service_only (4 tabelas); drop function public.expert_rows_service_only();
 --   colunas expert_id/approval_*/expert_estimated_cost e índices; restaurar
 --   unique (tenant_id, name) em sms_audiences, o CHECK de status anterior de
 --   sms_campaigns, o corpo de resolve_sms_audience_v2 de 20261117100000 e o de
@@ -65,6 +67,10 @@ alter table public.sms_campaigns
   add column if not exists expert_id uuid references public.experts(id) on delete restrict;
 alter table public.email_campaigns
   add column if not exists expert_id uuid references public.experts(id) on delete restrict;
+-- Rascunhos do compositor do expert (nunca listados pela casa nem por
+-- outro expert; os da casa nunca aparecem para o expert).
+alter table public.campaign_drafts
+  add column if not exists expert_id uuid references public.experts(id) on delete cascade;
 
 create index if not exists sms_audiences_expert_idx
   on public.sms_audiences (expert_id, updated_at desc) where expert_id is not null;
@@ -72,6 +78,8 @@ create index if not exists sms_campaigns_expert_idx
   on public.sms_campaigns (tenant_id, expert_id, created_at desc) where expert_id is not null;
 create index if not exists email_campaigns_expert_idx
   on public.email_campaigns (tenant_id, expert_id, created_at desc) where expert_id is not null;
+create index if not exists campaign_drafts_expert_idx
+  on public.campaign_drafts (expert_id, status, updated_at desc) where expert_id is not null;
 
 -- ─── 2. Nome de público: casa e expert em espaços separados ─────────────────
 
@@ -173,6 +181,10 @@ create trigger sms_campaigns_expert_service_only
 drop trigger if exists email_campaigns_expert_service_only on public.email_campaigns;
 create trigger email_campaigns_expert_service_only
   before insert or update or delete on public.email_campaigns
+  for each row execute function public.expert_rows_service_only();
+drop trigger if exists campaign_drafts_expert_service_only on public.campaign_drafts;
+create trigger campaign_drafts_expert_service_only
+  before insert or update or delete on public.campaign_drafts
   for each row execute function public.expert_rows_service_only();
 
 -- ─── 5. Campanha de voz do expert ───────────────────────────────────────────

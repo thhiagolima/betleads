@@ -50,6 +50,12 @@ import { countSmsSegments, toGsm7Text } from "@/lib/sms-segments";
 import { voiceReservationUnits } from "@/lib/infobip-voice.server";
 import { assertTenantNotDemoForSend } from "@/lib/tenant-access.server";
 import type { BlockReason } from "@/lib/channel-eligibility.server";
+import type { z } from "zod";
+import {
+  toDraft,
+  type CampaignDraft,
+  type campaignDraftSaveSchema,
+} from "@/lib/campaign-drafts.functions";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- new tables/columns are not in the generated Supabase types yet. */
 const db = () => supabaseAdmin as any;
@@ -1448,4 +1454,200 @@ async function auditApproval(
   if (error) console.warn("[expert-campaigns] audit log failed", { action, id, error: error.message });
 }
 
+// ─── Rascunhos do expert (campaign_drafts com expert_id) ────────────────────
+// Mesmas formas de campaign-drafts.functions.ts. Só os do próprio expert;
+// a casa não os lista (expert_id nulo) e o expert nunca vê os da casa.
+// Enviar um rascunho passa pelo mesmo caminho de envio do expert (aprovação,
+// teto, escopo, links) e só então o marca como enviado.
+
+export const EXPERT_DRAFT_NOT_FOUND = "Rascunho não encontrado ou não editável.";
+export const EXPERT_DRAFT_CONFLICT =
+  "Este rascunho foi alterado em outra sessão. Reabra para continuar.";
+
+export type ExpertDraftSaveInput = z.infer<typeof campaignDraftSaveSchema>;
+
+export async function listExpertCampaignDraftsFor(
+  ctx: ExpertServerContext,
+): Promise<{ items: CampaignDraft[] }> {
+  const { expert } = await requireExpert(ctx);
+  const { data, error } = await db()
+    .from("campaign_drafts")
+    .select("id,channel,name,audience_id,asset_id,status,version,updated_at")
+    .eq("tenant_id", expert.tenantId)
+    .eq("expert_id", expert.expertId)
+    .eq("status", "draft")
+    .order("updated_at", { ascending: false });
+  if (error) throw new Error("Não foi possível carregar os rascunhos.");
+  return { items: ((data ?? []) as Array<Record<string, unknown>>).map((row) => toDraft(row)) };
+}
+
+async function loadOwnDraft(expert: ExpertContext, id: string) {
+  const { data, error } = await db()
+    .from("campaign_drafts")
+    .select("*")
+    .eq("id", id)
+    .eq("tenant_id", expert.tenantId)
+    .eq("expert_id", expert.expertId)
+    .eq("status", "draft")
+    .maybeSingle();
+  if (error || !data) throw new Error(EXPERT_DRAFT_NOT_FOUND);
+  return data as Record<string, unknown>;
+}
+
+export async function getExpertCampaignDraftFor(
+  ctx: ExpertServerContext,
+  data: { id: string },
+): Promise<CampaignDraft> {
+  const { expert } = await requireExpert(ctx);
+  return toDraft(await loadOwnDraft(expert, data.id));
+}
+
+export async function saveExpertCampaignDraftFor(
+  ctx: ExpertServerContext,
+  data: ExpertDraftSaveInput,
+): Promise<CampaignDraft> {
+  const { expert } = await requireExpert(ctx);
+  const row = {
+    tenant_id: expert.tenantId,
+    expert_id: expert.expertId,
+    created_by: ctx.userId,
+    channel: data.channel,
+    name: data.name,
+    audience_id: data.audienceId ?? null,
+    audience_criteria: data.audienceCriteria ?? null,
+    asset_id: data.assetId ?? null,
+    asset_kind: data.assetKind ?? null,
+    asset_snapshot: data.assetSnapshot ?? null,
+    content: data.content,
+    scheduled_at: data.scheduledAt ?? null,
+    track_links: data.trackLinks,
+    payload: data.payload,
+    idempotency_key: data.idempotencyKey,
+  };
+  if (!data.id) {
+    // No upsert on (tenant, idempotency_key): the key of someone else's
+    // draft must never update that draft.
+    const { data: existing, error: readError } = await db()
+      .from("campaign_drafts")
+      .select("*")
+      .eq("tenant_id", expert.tenantId)
+      .eq("idempotency_key", data.idempotencyKey)
+      .maybeSingle();
+    if (readError) throw new Error("Não foi possível criar o rascunho.");
+    if (existing) {
+      if (existing.expert_id !== expert.expertId)
+        throw new Error("Não foi possível criar o rascunho.");
+      return toDraft(existing);
+    }
+    const { data: created, error } = await db()
+      .from("campaign_drafts")
+      .insert({ ...row, status: "draft", version: 1 })
+      .select("*")
+      .single();
+    if (error || !created) throw new Error("Não foi possível criar o rascunho.");
+    return toDraft(created);
+  }
+  if (!data.version) throw new Error("Versão do rascunho ausente.");
+  const { data: updated, error } = await db()
+    .from("campaign_drafts")
+    .update({ ...row, version: data.version + 1, updated_at: new Date().toISOString() })
+    .eq("id", data.id)
+    .eq("tenant_id", expert.tenantId)
+    .eq("expert_id", expert.expertId)
+    .eq("status", "draft")
+    .eq("version", data.version)
+    .select("*")
+    .maybeSingle();
+  if (error) throw new Error("Não foi possível salvar o rascunho.");
+  if (!updated) throw new Error(EXPERT_DRAFT_CONFLICT);
+  return toDraft(updated);
+}
+
+export async function deleteExpertCampaignDraftFor(
+  ctx: ExpertServerContext,
+  data: { id: string },
+): Promise<{ ok: true }> {
+  const { expert } = await requireExpert(ctx);
+  const { error } = await db()
+    .from("campaign_drafts")
+    .delete()
+    .eq("id", data.id)
+    .eq("tenant_id", expert.tenantId)
+    .eq("expert_id", expert.expertId)
+    .eq("status", "draft");
+  if (error) throw new Error("Não foi possível excluir o rascunho.");
+  return { ok: true };
+}
+
+const draftPlayerIds = (payload: Record<string, unknown>): string[] | undefined =>
+  Array.isArray(payload.playerIds)
+    ? payload.playerIds
+        .filter((id): id is string => typeof id === "string")
+        .slice(0, MAX_SELECTION_PLAYER_IDS)
+    : undefined;
+const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+
+/**
+ * Sends an expert draft through the expert submit path of its channel and
+ * marks it submitted. Draft fields: name, content (SMS text / e-mail HTML),
+ * audienceCriteria, scheduledAt; payload.playerIds (subset), payload.assunto
+ * and payload.preheader (e-mail); assetKind "email_template" + assetId (a
+ * published house template); voice: assetKind "script" (or
+ * payload.voiceMode "script") + assetId, else assetId is a library audio.
+ */
+export async function submitExpertCampaignDraftFor(
+  ctx: ExpertServerContext,
+  data: { id: string },
+): Promise<ExpertCampaignSubmitResult & { ok: true; draftId: string }> {
+  const { expert } = await requireExpert(ctx);
+  const row = await loadOwnDraft(expert, data.id);
+  const payload = (row.payload ?? {}) as Record<string, unknown>;
+  const criteria = (row.audience_criteria ?? {}) as Record<string, unknown>;
+  const playerIds = draftPlayerIds(payload);
+  const scheduledAt = (row.scheduled_at as string | null) ?? null;
+  const name = String(row.name ?? "").trim();
+  if (!name) throw new Error("Informe o nome da campanha.");
+  let result: ExpertCampaignSubmitResult;
+  if (row.channel === "sms") {
+    result = await saveExpertSmsCampaignFor(ctx, {
+      campaignName: name,
+      content: String(row.content ?? ""),
+      audienceCriteria: criteria,
+      playerIds,
+      scheduledAt,
+    });
+  } else if (row.channel === "email") {
+    result = await saveExpertEmailCampaignFor(ctx, {
+      nome: name,
+      assunto: str(payload.assunto),
+      html: str(row.content),
+      preheader: str(payload.preheader),
+      templateId: row.asset_kind === "email_template" ? (str(row.asset_id) ?? null) : null,
+      audienceCriteria: criteria,
+      playerIds,
+      agendadoPara: scheduledAt,
+      status: "agendada",
+    });
+  } else {
+    const assetId = str(row.asset_id);
+    const isScript = row.asset_kind === "script" || payload.voiceMode === "script";
+    result = await saveExpertVoiceCampaignFor(ctx, {
+      campaign_name: name,
+      scheduled_at: scheduledAt,
+      ...(isScript ? { script_id: assetId } : { asset_id: assetId }),
+      audienceCriteria: criteria,
+      playerIds,
+    });
+  }
+  const { error } = await db()
+    .from("campaign_drafts")
+    .update({ status: "submitted", submitted_at: new Date().toISOString() })
+    .eq("id", data.id)
+    .eq("tenant_id", expert.tenantId)
+    .eq("expert_id", expert.expertId)
+    .eq("status", "draft");
+  if (error)
+    console.warn("[expert-campaigns] draft not marked submitted", { id: data.id, error: error.message });
+  return { ...result, ok: true, draftId: data.id };
+}
 /* eslint-enable @typescript-eslint/no-explicit-any */

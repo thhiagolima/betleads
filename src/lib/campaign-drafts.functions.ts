@@ -46,7 +46,10 @@ export type CampaignDraft = CampaignDraftPayload & {
   updatedAt: string;
 };
 
-function toDraft(row: Record<string, unknown>): CampaignDraft {
+/** Exportado para os rascunhos do expert (expert-campaigns.server.ts). */
+export const campaignDraftSaveSchema = saveSchema;
+
+export function toDraft(row: Record<string, unknown>): CampaignDraft {
   return {
     id: row.id as string,
     channel: row.channel as z.infer<typeof channelSchema>,
@@ -74,6 +77,8 @@ export const listCampaignDrafts = createServerFn({ method: "GET" })
       .from("campaign_drafts")
       .select("id,channel,name,audience_id,asset_id,status,version,updated_at")
       .eq("tenant_id", tenantId)
+      // Área do Expert: rascunhos de expert nunca aparecem para a casa.
+      .is("expert_id", null)
       .eq("status", "draft")
       .order("updated_at", { ascending: false });
     if (error) throw new Error("Não foi possível carregar os rascunhos.");
@@ -90,6 +95,7 @@ export const getCampaignDraft = createServerFn({ method: "POST" })
       .select("*")
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
+      .is("expert_id", null)
       .eq("status", "draft")
       .maybeSingle();
     if (error || !row) throw new Error("Rascunho não encontrado ou não editável.");
@@ -134,6 +140,7 @@ export const saveCampaignDraft = createServerFn({ method: "POST" })
       .update({ ...payload, version: data.version + 1 })
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
+      .is("expert_id", null)
       .eq("status", "draft")
       .eq("version", data.version)
       .select("*")
@@ -154,6 +161,7 @@ export const deleteCampaignDraft = createServerFn({ method: "POST" })
       .delete()
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
+      .is("expert_id", null)
       .eq("status", "draft");
     if (error) throw new Error("Não foi possível excluir o rascunho.");
     return { ok: true };
@@ -169,6 +177,7 @@ export const submitCampaignDraft = createServerFn({ method: "POST" })
       .update({ status: "submitted", submitted_at: new Date().toISOString() })
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
+      .is("expert_id", null)
       .eq("status", "draft")
       .select("id")
       .maybeSingle();
