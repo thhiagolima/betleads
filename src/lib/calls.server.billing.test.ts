@@ -386,6 +386,7 @@ describe("runVoiceQueueDispatcher claim (double dial)", () => {
     });
     // Selected as audio_ready, but claimed (calling) by another worker
     // right after this worker's select ran.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- loose query-builder double
     const admin = supabaseAdmin as unknown as { from: (table: string) => any };
     const original = admin.from;
     let selects = 0;

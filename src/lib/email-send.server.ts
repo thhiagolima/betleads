@@ -106,7 +106,6 @@ const EMAIL_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     ul: ["type"],
     li: ["value"],
   },
-  allowedEmptyAttributes: ["alt"],
   allowedSchemes: ["http", "https", "mailto", "tel"],
   // Images may be inline (data:) or attachments (cid:); links never data:.
   allowedSchemesByTag: { img: ["http", "https", "data", "cid"] },
