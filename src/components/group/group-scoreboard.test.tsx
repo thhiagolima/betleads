@@ -94,8 +94,9 @@ describe("GroupScoreboard", () => {
       {
         id: "a",
         nome: "Sorte Alta",
-        current: summary({ roi: 0.3 }),
-        previous: summary({ roi: 0.177 }),
+        current: summary({ roi: 0.3, adSpend: 1000 }),
+        // A previous ROI implies ad spend in that window.
+        previous: summary({ roi: 0.177, adSpend: 1000 }),
         goals: [],
       },
     ];
@@ -104,6 +105,25 @@ describe("GroupScoreboard", () => {
 
     expect(html).toContain("+12,3 p.p.");
     expect(html).not.toContain("69,5%");
+  });
+
+  it("an empty previous window (Sem comparação) shows no variation", () => {
+    const html = renderToStaticMarkup(
+      <GroupScoreboard
+        rows={[
+          {
+            id: "a",
+            nome: "Sorte Alta",
+            current: summary({ cashResult: 500, depositAmount: 900, roi: 0.3, adSpend: 100 }),
+            previous: summary(),
+            goals: [],
+          },
+        ]}
+      />,
+    );
+    expect(html).not.toContain("▲");
+    expect(html).not.toContain("▼");
+    expect(html).not.toContain("p.p.");
   });
 
   it("an improvement from a negative previous is shown as a rise", () => {

@@ -15,10 +15,10 @@ import {
   formatRatio,
   GGR_COLUMN_LABEL,
 } from "@/components/finance/format";
+import { periodHasData, visibleChange } from "@/components/finance/dashboard/display";
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
 import { TermTooltip } from "@/components/finance/term-tooltip";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { pctChange, ppChange } from "@/lib/finance/calc";
 import type { GoalEvaluation, GoalMetric, GoalStatus, PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -143,13 +143,16 @@ function VariationLabel({
   column,
   current,
   previous,
+  hasPrevious,
 }: {
   column: ColumnDef;
   current: number | null;
   previous: number | null;
+  /** The compared window has data (periodHasData); none for "Sem comparação". */
+  hasPrevious: boolean;
 }) {
   const ratio = column.format === "ratio";
-  const change = ratio ? ppChange(current, previous) : pctChange(current, previous);
+  const change = visibleChange(current, previous, { hasPrevious, points: ratio });
   if (change === null) return null;
   const good = column.invert ? change <= 0 : change >= 0;
   return (
@@ -248,6 +251,7 @@ export function GroupScoreboard({
                           column={column}
                           current={value}
                           previous={column.pick(row.previous)}
+                          hasPrevious={periodHasData(row.previous)}
                         />
                         {goal && (
                           <span className="block text-[10px] opacity-60">

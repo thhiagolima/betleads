@@ -1,6 +1,6 @@
 // Financeiro painel (spec §5–§6, mockup financeiro-painel-v1.html): one view
 // for a house, a group or every house. It owns the scope (super admin can
-// change it with "Ver:") and the period (month picker on), and reads
+// change it with "Ver:") and the period (GroupPeriodBar), and reads
 // getFinanceDashboard. Top to bottom (spec §3.2): result band, the "Do
 // depósito ao lucro" waterfall, the KPI blocks (Movimentação, Aquisição, GGR,
 // Envios e CRM), the 12-month chart and, in group/all scope, "Lucro por
@@ -9,11 +9,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState, type ReactNode } from "react";
 
-import {
-  defaultGroupPeriod,
-  GroupPeriodBar,
-  type GroupPeriod,
-} from "@/components/group/group-period-bar";
+import { GroupPeriodBar } from "@/components/group/group-period-bar";
+import { defaultGroupPeriod, type GroupPeriod } from "@/components/group/period-options";
 import { GroupScoreboard } from "@/components/group/group-scoreboard";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -189,7 +186,7 @@ export function FinanceDashboardView({
           onChange={setScope}
         />
       )}
-      <GroupPeriodBar value={period} onChange={setPeriod} monthPicker />
+      <GroupPeriodBar value={period} onChange={setPeriod} />
       {query.isError ? (
         <p className="text-sm text-destructive">
           {(query.error as Error).message || "Não foi possível carregar o painel."}
