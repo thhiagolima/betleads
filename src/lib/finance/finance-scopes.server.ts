@@ -3,6 +3,7 @@
 // its own, through the existing can/requirePermission helpers below. See
 // docs/superpowers/specs/2026-10-30-mcp-financeiro-design.md §3-4.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { isSuperAdminUser } from "@/lib/billing/billing-state.server";
 import { can } from "@/lib/finance/finance-data.server";
 import { managedGroupIds } from "@/lib/tenants.functions";
 
@@ -29,12 +30,6 @@ export type FinanceScopes = {
 
 type TenantRow = { id: string; nome: string; is_demo: boolean | null; status: string | null };
 type GroupRow = { id: string; nome: string; is_demo: boolean | null };
-
-async function isSuperAdmin(userId: string): Promise<boolean> {
-  const { data, error } = await db().rpc<boolean>("is_super_admin", { _user_id: userId });
-  if (error) throw new Error(error.message);
-  return data === true;
-}
 
 const sortByNome = <T extends { nome: string }>(rows: T[]) =>
   [...rows].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
@@ -123,7 +118,7 @@ async function tenantIdsOfGroups(groupIds: string[]): Promise<string[]> {
  * allow. Groups are simply the ones the user manages.
  */
 export async function listFinanceScopesFor(userId: string): Promise<FinanceScopes> {
-  const superAdmin = await isSuperAdmin(userId);
+  const superAdmin = await isSuperAdminUser(userId);
 
   if (superAdmin) {
     const [tenants, groups] = await Promise.all([allTenants(), allGroups()]);

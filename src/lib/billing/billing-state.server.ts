@@ -100,7 +100,13 @@ export async function getTenantBillingSnapshot(tenantId: string): Promise<Tenant
   };
 }
 
-async function isSuperAdminUser(userId: string): Promise<boolean> {
+/**
+ * Whether `userId` is the super admin (`is_super_admin` RPC). Exported so
+ * other server modules that need the same check (e.g. the MCP finance scope
+ * listing and write gate) share this one definition instead of duplicating
+ * it.
+ */
+export async function isSuperAdminUser(userId: string): Promise<boolean> {
   const { data, error } = await looseDb(supabaseAdmin).rpc("is_super_admin", {
     _user_id: userId,
   });
