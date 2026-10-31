@@ -11,6 +11,7 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => ({ data: [], isLoading: false, isError: false }),
   useMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -19,6 +20,8 @@ vi.mock("@/lib/meta.functions", () => ({
   connectMetaSystemUserToken: vi.fn(),
   disconnectMetaConnection: vi.fn(),
   enqueueMetaSync: vi.fn(),
+  getMetaSyncRunJobs: vi.fn(),
+  getMetaSyncRuns: vi.fn(),
   renameMetaConnection: vi.fn(),
   updateMetaAccountSelection: vi.fn(),
   validateMetaConnection: vi.fn(),
@@ -119,6 +122,11 @@ describe("MetaConnectionView", () => {
     expect(buttonWith(html, "Sincronizar agora")).toContain('disabled=""');
     // Nada mudou ainda: sem a barra de alterações.
     expect(html).not.toContain("Salvar contas");
+    // MB4-01: o histórico fica abaixo das contas.
+    expect(html.indexOf("Histórico de sincronizações")).toBeGreaterThan(
+      html.indexOf("meta-accounts-title"),
+    );
+    expect(html).toContain("Nenhuma sincronização ainda.");
   });
 
   it("shows the backfill percent on 'Primeira leitura' as a progressbar", () => {

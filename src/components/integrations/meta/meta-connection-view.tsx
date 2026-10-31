@@ -32,6 +32,7 @@ import { ConnectionCard } from "./connection-card";
 import { DisconnectDialog } from "./disconnect-dialog";
 import { ToneBadge } from "./meta-badges";
 import { ProgressStrip } from "./progress-strip";
+import { SyncHistory } from "./sync-history";
 import { isStaleSelectionError } from "./use-meta-actions";
 import { useSelectionDraft } from "./use-selection-draft";
 
@@ -285,6 +286,8 @@ export function MetaConnectionView({
               staleNotice={staleNotice}
               initialFilter={initialFilter}
             />
+
+            <SyncHistory />
           </>
         )}
       </div>

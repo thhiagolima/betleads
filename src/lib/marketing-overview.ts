@@ -129,6 +129,12 @@ export type MoneyRow = {
   share: number;
 };
 
+/** MB4-04: presente quando o overview foi filtrado por contas de anúncio. */
+export type MarketingOverviewFilter = {
+  ad_account_ids: string[];
+  players_scope: "matched_only";
+};
+
 export type MarketingOverviewRpc = {
   period: { from: string; to: string };
   totals: MarketingTotals;
@@ -141,10 +147,12 @@ export type MarketingOverviewRpc = {
   audiencesOthers: OthersRow;
   orphanAttributions: OrphanAttributionRow[];
   daily: DailyPoint[];
+  filter?: MarketingOverviewFilter | null;
 };
 
 export type MarketingOverview = MarketingOverviewRpc & {
   moneyMap: MoneyRow[];
+  filter: MarketingOverviewFilter | null;
 };
 
 /** Normaliza números (o Postgres devolve numeric como número ou texto) e calcula o mapa de receita. */
@@ -264,6 +272,12 @@ export function buildMarketingOverview(raw: MarketingOverviewRpc): MarketingOver
     ),
     daily: (raw.daily ?? []).map((row) => numbers(row, ["spend", "ftd", "signups"])),
     moneyMap,
+    filter: raw.filter
+      ? {
+          ad_account_ids: [...(raw.filter.ad_account_ids ?? [])],
+          players_scope: "matched_only",
+        }
+      : null,
   };
 }
 

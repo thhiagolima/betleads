@@ -12,6 +12,7 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ to, children }: { to: string; children: ReactNode }) => <a href={to}>{children}</a>,
 }));
 vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => ({ data: [], isLoading: false, isError: false }),
   useMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -20,6 +21,8 @@ vi.mock("@/lib/meta.functions", () => ({
   connectMetaSystemUserToken: vi.fn(),
   disconnectMetaConnection: vi.fn(),
   enqueueMetaSync: vi.fn(),
+  getMetaSyncRunJobs: vi.fn(),
+  getMetaSyncRuns: vi.fn(),
   getMetaConnectionSummary: vi.fn(),
   renameMetaConnection: vi.fn(),
   updateMetaAccountSelection: vi.fn(),

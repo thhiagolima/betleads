@@ -1122,7 +1122,7 @@ async function syncMetaAccount(
  * O PostgREST corta a resposta em 1000 linhas: lê em páginas (a consulta precisa de
  * ordem estável) até a última vir incompleta.
  */
-async function readAllPages<T>(
+export async function readAllPages<T>(
   page: (
     from: number,
     to: number,
@@ -1294,6 +1294,100 @@ export const getMetaSyncRuns = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     return data ?? [];
   });
+
+const runJobsSchema = z.object({ runId: z.string().uuid() });
+
+export type MetaSyncRunJob = {
+  accountId: string;
+  accountName: string | null;
+  metaAdAccountId: string;
+  status: string;
+  attemptCount: number;
+  rateLimitedCount: number;
+  rowsImported: number;
+  lastError: string | null;
+  finishedAt: string | null;
+};
+
+/** Falhas primeiro; depois as que ainda podem mudar; concluídas no fim. */
+const RUN_JOB_STATUS_ORDER: Record<string, number> = {
+  failed: 0,
+  retry: 1,
+  running: 2,
+  queued: 3,
+  canceled: 4,
+  completed: 5,
+};
+
+/** MB4-01: as contas de um run da casa, para o histórico de sincronizações. */
+export const getMetaSyncRunJobs = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => runJobsSchema.parse(input ?? {}))
+  .handler(async ({ data, context }) => getMetaSyncRunJobsFor(context, data));
+
+export async function getMetaSyncRunJobsFor(
+  context: { supabase: unknown },
+  data: z.infer<typeof runJobsSchema>,
+): Promise<{ jobs: MetaSyncRunJob[] }> {
+  const tenantId = await resolveTenantId(context.supabase);
+  const { data: run, error: runError } = await (supabaseAdmin as any)
+    .from("meta_sync_runs")
+    .select("id")
+    .eq("id", data.runId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (runError) throw new Error(runError.message);
+  if (!run) throw new Error("Sincronização não encontrada.");
+
+  const rows = await readAllPages<{
+    account_id: string;
+    status: string;
+    attempt_count: number | null;
+    rate_limited_count: number | null;
+    rows_imported: number | null;
+    last_error: string | null;
+    finished_at: string | null;
+    meta_ad_accounts:
+      | { name: string | null; meta_ad_account_id: string }
+      | { name: string | null; meta_ad_account_id: string }[]
+      | null;
+  }>((from, to) =>
+    (supabaseAdmin as any)
+      .from("meta_sync_jobs")
+      .select(
+        "id,account_id,status,attempt_count,rate_limited_count,rows_imported,last_error,finished_at,meta_ad_accounts(name,meta_ad_account_id)",
+      )
+      .eq("run_id", data.runId)
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+
+  const jobs = rows.map((row): MetaSyncRunJob => {
+    const account = embedded(row.meta_ad_accounts);
+    return {
+      accountId: row.account_id,
+      accountName: account?.name ?? null,
+      metaAdAccountId: account?.meta_ad_account_id ?? "",
+      status: row.status,
+      attemptCount: Number(row.attempt_count ?? 0),
+      rateLimitedCount: Number(row.rate_limited_count ?? 0),
+      rowsImported: Number(row.rows_imported ?? 0),
+      lastError: row.last_error ?? null,
+      finishedAt: row.finished_at ?? null,
+    };
+  });
+  const rank = (status: string) => RUN_JOB_STATUS_ORDER[status] ?? 9;
+  jobs.sort(
+    (a, b) =>
+      rank(a.status) - rank(b.status) ||
+      (a.accountName ?? a.metaAdAccountId).localeCompare(
+        b.accountName ?? b.metaAdAccountId,
+        "pt-BR",
+      ),
+  );
+  return { jobs };
+}
 
 function isPermanentMetaError(message: string) {
   return /token|permiss|oauth|ads_read|outro app|não possui mais acesso|conexão antiga/i.test(

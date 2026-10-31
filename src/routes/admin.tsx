@@ -54,6 +54,7 @@ import { ChannelObservabilityPanel } from "@/components/admin/channel-observabil
 import { ProviderAccountsPanel } from "@/components/admin/provider-accounts-panel";
 import { McpAccessPanel } from "@/components/admin/mcp-access-panel";
 import { getMyMcpStatus } from "@/lib/mcp/mcp.functions";
+import { MetaHousesPanel } from "@/components/admin/meta-houses-panel";
 import {
   adminCreateUser,
   adminDeleteUser,
@@ -337,6 +338,7 @@ function AdminIntegrationsTab() {
         </CardContent>
       </Card>
       <ProviderAccountsPanel />
+      <MetaHousesPanel />
     </div>
   );
 }

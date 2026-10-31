@@ -140,4 +140,17 @@ describe("buildMarketingOverview", () => {
     expect(o.moneyMap.map((row) => row.creative)).toEqual(["A", "B"]);
     expect(o.moneyMap.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(100, 6);
   });
+
+  it("MB4-04: sem filtro o resultado traz filter null; com filtro, as contas", () => {
+    expect(buildMarketingOverview(raw).filter).toBeNull();
+    expect(buildMarketingOverview({ ...raw, filter: null }).filter).toBeNull();
+    const filtered = buildMarketingOverview({
+      ...raw,
+      filter: { ad_account_ids: ["act_1", "act_2"], players_scope: "matched_only" },
+    });
+    expect(filtered.filter).toEqual({
+      ad_account_ids: ["act_1", "act_2"],
+      players_scope: "matched_only",
+    });
+  });
 });

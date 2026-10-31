@@ -64,6 +64,7 @@ import {
   type MarketingIntegration,
   type MetaSummary,
 } from "@/components/integrations/meta-summary";
+import { AdAccountFilter, AdAccountFilterNote } from "@/components/midia-ltv/ad-account-filter";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/midia-ltv")({
@@ -174,17 +175,29 @@ function MediaLtvPage() {
   }, [period, customRange]);
   const includesToday = range.to >= brtToday();
 
+  const { data: metaSummary } = useMetaConnectionSummary();
+  // MB4-04: filtro "BM / conta" (estado local). Só valem as contas ainda marcadas.
+  const [adAccountFilter, setAdAccountFilter] = useState<string[]>([]);
+  const adAccountIds = useMemo(() => {
+    const marked = metaSummary
+      ? new Set(
+          metaSummary.accounts
+            .filter((account) => account.selected !== false)
+            .map((account) => account.meta_ad_account_id),
+        )
+      : null;
+    return adAccountFilter.filter((id) => !marked || marked.has(id)).sort();
+  }, [adAccountFilter, metaSummary]);
+
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["marketing-overview", range.from, range.to],
+    queryKey: ["marketing-overview", range.from, range.to, adAccountIds.join(",")],
     queryFn: async () =>
       (await fetchOverview({
-        data: { from: range.from, to: range.to },
+        data: { from: range.from, to: range.to, adAccountIds },
       })) as MarketingOverview,
     // Só o período que inclui hoje muda sozinho; o resto é atualizado ao fim de um sync.
     refetchInterval: includesToday ? 60_000 : false,
   });
-
-  const { data: metaSummary } = useMetaConnectionSummary();
 
   const { data: metaSyncRuns = [] } = useQuery({
     queryKey: ["meta-sync-runs"],
@@ -283,6 +296,8 @@ function MediaLtvPage() {
           data={data}
           isLoading={isLoading}
           metaSummary={metaSummary}
+          adAccountIds={adAccountIds}
+          onAdAccountIdsChange={setAdAccountFilter}
           syncPending={
             syncMetaMutation.isPending ||
             metaSyncRuns.some(
@@ -339,6 +354,8 @@ function VisualizacaoSection({
   data,
   isLoading,
   metaSummary,
+  adAccountIds,
+  onAdAccountIdsChange,
   syncPending,
   onSync,
   syncRuns,
@@ -351,6 +368,8 @@ function VisualizacaoSection({
   data: MarketingOverview | undefined;
   isLoading: boolean;
   metaSummary: MetaSummary | undefined;
+  adAccountIds: string[];
+  onAdAccountIdsChange: (ids: string[]) => void;
   syncPending: boolean;
   onSync: () => void;
   syncRuns: MetaSyncRun[];
@@ -526,10 +545,13 @@ function VisualizacaoSection({
             }
           />
         </div>
+        <AdAccountFilter accounts={accounts} value={adAccountIds} onChange={onAdAccountIdsChange} />
       </div>
 
+      <AdAccountFilterNote active={adAccountIds.length > 0} />
+
       <p className="text-meta text-muted-foreground">
-        Gasto: Meta Ads, {num(selectedAccounts.length)} conta(s)
+        Gasto: Meta Ads, {num(adAccountIds.length || selectedAccounts.length)} conta(s)
         {lastSync
           ? `, última leitura em ${new Date(lastSync).toLocaleString("pt-BR")}`
           : ", aguardando a primeira leitura"}
@@ -687,7 +709,18 @@ function VisualizacaoSection({
           <MoneyMapCard rows={data?.moneyMap ?? []} />
         </div>
       )}
-      {reportView === "diagnostics" && (
+      {reportView === "diagnostics" && adAccountIds.length > 0 && (
+        // Com filtro, só entra tráfego atribuído às contas: a saúde da atribuição
+        // daria 100% / 0 órfãos trivialmente, então não mostramos os números.
+        <p
+          role="note"
+          className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
+        >
+          O diagnóstico de atribuição considera todo o tráfego. Limpe o filtro de BM / conta para
+          ver.
+        </p>
+      )}
+      {reportView === "diagnostics" && adAccountIds.length === 0 && (
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             <Kpi title="Cadastros" value={num(data?.attributionHealth.total)} detail="no período" />

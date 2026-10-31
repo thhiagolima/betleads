@@ -210,6 +210,7 @@ import {
   disconnectMetaConnectionFor,
   enqueueMetaSyncFor,
   getMetaConnectionSummaryFor,
+  getMetaSyncRunJobsFor,
   metaErrorLevel,
   processMetaSyncQueue,
   renameMetaConnectionFor,
@@ -3059,6 +3060,105 @@ describe("tick", () => {
       "utf8",
     );
     expect(source).toContain("processMetaSyncQueue(6)");
+  });
+
+  it("MB4-02: depois da fila roda o estágio de saúde, num try/catch próprio", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/routes/api/public/meta-sync/tick.ts"),
+      "utf8",
+    );
+    const queueAt = source.indexOf("processMetaSyncQueue(6)");
+    const stageAt = source.indexOf("runMetaHealthStage(new Date())");
+    expect(stageAt).toBeGreaterThan(queueAt);
+    // O estágio tem o próprio try: falha nele não vira 500.
+    expect(source.slice(queueAt, stageAt)).toMatch(/try \{/);
+    expect(source).toContain("health });");
+  });
+});
+
+describe("MB4-01 contas de um run", () => {
+  const RUN_ID = "33333333-3333-4333-8333-333333333333";
+  const job = (overrides: Row): Row => ({
+    run_id: RUN_ID,
+    tenant_id: "t1",
+    attempt_count: 1,
+    rate_limited_count: 0,
+    rows_imported: 0,
+    last_error: null,
+    finished_at: null,
+    ...overrides,
+  });
+
+  it("recusa run de outra casa ou inexistente", async () => {
+    db.tables.meta_sync_runs = [{ id: RUN_ID, tenant_id: "t2" }];
+    await expect(call(getMetaSyncRunJobsFor, { runId: RUN_ID })).rejects.toThrow(
+      "Sincronização não encontrada.",
+    );
+    db.tables.meta_sync_runs = [];
+    await expect(call(getMetaSyncRunJobsFor, { runId: RUN_ID })).rejects.toThrow(
+      "Sincronização não encontrada.",
+    );
+  });
+
+  it("lista as contas do run da casa: falhas primeiro, depois por nome", async () => {
+    db.tables.meta_sync_runs = [{ id: RUN_ID, tenant_id: "t1" }];
+    db.tables.meta_sync_jobs = [
+      job({
+        id: "j1",
+        account_id: "a1",
+        status: "completed",
+        rows_imported: 40,
+        finished_at: "2026-10-31T10:00:00Z",
+        meta_ad_accounts: { name: "Zeta", meta_ad_account_id: "act_9" },
+      }),
+      job({
+        id: "j2",
+        account_id: "a2",
+        status: "failed",
+        attempt_count: 3,
+        rate_limited_count: 2,
+        last_error: "Sem permissão",
+        meta_ad_accounts: [{ name: "Beta", meta_ad_account_id: "act_2" }],
+      }),
+      job({
+        id: "j3",
+        account_id: "a3",
+        status: "completed",
+        meta_ad_accounts: { name: "Alfa", meta_ad_account_id: "act_1" },
+      }),
+      // Job de outro run: fora.
+      job({
+        id: "j4",
+        run_id: "outro",
+        account_id: "a4",
+        status: "failed",
+        meta_ad_accounts: null,
+      }),
+    ];
+    const result = (await call(getMetaSyncRunJobsFor, { runId: RUN_ID })) as {
+      jobs: Array<Record<string, unknown>>;
+    };
+    expect(result.jobs.map((item) => item.accountId)).toEqual(["a2", "a3", "a1"]);
+    expect(result.jobs[0]).toEqual({
+      accountId: "a2",
+      accountName: "Beta",
+      metaAdAccountId: "act_2",
+      status: "failed",
+      attemptCount: 3,
+      rateLimitedCount: 2,
+      rowsImported: 0,
+      lastError: "Sem permissão",
+      finishedAt: null,
+    });
+    expect(result.jobs[2]).toMatchObject({ rowsImported: 40, finishedAt: "2026-10-31T10:00:00Z" });
+    const jobsRead = db.calls.find((item) => item.table === "meta_sync_jobs")!;
+    expect(jobsRead.filters).toEqual(
+      expect.arrayContaining([
+        { op: "eq", column: "run_id", value: RUN_ID },
+        { op: "eq", column: "tenant_id", value: "t1" },
+      ]),
+    );
+    expect(jobsRead.range).toEqual([0, 999]);
   });
 });
 
