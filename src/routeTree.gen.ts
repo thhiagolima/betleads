@@ -28,6 +28,7 @@ import { Route as InteligenciaRouteImport } from './routes/inteligencia'
 import { Route as JornadasRouteImport } from './routes/jornadas'
 import { Route as LigacoesRouteImport } from './routes/ligacoes'
 import { Route as LinksRouteImport } from './routes/links'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
 import { Route as PlanoECreditosRouteImport } from './routes/plano-e-creditos'
 import { Route as PlayersRouteImport } from './routes/players'
@@ -203,6 +204,11 @@ const LinksRoute = LinksRouteImport.update({
   path: '/links',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MidiaLtvRoute = MidiaLtvRouteImport.update({
   id: '/midia-ltv',
   path: '/midia-ltv',
@@ -361,9 +367,9 @@ const LinksConfiguracoesRoute = LinksConfiguracoesRouteImport.update({
   getParentRoute: () => LinksRoute,
 } as any)
 const McpAutorizarRoute = McpAutorizarRouteImport.update({
-  id: '/mcp/autorizar',
-  path: '/mcp/autorizar',
-  getParentRoute: () => rootRouteImport,
+  id: '/autorizar',
+  path: '/autorizar',
+  getParentRoute: () => McpRoute,
 } as any)
 const PlayersPlayerIdRoute = PlayersPlayerIdRouteImport.update({
   id: '/$playerId',
@@ -648,6 +654,7 @@ export interface FileRoutesByFullPath {
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
   '/links': typeof LinksRouteWithChildren
+  '/mcp': typeof McpRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
   '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
@@ -748,6 +755,7 @@ export interface FileRoutesByTo {
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
   '/links': typeof LinksRouteWithChildren
+  '/mcp': typeof McpRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
   '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
@@ -849,6 +857,7 @@ export interface FileRoutesById {
   '/jornadas': typeof JornadasRouteWithChildren
   '/ligacoes': typeof LigacoesRoute
   '/links': typeof LinksRouteWithChildren
+  '/mcp': typeof McpRouteWithChildren
   '/midia-ltv': typeof MidiaLtvRoute
   '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
@@ -951,6 +960,7 @@ export interface FileRouteTypes {
     | '/jornadas'
     | '/ligacoes'
     | '/links'
+    | '/mcp'
     | '/midia-ltv'
     | '/plano-e-creditos'
     | '/players'
@@ -1051,6 +1061,7 @@ export interface FileRouteTypes {
     | '/jornadas'
     | '/ligacoes'
     | '/links'
+    | '/mcp'
     | '/midia-ltv'
     | '/plano-e-creditos'
     | '/players'
@@ -1151,6 +1162,7 @@ export interface FileRouteTypes {
     | '/jornadas'
     | '/ligacoes'
     | '/links'
+    | '/mcp'
     | '/midia-ltv'
     | '/plano-e-creditos'
     | '/players'
@@ -1252,6 +1264,7 @@ export interface RootRouteChildren {
   JornadasRoute: typeof JornadasRouteWithChildren
   LigacoesRoute: typeof LigacoesRoute
   LinksRoute: typeof LinksRouteWithChildren
+  McpRoute: typeof McpRouteWithChildren
   MidiaLtvRoute: typeof MidiaLtvRoute
   PlanoECreditosRoute: typeof PlanoECreditosRoute
   PlayersRoute: typeof PlayersRouteWithChildren
@@ -1274,7 +1287,6 @@ export interface RootRouteChildren {
   GrupoCasaRoute: typeof GrupoCasaRoute
   GrupoMetasRoute: typeof GrupoMetasRoute
   GrupoPessoasRoute: typeof GrupoPessoasRoute
-  McpAutorizarRoute: typeof McpAutorizarRoute
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
@@ -1448,6 +1460,13 @@ declare module '@tanstack/react-router' {
       path: '/links'
       fullPath: '/links'
       preLoaderRoute: typeof LinksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/midia-ltv': {
@@ -1669,10 +1688,10 @@ declare module '@tanstack/react-router' {
     }
     '/mcp/autorizar': {
       id: '/mcp/autorizar'
-      path: '/mcp/autorizar'
+      path: '/autorizar'
       fullPath: '/mcp/autorizar'
       preLoaderRoute: typeof McpAutorizarRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof McpRoute
     }
     '/players/$playerId': {
       id: '/players/$playerId'
@@ -2073,6 +2092,16 @@ const LinksRouteChildren: LinksRouteChildren = {
 
 const LinksRouteWithChildren = LinksRoute._addFileChildren(LinksRouteChildren)
 
+interface McpRouteChildren {
+  McpAutorizarRoute: typeof McpAutorizarRoute
+}
+
+const McpRouteChildren: McpRouteChildren = {
+  McpAutorizarRoute: McpAutorizarRoute,
+}
+
+const McpRouteWithChildren = McpRoute._addFileChildren(McpRouteChildren)
+
 interface PlayersRouteChildren {
   PlayersPlayerIdRoute: typeof PlayersPlayerIdRoute
 }
@@ -2177,6 +2206,7 @@ const rootRouteChildren: RootRouteChildren = {
   JornadasRoute: JornadasRouteWithChildren,
   LigacoesRoute: LigacoesRoute,
   LinksRoute: LinksRouteWithChildren,
+  McpRoute: McpRouteWithChildren,
   MidiaLtvRoute: MidiaLtvRoute,
   PlanoECreditosRoute: PlanoECreditosRoute,
   PlayersRoute: PlayersRouteWithChildren,
@@ -2201,7 +2231,6 @@ const rootRouteChildren: RootRouteChildren = {
   GrupoCasaRoute: GrupoCasaRoute,
   GrupoMetasRoute: GrupoMetasRoute,
   GrupoPessoasRoute: GrupoPessoasRoute,
-  McpAutorizarRoute: McpAutorizarRoute,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,

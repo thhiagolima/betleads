@@ -204,7 +204,8 @@ async function issueTokenPair(connectionId: string): Promise<TokenResponse> {
   };
 }
 
-async function revokeConnection(connectionId: string) {
+/** Marks a connection revoked (idempotent: a no-op if already revoked). */
+export async function revokeConnection(connectionId: string) {
   const { error } = await db()
     .from("mcp_connections")
     .update({ revoked_at: new Date().toISOString() })
@@ -330,10 +331,14 @@ export async function exchangeToken(form: URLSearchParams): Promise<TokenRespons
 // Metadata (RFC 9728 protected resource + RFC 8414 authorization server)
 // ---------------------------------------------------------------------------
 
+/** VITE_PUBLIC_APP_URL without a trailing slash, or "" when unset. Request-free: usable outside a request handler. */
+export function publicBaseUrlFromEnv(): string {
+  return (process.env.VITE_PUBLIC_APP_URL ?? "").trim().replace(/\/+$/, "");
+}
+
 /** Public base URL: VITE_PUBLIC_APP_URL without trailing slash, else the request origin. */
 export function publicBaseUrl(request: Request): string {
-  const configured = (process.env.VITE_PUBLIC_APP_URL ?? "").trim().replace(/\/+$/, "");
-  return configured || new URL(request.url).origin;
+  return publicBaseUrlFromEnv() || new URL(request.url).origin;
 }
 
 export function oauthMetadata(request: Request) {

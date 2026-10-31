@@ -298,6 +298,23 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/tenants": { section: "Conta", title: "Conta e equipe" },
   "/admin": { section: "Administração", title: "Visão da plataforma" },
   "/grupos": { section: "Administração", title: "Grupos" },
+  "/mcp": { section: "Configurações", title: "Conectar ao Claude" },
+  // Not sidebar entries: the OAuth consent screen and the well-known
+  // metadata endpoints the MCP OAuth flow exposes (specs §5). Still declared
+  // routes, so the "every route has a title" test needs an entry for each.
+  "/mcp/autorizar": { section: "Configurações", title: "Autorizar conexão MCP" },
+  "/.well-known/oauth-authorization-server": {
+    section: "Configurações",
+    title: "Metadados OAuth (servidor de autorização)",
+  },
+  "/.well-known/oauth-protected-resource": {
+    section: "Configurações",
+    title: "Metadados OAuth (recurso protegido)",
+  },
+  "/.well-known/oauth-protected-resource/api/mcp": {
+    section: "Configurações",
+    title: "Metadados OAuth (recurso protegido do MCP)",
+  },
   "/grupo": { section: "Grupo", title: "Financeiro do grupo" },
   "/grupo/casa": { section: "Grupo", title: "Financeiro da casa" },
   "/grupo/metas": { section: "Grupo", title: "Metas do grupo" },

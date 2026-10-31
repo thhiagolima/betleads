@@ -52,6 +52,8 @@ import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { ChannelObservabilityPanel } from "@/components/admin/channel-observability-panel";
 import { ProviderAccountsPanel } from "@/components/admin/provider-accounts-panel";
+import { McpAccessPanel } from "@/components/admin/mcp-access-panel";
+import { getMyMcpStatus } from "@/lib/mcp/mcp.functions";
 import {
   adminCreateUser,
   adminDeleteUser,
@@ -131,7 +133,14 @@ function fmtDate(d: string | null) {
 }
 
 type AdminView =
-  "metrics" | "users" | "pricing" | "sms-credits" | "billing" | "channels" | "integrations";
+  | "metrics"
+  | "users"
+  | "pricing"
+  | "sms-credits"
+  | "billing"
+  | "channels"
+  | "integrations"
+  | "mcp";
 
 const ADMIN_VIEWS: ReadonlyArray<{ value: AdminView; label: string; hash: string }> = [
   { value: "metrics", label: "Métricas", hash: "metricas" },
@@ -141,6 +150,7 @@ const ADMIN_VIEWS: ReadonlyArray<{ value: AdminView; label: string; hash: string
   { value: "billing", label: "Faturamento", hash: "faturamento" },
   { value: "channels", label: "Canais", hash: "canais" },
   { value: "integrations", label: "Integrações", hash: "integracoes" },
+  { value: "mcp", label: "MCP", hash: "mcp" },
 ];
 
 function viewFromHash(hash: string): AdminView {
@@ -227,6 +237,7 @@ function AdminPage() {
         {view === "billing" && <BillingTab />}
         {view === "channels" && <ChannelObservabilityPanel />}
         {view === "integrations" && <AdminIntegrationsTab />}
+        {view === "mcp" && <McpTab />}
       </div>
     </Page>
   );
@@ -245,6 +256,21 @@ function BillingTab() {
       </div>
     </div>
   );
+}
+
+// ─── Aba MCP (Task 9) ───────────────────────────────────────────────────────
+function McpTab() {
+  const statusFn = useServerFn(getMyMcpStatus);
+  const { data, isLoading } = useQuery({
+    queryKey: ["mcp", "my-status"],
+    queryFn: () => statusFn(),
+  });
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">Carregando…</p>;
+  }
+
+  return <McpAccessPanel mcpEnabled={data?.enabled === true} />;
 }
 
 function AdminIntegrationsTab() {

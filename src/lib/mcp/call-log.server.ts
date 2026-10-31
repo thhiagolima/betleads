@@ -54,8 +54,16 @@ export async function checkRateLimit(identity: McpIdentity, tool: string): Promi
   }
 }
 
+/**
+ * Who performed the call: the usual MCP identity (bound to a connection), or
+ * an admin action taken straight from the admin panel, outside any MCP
+ * connection — `mcp_call_log.connection_id` is nullable for exactly this case
+ * (see the migration's comment).
+ */
+export type CallLogIdentity = McpIdentity | { userId: string; connectionId: null };
+
 export type CallLogEntry = {
-  identity: McpIdentity;
+  identity: CallLogIdentity;
   tool: string;
   tenantId?: string | null;
   ok: boolean;
