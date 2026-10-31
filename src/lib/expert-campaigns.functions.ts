@@ -27,6 +27,7 @@ import {
   listExpertCampaignDraftsFor,
   saveExpertCampaignDraftFor,
   submitExpertCampaignDraftFor,
+  markExpertCampaignDraftSubmittedFor,
   createExpertSelectionAudienceFor,
   deleteExpertAudienceFor,
   getExpertCampaignUsageFor,
@@ -257,7 +258,8 @@ export const resumeExpertCampaign = createServerFn({ method: "POST" })
 //   getCampaignDraft    → getExpertCampaignDraft
 //   saveCampaignDraft   → saveExpertCampaignDraft
 //   deleteCampaignDraft → deleteExpertCampaignDraft
-//   submitCampaignDraft → submitExpertCampaignDraft (envia pelo caminho do expert)
+//   submitCampaignDraft → markExpertCampaignDraftSubmitted (só marca, como a casa)
+//   submitExpertCampaignDraft cria a campanha a partir do rascunho salvo.
 
 export const listExpertCampaignDrafts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -282,3 +284,8 @@ export const submitExpertCampaignDraft = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v: unknown) => z.object({ id: dbUuid() }).parse(v))
   .handler(async ({ data, context }) => submitExpertCampaignDraftFor(ctxOf(context), data));
+
+export const markExpertCampaignDraftSubmitted = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => z.object({ id: dbUuid() }).parse(v))
+  .handler(async ({ data, context }) => markExpertCampaignDraftSubmittedFor(ctxOf(context), data));

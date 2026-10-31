@@ -24,7 +24,7 @@ import {
   listExpertCampaignDrafts,
   saveExpertAudience,
   saveExpertCampaignDraft,
-  submitExpertCampaignDraft,
+  markExpertCampaignDraftSubmitted,
 } from "@/lib/expert-campaigns.functions";
 import type { ShellRole } from "@/lib/navigation";
 import {
@@ -119,7 +119,9 @@ export const EXPERT_CAMPAIGN_SOURCE: CampaignDataSource = {
   getDraft: as<CampaignDataSource["getDraft"]>(getExpertCampaignDraft),
   saveDraft: as<CampaignDataSource["saveDraft"]>(saveExpertCampaignDraft),
   deleteDraft: as<CampaignDataSource["deleteDraft"]>(deleteExpertCampaignDraft),
-  submitDraft: as<CampaignDataSource["submitDraft"]>(submitExpertCampaignDraft),
+  // The composer creates the campaign itself and then only marks the draft;
+  // submitExpertCampaignDraft would create a second campaign.
+  submitDraft: as<CampaignDataSource["submitDraft"]>(markExpertCampaignDraftSubmitted),
 };
 
 export function campaignDataSourceFor(role: ShellRole | null | undefined): CampaignDataSource {

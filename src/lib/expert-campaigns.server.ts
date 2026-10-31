@@ -1497,6 +1497,30 @@ async function loadOwnDraft(expert: ExpertContext, id: string) {
   return data as Record<string, unknown>;
 }
 
+/**
+ * Marks the expert's own draft as submitted once the composer has already
+ * created the campaign (same contract as the house `submitCampaignDraft`).
+ * It never sends anything — `submitExpertCampaignDraftFor` is the one that
+ * creates a campaign from the stored draft.
+ */
+export async function markExpertCampaignDraftSubmittedFor(
+  ctx: ExpertServerContext,
+  data: { id: string },
+): Promise<{ ok: true }> {
+  const { expert } = await requireExpert(ctx);
+  const { data: updated, error } = await db()
+    .from("campaign_drafts")
+    .update({ status: "submitted", submitted_at: new Date().toISOString() })
+    .eq("id", data.id)
+    .eq("tenant_id", expert.tenantId)
+    .eq("expert_id", expert.expertId)
+    .eq("status", "draft")
+    .select("id")
+    .maybeSingle();
+  if (error || !updated) throw new Error("O rascunho já não pode ser enviado.");
+  return { ok: true };
+}
+
 export async function getExpertCampaignDraftFor(
   ctx: ExpertServerContext,
   data: { id: string },

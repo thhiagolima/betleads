@@ -45,6 +45,7 @@ import {
   listExpertCampaignDraftsFor,
   saveExpertCampaignDraftFor,
   submitExpertCampaignDraftFor,
+  markExpertCampaignDraftSubmittedFor,
   deleteExpertAudienceFor,
   EXPERT_AUDIENCE_NOT_FOUND,
   EXPERT_CAMPAIGN_NOT_PENDING,
@@ -608,6 +609,33 @@ describe("rascunhos do expert", () => {
     expect(fake.admin.rows("campaign_drafts")[0].status).toBe("submitted");
     expect(fake.admin.rows("sms_campaigns")[0]).toMatchObject({ expert_id: ME, status: "aguardando_aprovacao" });
     await expect(submitExpertCampaignDraftFor(CTX, { id: d.id })).rejects.toThrow(/Rascunho não encontrado/);
+  });
+
+  it("marcar o rascunho como enviado (composer) não cria outra campanha", async () => {
+    setExpert({ envioModo: "aprovacao" });
+    const d = await saveExpertCampaignDraftFor(CTX, draft());
+    await saveExpertSmsCampaignFor(CTX, {
+      campaignName: "Campanha",
+      content: "Oi",
+      audienceCriteria: {},
+      playerIds: [pid(1)],
+    });
+    expect(await markExpertCampaignDraftSubmittedFor(CTX, { id: d.id })).toEqual({ ok: true });
+    expect(fake.admin.rows("campaign_drafts")[0].status).toBe("submitted");
+    expect(fake.admin.rows("sms_campaigns")).toHaveLength(1);
+    await expect(markExpertCampaignDraftSubmittedFor(CTX, { id: d.id })).rejects.toThrow(
+      /já não pode ser enviado/,
+    );
+  });
+
+  it("não marca rascunho da casa nem de outro expert", async () => {
+    fake.admin.rows("campaign_drafts").push(
+      { id: "house-d", tenant_id: TENANT, expert_id: null, status: "draft", name: "Casa", idempotency_key: KEY, version: 1 },
+      { id: "other-d", tenant_id: TENANT, expert_id: OTHER_EXPERT, status: "draft", name: "Dele", idempotency_key: "k2", version: 1 },
+    );
+    await expect(markExpertCampaignDraftSubmittedFor(CTX, { id: "house-d" })).rejects.toThrow();
+    await expect(markExpertCampaignDraftSubmittedFor(CTX, { id: "other-d" })).rejects.toThrow();
+    expect(fake.admin.rows("campaign_drafts").map((d) => d.status)).toEqual(["draft", "draft"]);
   });
 
   it("rascunho com link fora da casa não é enviado e continua rascunho", async () => {

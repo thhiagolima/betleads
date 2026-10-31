@@ -26,7 +26,7 @@ vi.mock("@/lib/expert-campaigns.functions", () => ({
   getExpertCampaignDraft: stub("getExpertCampaignDraft"),
   saveExpertCampaignDraft: stub("saveExpertCampaignDraft"),
   deleteExpertCampaignDraft: stub("deleteExpertCampaignDraft"),
-  submitExpertCampaignDraft: stub("submitExpertCampaignDraft"),
+  markExpertCampaignDraftSubmitted: stub("markExpertCampaignDraftSubmitted"),
 }));
 
 import {
@@ -71,6 +71,6 @@ describe("campaign data source", () => {
     expect(nameOf(expert.getDraft)).toBe("getExpertCampaignDraft");
     expect(nameOf(expert.saveDraft)).toBe("saveExpertCampaignDraft");
     expect(nameOf(expert.deleteDraft)).toBe("deleteExpertCampaignDraft");
-    expect(nameOf(expert.submitDraft)).toBe("submitExpertCampaignDraft");
+    expect(nameOf(expert.submitDraft)).toBe("markExpertCampaignDraftSubmitted");
   });
 });
