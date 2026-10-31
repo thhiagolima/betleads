@@ -46,6 +46,10 @@ const metaConnectionSchema = z.object({
 const metaAccountSelectionSchema = z.object({
   accountIds: z.array(z.string().uuid()).max(200),
 });
+const metaConnectionRenameSchema = z.object({
+  connectionId: z.string().uuid(),
+  label: z.string().trim().min(1).max(60),
+});
 
 /** D4: conta recém-marcada importa os últimos 90 dias (em blocos de 30, no worker). */
 const META_BACKFILL_DAYS = 90;
@@ -743,19 +747,59 @@ export async function disconnectMetaConnectionFor(
   };
 }
 
+export const renameMetaConnection = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => metaConnectionRenameSchema.parse(input))
+  .handler(async ({ data, context }) => renameMetaConnectionFor(context, data));
+
+/**
+ * Renomeia uma chave (MB3): só o rótulo que a casa vê. Sem auditoria: a constraint
+ * de `meta_connection_audit.action` não tem uma ação para isso.
+ */
+export async function renameMetaConnectionFor(
+  context: MetaActionContext,
+  data: z.infer<typeof metaConnectionRenameSchema>,
+) {
+  const tenantId = await requireMetaAdmin(context.supabase);
+  await assertTenantNotDemo(tenantId);
+  // O `*For` também é chamado sem o inputValidator: o rótulo é aparado aqui.
+  const { connectionId, label } = metaConnectionRenameSchema.parse(data);
+  const { data: rows, error } = await (supabaseAdmin as any)
+    .from("meta_connections")
+    .update({ connection_label: label })
+    .eq("tenant_id", tenantId)
+    .eq("id", connectionId)
+    .neq("status", "disabled")
+    .select("id");
+  if (error) throw new Error(error.message);
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error("Conexão Meta não encontrada.");
+  return { ok: true as const, label };
+}
+
 export const getMetaConnectionSummary = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => getMetaConnectionSummaryFor(context));
+
+type MetaBackfillRunRow = {
+  id: string;
+  status: string;
+  total_accounts: number;
+  processed_accounts: number;
+  successful_accounts: number;
+  failed_accounts: number;
+  created_at: string;
+  finished_at: string | null;
+};
 
 /** As chaves e as contas da casa, cada conta com as chaves que a alcançam. */
 export async function getMetaConnectionSummaryFor(context: { supabase: unknown }) {
   const tenantId = await resolveTenantId(context.supabase);
 
-  const [connectionsRes, accountsRes, accessRows] = await Promise.all([
+  const [connectionsRes, accountsRes, accessRows, backfillRes] = await Promise.all([
     supabaseAdmin
       .from("meta_connections")
       .select(
-        "id, meta_user_id, meta_user_name, scopes, token_expires_at, status, last_error, connected_at, last_sync_at, auth_type, token_hint, token_validated_at, permissions_checked_at, app_id, app_name, business_id, connection_label, accounts_discovered_at",
+        "id, meta_user_id, meta_user_name, scopes, token_expires_at, status, last_error, connected_at, last_sync_at, auth_type, token_hint, token_validated_at, permissions_checked_at, app_id, app_name, business_id, connection_label, accounts_discovered_at, token_type, data_access_expires_at, health_checked_at",
       )
       .eq("tenant_id", tenantId)
       .neq("status", "disabled")
@@ -763,7 +807,7 @@ export async function getMetaConnectionSummaryFor(context: { supabase: unknown }
     supabaseAdmin
       .from("meta_ad_accounts")
       .select(
-        "id, connection_id, meta_ad_account_id, account_id, name, business_id, business_name, currency, timezone_name, account_status, selected, last_sync_at, sync_status, last_attempt_at, last_success_at, last_error, last_row_count",
+        "id, connection_id, meta_ad_account_id, account_id, name, business_id, business_name, currency, timezone_name, account_status, selected, last_sync_at, sync_status, last_attempt_at, last_success_at, last_error, last_row_count, created_at",
       )
       .eq("tenant_id", tenantId)
       .order("name", { ascending: true }),
@@ -777,10 +821,22 @@ export async function getMetaConnectionSummaryFor(context: { supabase: unknown }
         .order("id", { ascending: true })
         .range(from, to),
     ),
+    // O backfill mais recente da casa (MB3): a barra de "Primeira leitura".
+    (supabaseAdmin as any)
+      .from("meta_sync_runs")
+      .select(
+        "id, status, total_accounts, processed_accounts, successful_accounts, failed_accounts, created_at, finished_at",
+      )
+      .eq("tenant_id", tenantId)
+      .eq("trigger_type", "backfill")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   if (connectionsRes.error) throw new Error(connectionsRes.error.message);
   if (accountsRes.error) throw new Error(accountsRes.error.message);
+  if (backfillRes.error) throw new Error(backfillRes.error.message);
 
   const accessByAccount = new Map<string, string[]>();
   for (const row of accessRows) {
@@ -796,6 +852,7 @@ export async function getMetaConnectionSummaryFor(context: { supabase: unknown }
       ...account,
       access_connection_ids: accessByAccount.get(account.id) ?? [],
     })),
+    latestBackfill: (backfillRes.data ?? null) as MetaBackfillRunRow | null,
   };
 }
 

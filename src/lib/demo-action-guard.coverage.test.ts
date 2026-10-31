@@ -161,6 +161,7 @@ const entries: Entry[] = [
   { file: "meta.functions.ts", name: "validateMetaConnectionFor", kind: "function" },
   { file: "meta.functions.ts", name: "disconnectMetaConnectionFor", kind: "function" },
   { file: "meta.functions.ts", name: "enqueueMetaSyncFor", kind: "function" },
+  { file: "meta.functions.ts", name: "renameMetaConnectionFor", kind: "function" },
   // sms-credits.functions.ts: `createSmsCreditCheckout` and
   // `adminMarkSmsCreditOrderPaid` were dead code (no screen called either
   // one) and were removed in the PG1 final review. `createSmsCreditCheckoutFor`

@@ -20,6 +20,7 @@ type Call = {
   payload?: unknown;
   filters: Filter[];
   range?: [number, number];
+  columns?: string;
 };
 
 const db = vi.hoisted(() => ({
@@ -162,8 +163,9 @@ function query(table: string) {
     return { data: mode === "single" ? (hit[0] ?? null) : hit, error: null };
   };
   const builder: Record<string, unknown> = {
-    select: () => {
+    select: (columns?: string) => {
       if (call.action !== "select") returning = true;
+      else call.columns = columns;
       return builder;
     },
     insert: (payload: unknown) => Object.assign(call, { action: "insert", payload }) && builder,
@@ -210,6 +212,7 @@ import {
   getMetaConnectionSummaryFor,
   metaErrorLevel,
   processMetaSyncQueue,
+  renameMetaConnectionFor,
   updateMetaAccountSelectionFor,
   validateMetaConnectionFor,
 } from "./meta.functions";
@@ -358,6 +361,12 @@ describe("papel: só o admin da casa mexe na conexão", () => {
     ["select", updateMetaAccountSelectionFor, { accountIds: [] }, ADMIN_MESSAGE],
     ["validate", validateMetaConnectionFor, { connectionId: CONNECTION_ID }, ADMIN_MESSAGE],
     ["disconnect", disconnectMetaConnectionFor, { connectionId: CONNECTION_ID }, ADMIN_MESSAGE],
+    [
+      "rename",
+      renameMetaConnectionFor,
+      { connectionId: CONNECTION_ID, label: "Mídia Interna" },
+      ADMIN_MESSAGE,
+    ],
     [
       "enqueue",
       enqueueMetaSyncFor,
@@ -2231,6 +2240,162 @@ describe("MB1-06 redescoberta diária", () => {
 
     expect(connection.status).toBe("disabled");
     consoleError.mockRestore();
+  });
+});
+
+describe("MB3 resumo: campos da tela e último backfill", () => {
+  it("devolve os campos novos da chave e da conta", async () => {
+    db.tables.meta_connections = [{ id: "c1", tenant_id: "t1", status: "connected" }];
+    db.tables.meta_ad_accounts = [{ id: "a1", tenant_id: "t1" }];
+    db.tables.meta_ad_account_access = [];
+
+    await getMetaConnectionSummaryFor({ supabase: {} });
+
+    // O fake não projeta colunas: confere o select pedido ao PostgREST.
+    const columnsOf = (table: string) =>
+      String(db.calls.find((item) => item.table === table)?.columns ?? "")
+        .split(",")
+        .map((column) => column.trim());
+    expect(columnsOf("meta_connections")).toEqual(
+      expect.arrayContaining(["token_type", "data_access_expires_at", "health_checked_at"]),
+    );
+    expect(columnsOf("meta_ad_accounts")).toEqual(
+      expect.arrayContaining(["created_at", "account_status", "timezone_name", "currency"]),
+    );
+    expect(columnsOf("meta_sync_runs")).toEqual([
+      "id",
+      "status",
+      "total_accounts",
+      "processed_accounts",
+      "successful_accounts",
+      "failed_accounts",
+      "created_at",
+      "finished_at",
+    ]);
+  });
+
+  it("traz o backfill mais recente da casa, ignorando outros gatilhos e casas", async () => {
+    db.tables.meta_connections = [];
+    db.tables.meta_ad_accounts = [];
+    db.tables.meta_ad_account_access = [];
+    const backfill = {
+      id: "r1",
+      tenant_id: "t1",
+      trigger_type: "backfill",
+      status: "running",
+      total_accounts: 4,
+      processed_accounts: 1,
+      successful_accounts: 1,
+      failed_accounts: 0,
+      created_at: "2026-10-30T10:00:00Z",
+      finished_at: null,
+    };
+    db.tables.meta_sync_runs = [
+      { ...backfill, id: "r0", tenant_id: "t2" },
+      { ...backfill, id: "r9", trigger_type: "manual" },
+      backfill,
+    ];
+
+    const summary = await getMetaConnectionSummaryFor({ supabase: {} });
+
+    expect(summary.latestBackfill).toMatchObject({ id: "r1", status: "running" });
+    const run = db.calls.find((item) => item.table === "meta_sync_runs");
+    expect(run?.filters).toEqual(
+      expect.arrayContaining([
+        { op: "eq", column: "tenant_id", value: "t1" },
+        { op: "eq", column: "trigger_type", value: "backfill" },
+      ]),
+    );
+  });
+
+  it("sem backfill devolve null", async () => {
+    db.tables.meta_connections = [];
+    db.tables.meta_ad_accounts = [];
+    db.tables.meta_ad_account_access = [];
+    db.tables.meta_sync_runs = [];
+
+    const summary = await getMetaConnectionSummaryFor({ supabase: {} });
+
+    expect(summary.latestBackfill).toBeNull();
+  });
+});
+
+describe("MB3 renomear a chave", () => {
+  const connection = (overrides: Row = {}): Row => ({
+    id: CONNECTION_ID,
+    tenant_id: "t1",
+    status: "connected",
+    connection_label: null,
+    ...overrides,
+  });
+
+  it("grava o rótulo aparado, filtrado por casa, id e não desativada", async () => {
+    const row = connection();
+    db.tables.meta_connections = [row];
+
+    const result = await call(renameMetaConnectionFor, {
+      connectionId: CONNECTION_ID,
+      label: "  Mídia Interna  ",
+    });
+
+    expect(result).toEqual({ ok: true, label: "Mídia Interna" });
+    expect(row.connection_label).toBe("Mídia Interna");
+    const update = db.calls.find(
+      (item) => item.table === "meta_connections" && item.action === "update",
+    );
+    expect(update?.payload).toEqual({ connection_label: "Mídia Interna" });
+    expect(update?.filters).toEqual(
+      expect.arrayContaining([
+        { op: "eq", column: "tenant_id", value: "t1" },
+        { op: "eq", column: "id", value: CONNECTION_ID },
+        { op: "neq", column: "status", value: "disabled" },
+      ]),
+    );
+    // Sem auditoria: a constraint de action não tem "renamed".
+    expect(db.calls.some((item) => item.table === "meta_connection_audit")).toBe(false);
+  });
+
+  it.each([
+    ["desativada", connection({ status: "disabled" })],
+    ["de outra casa", connection({ tenant_id: "t2" })],
+  ])("chave %s: Conexão Meta não encontrada", async (_, row) => {
+    db.tables.meta_connections = [row];
+
+    await expect(
+      call(renameMetaConnectionFor, { connectionId: CONNECTION_ID, label: "Nova" }),
+    ).rejects.toThrow("Conexão Meta não encontrada.");
+    expect(row.connection_label).toBeNull();
+  });
+
+  it.each([
+    ["vazio", "   "],
+    ["acima de 60", "x".repeat(61)],
+  ])("rótulo %s é recusado sem gravar", async (_, label) => {
+    db.tables.meta_connections = [connection()];
+
+    await expect(
+      call(renameMetaConnectionFor, { connectionId: CONNECTION_ID, label }),
+    ).rejects.toThrow();
+    expect(db.calls.filter((item) => item.action === "update")).toEqual([]);
+  });
+
+  it("aceita 60 caracteres", async () => {
+    db.tables.meta_connections = [connection()];
+    const label = "x".repeat(60);
+
+    await expect(
+      call(renameMetaConnectionFor, { connectionId: CONNECTION_ID, label }),
+    ).resolves.toEqual({ ok: true, label });
+  });
+
+  it("casa demo é bloqueada sem gravar", async () => {
+    access.demo = true;
+    db.tables.meta_connections = [connection()];
+
+    await expect(
+      call(renameMetaConnectionFor, { connectionId: CONNECTION_ID, label: "Nova" }),
+    ).rejects.toThrow("DEMO_ACTION_BLOCKED");
+    expect(db.calls.filter((item) => item.action === "update")).toEqual([]);
   });
 });
 

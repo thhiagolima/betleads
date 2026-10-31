@@ -1,53 +1,20 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
-import {
-  CheckCircle2,
-  Clipboard,
-  Link2,
-  Loader2,
-  RefreshCw,
-  ShieldCheck,
-  Target,
-  Trash2,
-} from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Clipboard, Link2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { DataCard } from "@/components/ui-premium/data-card";
-import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
-import {
-  connectMetaSystemUserToken,
-  disconnectMetaConnection,
-  updateMetaAccountSelection,
-  validateMetaConnection,
-} from "@/lib/meta.functions";
-import { cn } from "@/lib/utils";
-import {
-  useMetaConnectionSummary,
-  type MarketingIntegration,
-  type MetaSummary,
-} from "./meta-summary";
+import { MetaConnectionView } from "./meta/meta-connection-view";
+import { useMetaActions } from "./meta/use-meta-actions";
+import { useMetaConnectionSummary, type MarketingIntegration } from "./meta-summary";
 
-// Conexão com a Meta (token do Usuário do Sistema) e montador de UTM. Saiu da
-// "Configuração" de Aquisição e LTV (/midia-ltv) para Integrações (/webhooks#meta);
-// a lógica e as server functions são as mesmas.
+// Conexão com a Meta (chaves de Usuário do Sistema, contas por BM) e montador de UTM.
+// Mora em Integrações (/webhooks#meta). As regras da tela estão em
+// `meta-connection-model.ts`; os pedaços da tela, em `./meta/`.
 
 // Só a Meta tem gasto sincronizado. Google, TikTok e Kwai voltam quando houver
 // integração (AL5-04); antes disso o gerador prometeria uma medição que não existe.
@@ -60,110 +27,25 @@ function appendParams(url: string, params: string) {
   return `${clean}${clean.includes("?") ? "&" : "?"}${params}`;
 }
 
-const STALE_SELECTION_RPC_MESSAGE = "Uma das contas selecionadas não pertence à sua operação.";
-const STALE_SELECTION_MESSAGE =
-  "A lista de contas mudou desde que você abriu a tela. Revise e salve de novo.";
-
-function plural(count: number, one: string, many: string) {
-  return `${count} ${count === 1 ? one : many}`;
-}
-
-function statusLabel(status?: string) {
-  // No connection row at all (Integrações does not load the marketing overview).
-  if (!status) return "não conectada";
-  if (status === "connected") return "conectada";
-  if (status === "configured") return "preparada";
-  if (status === "error") return "erro";
-  if (status === "disabled") return "pausada";
-  return "planejada";
-}
-
-/** Aba "Meta Ads" de Integrações: assistente de conexão + montador de UTM. */
-export function MetaConnectionPanel({ meta }: { meta?: MarketingIntegration }) {
-  const qc = useQueryClient();
-  const connectMetaToken = useServerFn(connectMetaSystemUserToken);
-  const saveMetaSelection = useServerFn(updateMetaAccountSelection);
-  const testMetaConnection = useServerFn(validateMetaConnection);
-  const removeMetaConnection = useServerFn(disconnectMetaConnection);
+/**
+ * Aba "Meta Ads" de Integrações: conexão + montador de UTM. `meta` (status de
+ * `marketing_integrations`) é aceito por compatibilidade; o status vem das chaves.
+ */
+export function MetaConnectionPanel(_props: { meta?: MarketingIntegration }) {
   const [houseUrl, setHouseUrl] = useState("");
-  const { data: metaSummary, isLoading: summaryLoading } = useMetaConnectionSummary();
-
-  const connectMetaTokenMutation = useMutation({
-    mutationFn: (accessToken: string) => connectMetaToken({ data: { accessToken } }),
-    onSuccess: (result) => {
-      // Contagens do RPC `meta_connect_token`: BMs e contas que a chave alcança.
-      toast.success(
-        `${result.created ? "Chave conectada" : "Chave atualizada"}: ${plural(
-          result.businesses,
-          "BM",
-          "BMs",
-        )}, ${plural(result.accountsTotal, "conta", "contas")} (${plural(
-          result.accountsNew,
-          "nova",
-          "novas",
-        )}). Escolha quais acompanhar e salve.`,
-      );
-      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
-      qc.invalidateQueries({ queryKey: ["marketing-overview"] });
-    },
-    onError: (e) =>
-      toast.error(
-        e instanceof Error ? e.message : "Não foi possível validar a chave de acesso da Meta",
-      ),
-  });
-
-  const metaSelectionMutation = useMutation({
-    mutationFn: (accountIds: string[]) => saveMetaSelection({ data: { accountIds } }),
-    onSuccess: (result) => {
-      toast.success(
-        `${result.selected} conta(s) selecionada(s)${
-          result.added > 0 ? ", a importação dos últimos 90 dias começou" : ""
-        }`,
-      );
-      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
-      qc.invalidateQueries({ queryKey: ["marketing-overview"] });
-    },
-    onError: (e) => {
-      // A lista mudou depois que a tela abriu (redescoberta, chave desconectada):
-      // relê o resumo e pede para revisar, em vez de mostrar o erro do RPC.
-      if (e instanceof Error && e.message === STALE_SELECTION_RPC_MESSAGE) {
-        qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
-        toast.error(STALE_SELECTION_MESSAGE);
-        return;
-      }
-      toast.error(e instanceof Error ? e.message : "Não foi possível salvar as contas");
-    },
-  });
-
-  const validateMetaMutation = useMutation({
-    mutationFn: (connectionId: string) => testMetaConnection({ data: { connectionId } }),
-    onSuccess: (result) => {
-      toast.success(`Conexão validada · ${result.accounts} conta(s) acessíveis`);
-      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
-    },
-    onError: (e) => {
-      toast.error(e instanceof Error ? e.message : "Não foi possível validar a conexão");
-      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
-    },
-  });
-
-  const disconnectMetaMutation = useMutation({
-    mutationFn: (connectionId: string) => removeMetaConnection({ data: { connectionId } }),
-    onSuccess: (result) => {
-      const parts = [
-        result.accountsMoved > 0
-          ? `${plural(result.accountsMoved, "conta segue", "contas seguem")} por outra chave`
-          : null,
-        result.accountsStopped > 0
-          ? `${plural(result.accountsStopped, "conta parou", "contas pararam")} de sincronizar`
-          : null,
-      ].filter(Boolean);
-      toast.success(`Chave desconectada${parts.length ? `. ${parts.join("; ")}.` : ""}`);
-      qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
-      qc.invalidateQueries({ queryKey: ["marketing-overview"] });
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Não foi possível desconectar"),
-  });
+  const {
+    data: metaSummary,
+    isLoading: summaryLoading,
+    isError: summaryFailed,
+    isFetching: summaryFetching,
+    refetch: refetchSummary,
+  } = useMetaConnectionSummary();
+  const isDemo = useIsDemoTenant();
+  // Só o admin da casa (ou o super admin) altera a conexão; o servidor também confere.
+  // Enquanto o papel carrega, nada fica bloqueado.
+  const { active } = useActiveTenant();
+  const readOnly = Boolean(active) && active?.role !== "admin" && active?.role !== "super_admin";
+  const { connect, select, validate, disconnect, rename, sync } = useMetaActions();
 
   const utmParams = META_UTM_PARAMS;
   const fullUrl = useMemo(() => appendParams(houseUrl, utmParams), [houseUrl, utmParams]);
@@ -178,22 +60,31 @@ export function MetaConnectionPanel({ meta }: { meta?: MarketingIntegration }) {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       {summaryLoading ? (
-        // The wizard decides on mount whether to open the token form; wait for the summary.
         <Skeleton className="h-64 rounded-xl" />
       ) : (
-        <MetaConnectionWizard
-          meta={meta}
+        <MetaConnectionView
           summary={metaSummary}
-          onConnect={(token) => connectMetaTokenMutation.mutateAsync(token)}
-          connectPending={connectMetaTokenMutation.isPending}
-          onSaveSelection={(accountIds) => metaSelectionMutation.mutateAsync(accountIds)}
-          selectionPending={metaSelectionMutation.isPending}
-          onValidate={(connectionId) => validateMetaMutation.mutateAsync(connectionId)}
-          validatingConnectionId={validateMetaMutation.variables ?? null}
-          onDisconnect={(connectionId) => disconnectMetaMutation.mutateAsync(connectionId)}
-          disconnectPending={disconnectMetaMutation.isPending}
+          readOnly={readOnly}
+          isDemo={isDemo}
+          loadError={
+            summaryFailed ? { retry: () => void refetchSummary(), retrying: summaryFetching } : null
+          }
+          actions={{
+            connect: (token) => connect.mutateAsync(token),
+            connectPending: connect.isPending,
+            saveSelection: (accountIds) => select.mutateAsync(accountIds),
+            savePending: select.isPending,
+            validate: (connectionId) => validate.mutate(connectionId),
+            validatingConnectionId: validate.isPending ? (validate.variables ?? null) : null,
+            rename: (connectionId, label) => rename.mutateAsync({ connectionId, label }),
+            renamePending: rename.isPending,
+            disconnect: (connectionId) => disconnect.mutateAsync(connectionId),
+            disconnectPending: disconnect.isPending,
+            sync: () => sync.mutate(),
+            syncPending: sync.isPending,
+          }}
         />
       )}
 
@@ -225,24 +116,6 @@ export function MetaConnectionPanel({ meta }: { meta?: MarketingIntegration }) {
   );
 }
 
-function StatusBadge({ status }: { status?: string }) {
-  const connected = status === "connected";
-  const configured = status === "configured" || status === "planned";
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        "border-border/60 text-meta",
-        connected && "border-success/30 bg-success/10 text-success",
-        configured && "border-info/30 bg-info/10 text-info",
-        status === "error" && "border-danger/30 bg-danger/10 text-danger",
-      )}
-    >
-      {statusLabel(status)}
-    </Badge>
-  );
-}
-
 function CopyBlock({ title, value, onCopy }: { title: string; value: string; onCopy: () => void }) {
   return (
     <div className="rounded-lg border border-border/60 bg-background/40 p-3">
@@ -257,482 +130,5 @@ function CopyBlock({ title, value, onCopy }: { title: string; value: string; onC
         {value}
       </pre>
     </div>
-  );
-}
-
-function MetaConnectionWizard({
-  meta,
-  summary,
-  onConnect,
-  connectPending,
-  onSaveSelection,
-  selectionPending,
-  onValidate,
-  validatingConnectionId,
-  onDisconnect,
-  disconnectPending,
-}: {
-  meta: MarketingIntegration | undefined;
-  summary: MetaSummary | undefined;
-  onConnect: (token: string) => Promise<unknown>;
-  connectPending: boolean;
-  onSaveSelection: (accountIds: string[]) => Promise<unknown>;
-  selectionPending: boolean;
-  onValidate: (connectionId: string) => Promise<unknown>;
-  validatingConnectionId: string | null;
-  onDisconnect: (connectionId: string) => Promise<unknown>;
-  disconnectPending: boolean;
-}) {
-  const isDemo = useIsDemoTenant();
-  // Só o admin da casa (ou o super admin) altera a conexão; o servidor também confere.
-  // Enquanto o papel carrega, nada fica bloqueado.
-  const { active } = useActiveTenant();
-  const readOnly = Boolean(active) && active?.role !== "admin" && active?.role !== "super_admin";
-  const locked = isDemo || readOnly;
-  const connections = useMemo(() => summary?.connections ?? [], [summary?.connections]);
-  const activeConnectionIds = useMemo(
-    () => new Set(connections.map((item) => item.id)),
-    [connections],
-  );
-  // Chaves que o worker usa: só as `connected` (uma em erro não lê nem aceita conta nova).
-  const connectedIds = useMemo(
-    () => new Set(connections.filter((item) => item.status === "connected").map((item) => item.id)),
-    [connections],
-  );
-  // Uma conta aparece enquanto alguma chave ativa a alcança (tabela N:N da MB1). A
-  // marcada aparece sempre, mesmo sem chave, para não sumir da tela nem do Salvar.
-  const accounts = useMemo(
-    () =>
-      (summary?.accounts ?? []).filter(
-        (account) =>
-          account.selected ||
-          account.access_connection_ids.some((id) => activeConnectionIds.has(id)),
-      ),
-    [summary?.accounts, activeConnectionIds],
-  );
-  // O que cada chave alcança: contas e BMs (a BM é atributo da conta, D1).
-  const reachByConnection = useMemo(() => {
-    const reach = new Map<string, { accounts: number; businesses: Set<string> }>();
-    for (const account of accounts) {
-      for (const connectionId of account.access_connection_ids) {
-        const entry = reach.get(connectionId) ?? { accounts: 0, businesses: new Set<string>() };
-        entry.accounts += 1;
-        entry.businesses.add(account.business_id ?? "__sem_bm__");
-        reach.set(connectionId, entry);
-      }
-    }
-    return reach;
-  }, [accounts]);
-  const [token, setToken] = useState("");
-  const [showGuide, setShowGuide] = useState(connections.length === 0);
-  const [showTokenForm, setShowTokenForm] = useState(connections.length === 0);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [disconnectId, setDisconnectId] = useState<string | null>(null);
-
-  // A partir de todas as contas do resumo: o Salvar nunca derruba uma conta marcada
-  // em silêncio (desmarcar é sempre uma ação explícita).
-  useEffect(() => {
-    setSelectedIds(
-      (summary?.accounts ?? []).filter((account) => account.selected).map((account) => account.id),
-    );
-  }, [summary?.accounts]);
-
-  useEffect(() => {
-    if (connections.length === 0) setShowTokenForm(true);
-  }, [connections.length]);
-
-  const persistedSelectedCount = accounts.filter((account) => account.selected).length;
-  const legacyConnections = connections.filter(
-    (connection) => connection.auth_type === "legacy_oauth",
-  );
-  const currentStep = connections.length === 0 ? 1 : persistedSelectedCount === 0 ? 2 : 3;
-  const connectionStatus = connections.some((connection) => connection.status === "error")
-    ? "error"
-    : connections.length > 0
-      ? "connected"
-      : meta?.status;
-
-  return (
-    <DataCard
-      title="Meta Ads"
-      description="Conecte sua conta, escolha o que deseja acompanhar e valide o acesso."
-      icon={<Target className="h-4 w-4" />}
-      actions={<StatusBadge status={connectionStatus} />}
-    >
-      <div className="mb-5 grid gap-2 sm:grid-cols-3">
-        {["Conectar", "Escolher contas", "Validar acesso"].map((label, index) => {
-          const step = index + 1;
-          const complete = step < currentStep;
-          const active = step === currentStep;
-          return (
-            <div
-              key={label}
-              className={cn(
-                "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-                active && "border-primary/60 bg-primary/10",
-                complete && "border-success/30 bg-success/10",
-              )}
-            >
-              <span
-                className={cn(
-                  "flex h-6 w-6 items-center justify-center rounded-full bg-muted text-meta font-bold",
-                  active && "bg-primary text-primary-foreground",
-                  complete && "bg-success/20 text-success",
-                )}
-              >
-                {complete ? <CheckCircle2 className="h-4 w-4" /> : step}
-              </span>
-              <span className={cn("font-medium", !active && !complete && "text-muted-foreground")}>
-                {label}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      <Button variant="outline" size="sm" onClick={() => setShowGuide((value) => !value)}>
-        {showGuide ? "Esconder preparação" : "Como preparar a conta"}
-      </Button>
-      {readOnly && (
-        <p className="mt-3 text-meta text-muted-foreground">
-          Só o administrador da casa altera a conexão.
-        </p>
-      )}
-      {legacyConnections.length > 0 && (
-        <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
-          <p className="font-semibold text-warning">Conexão antiga precisa ser substituída</p>
-          <p className="mt-1 text-muted-foreground">
-            A integração anterior usava o app compartilhado da plataforma. Gere uma chave de acesso
-            no app da sua operação e conecte abaixo; os dados já importados serão preservados.
-          </p>
-        </div>
-      )}
-      {showGuide && (
-        <div className="mt-3 grid gap-2 text-meta text-muted-foreground md:grid-cols-2">
-          {[
-            "Abra as Configurações do negócio no Business Manager.",
-            "Crie um Usuário do Sistema para esta operação.",
-            "Atribua somente as contas de anúncio necessárias.",
-            "Gere a chave de acesso (na Meta, “Gerar token”) no app da operação, com a permissão ads_read.",
-          ].map((step, index) => (
-            <div key={step} className="flex gap-2 rounded-lg bg-muted/40 p-3">
-              <span className="font-bold text-primary">{index + 1}</span>
-              <span>{step}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {(showTokenForm || connections.length === 0) && (
-        <div className="mt-5 rounded-xl border border-border/60 bg-background/40 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="font-semibold">Conectar chave de acesso</p>
-              <p className="text-meta text-muted-foreground">
-                A chave de acesso fica guardada de forma criptografada e não volta a aparecer.
-              </p>
-            </div>
-            {connections.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setShowTokenForm(false);
-                  setToken("");
-                }}
-              >
-                Cancelar
-              </Button>
-            )}
-          </div>
-          <Label className="mt-4 block" htmlFor="meta-system-token">
-            Chave de acesso do Usuário do Sistema
-          </Label>
-          <Input
-            id="meta-system-token"
-            className="mt-2"
-            type="password"
-            autoComplete="off"
-            placeholder="EAAG..."
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
-          />
-          <DemoDisabledTooltip active={isDemo}>
-            <Button
-              className="mt-3 gap-2"
-              disabled={locked || connectPending || token.trim().length < 40}
-              onClick={async () => {
-                try {
-                  await onConnect(token.trim());
-                  setToken("");
-                  setShowTokenForm(false);
-                } catch {
-                  // A mensagem de erro é exibida pela mutation; mantenha o token para nova tentativa.
-                }
-              }}
-            >
-              {connectPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <ShieldCheck className="h-4 w-4" />
-              )}
-              Validar acesso e buscar contas
-            </Button>
-          </DemoDisabledTooltip>
-        </div>
-      )}
-
-      {connections.length > 0 && !showTokenForm && (
-        <div className="mt-5 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="font-semibold">Conexões encontradas</p>
-              <p className="text-meta text-muted-foreground">
-                Revise a origem antes de escolher as contas de anúncio.
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={readOnly}
-              onClick={() => setShowTokenForm(true)}
-            >
-              Adicionar ou atualizar chave
-            </Button>
-          </div>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {connections.map((connection) => (
-              <div
-                key={connection.id}
-                className={cn(
-                  "rounded-xl border p-4",
-                  connection.status === "error"
-                    ? "border-danger/30 bg-danger/5"
-                    : "border-border/60 bg-background/40",
-                )}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold">
-                      {connection.connection_label ??
-                        connection.meta_user_name ??
-                        connection.app_name ??
-                        "Conta Meta"}
-                    </p>
-                    <p className="mt-1 text-meta text-muted-foreground">
-                      Alcança{" "}
-                      {plural(
-                        reachByConnection.get(connection.id)?.businesses.size ?? 0,
-                        "BM",
-                        "BMs",
-                      )}{" "}
-                      ·{" "}
-                      {plural(
-                        reachByConnection.get(connection.id)?.accounts ?? 0,
-                        "conta",
-                        "contas",
-                      )}
-                    </p>
-                    <p className="mt-1 text-meta text-muted-foreground">
-                      App {connection.app_name ?? connection.app_id ?? "identificado"} · chave{" "}
-                      {connection.token_hint ?? "protegido"}
-                    </p>
-                    <p className="mt-1 text-meta text-muted-foreground">
-                      Usuário: {connection.meta_user_name ?? "Usuário do Sistema"}
-                    </p>
-                    <p className="mt-1 text-meta text-muted-foreground">
-                      {connection.auth_type === "system_user_token"
-                        ? "App próprio da operação"
-                        : "Conexão antiga do app compartilhado"}
-                    </p>
-                  </div>
-                  <StatusBadge status={connection.status} />
-                </div>
-                {connection.last_error && (
-                  <p className="mt-3 rounded-md bg-danger/10 px-3 py-2 text-meta text-danger">
-                    {connection.last_error}
-                  </p>
-                )}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <DemoDisabledTooltip active={isDemo}>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-2"
-                      disabled={locked || validatingConnectionId === connection.id}
-                      onClick={() => onValidate(connection.id)}
-                    >
-                      {validatingConnectionId === connection.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      )}{" "}
-                      Testar acesso
-                    </Button>
-                  </DemoDisabledTooltip>
-                  <DemoDisabledTooltip active={isDemo}>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="gap-2 text-danger hover:text-danger/80"
-                      disabled={locked}
-                      onClick={() => setDisconnectId(connection.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" /> Desconectar
-                    </Button>
-                  </DemoDisabledTooltip>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="rounded-xl border border-border/60 bg-background/40 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold">Contas que entram nos relatórios</p>
-                <p className="text-meta text-muted-foreground">
-                  Somente as contas marcadas serão sincronizadas.
-                </p>
-              </div>
-              <span className="text-sm font-semibold text-primary">
-                {selectedIds.length} de {accounts.length} selecionadas
-              </span>
-            </div>
-            <div className="app-scrollbar mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
-              {accounts.map((account) => {
-                const checked = selectedIds.includes(account.id);
-                const hasActiveKey = account.access_connection_ids.some((id) =>
-                  activeConnectionIds.has(id),
-                );
-                // Marcar exige uma chave `connected` com acesso ativo (o RPC recusa sem
-                // ela); a conta já marcada pode sempre ser desmarcada.
-                const selectable = account.access_connection_ids.some((id) => connectedIds.has(id));
-                const blockReason = selectable
-                  ? null
-                  : hasActiveKey
-                    ? "A chave que alcança esta conta está com erro. Teste o acesso."
-                    : "Nenhuma chave conectada alcança esta conta.";
-                return (
-                  <label
-                    key={account.id}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg border border-border/50 px-3 py-3 hover:bg-muted/30",
-                      selectable || checked ? "cursor-pointer" : "cursor-not-allowed opacity-70",
-                    )}
-                  >
-                    <Checkbox
-                      checked={checked}
-                      disabled={readOnly || (!selectable && !checked)}
-                      onCheckedChange={(next) =>
-                        setSelectedIds((current) =>
-                          next
-                            ? selectable && !current.includes(account.id)
-                              ? [...current, account.id]
-                              : current
-                            : current.filter((id) => id !== account.id),
-                        )
-                      }
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold">
-                        {account.name ?? account.account_id}
-                      </span>
-                      <span className="text-meta text-muted-foreground">
-                        {account.meta_ad_account_id}
-                        {account.business_name ? ` · ${account.business_name}` : ""}
-                      </span>
-                      {blockReason && (
-                        <span className="block text-meta text-warning">{blockReason}</span>
-                      )}
-                    </span>
-                    {!hasActiveKey && (
-                      <Badge variant="outline" className="border-warning/30 text-meta text-warning">
-                        sem chave ativa
-                      </Badge>
-                    )}
-                    <span className="text-meta text-muted-foreground">
-                      {account.currency ?? ""}
-                    </span>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-meta",
-                        account.sync_status === "healthy" && "border-success/30 text-success",
-                        account.sync_status === "warning" && "border-warning/30 text-warning",
-                        account.sync_status === "error" && "border-danger/30 text-danger",
-                      )}
-                      title={account.last_error ?? undefined}
-                    >
-                      {account.sync_status === "healthy"
-                        ? "dados atualizados"
-                        : account.sync_status === "syncing"
-                          ? "sincronizando"
-                          : account.sync_status === "queued"
-                            ? "aguardando"
-                            : account.sync_status === "error"
-                              ? "erro"
-                              : account.sync_status === "warning"
-                                ? "atenção"
-                                : "sem leitura"}
-                    </Badge>
-                  </label>
-                );
-              })}
-              {accounts.length === 0 && (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  Nenhuma conta de anúncio foi encontrada.
-                </p>
-              )}
-            </div>
-            <div className="mt-4 flex justify-end">
-              <DemoDisabledTooltip active={isDemo}>
-                <Button
-                  disabled={locked || selectionPending || accounts.length === 0}
-                  onClick={() => onSaveSelection(selectedIds)}
-                >
-                  {selectionPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Salvar
-                  contas
-                </Button>
-              </DemoDisabledTooltip>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <AlertDialog
-        open={Boolean(disconnectId)}
-        onOpenChange={(open) => !open && !disconnectPending && setDisconnectId(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Desconectar esta chave?</AlertDialogTitle>
-            <AlertDialogDescription>
-              A chave de acesso guardada será removida. As contas que outra chave conectada também
-              alcança continuam sincronizando por ela; as demais deixam de sincronizar. Os
-              relatórios já importados serão preservados.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={disconnectPending}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={disconnectPending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={async (event) => {
-                event.preventDefault();
-                if (!disconnectId) return;
-                try {
-                  await onDisconnect(disconnectId);
-                  setDisconnectId(null);
-                } catch {
-                  // O diálogo permanece aberto e a mutation informa o erro.
-                }
-              }}
-            >
-              {disconnectPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Desconectar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </DataCard>
   );
 }
