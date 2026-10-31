@@ -149,8 +149,25 @@ const lancamentoDias: WriteAction<DaysInput> = {
 type MonthlyGgrInput = z.infer<typeof setMonthlyGgrInput>;
 type MonthlyGgrSnapshot = { ggr: number; valid_through: string } | null;
 
+/** Same date checks (and messages) as setMonthlyGgrFor, at preview time. */
+const monthlyGgrSchema = setMonthlyGgrInput.superRefine((input, ctx) => {
+  if (input.ggr === null || input.validThrough === undefined) return;
+  const monthStart = `${input.month}-01`;
+  const [y, m] = input.month.split("-").map(Number);
+  const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  if (input.validThrough < monthStart || input.validThrough > monthEnd) {
+    ctx.addIssue({
+      code: "custom",
+      message: "A data deve estar dentro do mês",
+      path: ["validThrough"],
+    });
+  } else if (input.validThrough > todaySaoPaulo()) {
+    ctx.addIssue({ code: "custom", message: "Data futura não permitida", path: ["validThrough"] });
+  }
+});
+
 const ggrMensal: WriteAction<MonthlyGgrInput> = {
-  schema: setMonthlyGgrInput,
+  schema: monthlyGgrSchema,
   permission: "finance_can_edit_values",
   async snapshot(tenantId, input) {
     const { data, error } = await db()
@@ -195,7 +212,7 @@ const ggrMensal: WriteAction<MonthlyGgrInput> = {
 
 // ─── custo / exclusao_custo ─────────────────────────────────────────────────
 
-type CostSnapshot = {
+type CostRow = {
   id: string;
   cost_date: string;
   descricao: string;
@@ -204,6 +221,24 @@ type CostSnapshot = {
   repeat_monthly: boolean;
   series_id: string | null;
 };
+/**
+ * The cost row plus, for a row of a repeating series, the series' two newest
+ * rows (newest first) — exactly what saveOtherCostFor (newest 1) and
+ * deleteOtherCostFor (newest 2) read before flipping `repeat_monthly` on
+ * another row of the series. Part of the snapshot, so a concurrent change to
+ * the series also trips the "mudaram" check at confirm.
+ */
+type CostSnapshot = { row: CostRow; series: CostRow[] };
+
+const toCostRow = (data: OtherCostRow): CostRow => ({
+  id: data.id,
+  cost_date: data.cost_date,
+  descricao: data.descricao,
+  valor: num(data.valor),
+  categoria: data.categoria ?? null,
+  repeat_monthly: data.repeat_monthly === true,
+  series_id: data.series_id ?? null,
+});
 
 async function costSnapshot(tenantId: string, id: string): Promise<CostSnapshot> {
   const { data, error } = await db()
@@ -214,15 +249,18 @@ async function costSnapshot(tenantId: string, id: string): Promise<CostSnapshot>
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Custo não encontrado");
-  return {
-    id: data.id,
-    cost_date: data.cost_date,
-    descricao: data.descricao,
-    valor: num(data.valor),
-    categoria: data.categoria ?? null,
-    repeat_monthly: data.repeat_monthly === true,
-    series_id: data.series_id ?? null,
-  };
+  const row = toCostRow(data);
+  if (!row.series_id) return { row, series: [] };
+
+  const { data: newest, error: seriesError } = await db()
+    .from<OtherCostRow[]>("tenant_finance_other_costs")
+    .select(OTHER_COST_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .eq("series_id", row.series_id)
+    .order("cost_date", { ascending: false })
+    .range(0, 1);
+  if (seriesError) throw new Error(seriesError.message);
+  return { row, series: (newest ?? []).map(toCostRow) };
 }
 
 const yesNo = (value: boolean) => (value ? "sim" : "não");
@@ -233,25 +271,31 @@ function storedCategory(categoria: string | null) {
   return categoryKey(label) === categoryKey("Outros") ? null : label;
 }
 
-type CostInput = z.infer<typeof saveOtherCostInput>;
+/** Same check (and message) as saveOtherCostFor, at preview time (before the code is spent). */
+const costSchema = saveOtherCostInput.refine((input) => input.costDate <= todaySaoPaulo(), {
+  message: "Data futura não permitida",
+  path: ["costDate"],
+});
+type CostInput = z.infer<typeof costSchema>;
 
 const custo: WriteAction<CostInput> = {
-  schema: saveOtherCostInput,
+  schema: costSchema,
   permission: "finance_can_edit_values",
   async snapshot(tenantId, input) {
     return input.id ? await costSnapshot(tenantId, input.id) : null;
   },
   describe(before, input, houseName) {
-    const current = before as CostSnapshot | null;
+    const snapshot = before as CostSnapshot | null;
     const linhas: string[] = [];
     const avisos: string[] = [];
-    if (!current) {
+    if (!snapshot) {
       linhas.push(
         `${formatDay(input.costDate)} ${houseName} — Custo "${input.descricao}": ${arrow(EMPTY, formatMoney(round2(input.valor)))}`,
       );
       if (input.repeatMonthly) avisos.push("Repete todo mês");
       return { linhas, avisos };
     }
+    const current = snapshot.row;
     const prefix = `${formatDay(current.cost_date)} ${houseName} — Custo "${current.descricao}":`;
     linhas.push(`${prefix} ${arrow(formatMoney(current.valor), formatMoney(round2(input.valor)))}`);
     if (input.descricao !== current.descricao) {
@@ -273,6 +317,18 @@ const custo: WriteAction<CostInput> = {
       linhas.push(
         `${prefix} Repetir todo mês: ${arrow(yesNo(current.repeat_monthly), yesNo(input.repeatMonthly))}`,
       );
+      // saveOtherCostFor applies the change to the series' newest row too.
+      const [newest] = snapshot.series;
+      if (
+        current.series_id &&
+        newest &&
+        newest.id !== current.id &&
+        newest.repeat_monthly !== input.repeatMonthly
+      ) {
+        avisos.push(
+          `A mudança de "Repetir todo mês" vale também para a repetição de ${formatDay(newest.cost_date)}`,
+        );
+      }
     }
     avisos.push(OVERWRITE);
     return { linhas, avisos };
@@ -285,9 +341,16 @@ type DeleteCostInput = z.infer<typeof deleteOtherCostInput>;
 const exclusaoCusto: WriteAction<DeleteCostInput> = {
   schema: deleteOtherCostInput,
   permission: "finance_can_edit_values",
-  snapshot: (tenantId, input) => costSnapshot(tenantId, input.id),
+  async snapshot(tenantId, input) {
+    const snapshot = await costSnapshot(tenantId, input.id);
+    // Same check (and message) as deleteOtherCostFor, at preview time.
+    if (input.mode === "skip_month" && (!snapshot.row.series_id || !snapshot.row.repeat_monthly)) {
+      throw new Error("Só um custo recorrente pode pular um mês");
+    }
+    return snapshot;
+  },
   describe(before, input, houseName) {
-    const current = before as CostSnapshot;
+    const { row: current, series } = before as CostSnapshot;
     const day = formatDay(current.cost_date);
     const prefix = `${day} ${houseName} — Custo "${current.descricao}":`;
     if (input.mode === "skip_month") {
@@ -297,7 +360,19 @@ const exclusaoCusto: WriteAction<DeleteCostInput> = {
       };
     }
     const avisos = [`Vai apagar o custo "${current.descricao}" de ${day}`];
-    if (input.mode === "end_series") avisos.push("Encerra a repetição mensal");
+    // Mirrors deleteOtherCostFor: the newest other row of the series stops
+    // repeating when the series ends or when the newest row is removed.
+    const remaining = current.series_id ? series.find((row) => row.id !== current.id) : undefined;
+    const stopRemaining =
+      remaining?.repeat_monthly === true &&
+      (input.mode === "end_series" || remaining.cost_date < current.cost_date);
+    if (stopRemaining && remaining) {
+      avisos.push(
+        `Encerra a repetição da série: o lançamento de ${formatDay(remaining.cost_date)} deixa de repetir todo mês`,
+      );
+    } else if (input.mode === "end_series") {
+      avisos.push("Encerra a repetição da série");
+    }
     return { linhas: [`${prefix} ${arrow(formatMoney(current.valor), EMPTY)}`], avisos };
   },
   apply: (ctx, input) => deleteOtherCostFor(ctx, input),

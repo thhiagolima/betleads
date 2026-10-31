@@ -10,15 +10,16 @@
 //
 // Single use / retries (Review Focus 2): confirmed_at is set with a
 // conditional update (`confirmed_at is null`) BEFORE apply, so of two
-// concurrent confirms only one applies; the other gets `ja_confirmada`.
+// concurrent confirms only one applies.
 // A code already confirmed returns its stored result with `ja_confirmada`,
 // even after the 10 min window (a retry after a network error must not look
 // like "not applied"). If apply throws after the mark, the code stays spent
 // and `{ erro }` is stored as its result: a retry throws "já foi usada e
 // falhou" instead of re-applying a possibly partial write; the user generates
-// a new preview, whose snapshot then shows the current values. If the process
-// dies between the mark and storing the result, a retry returns
-// `ja_confirmada` with `resultado: null`.
+// a new preview, whose snapshot then shows the current values. A spent code
+// with no stored result (storeResult failed, the process died after the mark,
+// or a concurrent confirm is still applying) throws UNKNOWN_RESULT — never
+// `ok`: a write whose outcome is unknown is not reported as success.
 import { z } from "zod";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
@@ -45,6 +46,8 @@ const READ_ONLY = "Seu acesso ao MCP é só leitura.";
 const REVOKED = "Seu acesso ao MCP foi revogado.";
 const INVALID_CODE = "Código de confirmação inválido.";
 const EXPIRED_CODE = "Código de confirmação expirado. Gere uma nova prévia.";
+const UNKNOWN_RESULT =
+  "Esta prévia já foi usada, mas não foi possível confirmar o resultado. Confira os valores e gere uma nova se preciso.";
 const CHANGED = "Os valores mudaram desde a prévia. Gere uma nova.";
 
 type PreviewRow = {
@@ -158,6 +161,10 @@ function alreadyConfirmed(row: PreviewRow): ConfirmResult {
   if (isStoredError(row.result)) {
     throw new Error(`Esta prévia já foi usada e falhou: ${row.result.erro}. Gere uma nova.`);
   }
+  // Marked but no result stored: the write may or may not have happened
+  // (storeResult failed, the process died, or another confirm is still
+  // applying). Never report that as success.
+  if (row.result === null || row.result === undefined) throw new Error(UNKNOWN_RESULT);
   return { ok: true, resultado: row.result, ja_confirmada: true };
 }
 

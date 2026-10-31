@@ -369,12 +369,18 @@ describe("confirmation code", () => {
 
   it("concurrent confirms apply once", async () => {
     const { codigo_confirmacao } = await preview();
-    const results = await Promise.all([
+    const results = await Promise.allSettled([
       confirmPreview(identity(ADMIN_A), codigo_confirmacao),
       confirmPreview(identity(ADMIN_A), codigo_confirmacao),
     ]);
     expect(saveFinanceDaysFor).toHaveBeenCalledTimes(1);
-    expect(results.filter((r) => r.ja_confirmada)).toHaveLength(1);
+    const applied = results.filter((r) => r.status === "fulfilled" && !r.value.ja_confirmada);
+    expect(applied).toHaveLength(1);
+    // The other one either saw the stored result or (still applying) the
+    // "não foi possível confirmar o resultado" refusal — never a second apply.
+    const other = results.find((r) => !applied.includes(r))!;
+    if (other.status === "fulfilled") expect(other.value.ja_confirmada).toBe(true);
+    else expect(String(other.reason)).toContain("não foi possível confirmar o resultado");
   });
 
   it("refuses when the values changed since the preview", async () => {
@@ -456,5 +462,158 @@ describe("house state", () => {
     const confirmed = await confirmPreview(identity(SUPER), preview.codigo_confirmacao);
     expect(confirmed.ok).toBe(true);
     expect(daily()[0].ggr).toBe(1);
+  });
+});
+
+describe("core-only validations at preview (no code spent)", () => {
+  it.each([
+    ["validThrough outside the month", "2026-09-30", "A data deve estar dentro do mês"],
+    ["validThrough in the future", "2026-10-25", "Data futura não permitida"],
+  ])("ggr_mensal refuses %s", async (_label, validThrough, message) => {
+    await expect(
+      createPreview(identity(ADMIN_A), "ggr_mensal", {
+        tenantId: HOUSE_A,
+        month: "2026-10",
+        ggr: 100,
+        validThrough,
+      }),
+    ).rejects.toThrow(message);
+    expect(previews()).toHaveLength(0);
+  });
+
+  it("custo refuses a future costDate", async () => {
+    await expect(
+      createPreview(identity(ADMIN_A), "custo", {
+        tenantId: HOUSE_A,
+        costDate: "2026-10-25",
+        descricao: "Ferramenta",
+        valor: 10,
+      }),
+    ).rejects.toThrow("Data futura não permitida");
+    expect(previews()).toHaveLength(0);
+  });
+
+  it("exclusao_custo refuses skip_month on a non-recurring cost", async () => {
+    fake.admin.rows("tenant_finance_other_costs").push({
+      id: COST_1,
+      tenant_id: HOUSE_A,
+      month: "2026-10-01",
+      cost_date: "2026-10-05",
+      descricao: "CRM",
+      valor: 30,
+      categoria: null,
+      repeat_monthly: false,
+      series_id: null,
+    });
+    await expect(
+      createPreview(identity(ADMIN_A), "exclusao_custo", {
+        tenantId: HOUSE_A,
+        id: COST_1,
+        mode: "skip_month",
+      }),
+    ).rejects.toThrow("Só um custo recorrente pode pular um mês");
+    expect(previews()).toHaveLength(0);
+  });
+});
+
+describe("cost series side effects", () => {
+  const SEP = "00000000-0000-4000-8000-00000000c00a";
+  const OCT = "00000000-0000-4000-8000-00000000c00b";
+  const costs = () => fake.admin.rows("tenant_finance_other_costs");
+  const byId = (id: string) => costs().find((row) => row.id === id)!;
+
+  beforeEach(() => {
+    const base = {
+      tenant_id: HOUSE_A,
+      descricao: "CRM",
+      valor: 30,
+      categoria: null,
+      repeat_monthly: true,
+      series_id: SEP,
+    };
+    costs().push(
+      { ...base, id: SEP, month: "2026-09-01", cost_date: "2026-09-05" },
+      { ...base, id: OCT, month: "2026-10-01", cost_date: "2026-10-05" },
+    );
+  });
+
+  it("custo: turning repeat off on an older row warns it also applies to the newest", async () => {
+    const preview = await createPreview(identity(ADMIN_A), "custo", {
+      tenantId: HOUSE_A,
+      id: SEP,
+      costDate: "2026-09-05",
+      descricao: "CRM",
+      valor: 30,
+      repeatMonthly: false,
+    });
+    expect(preview.avisos).toContain(
+      'A mudança de "Repetir todo mês" vale também para a repetição de 05/10',
+    );
+    expect(byId(OCT).repeat_monthly).toBe(true);
+
+    await confirmPreview(identity(ADMIN_A), preview.codigo_confirmacao);
+    expect(byId(SEP).repeat_monthly).toBe(false);
+    expect(byId(OCT).repeat_monthly).toBe(false);
+  });
+
+  it("custo: a change to another row of the series trips the mudaram check", async () => {
+    const preview = await createPreview(identity(ADMIN_A), "custo", {
+      tenantId: HOUSE_A,
+      id: SEP,
+      costDate: "2026-09-05",
+      descricao: "CRM",
+      valor: 30,
+      repeatMonthly: false,
+    });
+    byId(OCT).repeat_monthly = false;
+    await expect(confirmPreview(identity(ADMIN_A), preview.codigo_confirmacao)).rejects.toThrow(
+      "Os valores mudaram desde a prévia. Gere uma nova.",
+    );
+  });
+
+  it("exclusao_custo: deleting the newest row warns the older row stops repeating", async () => {
+    const preview = await createPreview(identity(ADMIN_A), "exclusao_custo", {
+      tenantId: HOUSE_A,
+      id: OCT,
+    });
+    expect(preview.avisos).toEqual([
+      'Vai apagar o custo "CRM" de 05/10',
+      "Encerra a repetição da série: o lançamento de 05/09 deixa de repetir todo mês",
+    ]);
+    await confirmPreview(identity(ADMIN_A), preview.codigo_confirmacao);
+    expect(costs()).toHaveLength(1);
+    expect(byId(SEP).repeat_monthly).toBe(false);
+  });
+
+  it("exclusao_custo: end_series on an older row warns the newest row stops repeating", async () => {
+    const preview = await createPreview(identity(ADMIN_A), "exclusao_custo", {
+      tenantId: HOUSE_A,
+      id: SEP,
+      mode: "end_series",
+    });
+    expect(preview.avisos).toEqual([
+      'Vai apagar o custo "CRM" de 05/09',
+      "Encerra a repetição da série: o lançamento de 05/10 deixa de repetir todo mês",
+    ]);
+    await confirmPreview(identity(ADMIN_A), preview.codigo_confirmacao);
+    expect(costs()).toHaveLength(1);
+    expect(byId(OCT).repeat_monthly).toBe(false);
+  });
+});
+
+describe("spent code without a stored result", () => {
+  it("a retry is refused instead of being reported as success", async () => {
+    const preview = await createPreview(
+      identity(ADMIN_A),
+      "lancamento_dias",
+      daysInput([{ date: "2026-10-15", ggr: 12345 }]),
+    );
+    await confirmPreview(identity(ADMIN_A), preview.codigo_confirmacao);
+    // As if storeResult had failed / the process died after the mark.
+    previews()[0].result = null;
+    await expect(confirmPreview(identity(ADMIN_A), preview.codigo_confirmacao)).rejects.toThrow(
+      "Esta prévia já foi usada, mas não foi possível confirmar o resultado. Confira os valores e gere uma nova se preciso.",
+    );
+    expect(saveFinanceDaysFor).toHaveBeenCalledTimes(1);
   });
 });
