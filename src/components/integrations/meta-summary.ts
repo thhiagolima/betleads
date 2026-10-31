@@ -28,6 +28,11 @@ export type MetaAccount = {
   last_success_at: string | null;
   last_error: string | null;
   last_row_count: number;
+  /** Quando a conta apareceu na casa (selo "nova"). */
+  created_at: string;
+  /** `account_status` da Meta (1 = ativa). */
+  account_status: number | null;
+  timezone_name: string | null;
 };
 
 export type MetaConnection = {
@@ -47,11 +52,30 @@ export type MetaConnection = {
   /** Última leitura da lista de contas da chave na Meta. */
   accounts_discovered_at: string | null;
   auth_type: "legacy_oauth" | "system_user_token";
+  /** Tipo do token pelo `debug_token` (ex.: "SYSTEM_USER", "USER"). */
+  token_type: string | null;
+  token_expires_at: string | null;
+  data_access_expires_at: string | null;
+  /** Última checagem de saúde da chave (teste ou job diário). */
+  health_checked_at: string | null;
+};
+
+/** O backfill mais recente da casa (`meta_sync_runs`, trigger "backfill"). */
+export type MetaBackfillRun = {
+  id: string;
+  status: "queued" | "running" | "completed" | "partial" | "failed" | "canceled";
+  total_accounts: number;
+  processed_accounts: number;
+  successful_accounts: number;
+  failed_accounts: number;
+  created_at: string;
+  finished_at: string | null;
 };
 
 export type MetaSummary = {
   accounts: MetaAccount[];
   connections: MetaConnection[];
+  latestBackfill: MetaBackfillRun | null;
 };
 
 const META_CONNECTION_SUMMARY_KEY = ["meta-connection-summary"] as const;
