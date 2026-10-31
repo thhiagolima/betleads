@@ -16,7 +16,7 @@ vi.mock("@/integrations/supabase/client.server", async () => {
       auth: {
         admin: {
           listUsers: async () => ({ data: { users: fake.authUsers }, error: null }),
-          inviteUserByEmail: async () => {
+          generateLink: async () => {
             throw new Error("unexpected invite");
           },
         },

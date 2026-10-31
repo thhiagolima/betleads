@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { sendAuthInvite } from "@/lib/invite-email.server";
 import type { Json } from "@/integrations/supabase/types";
 import {
   getTenantBillingSnapshot,
@@ -272,12 +273,22 @@ export async function findAuthUserByEmail(email: string) {
   return null;
 }
 
+// An invited user arrives signed in but without a password; the auth gate asks
+// for one on first sign-in only when this flag is set.
+async function flagInitialPassword(userId: string) {
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    app_metadata: { force_password_change: true },
+  });
+  if (error) throw new Error(error.message);
+}
+
 /**
- * Finds the auth user for `email`, or creates one: an e-mail invite
- * (`inviteUserByEmail`) by default, or — only when `password` is given — a
- * confirmed user with that password who must change it on first sign-in.
- * Shared by the team screen (`addUserToTenantFor`) and Experts
- * (`inviteExpertFor`). An existing user is reused as-is (`created: false`).
+ * Finds the auth user for `email`, or creates one: an e-mail invite sent from
+ * the platform sender (`sendAuthInvite`) by default, or — only when `password`
+ * is given — a confirmed user with that password who must change it on first
+ * sign-in. Shared by the team screen (`addUserToTenantFor`) and Experts
+ * (`inviteExpertFor`). An existing user is reused (`created: false`); one who
+ * never accepted an earlier invite gets a fresh invite e-mail.
  */
 export async function findOrInviteUserByEmail(
   email: string,
@@ -285,18 +296,28 @@ export async function findOrInviteUserByEmail(
 ): Promise<{ userId: string; created: boolean }> {
   const normalized = email.trim().toLowerCase();
   const existing = await findAuthUserByEmail(normalized);
-  if (existing) return { userId: existing.id, created: false };
-
   const metadata = { invited_by: opts.invitedBy, tenant_id: opts.tenantId };
-  const createRes = opts.password
-    ? await supabaseAdmin.auth.admin.createUser({
-        email: normalized,
-        password: opts.password,
-        email_confirm: true,
-        user_metadata: metadata,
-        app_metadata: { force_password_change: true },
-      })
-    : await supabaseAdmin.auth.admin.inviteUserByEmail(normalized, { data: metadata });
+  if (existing) {
+    if (!opts.password && !existing.last_sign_in_at && !existing.email_confirmed_at) {
+      await sendAuthInvite(normalized, metadata);
+      await flagInitialPassword(existing.id);
+    }
+    return { userId: existing.id, created: false };
+  }
+
+  if (!opts.password) {
+    const user = await sendAuthInvite(normalized, metadata);
+    await flagInitialPassword(user.id);
+    return { userId: user.id, created: true };
+  }
+
+  const createRes = await supabaseAdmin.auth.admin.createUser({
+    email: normalized,
+    password: opts.password,
+    email_confirm: true,
+    user_metadata: metadata,
+    app_metadata: { force_password_change: true },
+  });
   if (createRes.error) throw new Error(createRes.error.message);
   if (!createRes.data.user) throw new Error("Falha ao criar usuário");
   return { userId: createRes.data.user.id, created: true };

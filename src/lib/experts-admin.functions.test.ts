@@ -7,7 +7,9 @@ const fake = vi.hoisted(() => ({
   admin: null as unknown as ReturnType<typeof createFakeDb>,
   authUsers: [] as Array<{ id: string; email: string; last_sign_in_at?: string | null }>,
   invited: [] as Array<{ email: string; options: unknown }>,
-  // Runs inside inviteUserByEmail: lets a test act "concurrently" between
+  appMetadata: {} as Record<string, unknown>,
+  emails: [] as Array<{ to: string; subject: string; html: string }>,
+  // Runs inside the invite (generateLink): lets a test act "concurrently" between
   // the invite's checks and its writes.
   onInvite: null as null | (() => void),
 }));
@@ -27,18 +29,35 @@ vi.mock("@/integrations/supabase/client.server", async () => {
               ? { data: { user }, error: null }
               : { data: { user: null }, error: { message: "User not found" } };
           },
-          inviteUserByEmail: async (email: string, options: unknown) => {
-            fake.invited.push({ email, options });
+          generateLink: async (params: { type: string; email: string; options: unknown }) => {
+            fake.invited.push({ email: params.email, options: params.options });
             fake.onInvite?.();
-            const user = { id: `invited-${fake.invited.length}`, email, last_sign_in_at: null };
-            fake.authUsers.push(user);
-            return { data: { user }, error: null };
+            let user = fake.authUsers.find((u) => u.email === params.email);
+            if (!user) {
+              user = { id: `invited-${fake.invited.length}`, email: params.email, last_sign_in_at: null };
+              fake.authUsers.push(user);
+            }
+            return {
+              data: { user, properties: { action_link: `https://auth.test/verify?u=${user.id}` } },
+              error: null,
+            };
+          },
+          updateUserById: async (id: string, attrs: { app_metadata?: unknown }) => {
+            fake.appMetadata[id] = attrs.app_metadata;
+            return { data: { user: { id } }, error: null };
           },
         },
       },
     },
   };
 });
+
+vi.mock("@/lib/billing/billing-emails.server", () => ({
+  sendPlatformEmail: async (input: { to: string; subject: string; html: string }) => {
+    fake.emails.push(input);
+    return { ok: true, status: 200, body: null, idempotencyKey: "k" };
+  },
+}));
 
 import { createFakeDb } from "./sms-bulk.test-support";
 import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
@@ -107,6 +126,8 @@ beforeEach(() => {
   fake.admin.reset();
   fake.authUsers.length = 0;
   fake.invited.length = 0;
+  fake.appMetadata = {};
+  fake.emails.length = 0;
   fake.onInvite = null;
   __resetDemoTenantCacheForTests();
   fake.admin.rows("tenants").push({ id: TENANT, nome: "Casa", status: "active", is_demo: false });
@@ -217,15 +238,55 @@ describe("experts admin server functions", () => {
     expect(fake.invited).toEqual([
       {
         email: "expert@casa.com",
-        options: { data: { invited_by: ADMIN, tenant_id: TENANT } },
+        options: {
+          data: { invited_by: ADMIN, tenant_id: TENANT },
+          redirectTo: "https://betleads.io",
+        },
       },
     ]);
     const userId = fake.authUsers[0].id;
+    expect(fake.appMetadata[userId]).toEqual({ force_password_change: true });
+    expect(fake.emails).toHaveLength(1);
+    expect(fake.emails[0].to).toBe("expert@casa.com");
+    expect(fake.emails[0].html).toContain(`https://auth.test/verify?u=${userId}`);
+    expect(fake.emails[0].html).not.toMatch(/supabase/i);
     expect(fake.admin.rows("user_roles")).toEqual([
       expect.objectContaining({ user_id: userId, tenant_id: TENANT, role: "expert" }),
     ]);
     expect(fake.admin.rows("experts")[0].user_id).toBe(userId);
     expect(fake.admin.rows("tenant_audit_logs").map((r) => r.action)).toEqual(["expert.invited"]);
+  });
+
+  it("invite re-sends the e-mail to an existing user who never accepted", async () => {
+    addExpert();
+    fake.authUsers.push({ id: "u-pending", email: "pending@casa.com", last_sign_in_at: null });
+    await inviteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID, email: "pending@casa.com" });
+
+    expect(fake.invited).toEqual([
+      {
+        email: "pending@casa.com",
+        options: {
+          data: { invited_by: ADMIN, tenant_id: TENANT },
+          redirectTo: "https://betleads.io",
+        },
+      },
+    ]);
+    expect(fake.appMetadata["u-pending"]).toEqual({ force_password_change: true });
+    expect(fake.admin.rows("experts")[0].user_id).toBe("u-pending");
+  });
+
+  it("invite links an existing user who already signed in without a new e-mail", async () => {
+    addExpert();
+    fake.authUsers.push({
+      id: "u-active",
+      email: "active@casa.com",
+      last_sign_in_at: "2026-10-20T00:00:00Z",
+    });
+    await inviteExpertFor(ctxFor(ADMIN), { expertId: EXPERT_ID, email: "active@casa.com" });
+
+    expect(fake.invited).toEqual([]);
+    expect(fake.emails).toEqual([]);
+    expect(fake.admin.rows("experts")[0].user_id).toBe("u-active");
   });
 
   it("invite loses a race to a concurrent invite: no orphan expert role", async () => {
