@@ -3,13 +3,17 @@
 // browser storage, so a signed-out visitor sees the login form here, keeping
 // the URL and its query. The request is validated by getMcpAuthorizationInfo
 // before any button shows, so Cancelar only ever redirects to a registered URI.
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { approveMcpAuthorization, getMcpAuthorizationInfo } from "@/lib/mcp/oauth.functions";
+import {
+  approveMcpAuthorization,
+  getMcpAuthorizationInfo,
+  mcpConsentEnabled,
+} from "@/lib/mcp/oauth.functions";
 
 type AutorizarSearch = {
   client_id?: string;
@@ -30,6 +34,10 @@ export const Route = createFileRoute("/mcp/autorizar")({
     code_challenge_method: str(search.code_challenge_method),
     state: str(search.state),
   }),
+  // MCP_ENABLED off => the app's not-found page; the consent UI never renders.
+  beforeLoad: async () => {
+    if (!(await mcpConsentEnabled())) throw notFound();
+  },
   head: () => ({
     meta: [{ title: "Conectar o Claude" }, { name: "robots", content: "noindex,nofollow" }],
   }),

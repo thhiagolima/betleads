@@ -1,7 +1,7 @@
 // MCP financeiro: server functions behind the consent screen (/mcp/autorizar).
 // The Supabase session lives in browser storage, so the screen is a client
 // route and these fns receive the user's Bearer via requireSupabaseAuth.
-import { createServerFn } from "@tanstack/react-start";
+import { createIsomorphicFn, createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -9,6 +9,18 @@ import { isMcpEnabled } from "@/lib/mcp/config.server";
 import { approveMcpAuthorizationFor, getMcpAuthorizationInfoFor } from "@/lib/mcp/oauth.server";
 
 const MCP_OFF = "Conexão com o Claude indisponível.";
+
+// No auth: only tells the consent route whether to exist (flag is server-only).
+export const getMcpEnabled = createServerFn({ method: "GET" }).handler(async () => ({
+  enabled: isMcpEnabled(),
+}));
+
+// Gate for the consent route's beforeLoad. On the server (SSR) it reads the
+// flag directly: calling a server fn there would run the global client auth
+// middleware, which needs `window`. In the browser it asks getMcpEnabled.
+export const mcpConsentEnabled = createIsomorphicFn()
+  .server(async () => isMcpEnabled())
+  .client(async () => (await getMcpEnabled()).enabled);
 
 const infoInput = z.object({
   clientId: z.string().min(1).max(200),
