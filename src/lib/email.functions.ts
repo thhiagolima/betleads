@@ -32,6 +32,15 @@ import { isSendBlockedError } from "./billing/billing-locked-error";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
 import { tenantReads } from "@/lib/active-tenant-filter";
+import {
+  EMAIL_CAMPAIGN_EXPERT_CAP_MESSAGE,
+  EXPERT_SCOPE_INACTIVE,
+  assertNotExpertEmailCampaign,
+  loadExpertEmailOwner,
+  loadExpertEmailRecipients,
+} from "./expert-email-campaign.server";
+import { notifyExpertCapReached } from "./billing/expert-cap-alerts.server";
+import { expertNamesById } from "./expert-names.server";
 
 // ============ Helpers ============
 
@@ -634,6 +643,8 @@ function campanhaRowToUI(r: any) {
     cliques: stats.cliques ?? 0,
     descadastros: stats.descadastros ?? 0,
     falhas: stats.falhas ?? 0,
+    /** A batched send is between two batches (shown as "Enviando em lotes"). */
+    loteEmAndamento: stats.lote_em_andamento === true,
     data: new Date(r.created_at).toLocaleDateString("pt-BR"),
     trackLinks: r.track_links !== false,
   };
@@ -648,7 +659,20 @@ export const listEmailCampaigns = createServerFn({ method: "GET" })
       .select("*")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return { items: (data ?? []).map(campanhaRowToUI) };
+    // Área do Expert: expert campaigns come with the owner's name.
+    const rows = (data ?? []) as any[];
+    const names = await expertNamesById(
+      rows[0]?.tenant_id ?? "",
+      rows.map((r) => r.expert_id ?? null),
+    );
+    return {
+      items: rows.map((r) => ({
+        ...campanhaRowToUI(r),
+        expertId: (r.expert_id as string | null | undefined) ?? null,
+        expertNome: r.expert_id ? (names.get(r.expert_id) ?? "") : null,
+        approvalStatus: (r.approval_status as string | null | undefined) ?? null,
+      })),
+    };
   });
 
 export const saveEmailCampaign = createServerFn({ method: "POST" })
@@ -866,20 +890,111 @@ export const sendEmailCampaignNow = createServerFn({ method: "POST" })
       .eq("tenant_id", tenantId)
       .maybeSingle();
     if (!campaign) throw new Error("Campanha não encontrada nesta tenant");
+    await assertNotExpertEmailCampaign(data.campaignId);
+    // Before the claim: a demo campaign is never moved to "enviando".
+    await assertTenantNotDemoForSend(tenantId);
+    const lockToken = await claimEmailCampaignForSendNow(data.campaignId, tenantId);
+    if (!lockToken) throw new Error(EMAIL_CAMPAIGN_ALREADY_SENDING_MESSAGE);
     try {
-      return await runCampaignSend(data.campaignId);
+      return await runCampaignSend(data.campaignId, { lockToken });
     } catch (err) {
       await supabaseAdmin
         .from("email_campaigns")
-        .update({ status: "rascunho" })
+        .update({ status: "rascunho", locked_at: null, locked_by: null })
         .eq("id", data.campaignId)
-        .eq("status", "enviando");
+        .eq("status", "enviando")
+        .eq("locked_by", lockToken);
       throw err;
     }
   });
 
-/** Executor interno reutilizado pela rota pública agendada. */
-export async function runCampaignSend(campaignId: string) {
+/** Statuses "Enviar agora" may start a campaign from ("enviando" is a run in progress). */
+export const EMAIL_CAMPAIGN_SEND_NOW_FROM = ["rascunho", "agendada", "pausada", "concluida"] as const;
+
+export const EMAIL_CAMPAIGN_ALREADY_SENDING_MESSAGE =
+  "Esta campanha já está sendo enviada ou não pode ser enviada agora.";
+
+/** A run rechecks the campaign status every this many recipients (pause/cancel stop it). */
+export const EMAIL_CAMPAIGN_STATUS_CHECK_EVERY = 10;
+
+/**
+ * Batched sending (no recipient limit): one run sends at most this many
+ * recipients, or stops at EMAIL_CAMPAIGN_RUN_BUDGET_MS, whichever comes
+ * first. Then the campaign goes back to 'agendada' (scheduled now, lock
+ * released) and the e-mail tick (claim_due_email_campaigns, every minute)
+ * claims the next batch until everyone was attempted -> 'concluida'. Each
+ * send is ~1 provider call + 30 ms pause, so a batch fits in a Worker
+ * request; the tick also caps the whole run at EMAIL_CAMPAIGN_TICK_BUDGET_MS
+ * across the campaigns it claimed.
+ */
+export const EMAIL_CAMPAIGN_BATCH_SIZE = 150;
+export const EMAIL_CAMPAIGN_RUN_BUDGET_MS = 20_000;
+export const EMAIL_CAMPAIGN_TICK_BUDGET_MS = 45_000;
+
+/**
+ * Atomic claim of an immediate send, the counterpart of the worker's
+ * claim_due_email_campaigns: one conditional UPDATE moves the campaign to
+ * "enviando" with a fresh lock only from EMAIL_CAMPAIGN_SEND_NOW_FROM. A
+ * concurrent "Enviar agora" or a tick that already claimed it matches no row.
+ * Returns the lock token (locked_by), or null when not claimed.
+ */
+export async function claimEmailCampaignForSendNow(
+  campaignId: string,
+  tenantId: string,
+): Promise<string | null> {
+  const lockToken = crypto.randomUUID();
+  const { data, error } = await supabaseAdmin
+    .from("email_campaigns")
+    .update({ status: "enviando", locked_at: new Date().toISOString(), locked_by: lockToken })
+    .eq("id", campaignId)
+    .eq("tenant_id", tenantId)
+    .in("status", [...EMAIL_CAMPAIGN_SEND_NOW_FROM])
+    .select("id");
+  if (error) throw new Error(error.message);
+  return data && data.length > 0 ? lockToken : null;
+}
+
+/**
+ * Executor interno reutilizado pela rota pública agendada. The campaign must
+ * already be claimed ("enviando": claim_due_email_campaigns in the tick,
+ * claimEmailCampaignForSendNow in "Enviar agora"); `lockToken` is that
+ * claim's locked_by. Every status write is conditional on the run still
+ * owning the campaign (status "enviando" and, with a token, the same
+ * locked_by), the status is rechecked every EMAIL_CAMPAIGN_STATUS_CHECK_EVERY
+ * recipients, and a pause/cancel (or any other status change) stops the run
+ * without being overwritten (`interrompida`).
+ */
+export async function runCampaignSend(
+  campaignId: string,
+  opts: { lockToken?: string | null; deadline?: number } = {},
+) {
+  const lockToken = opts.lockToken ?? null;
+  const deadline = Math.min(opts.deadline ?? Infinity, Date.now() + EMAIL_CAMPAIGN_RUN_BUDGET_MS);
+  /** Writes `patch` only while this run owns the campaign; true when it did. */
+  const updateOwnRun = async (patch: Record<string, unknown>) => {
+    let query = supabaseAdmin
+      .from("email_campaigns")
+      .update(patch as never)
+      .eq("id", campaignId)
+      .eq("status", "enviando");
+    if (lockToken) query = query.eq("locked_by", lockToken);
+    const { data, error } = await query.select("id");
+    if (error) {
+      console.error(`[email.functions] campaign ${campaignId} update failed:`, error.message);
+      return false;
+    }
+    return Array.isArray(data) && data.length > 0;
+  };
+  const stillOwned = async () => {
+    const { data, error } = await supabaseAdmin
+      .from("email_campaigns")
+      .select("status, locked_by")
+      .eq("id", campaignId)
+      .maybeSingle();
+    // A failed read stops the run (fail closed: never keep sending blind).
+    if (error || !data) return false;
+    return data.status === "enviando" && (!lockToken || data.locked_by === lockToken);
+  };
   const { data: camp, error: cErr } = await supabaseAdmin
     .from("email_campaigns")
     .select("*")
@@ -890,24 +1005,45 @@ export async function runCampaignSend(campaignId: string) {
   // 'pending' rows, email_send_logs): a demo campaign never starts.
   await assertTenantNotDemoForSend(camp.tenant_id);
 
-  if (!camp.template_id) throw new Error("Selecione um template antes de enviar.");
+  // Área do Expert: re-checked at every run (approval, owner active, scope).
+  const expertOwner = await loadExpertEmailOwner(camp as any);
+  const expertId: string | null = (camp as any).expert_id ?? null;
+  if (expertOwner?.inactive) {
+    await supabaseAdmin
+      .from("email_campaigns")
+      .update({ status: "pausada", blocked_reason: EXPERT_SCOPE_INACTIVE, locked_at: null, locked_by: null })
+      .eq("id", campaignId);
+    return { enviados: 0, falhas: 0, pendentes: 0, total: 0, jaEnviados: 0, pausadaPorSaldo: false, pausadaPorTeto: false, continuaEmLotes: false };
+  }
+  const expertTpl = expertId ? (camp.template_snapshot as Record<string, any> | null) : null;
+  if (expertId && !expertTpl?.body_html) throw new Error("O conteúdo desta campanha não foi encontrado.");
 
-  const { data: liveTpl, error: tErr } = await supabaseAdmin
-    .from("email_templates")
-    .select("*")
-    .eq("id", camp.template_id)
-    .eq("tenant_id", camp.tenant_id)
-    .maybeSingle();
-  if (tErr || !liveTpl) throw new Error("Template da campanha não encontrado.");
-  if (liveTpl.lifecycle_status !== "published") {
-    throw new Error("O template desta campanha não está publicado.");
+  if (!camp.template_id && !expertTpl) throw new Error("Selecione um template antes de enviar.");
+
+  let liveTpl: any = null;
+  if (!expertTpl) {
+    const { data: loadedTpl, error: tErr } = await supabaseAdmin
+      .from("email_templates")
+      .select("*")
+      .eq("id", camp.template_id!)
+      .eq("tenant_id", camp.tenant_id)
+      .maybeSingle();
+    if (tErr || !loadedTpl) throw new Error("Template da campanha não encontrado.");
+    if (loadedTpl.lifecycle_status !== "published") {
+      throw new Error("O template desta campanha não está publicado.");
+    }
+    liveTpl = loadedTpl;
   }
   // O snapshot preserva a versão aprovada no momento em que a campanha foi criada.
   // Campanhas legadas, sem snapshot, seguem usando o template publicado atual.
-  const tpl = (camp.template_snapshot as Record<string, any> | null) ?? liveTpl;
+  const tpl = expertTpl ?? (camp.template_snapshot as Record<string, any> | null) ?? liveTpl;
 
   // Only a sender on a verified e-mail domain of the house; before any write.
-  const sender = await resolveSender({ tenantId: camp.tenant_id, senderId: camp.sender_id });
+  // Expert: always the house default sender (never an override).
+  const sender = await resolveSender({
+    tenantId: camp.tenant_id,
+    senderId: expertId ? null : camp.sender_id,
+  });
   if (!sender) {
     const blocked = new EmailDomainNotVerifiedError(
       camp.sender_id ? STALE_SENDER_MESSAGE : undefined,
@@ -948,7 +1084,9 @@ export async function runCampaignSend(campaignId: string) {
       : Array.isArray(af.extra_emails) && af.extra_emails.length > 0
         ? "emails"
         : "segmento");
-  if (audienceMode === "emails") {
+  if (expertOwner && !expertOwner.inactive) {
+    players = await loadExpertEmailRecipients(camp.tenant_id, af as any, expertOwner.scope);
+  } else if (audienceMode === "emails") {
     players = [];
   } else if (audienceMode === "leads") {
     if (!Array.isArray(af.target_player_ids) || af.target_player_ids.length === 0) {
@@ -972,7 +1110,7 @@ export async function runCampaignSend(campaignId: string) {
       .filter(Boolean),
   );
   const extras =
-    audienceMode === "leads"
+    audienceMode === "leads" || expertId
       ? []
       : Array.from(
           new Set(
@@ -987,58 +1125,70 @@ export async function runCampaignSend(campaignId: string) {
     throw new Error("Nenhum destinatário com email foi encontrado para esta campanha.");
   }
 
-  const IMMEDIATE_SEND_LIMIT = 50;
-  if (players.length > IMMEDIATE_SEND_LIMIT) {
-    await supabaseAdmin
-      .from("email_campaigns")
-      .update({
-        status: "rascunho",
-        stats: {
-          enviados: 0,
-          entregues: 0,
-          abertos: 0,
-          cliques: 0,
-          falhas: 0,
-          total: players.length,
-        },
-      })
-      .eq("id", campaignId);
-    throw new Error(
-      `Esta campanha tem ${players.length} destinatários. Para evitar travamento, envie agora apenas até ${IMMEDIATE_SEND_LIMIT} destinatários ou selecione e-mails/leads específicos.`,
-    );
-  }
-
   // A re-run (after "pausada por saldo", "Retomar" or a second "Enviar
   // agora") never re-sends — nor re-charges — a recipient this campaign
-  // already reached. Pending/error rows are retried.
+  // already reached. Pending/error rows are retried by such a re-run; the
+  // next batch of a batched send (stats.lote_em_andamento) skips every
+  // recipient already attempted, so a failing address never stalls it.
+  const continuation =
+    (camp.stats as { lote_em_andamento?: boolean } | null)?.lote_em_andamento === true;
   const reached = await loadCampaignReachedRecipients(campaignId);
-  const isReached = (p: { id?: string | null; email?: string | null }) =>
-    p.id
-      ? reached.playerIds.has(p.id)
-      : reached.emails.has(String(p.email ?? "").trim().toLowerCase());
-  const remaining = players.filter((p) => !isReached(p));
-  const jaEnviados = players.length - remaining.length;
-  const stats = (sent: number, failed: number) => ({
+  const isIn =
+    (sets: { playerIds: Set<string>; emails: Set<string> }) =>
+    (p: { id?: string | null; email?: string | null }) =>
+      p.id
+        ? sets.playerIds.has(p.id)
+        : sets.emails.has(String(p.email ?? "").trim().toLowerCase());
+  const isReached = isIn(reached);
+  const isAttempted = isIn(reached.attempted);
+  const remaining = players.filter((p) => !isReached(p) && !(continuation && isAttempted(p)));
+  const jaEnviados = players.filter((p) => isReached(p)).length;
+  const stats = (sent: number, failed: number, loteEmAndamento = false) => ({
     enviados: jaEnviados + sent,
     entregues: 0,
     abertos: 0,
     cliques: 0,
     falhas: failed,
     total: players.length,
+    ...(loteEmAndamento ? { lote_em_andamento: true } : {}),
   });
 
   if (remaining.length === 0) {
-    await supabaseAdmin
-      .from("email_campaigns")
-      .update({ status: "concluida", blocked_reason: null, stats: stats(0, 0) })
-      .eq("id", campaignId);
-    return { enviados: 0, falhas: 0, pendentes: 0, total: players.length, jaEnviados, pausadaPorSaldo: false };
+    const concluded = await updateOwnRun({
+      status: "concluida",
+      blocked_reason: null,
+      stats: stats(0, 0),
+      locked_at: null,
+      locked_by: null,
+    });
+    return {
+      enviados: 0,
+      falhas: 0,
+      pendentes: 0,
+      total: players.length,
+      jaEnviados,
+      pausadaPorSaldo: false,
+      pausadaPorTeto: false,
+      continuaEmLotes: false,
+      interrompida: !concluded,
+    };
   }
 
-  await supabaseAdmin
-    .from("email_campaigns")
-    .update({ status: "enviando", stats: stats(0, 0) })
-    .eq("id", campaignId);
+  // Never sends a campaign this run does not own (paused, cancelled or
+  // claimed by another run since).
+  if (!(await updateOwnRun({ stats: stats(0, 0) }))) {
+    return {
+      enviados: 0,
+      falhas: 0,
+      pendentes: 0,
+      total: players.length,
+      jaEnviados,
+      pausadaPorSaldo: false,
+      pausadaPorTeto: false,
+      continuaEmLotes: false,
+      interrompida: true,
+    };
+  }
 
   let enviados = 0;
   let falhas = 0;
@@ -1047,11 +1197,28 @@ export async function runCampaignSend(campaignId: string) {
   // wallet refuses; the campaign is left "pausada" and the house reruns it
   // after a top-up (no automatic resume).
   let pausadaPorSaldo = false;
+  // Área do Expert: the expert's monthly cap (or deactivation) refused a send.
+  let pausadaPorTeto = false;
+  let expertStopReason: string | null = null;
+  // Paused/cancelled (or taken over) while running: stop, keep that status.
+  let interrompida = false;
+  let processed = 0;
+  // Batch full or time budget spent: the tick sends the rest.
+  let continuaEmLotes = false;
 
   const house = await loadHouseLinks(camp.tenant_id);
 
   for (const p of remaining) {
     if (!p.email) continue;
+    if (processed >= EMAIL_CAMPAIGN_BATCH_SIZE || (processed > 0 && Date.now() >= deadline)) {
+      continuaEmLotes = true;
+      break;
+    }
+    if (processed > 0 && processed % EMAIL_CAMPAIGN_STATUS_CHECK_EVERY === 0 && !(await stillOwned())) {
+      interrompida = true;
+      break;
+    }
+    processed++;
     // Known once the provider answered: the throw-path log row keeps it.
     let r: Awaited<ReturnType<typeof sendInfobipEmail>> | null = null;
     try {
@@ -1069,14 +1236,22 @@ export async function runCampaignSend(campaignId: string) {
         idempotencyKey: crypto.randomUUID(),
         linkTracking: {
           tenantId: camp.tenant_id,
-          sourceType: "campaign",
-          sourceId: campaignId,
+          sourceType: expertId ? "expert" : "campaign",
+          sourceId: expertId ?? campaignId,
           recipientPlayerId: p.id,
           messageLogType: "email_send_logs",
           enabled: camp.track_links !== false,
-          shortDomainId: camp.short_domain_id,
+          shortDomainId: expertId ? null : camp.short_domain_id,
         },
+        ...(expertId ? { expertId } : {}),
       });
+      if (!r.ok && (r.errorKind === "expert_cap" || r.errorKind === "expert_inactive")) {
+        // Nothing was sent nor charged; only this expert's campaign pauses.
+        pausadaPorTeto = true;
+        expertStopReason =
+          r.errorKind === "expert_cap" ? EMAIL_CAMPAIGN_EXPERT_CAP_MESSAGE : EXPERT_SCOPE_INACTIVE;
+        break;
+      }
       if (!r.ok && r.errorKind === "insufficient_balance") {
         // Nothing was sent nor charged: not a delivery attempt, no log row.
         pausadaPorSaldo = true;
@@ -1136,27 +1311,54 @@ export async function runCampaignSend(campaignId: string) {
     }
     // Atualização parcial a cada 25 envios para o usuário acompanhar progresso.
     if ((enviados + falhas) % 25 === 0) {
-      await supabaseAdmin
-        .from("email_campaigns")
-        .update({ stats: stats(enviados, falhas) })
-        .eq("id", campaignId);
+      await updateOwnRun({ stats: stats(enviados, falhas) });
     }
     // small breath to avoid bursts
     await new Promise((r) => setTimeout(r, 30));
   }
 
-  await supabaseAdmin
-    .from("email_campaigns")
-    .update({
+  if (!interrompida) {
+    // Conditional: a pause/cancel after the last check is never overwritten.
+    const paused = pausadaPorSaldo || pausadaPorTeto;
+    const nextBatch = continuaEmLotes && !paused;
+    const finished = await updateOwnRun({
       // Falhas temporárias ficam como pendentes no log; não contam como falha
       // definitiva porque o provedor pode aceitar o próximo retry.
-      status: pausadaPorSaldo ? "pausada" : "concluida",
+      // Próximo lote: volta para 'agendada' agora; o tick pega no próximo minuto.
+      status: paused ? "pausada" : nextBatch ? "agendada" : "concluida",
+      ...(nextBatch ? { scheduled_at: new Date().toISOString() } : {}),
       ...(pausadaPorSaldo ? { blocked_reason: EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE } : {}),
-      stats: stats(enviados, falhas),
-    })
-    .eq("id", campaignId);
+      ...(pausadaPorTeto ? { blocked_reason: expertStopReason } : {}),
+      stats: stats(enviados, falhas, paused ? continuation || continuaEmLotes : nextBatch),
+      locked_at: null,
+      locked_by: null,
+    });
+    if (!finished) interrompida = true;
+  }
+  if (interrompida) {
+    // Progress only, never the status; skipped if another run is sending.
+    await supabaseAdmin
+      .from("email_campaigns")
+      .update({ stats: stats(enviados, falhas) })
+      .eq("id", campaignId)
+      .neq("status", "enviando");
+  }
 
-  return { enviados, falhas, pendentes, total: players.length, jaEnviados, pausadaPorSaldo };
+  if (pausadaPorTeto && expertId && expertStopReason === EMAIL_CAMPAIGN_EXPERT_CAP_MESSAGE)
+    await notifyExpertCapReached(camp.tenant_id, expertId);
+
+  return {
+    enviados,
+    falhas,
+    pendentes,
+    total: players.length,
+    jaEnviados,
+    pausadaPorSaldo,
+    pausadaPorTeto,
+    /** More recipients remain: the e-mail tick sends the next batches. */
+    continuaEmLotes: continuaEmLotes && !pausadaPorSaldo && !pausadaPorTeto && !interrompida,
+    interrompida,
+  };
 }
 
 /**
@@ -1174,14 +1376,19 @@ async function loadCampaignReachedRecipients(campaignId: string) {
   if (error) throw new Error(error.message);
   const playerIds = new Set<string>();
   const emails = new Set<string>();
+  /** Any log row (sent, pending or error): attempted by some run. */
+  const attempted = { playerIds: new Set<string>(), emails: new Set<string>() };
   for (const row of data ?? []) {
+    if (row.player_id) attempted.playerIds.add(row.player_id);
+    const attemptedEmail = String(row.to_email ?? "").trim().toLowerCase();
+    if (attemptedEmail) attempted.emails.add(attemptedEmail);
     const reached = row.status === "sent" || row.status === "delivered" || row.sent_at != null;
     if (!reached) continue;
     if (row.player_id) playerIds.add(row.player_id);
     const email = String(row.to_email ?? "").trim().toLowerCase();
     if (email) emails.add(email);
   }
-  return { playerIds, emails };
+  return { playerIds, emails, attempted };
 }
 
 /**

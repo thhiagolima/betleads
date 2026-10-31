@@ -96,6 +96,7 @@ No ranking e nos painéis, o depositado atribuído aparece separado em **"por cl
 - Clique recente vence afiliado.
 - Entre experts, vence o último clique dentro da janela.
 - Um depósito nunca conta para dois experts.
+- *(adendo de 2026-10-30, rule_version 2 — `20261125100000_expert_hardening.sql`)* O clique de um expert não leva o depósito de um lead cujo ID de afiliado pertence a **outro** expert elegível no momento do depósito (o dono do afiliado fica com ele; só os cliques do próprio dono contam para esse lead). Os créditos guardam a versão da regra e o recálculo dos crons cobre só os últimos 8 dias, então créditos antigos mantêm a versão 1.
 
 **Janela:** 72 horas por padrão, configurável por casa. *(o sistema atual usa 7 dias para campanhas e jornadas; a janela do expert é separada)*
 
@@ -159,6 +160,18 @@ Há gestores que também convertem conversando direto com os leads. Eles vão pa
 - **Canais:** *(decisão minha)* SMS e e-mail na primeira versão. Voz fica para depois.
 - Os links nas mensagens do expert são rastreados com a origem dele, então os cliques contam para a regra de crédito da seção 6.
 
+### 8.1 Adendo de 2026-10-30 (entrega da fase 4)
+
+Decisões do dono do produto que substituem partes desta seção. O registro completo está em `docs/superpowers/plans/2026-10-30-area-expert-fase4.md`.
+
+- **Voz entra** junto com SMS e e-mail.
+- **Fluxos saem** desta entrega: `sms_flows`, `email_flows`, aprovação na ativação, "parar fluxo no teto" e a ação 6 da ficha ("colocar num fluxo dele"). Os itens acima sobre fluxos ficam sem efeito até uma decisão nova.
+- **Telas:** o expert usa as mesmas `/publicos` e `/campanhas` da casa, adaptadas ao papel, em vez de "Fluxos e campanhas" com editores próprios.
+- **Públicos do expert:** ele cria públicos próprios dentro do escopo dele. O expert total também usa os públicos salvos da casa, só leitura; o restrito usa só os dele.
+- **Teto:** vazio = sem teto; 0 = bloqueia os envios. O aviso ao admin é por e-mail, um por expert por mês.
+- **Conteúdo:** livre, mas todo link precisa ser do site da casa ou de um domínio liberado pelo admin; sem lista configurada, link externo é recusado. O expert não manda para telefone, e-mail avulso ou lista externa.
+- **Modo de envio:** continua por expert, sem padrão da casa.
+
 ## 9. Aposentar a casa CRM_EXPERT
 
 - Para cada casa CRM_EXPERT, os IDs de afiliado em `metadata.expert_affiliate_ids` viram o cadastro de expert (restrito) na casa de origem, ligado ao usuário que hoje é admin da casa CRM_EXPERT.
@@ -173,7 +186,7 @@ Há gestores que também convertem conversando direto com os leads. Eles vão pa
 1. **Papel e acesso:** papel expert, cadastro e convite, RLS por tipo, menu do expert, tela Experts do admin (configuração), aposentadoria do CRM_EXPERT.
 2. **Ficha do lead:** dados, linha do tempo e as 7 ações (link rastreado, WhatsApp, contato, retorno, assumir, fluxo, IA).
 3. **Crédito e painéis:** regra de atribuição, painel do expert, ranking e detalhe no admin.
-4. **Campanhas e fluxos do expert:** dono, público restrito, aprovação, teto, consumo por expert.
+4. **Campanhas e fluxos do expert:** dono, público restrito, aprovação, teto, consumo por expert. *(Entregue em 30/10/2026 sem os fluxos; ver §8.1.)*
 
 ## 11. Deixado para quem implementar
 

@@ -4624,6 +4624,7 @@ export type Database = {
           disabled_at: string | null;
           disabled_by_user_id: string | null;
           encrypted_access_token: string | null;
+          health_checked_at: string | null;
           id: string;
           last_error: string | null;
           last_sync_at: string | null;
@@ -4635,6 +4636,7 @@ export type Database = {
           tenant_id: string;
           token_expires_at: string | null;
           token_hint: string | null;
+          token_type: string | null;
           token_validated_at: string | null;
           updated_at: string;
         };
@@ -4653,6 +4655,7 @@ export type Database = {
           disabled_at?: string | null;
           disabled_by_user_id?: string | null;
           encrypted_access_token?: string | null;
+          health_checked_at?: string | null;
           id?: string;
           last_error?: string | null;
           last_sync_at?: string | null;
@@ -4664,6 +4667,7 @@ export type Database = {
           tenant_id: string;
           token_expires_at?: string | null;
           token_hint?: string | null;
+          token_type?: string | null;
           token_validated_at?: string | null;
           updated_at?: string;
         };
@@ -4682,6 +4686,7 @@ export type Database = {
           disabled_at?: string | null;
           disabled_by_user_id?: string | null;
           encrypted_access_token?: string | null;
+          health_checked_at?: string | null;
           id?: string;
           last_error?: string | null;
           last_sync_at?: string | null;
@@ -4693,6 +4698,7 @@ export type Database = {
           tenant_id?: string;
           token_expires_at?: string | null;
           token_hint?: string | null;
+          token_type?: string | null;
           token_validated_at?: string | null;
           updated_at?: string;
         };
@@ -4759,6 +4765,7 @@ export type Database = {
           locked_at: string | null;
           max_attempts: number;
           next_attempt_at: string;
+          rate_limited_count: number;
           rows_imported: number;
           run_id: string;
           started_at: string | null;
@@ -4778,6 +4785,7 @@ export type Database = {
           locked_at?: string | null;
           max_attempts?: number;
           next_attempt_at?: string;
+          rate_limited_count?: number;
           rows_imported?: number;
           run_id: string;
           started_at?: string | null;
@@ -4797,6 +4805,7 @@ export type Database = {
           locked_at?: string | null;
           max_attempts?: number;
           next_attempt_at?: string;
+          rate_limited_count?: number;
           rows_imported?: number;
           run_id?: string;
           started_at?: string | null;
@@ -8365,6 +8374,7 @@ export type Database = {
           locked_at: string | null;
           max_attempts: number;
           next_attempt_at: string;
+          rate_limited_count: number;
           rows_imported: number;
           run_id: string;
           started_at: string | null;

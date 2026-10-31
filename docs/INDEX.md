@@ -1,6 +1,6 @@
 # Índice da documentação
 
-**Atualizado em:** 16/10/2026 (F3-01)
+**Atualizado em:** 30/10/2026 (Área do Expert, fase 4)
 **Fonte de status do projeto:** a seção 8 de [ESCOPO_CORRECOES_AUDITORIA_2026-10-16.md](ESCOPO_CORRECOES_AUDITORIA_2026-10-16.md). Os status de outros documentos são históricos; em caso de conflito, vale aquela tabela.
 **Regra:** todo documento novo entra neste índice no mesmo PR. Material com segredo, credencial ou dado pessoal vai para `docs/private/` (ignorado pelo git) e nunca entra aqui.
 
@@ -15,6 +15,8 @@ Status usados:
 
 | Documento | Tipo | Data | Status | Para que serve |
 |---|---|---|---|---|
+| [superpowers/plans/2026-10-30-area-expert-fase4.md](superpowers/plans/2026-10-30-area-expert-fase4.md) | registro de entrega | 30/10/2026 | Encerrado | Fase 4 da Área do Expert: campanhas de SMS, e-mail e voz do expert com teto mensal, aprovação, públicos próprios e as telas da casa reaproveitadas; hardening de segurança que veio antes; fluxos fora. |
+| [superpowers/specs/2026-10-23-area-expert-design.md](superpowers/specs/2026-10-23-area-expert-design.md) | spec | 23/10/2026 | Vigente | Área do Expert: papel e acesso, ficha do lead, regra de crédito, painéis e campanhas (§8.1 com as decisões de 30/10). Planos das fases 1 a 3 em `superpowers/plans/2026-10-2*-area-expert-fase*.md`. |
 | [ESCOPO_META_MULTI_BM_2026-10-30.md](ESCOPO_META_MULTI_BM_2026-10-30.md) | escopo | 30/10/2026 | Proposto | Conexão Meta Ads com várias BMs: segurança (MB0), modelo por token com conta compartilhada (MB1), sync robusto (MB2), UX da aba (MB3), observabilidade (MB4). Absorve a AL2 e a parte de conexão da AL3. |
 | [superpowers/specs/2026-10-30-mcp-financeiro-design.md](superpowers/specs/2026-10-30-mcp-financeiro-design.md) | escopo (design) | 30/10/2026 | Implementado (branch feat/mcp-financeiro) | Servidor MCP do Financeiro: admins consultam e lançam valores do Financeiro da casa/grupo pelo Claude via OAuth, com preview + confirmação para escritas. |
 | [superpowers/plans/2026-10-30-mcp-financeiro.md](superpowers/plans/2026-10-30-mcp-financeiro.md) | plano | 30/10/2026 | Implementado (branch feat/mcp-financeiro) | Plano de implementação do MCP do Financeiro (tarefas 1–10: OAuth, endpoint `/api/mcp`, ferramentas de leitura/escrita, painel de acesso, checagem fim a fim). |

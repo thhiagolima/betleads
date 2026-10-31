@@ -3,7 +3,8 @@
 // depois de `requireExpertContext`: o lead precisa ser da casa do expert e,
 // para o expert restrito, ter um dos affiliate_ids dele.
 //
-// Lê com `supabaseAdmin` (os experts não têm RLS sobre `players`) e por isso
+// Lê com `supabaseAdmin` (os experts não têm RLS sobre `players`: as policies
+// *_expert_select saíram em 20261125100000_expert_hardening.sql) e por isso
 // seleciona só as colunas que a ficha pode mostrar: nunca CPF, e-mail ou
 // saldo de carteira.
 

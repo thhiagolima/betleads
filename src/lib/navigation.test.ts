@@ -12,6 +12,7 @@ import {
   canSee,
   homeRedirect,
   isExpertAllowedPath,
+  isExpertSharedPath,
   isGroupPath,
   resolveRouteMeta,
   shellContentState,
@@ -180,7 +181,7 @@ describe("visible sections", () => {
 });
 
 describe("group menu", () => {
-  it("names the /grupo page \"Financeiro do grupo\" in the menu and the header", () => {
+  it('names the /grupo page "Financeiro do grupo" in the menu and the header', () => {
     const first = GROUP_SECTIONS[0].items[0];
     expect(first).toMatchObject({ kind: "link", to: "/grupo", title: "Financeiro do grupo" });
     expect(ROUTE_META["/grupo"].title).toBe("Financeiro do grupo");
@@ -239,13 +240,28 @@ describe("expert role", () => {
       .map((item) => item.to);
   }
 
-  it("expert sees only the expert section", () => {
+  it("expert sees the expert section plus the shared Campanhas and Públicos", () => {
     expect(linkPaths(visibleSections("expert", false))).toEqual([
       "/expert",
       "/expert/leads",
       "/expert/rendimento",
       "/expert/modelos",
+      "/campanhas",
+      "/publicos",
     ]);
+  });
+
+  it("expert mobile tabs add one Envios tab (Públicos lights it too), no Menu", () => {
+    expect(EXPERT_MOBILE_TABS.map((tab) => tab.title)).toEqual([
+      "Início",
+      "Leads",
+      "Rendimento",
+      "Modelos",
+      "Envios",
+    ]);
+    expect(EXPERT_MOBILE_TABS.every((tab) => Boolean(tab.to))).toBe(true);
+    expect(activeMobileTab("/campanhas", EXPERT_MOBILE_TABS)).toBe("Envios");
+    expect(activeMobileTab("/publicos", EXPERT_MOBILE_TABS)).toBe("Envios");
   });
 
   it("expert has no account/team links", () => {
@@ -268,6 +284,38 @@ describe("expert role", () => {
     expect(isExpertAllowedPath("/expert/leads")).toBe(true);
     expect(isExpertAllowedPath("/players")).toBe(false);
     expect(isExpertAllowedPath("/experts")).toBe(false);
+  });
+
+  it("isExpertAllowedPath allows the shared /campanhas and /publicos screens only", () => {
+    expect(isExpertAllowedPath("/campanhas")).toBe(true);
+    expect(isExpertAllowedPath("/campanhas/")).toBe(true);
+    expect(isExpertAllowedPath("/publicos")).toBe(true);
+    expect(isExpertSharedPath("/publicos")).toBe(true);
+    // House subpages and other house routes stay blocked.
+    expect(isExpertAllowedPath("/campanhas/abc/relatorio")).toBe(false);
+    for (const path of [
+      "/",
+      "/sms",
+      "/email",
+      "/ligacoes",
+      "/jornadas",
+      "/automacoes",
+      "/plano-e-creditos",
+      "/players",
+    ]) {
+      expect(isExpertAllowedPath(path)).toBe(false);
+    }
+  });
+
+  it("shellContentState waits for the role on the shared screens, then renders them for the expert", () => {
+    // The role decides the data source: never mount before it is known.
+    expect(shellContentState(null, true, "/campanhas")).toBe("waiting_role");
+    expect(shellContentState(null, true, "/publicos")).toBe("waiting_role");
+    expect(shellContentState("expert", false, "/campanhas")).toBe("render");
+    expect(shellContentState("expert", false, "/publicos")).toBe("render");
+    expect(shellContentState("expert", false, "/campanhas/abc/relatorio")).toBe("redirect_expert");
+    expect(shellContentState("expert", false, "/sms")).toBe("redirect_expert");
+    expect(shellContentState("admin", false, "/campanhas")).toBe("render");
   });
 
   it("shellContentState mounts no house route until the role is known", () => {

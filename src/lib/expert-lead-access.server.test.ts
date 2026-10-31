@@ -39,6 +39,8 @@ const RESTRICTED: ExpertContext = {
   nome: "Fulano",
   tipo: "restrito",
   affiliateIds: ["AFF1"],
+  envioModo: "livre",
+  tetoMensal: null,
 };
 const TOTAL: ExpertContext = { ...RESTRICTED, tipo: "total", affiliateIds: [] };
 

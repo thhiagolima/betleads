@@ -48,13 +48,25 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { bulkDispatchCalls, listCallScripts } from "@/lib/calls.functions";
 import { tenantSafeChannelError } from "@/lib/channel-error";
+import { type CampaignDraft, type CampaignDraftPayload } from "@/lib/campaign-drafts.functions";
+import { useCampaignDataSource } from "@/hooks/use-campaign-data-source";
 import {
-  getCampaignDraft,
-  saveCampaignDraft,
-  submitCampaignDraft,
-  type CampaignDraft,
-  type CampaignDraftPayload,
-} from "@/lib/campaign-drafts.functions";
+  bulkDispatchExpertCalls,
+  getExpertCampaignUsage,
+  getExpertComposerOptions,
+  resolveExpertCampaignAudience,
+  saveExpertEmailCampaign,
+  scheduleExpertBulkSms,
+  sendExpertBulkSms,
+} from "@/lib/expert-campaigns.functions";
+import { listExpertTemplates } from "@/lib/expert-templates.functions";
+import {
+  EXPERT_USAGE_QUERY_KEY,
+  expertCapBlockReason,
+  expertEstimatedCost,
+  remainingAfterSend,
+  type ExpertCampaignUsageData,
+} from "@/lib/expert-campaign-usage";
 import {
   listEmailTemplates,
   saveEmailCampaign,
@@ -71,7 +83,6 @@ import {
   type ResolvedCampaignAudience,
 } from "@/lib/sms-audiences.functions";
 import { SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
-import { listSmsAudiences } from "@/lib/sms-audience-crud.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { previewSmsCampaignRecipients, scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
 import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
@@ -90,6 +101,8 @@ import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
 import { UNRESOLVED_REASONS, type UnresolvedReason } from "@/lib/campaign-recipients";
 import {
   alreadySentSuffix,
+  campaignContinuesInBatchesMessage,
+  campaignInterruptedMessage,
   campaignPausedForBalanceMessage,
   type EmailCampaignRunResult,
 } from "@/lib/email-campaign-messages";
@@ -103,12 +116,20 @@ import { PHONE_LIST_FILE_ACCEPT, readPhoneListFile } from "@/lib/phone-list-file
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import {
   campaignSendLabel,
+  expertCampaignSendLabel,
   requiresTypedConfirmation,
   typedCountMatches,
 } from "./campaign-send-confirmation";
 
 type Channel = "sms" | "email" | "voice";
-type AudienceOption = { id: string; name: string; criteria: SmsAudienceCriteria; system?: boolean };
+type AudienceOption = {
+  id: string;
+  name: string;
+  criteria: SmsAudienceCriteria;
+  system?: boolean;
+  /** Expert list only: "casa" = house audience, read-only (total-access expert). */
+  owner?: "meu" | "casa";
+};
 type ResolvedAudience = ResolvedCampaignAudience;
 
 /** Audience option of SMS campaigns to numbers that are not players. */
@@ -133,7 +154,23 @@ const fieldIds = {
   voiceSource: "campaign-voice-source",
   schedule: "campaign-schedule",
   validation: "campaign-validation",
+  cost: "campaign-cost",
+  approval: "campaign-approval-notice",
 };
+
+/** Notice of the expert's approval mode, next to the submit button. */
+export const EXPERT_APPROVAL_NOTICE =
+  "O admin precisa aprovar antes do disparo; o agendamento vale a partir da aprovação.";
+
+/** Label of a saved/system audience in the select; the expert sees whose leads it covers. */
+function audienceOptionLabel(item: AudienceOption, isExpert: boolean): string {
+  if (item.system) {
+    const base =
+      item.id === "system:all-leads" ? `Público automático · ${item.name}` : `Nível · ${item.name}`;
+    return isExpert ? `${base} (dos seus leads)` : base;
+  }
+  return isExpert && item.owner === "casa" ? `Da casa · ${item.name}` : item.name;
+}
 
 export function ChannelCampaignComposer({
   open,
@@ -151,11 +188,24 @@ export function ChannelCampaignComposer({
   initialAudienceId?: string;
 }) {
   const queryClient = useQueryClient();
+  // House or expert data source, by the shell role (campaign-data-source.ts).
+  // The expert sends the audience criteria and the server resolves it; the
+  // house-only controls are hidden for the expert below.
+  const source = useCampaignDataSource();
+  const isExpert = source.isExpert;
   const resolveAudience = useServerFn(resolveCampaignAudience);
-  const getDraft = useServerFn(getCampaignDraft);
-  const saveDraft = useServerFn(saveCampaignDraft);
-  const submitDraft = useServerFn(submitCampaignDraft);
-  const listAudiences = useServerFn(listSmsAudiences);
+  const getDraft = source.getDraft;
+  const saveDraft = source.saveDraft;
+  const submitDraft = source.submitDraft;
+  const listAudiences = source.listAudiences;
+  const resolveExpertAudience = useServerFn(resolveExpertCampaignAudience);
+  const sendExpertSms = useServerFn(sendExpertBulkSms);
+  const scheduleExpertSms = useServerFn(scheduleExpertBulkSms);
+  const saveExpertEmail = useServerFn(saveExpertEmailCampaign);
+  const dispatchExpertVoice = useServerFn(bulkDispatchExpertCalls);
+  const getExpertOptions = useServerFn(getExpertComposerOptions);
+  const getExpertUsage = useServerFn(getExpertCampaignUsage);
+  const listExpertTemplateFn = useServerFn(listExpertTemplates);
   const listSmsTemplateFn = useServerFn(listSmsTemplates);
   const listEmailTemplateFn = useServerFn(listEmailTemplates);
   const listScripts = useServerFn(listCallScripts);
@@ -172,16 +222,31 @@ export function ChannelCampaignComposer({
   const composerOptions = useQuery({
     queryKey: COMPOSER_OPTIONS_QUERY_KEY,
     queryFn: () => getComposerOpts(),
-    enabled: open,
+    enabled: open && !isExpert,
   });
-  const siteUrl = composerOptions.data?.siteUrl ?? null;
-  const quickLinks = composerOptions.data?.quickLinks ?? [];
+  const expertOptions = useQuery({
+    queryKey: ["expert-composer-options"],
+    queryFn: () => getExpertOptions(),
+    enabled: open && isExpert,
+  });
+  const expertUsage = useQuery({
+    queryKey: EXPERT_USAGE_QUERY_KEY,
+    queryFn: () => getExpertUsage(),
+    enabled: open && isExpert,
+  });
+  const siteUrl = isExpert
+    ? (expertOptions.data?.siteUrl ?? null)
+    : (composerOptions.data?.siteUrl ?? null);
+  const quickLinks = isExpert
+    ? (expertOptions.data?.quickLinks ?? [])
+    : (composerOptions.data?.quickLinks ?? []);
   const shortDomains = composerOptions.data?.shortDomains ?? [];
   const shortenerPending = composerOptions.data?.shortenerPending ?? false;
   const emailSenders = composerOptions.data?.senders ?? [];
   // Only a confirmed-empty sender list blocks sending — while the query is
   // still loading or failed, we don't know yet, so we don't block on it.
-  const emailBlocked = composerOptions.isSuccess && emailSenders.length === 0;
+  // The expert always sends with the house's default sender (resolved on the server).
+  const emailBlocked = !isExpert && composerOptions.isSuccess && emailSenders.length === 0;
   const getPrices = useServerFn(getBillingPrices);
 
   const [channel, setChannel] = useState<Channel>(initialChannel);
@@ -208,6 +273,8 @@ export function ChannelCampaignComposer({
   const [scheduledAt, setScheduledAt] = useState("");
   const trackLinks = true;
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  /** Expert: the server's last refusal (link policy, cap…), shown inline. */
+  const [serverError, setServerError] = useState<string | null>(null);
   const [smsTemplateDialogOpen, setSmsTemplateDialogOpen] = useState(false);
   const [emailTemplateDialogOpen, setEmailTemplateDialogOpen] = useState(false);
   const [voiceScriptDialogOpen, setVoiceScriptDialogOpen] = useState(false);
@@ -226,20 +293,20 @@ export function ChannelCampaignComposer({
   const submitted = useRef(false);
 
   const draftQuery = useQuery({
-    queryKey: ["campaign-draft", initialDraftId],
+    queryKey: source.queryKeys.draft(initialDraftId),
     queryFn: () => getDraft({ data: { id: initialDraftId! } }),
     enabled: open && Boolean(initialDraftId),
   });
 
   const savedAudiences = useQuery({
-    queryKey: ["sms-audiences"],
+    queryKey: source.queryKeys.audiences,
     queryFn: () => listAudiences(),
     enabled: open,
   });
   const pricesQuery = useQuery({
     queryKey: ["billing-prices"],
     queryFn: () => getPrices(),
-    enabled: open,
+    enabled: open && !isExpert,
     staleTime: 5 * 60_000,
   });
   const smsPrice = pricesQuery.data?.sms ?? null;
@@ -247,22 +314,28 @@ export function ChannelCampaignComposer({
   const smsTemplatesQuery = useQuery({
     queryKey: ["sms-templates"],
     queryFn: () => listSmsTemplateFn(),
-    enabled: open && channel === "sms",
+    enabled: open && channel === "sms" && !isExpert,
+  });
+  // Expert: own message templates + the house's active SMS templates (Modelos).
+  const expertSmsTemplatesQuery = useQuery({
+    queryKey: ["expert-templates"],
+    queryFn: () => listExpertTemplateFn(),
+    enabled: open && channel === "sms" && isExpert,
   });
   const emailTemplatesQuery = useQuery({
     queryKey: ["email-templates"],
     queryFn: () => listEmailTemplateFn(),
-    enabled: open && channel === "email",
+    enabled: open && channel === "email" && !isExpert,
   });
   const scriptsQuery = useQuery({
     queryKey: ["call-scripts"],
     queryFn: () => listScripts(),
-    enabled: open && channel === "voice",
+    enabled: open && channel === "voice" && !isExpert,
   });
   const assetsQuery = useQuery({
     queryKey: ["journey-voice-assets"],
     queryFn: () => listAssets(),
-    enabled: open && channel === "voice",
+    enabled: open && channel === "voice" && !isExpert,
   });
 
   const audienceOptions = useMemo<AudienceOption[]>(
@@ -273,14 +346,34 @@ export function ChannelCampaignComposer({
           id: string;
           name: string;
           criteria: SmsAudienceCriteria;
+          owner?: "meu" | "casa";
         }>
       ).map((item) => ({ ...item, system: false })),
     ],
     [savedAudiences.data],
   );
 
+  const expertTemplates = expertSmsTemplatesQuery.data as
+    | {
+        meus: Array<{ id: string; nome: string; conteudo: string }>;
+        casa: Array<{ id: string; nome: string; conteudo: string }>;
+      }
+    | undefined;
   const smsTemplates = (
-    (smsTemplatesQuery.data?.items ?? []) as Array<{
+    (isExpert
+      ? [
+          ...(expertTemplates?.meus ?? []).map((item) => ({
+            id: item.id,
+            name: item.nome,
+            content: item.conteudo,
+          })),
+          ...(expertTemplates?.casa ?? []).map((item) => ({
+            id: item.id,
+            name: `Da casa · ${item.nome}`,
+            content: item.conteudo,
+          })),
+        ]
+      : (smsTemplatesQuery.data?.items ?? [])) as Array<{
       id: string;
       name: string;
       content: string;
@@ -288,7 +381,14 @@ export function ChannelCampaignComposer({
     }>
   ).filter((item) => item.isActive !== false);
   const emailTemplates = (
-    (emailTemplatesQuery.data?.items ?? []) as Array<{
+    (isExpert
+      ? // Published house templates; the server copies the content at save time.
+        (expertOptions.data?.emailTemplates ?? []).map((item) => ({
+          id: item.id,
+          nome: item.nome,
+          subject: item.assunto,
+        }))
+      : (emailTemplatesQuery.data?.items ?? [])) as Array<{
       id: string;
       nome: string;
       name?: string;
@@ -300,7 +400,9 @@ export function ChannelCampaignComposer({
     }>
   ).filter((item) => item.ativo !== false);
   const scripts = (
-    (scriptsQuery.data?.scripts ?? []) as Array<{
+    (isExpert
+      ? (expertOptions.data?.callScripts ?? []).map((item) => ({ ...item, status: "active" }))
+      : (scriptsQuery.data?.scripts ?? [])) as Array<{
       id: string;
       name: string;
       content: string;
@@ -309,13 +411,25 @@ export function ChannelCampaignComposer({
     }>
   ).filter((item) => item.status === "active");
   const assets = (
-    (assetsQuery.data?.assets ?? []) as Array<{
+    (isExpert
+      ? (expertOptions.data?.voiceAssets ?? []).map((item) => ({
+          id: item.id,
+          name: item.name,
+          duration_seconds: item.durationSeconds,
+        }))
+      : (assetsQuery.data?.assets ?? [])) as Array<{
       id: string;
       name: string;
       is_archived?: boolean;
       duration_seconds?: number | null;
     }>
   ).filter((item) => !item.is_archived);
+  // Expert voice cost depends on the audio length (read by the audience estimate).
+  const expertVoiceSecondsRef = useRef<number | null>(null);
+  expertVoiceSecondsRef.current =
+    voiceMode === "asset"
+      ? (assets.find((item) => item.id === voiceSourceId)?.duration_seconds ?? null)
+      : null;
 
   useEffect(() => {
     if (!open || initialDraftId) return;
@@ -336,6 +450,7 @@ export function ChannelCampaignComposer({
     setWhen("now");
     setScheduledAt("");
     setSubmitAttempted(false);
+    setServerError(null);
     setDraftId(null);
     setDraftVersion(null);
     setDraftState("idle");
@@ -375,10 +490,25 @@ export function ChannelCampaignComposer({
 
   const audienceMutation = useMutation({
     mutationFn: ({ criteria, channel }: { criteria: SmsAudienceCriteria; channel: Channel }) =>
-      resolveAudience({ data: { criteria, channel } }),
+      isExpert
+        ? // Counts only (no identifier lists) + the estimated cost.
+          (resolveExpertAudience({
+            data: {
+              criteria: criteria as unknown as Record<string, unknown>,
+              channel,
+              voiceSeconds: channel === "voice" ? expertVoiceSecondsRef.current : null,
+            },
+          }) as Promise<ResolvedAudience>)
+        : resolveAudience({ data: { criteria, channel } }),
     onSuccess: (result) => setAudience(result),
     onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
   });
+
+  // Expert voice: a different audio changes the estimated cost (server estimate).
+  useEffect(() => {
+    if (!open || !isExpert || channel !== "voice" || !audienceCriteria) return;
+    audienceMutation.mutate({ criteria: audienceCriteria, channel });
+  }, [voiceSourceId, voiceMode]);
 
   useEffect(() => {
     if (!open || initialDraftId || !initialAudienceId) return;
@@ -398,7 +528,7 @@ export function ChannelCampaignComposer({
         ? (activeEmailTemplate?.body_html ?? activeEmailTemplate?.corpo ?? "")
         : (activeScript?.content ?? "");
   const invalidVariables = unknownMessageVariables(previewContent, channel);
-  const isExternalList = channel === "sms" && audienceId === EXTERNAL_LIST_ID;
+  const isExternalList = !isExpert && channel === "sms" && audienceId === EXTERNAL_LIST_ID;
   const externalList = useMemo(
     () => parsePhoneList(`${externalText}\n${externalFile?.text ?? ""}`),
     [externalText, externalFile],
@@ -424,7 +554,7 @@ export function ChannelCampaignComposer({
           recipientSource: isExternalList ? "external_list" : "players",
         },
       }),
-    enabled: open && channel === "sms" && smsPhones.length > 0,
+    enabled: open && !isExpert && channel === "sms" && smsPhones.length > 0,
     staleTime: 60_000,
     retry: false,
   });
@@ -434,6 +564,22 @@ export function ChannelCampaignComposer({
   const parts = smsSegmentInfo.segments;
   const cost = channel === "sms" ? sendableRecipients * parts : recipients;
   const smsCostBrl = smsPrice == null ? null : parts * smsPrice.unitPrice;
+  // Expert: estimated cost for every channel and what the monthly cap allows.
+  const expertUsageData = expertUsage.data as ExpertCampaignUsageData | undefined;
+  const expertCost = isExpert
+    ? expertEstimatedCost({
+        channel,
+        recipients,
+        smsSegments: parts,
+        prices: expertOptions.data?.prices,
+        serverEstimate: (audience as { estimatedCost?: number } | null)?.estimatedCost ?? null,
+      })
+    : null;
+  const expertCapBlock = isExpert ? expertCapBlockReason(expertUsageData, expertCost ?? 0) : null;
+  const expertRemainingAfter = isExpert
+    ? remainingAfterSend(expertUsageData, expertCost ?? 0)
+    : null;
+  const approvalMode = isExpert && expertOptions.data?.envioModo === "aprovacao";
   const channelLimitError =
     channel === "voice" && recipients > 200
       ? "Voz aceita até 200 destinatários por campanha."
@@ -469,6 +615,7 @@ export function ChannelCampaignComposer({
       ? [`Variáveis não reconhecidas: ${invalidVariables.join(", ")}`]
       : []),
     channelLimitError,
+    expertCapBlock,
     smsPreview && recipients > 0 && smsPreview.resolved === 0
       ? isExternalList
         ? "Nenhum número da lista pode receber: todos já são jogadores ou foram bloqueados."
@@ -561,7 +708,7 @@ export function ChannelCampaignComposer({
       setDraftId(saved.id);
       setDraftVersion(saved.version);
       setDraftState("saved");
-      queryClient.invalidateQueries({ queryKey: ["campaign-drafts"] });
+      queryClient.invalidateQueries({ queryKey: source.queryKeys.drafts });
     },
     onError: () => setDraftState("error"),
   });
@@ -614,6 +761,11 @@ export function ChannelCampaignComposer({
     return () => window.clearTimeout(timer);
   }, [serializedDraft, open, initialDraftId, draftQuery.data]);
 
+  // A server refusal no longer applies once the campaign is edited.
+  useEffect(() => {
+    setServerError(null);
+  }, [serializedDraft]);
+
   const submit = useMutation({
     mutationFn: async (confirmedCount?: number) => {
       if (!name.trim()) throw new Error("Informe o nome da campanha.");
@@ -638,6 +790,47 @@ export function ChannelCampaignComposer({
         throw new Error("O agendamento deve ter pelo menos um minuto de antecedência.");
       if (channel === "email" && emailBlocked) throw new Error(EMAIL_BLOCKED_WARNING);
       const scheduleAt = when === "schedule" ? (fromBrtInput(scheduledAt) ?? undefined) : undefined;
+
+      if (isExpert) {
+        // The expert sends the audience criteria; the server re-resolves it
+        // inside the expert's scope, checks the cap and the link policy, and
+        // queues the campaign (pending approval in "aprovacao" mode).
+        if (expertCapBlock) throw new Error(expertCapBlock);
+        const criteria = (audienceCriteria ?? {}) as unknown as Record<string, unknown>;
+        let completed: unknown;
+        if (channel === "sms") {
+          if (!smsContent.trim()) throw new Error("Escreva ou selecione a mensagem de SMS.");
+          const base = { campaignName: name, content: smsContent, audienceCriteria: criteria };
+          completed = scheduleAt
+            ? await scheduleExpertSms({ data: { ...base, scheduledAt: scheduleAt } })
+            : await sendExpertSms({ data: base });
+        } else if (channel === "email") {
+          if (!emailTemplateId) throw new Error("Selecione um template de e-mail.");
+          completed = await saveExpertEmail({
+            data: {
+              nome: name,
+              templateId: emailTemplateId,
+              audienceCriteria: criteria,
+              agendadoPara: scheduleAt ?? null,
+              status: "agendada",
+            },
+          });
+        } else {
+          if (!voiceSourceId) throw new Error("Selecione um roteiro ou áudio da biblioteca.");
+          completed = await dispatchExpertVoice({
+            data: {
+              campaign_name: name,
+              scheduled_at: scheduleAt,
+              script_id: voiceMode === "script" ? voiceSourceId : undefined,
+              asset_id: voiceMode === "asset" ? voiceSourceId : undefined,
+              audienceCriteria: criteria,
+            },
+          });
+        }
+        if (draftId) await submitDraft({ data: { id: draftId } });
+        submitted.current = true;
+        return completed;
+      }
 
       if (channel === "sms") {
         if (!smsContent.trim()) throw new Error("Escreva ou selecione a mensagem de SMS.");
@@ -684,7 +877,8 @@ export function ChannelCampaignComposer({
             senderId,
             shortDomainId,
             agendadoPara: scheduleAt ?? null,
-            status: when === "schedule" ? "agendada" : "enviando",
+            // "Enviar agora" claims it from rascunho (claimEmailCampaignForSendNow).
+            status: when === "schedule" ? "agendada" : "rascunho",
             targetPlayerIds: audience!.eligiblePlayerIds,
             extraEmails: [],
             trackLinks,
@@ -715,6 +909,22 @@ export function ChannelCampaignComposer({
       return completed;
     },
     onSuccess: (result) => {
+      if (isExpert) {
+        const pending =
+          (result as { approvalStatus?: string | null } | null | undefined)?.approvalStatus ===
+          "pendente";
+        toast.success(
+          pending
+            ? "Campanha enviada para aprovação"
+            : when === "schedule"
+              ? "Campanha agendada"
+              : "Campanha na fila de envio",
+          pending ? { description: EXPERT_APPROVAL_NOTICE } : undefined,
+        );
+        onCreated();
+        onOpenChange(false);
+        return;
+      }
       const unresolvedCount = Number(
         (result as { unresolvedCount?: number } | null | undefined)?.unresolvedCount ?? 0,
       );
@@ -725,6 +935,18 @@ export function ChannelCampaignComposer({
       if (emailRun?.pausadaPorSaldo) {
         // PG3: the e-mail run stopped at the first send the wallet refused.
         toast.warning(campaignPausedForBalanceMessage(emailRun));
+        onCreated();
+        onOpenChange(false);
+        return;
+      }
+      if (emailRun?.interrompida) {
+        toast.warning(campaignInterruptedMessage(emailRun));
+        onCreated();
+        onOpenChange(false);
+        return;
+      }
+      if (emailRun?.continuaEmLotes) {
+        toast.success(campaignContinuesInBatchesMessage(emailRun));
         onCreated();
         onOpenChange(false);
         return;
@@ -742,7 +964,12 @@ export function ChannelCampaignComposer({
       onCreated();
       onOpenChange(false);
     },
-    onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
+    onError: (error: Error) => {
+      // Expert: the server's own message (link policy, cap, audience) stays on
+      // screen next to the other notices, not only in a toast.
+      if (isExpert) setServerError(error.message);
+      toast.error(tenantSafeChannelError(error));
+    },
   });
 
   // O X, o clique fora e o botão Cancelar passam pela mesma verificação.
@@ -768,9 +995,19 @@ export function ChannelCampaignComposer({
     let confirmedCount: number | undefined;
     if (validationIssues.length === 0 && requiresTypedConfirmation(sendableRecipients)) {
       const count = sendableRecipients;
+      const sendSummary = isExpert
+        ? expertCampaignSendLabel({ when, recipients: count, cost: expertCost, approval: false })
+        : campaignSendLabel({
+            channel,
+            when,
+            recipients: count,
+            cost,
+            smsUnitPrice: smsPrice?.unitPrice,
+            smsExempt,
+          });
       const typed = await requestTextInput({
         title: when === "schedule" ? "Confirmar agendamento em massa" : "Confirmar envio em massa",
-        description: `${campaignSendLabel({ channel, when, recipients: count, cost, smsUnitPrice: smsPrice?.unitPrice, smsExempt })}. Para confirmar, digite a quantidade de destinatários. Depois de iniciado, o envio não pode ser desfeito.`,
+        description: `${sendSummary}. Para confirmar, digite a quantidade de destinatários. Depois de iniciado, o envio não pode ser desfeito.`,
         label: `Digite ${num(count)} para confirmar`,
         placeholder: num(count),
         confirmLabel: when === "schedule" ? "Agendar" : "Enviar",
@@ -801,9 +1038,17 @@ export function ChannelCampaignComposer({
       ? `${num(externalList.duplicates)} número(s) repetido(s) na lista recebem uma única vez.`
       : null,
     !isExternalList && audience && audience.excludedTotal > 0
-      ? `${num(audience.excludedTotal)} ${audience.excludedTotal === 1 ? "jogador fica" : "jogadores ficam"} de fora por cadastro inválido, sem contato ou sem consentimento.`
+      ? isExpert
+        ? `${num(audience.excludedTotal)} ${audience.excludedTotal === 1 ? "lead fica" : "leads ficam"} de fora por cadastro inválido, sem contato ou sem consentimento.`
+        : `${num(audience.excludedTotal)} ${audience.excludedTotal === 1 ? "jogador fica" : "jogadores ficam"} de fora por cadastro inválido, sem contato ou sem consentimento.`
       : null,
   ].filter((item): item is string => Boolean(item));
+  const expertSubmitLabel = expertCampaignSendLabel({
+    when,
+    recipients: sendableRecipients,
+    cost: expertCost,
+    approval: approvalMode,
+  });
   // Same conditions under which UnresolvedRecipientsNotice renders something.
   const showSmsRecipientCheck =
     channel === "sms" &&
@@ -812,7 +1057,10 @@ export function ChannelCampaignComposer({
       smsRecipientPreview.isError ||
       (smsPreview?.unresolvedCount ?? 0) > 0);
   const hasNotices =
-    validationIssues.length > 0 || audienceWarnings.length > 0 || showSmsRecipientCheck;
+    validationIssues.length > 0 ||
+    audienceWarnings.length > 0 ||
+    showSmsRecipientCheck ||
+    Boolean(serverError);
   return (
     <Dialog
       open={open}
@@ -908,22 +1156,23 @@ export function ChannelCampaignComposer({
                     <SelectValue placeholder="Selecione um público salvo" />
                   </SelectTrigger>
                   <SelectContent>
-                    {channel === "sms" ? (
+                    {channel === "sms" && !isExpert ? (
                       <SelectItem value={EXTERNAL_LIST_ID}>
                         Lista de números · quem ainda não é jogador
                       </SelectItem>
                     ) : null}
                     {audienceOptions.map((item) => (
                       <SelectItem key={item.id} value={item.id}>
-                        {item.system
-                          ? item.id === "system:all-leads"
-                            ? `Público automático · ${item.name}`
-                            : `Nível · ${item.name}`
-                          : item.name}
+                        {audienceOptionLabel(item, isExpert)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {isExpert ? (
+                  <p className="text-meta text-muted-foreground">
+                    Só os seus leads entram no envio, mesmo nos públicos da casa.
+                  </p>
+                ) : null}
                 {audienceMutation.isPending ? (
                   <p className="text-meta text-muted-foreground" aria-live="polite">
                     Calculando o público…
@@ -1039,13 +1288,15 @@ export function ChannelCampaignComposer({
                           ))}
                         </SelectContent>
                       </Select>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setSmsTemplateDialogOpen(true)}
-                      >
-                        <Plus /> Novo template
-                      </Button>
+                      {isExpert ? null : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setSmsTemplateDialogOpen(true)}
+                        >
+                          <Plus /> Novo template
+                        </Button>
+                      )}
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -1079,27 +1330,33 @@ export function ChannelCampaignComposer({
                     <p className="text-meta text-muted-foreground">
                       {Array.from(smsContent).length} caracteres · {smsSegmentInfo.encoding} ·{" "}
                       {parts} segmento{parts === 1 ? "" : "s"} ·{" "}
-                      {smsExempt
-                        ? "casa isenta"
-                        : smsCostBrl == null
-                          ? "—"
-                          : `${brl(smsCostBrl)} por jogador`}
+                      {isExpert
+                        ? expertOptions.data
+                          ? `${brl(parts * expertOptions.data.prices.sms)} por lead`
+                          : "—"
+                        : smsExempt
+                          ? "casa isenta"
+                          : smsCostBrl == null
+                            ? "—"
+                            : `${brl(smsCostBrl)} por jogador`}
                     </p>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Domínio do encurtador</Label>
-                    <ShortenerFallbackNotice
-                      isSuccess={composerOptions.isSuccess}
-                      isError={composerOptions.isError}
-                      shortenerPending={shortenerPending}
-                      hasVerifiedDomain={shortDomains.length > 0}
-                    />
-                    <ShortDomainSelect
-                      domains={shortDomains}
-                      value={shortDomainId}
-                      onChange={setShortDomainId}
-                    />
-                  </div>
+                  {isExpert ? null : (
+                    <div className="space-y-2">
+                      <Label>Domínio do encurtador</Label>
+                      <ShortenerFallbackNotice
+                        isSuccess={composerOptions.isSuccess}
+                        isError={composerOptions.isError}
+                        shortenerPending={shortenerPending}
+                        hasVerifiedDomain={shortDomains.length > 0}
+                      />
+                      <ShortDomainSelect
+                        domains={shortDomains}
+                        value={shortDomainId}
+                        onChange={setShortDomainId}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
               {channel === "email" && (
@@ -1125,47 +1382,59 @@ export function ChannelCampaignComposer({
                           ))}
                         </SelectContent>
                       </Select>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setEmailTemplateDialogOpen(true)}
-                      >
-                        <Plus /> Novo template
-                      </Button>
+                      {isExpert ? null : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setEmailTemplateDialogOpen(true)}
+                        >
+                          <Plus /> Novo template
+                        </Button>
+                      )}
                     </div>
+                    {isExpert ? (
+                      <p className="text-meta text-muted-foreground">
+                        Templates publicados da casa. O conteúdo é copiado quando a campanha é salva
+                        e sai com o remetente padrão da casa.
+                      </p>
+                    ) : null}
                   </div>
                   <MessageVariablePicker
                     channel="email"
                     readOnly
                     label="Variáveis aceitas nos templates de e-mail"
                   />
-                  <div className="space-y-2">
-                    <Label>Remetente</Label>
-                    <EmailBlockedNotice
-                      isSuccess={composerOptions.isSuccess}
-                      isError={composerOptions.isError}
-                      hasVerifiedSender={emailSenders.length > 0}
-                    />
-                    <EmailSenderSelect
-                      senders={emailSenders}
-                      value={senderId}
-                      onChange={setSenderId}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Domínio do encurtador</Label>
-                    <ShortenerFallbackNotice
-                      isSuccess={composerOptions.isSuccess}
-                      isError={composerOptions.isError}
-                      shortenerPending={shortenerPending}
-                      hasVerifiedDomain={shortDomains.length > 0}
-                    />
-                    <ShortDomainSelect
-                      domains={shortDomains}
-                      value={shortDomainId}
-                      onChange={setShortDomainId}
-                    />
-                  </div>
+                  {isExpert ? null : (
+                    <>
+                      <div className="space-y-2">
+                        <Label>Remetente</Label>
+                        <EmailBlockedNotice
+                          isSuccess={composerOptions.isSuccess}
+                          isError={composerOptions.isError}
+                          hasVerifiedSender={emailSenders.length > 0}
+                        />
+                        <EmailSenderSelect
+                          senders={emailSenders}
+                          value={senderId}
+                          onChange={setSenderId}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Domínio do encurtador</Label>
+                        <ShortenerFallbackNotice
+                          isSuccess={composerOptions.isSuccess}
+                          isError={composerOptions.isError}
+                          shortenerPending={shortenerPending}
+                          hasVerifiedDomain={shortDomains.length > 0}
+                        />
+                        <ShortDomainSelect
+                          domains={shortDomains}
+                          value={shortDomainId}
+                          onChange={setShortDomainId}
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
               {channel === "voice" && (
@@ -1211,17 +1480,19 @@ export function ChannelCampaignComposer({
                           ))}
                         </SelectContent>
                       </Select>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          if (voiceMode === "asset") setVoiceUploadDialogOpen(true);
-                          else setVoiceScriptDialogOpen(true);
-                        }}
-                      >
-                        <Plus />
-                        {voiceMode === "asset" ? "Enviar áudio" : "Novo roteiro"}
-                      </Button>
+                      {isExpert ? null : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            if (voiceMode === "asset") setVoiceUploadDialogOpen(true);
+                            else setVoiceScriptDialogOpen(true);
+                          }}
+                        >
+                          <Plus />
+                          {voiceMode === "asset" ? "Enviar áudio" : "Novo roteiro"}
+                        </Button>
+                      )}
                     </div>
                   </div>
                   <p className="text-meta text-muted-foreground">
@@ -1281,6 +1552,20 @@ export function ChannelCampaignComposer({
                   role="status"
                   aria-live="polite"
                 >
+                  {serverError ? (
+                    <p
+                      className={cn(
+                        "flex items-start gap-2 font-medium text-danger",
+                        validationIssues.length > 0 && "mb-3 border-b border-border pb-3",
+                      )}
+                    >
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                      <span>
+                        <span className="sr-only">Erro do servidor: </span>
+                        {serverError}
+                      </span>
+                    </p>
+                  ) : null}
                   {validationIssues.length > 0 && (
                     <>
                       <p className="flex items-center gap-2 font-medium">
@@ -1344,11 +1629,33 @@ export function ChannelCampaignComposer({
                 {audience && audienceName && !isExternalList ? (
                   <p className="text-meta text-muted-foreground">
                     {audienceName} · {num(audience.total)}{" "}
-                    {audience.total === 1 ? "jogador" : "jogadores"} no público
+                    {isExpert
+                      ? audience.total === 1
+                        ? "lead"
+                        : "leads"
+                      : audience.total === 1
+                        ? "jogador"
+                        : "jogadores"}{" "}
+                    no público
                   </p>
                 ) : null}
               </div>
-              {channel === "sms" ? (
+              {isExpert ? (
+                <div id={fieldIds.cost} aria-live="polite">
+                  <p className="text-meta text-muted-foreground">Custo estimado</p>
+                  <p className="font-medium tabular-nums">
+                    {audienceMutation.isPending || expertCost == null ? "—" : brl(expertCost)}
+                  </p>
+                  <p className="mt-1 text-meta text-muted-foreground">
+                    {expertUsageData == null
+                      ? "Carregando seu teto mensal…"
+                      : expertUsageData.teto === null
+                        ? "Sem teto mensal definido."
+                        : `Restante do teto após este envio: ${brl(Math.max(0, expertRemainingAfter ?? 0))}`}
+                  </p>
+                </div>
+              ) : null}
+              {channel === "sms" && !isExpert ? (
                 <div>
                   <p className="text-meta text-muted-foreground">Custo estimado</p>
                   <p className="font-medium tabular-nums">
@@ -1366,9 +1673,23 @@ export function ChannelCampaignComposer({
                   {channel === "voice" && voiceMode === "asset"
                     ? (assets.find((item) => item.id === voiceSourceId)?.name ??
                       "Selecione um áudio")
-                    : previewContent || "Selecione o conteúdo para visualizar"}
+                    : isExpert && channel === "email" && activeEmailTemplate
+                      ? `${activeEmailTemplate.nome ?? activeEmailTemplate.name ?? ""}${
+                          activeEmailTemplate.subject
+                            ? ` · Assunto: ${activeEmailTemplate.subject}`
+                            : ""
+                        }`
+                      : previewContent || "Selecione o conteúdo para visualizar"}
                 </p>
               </div>
+              {approvalMode ? (
+                <p
+                  id={fieldIds.approval}
+                  className="rounded-lg border border-info/30 bg-info/10 p-2.5 text-meta text-info"
+                >
+                  {EXPERT_APPROVAL_NOTICE}
+                </p>
+              ) : null}
               <p className="flex items-center gap-2 text-meta text-muted-foreground">
                 <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden="true" />
                 Consentimentos são verificados antes do envio.
@@ -1391,21 +1712,32 @@ export function ChannelCampaignComposer({
               draftState === "dirty" ||
               draftState === "saving" ||
               draftState === "error" ||
-              (channel === "email" && emailBlocked)
+              (channel === "email" && emailBlocked) ||
+              Boolean(expertCapBlock)
             }
             onClick={() => void confirmAndSubmit()}
-            aria-describedby={validationIssues.length ? fieldIds.validation : undefined}
+            aria-describedby={
+              [
+                validationIssues.length ? fieldIds.validation : null,
+                approvalMode ? fieldIds.approval : null,
+                isExpert ? fieldIds.cost : null,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
           >
             {submit.isPending
               ? "Processando..."
-              : campaignSendLabel({
-                  channel,
-                  when,
-                  recipients: sendableRecipients,
-                  cost,
-                  smsUnitPrice: smsPrice?.unitPrice,
-                  smsExempt,
-                })}
+              : isExpert
+                ? expertSubmitLabel
+                : campaignSendLabel({
+                    channel,
+                    when,
+                    recipients: sendableRecipients,
+                    cost,
+                    smsUnitPrice: smsPrice?.unitPrice,
+                    smsExempt,
+                  })}
           </Button>
         </DialogFooter>
       </DialogContent>

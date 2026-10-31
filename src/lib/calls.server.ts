@@ -9,6 +9,7 @@ import { logCallHistoryInsertError } from "./voice-history-log";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { assertTenantNotDemoForSend, listDemoTenantIds } from "./tenant-access.server";
 import { isDemoBlockedError } from "./demo-tenant";
+import { ExpertVoiceGate, loadExpertQueueOwners } from "./expert-voice.server";
 
 // ============================================================
 // Tipos
@@ -299,7 +300,26 @@ export const VOICE_INSUFFICIENT_BALANCE_MESSAGE = "Saldo insuficiente";
 /** How far a house's due items move when its wallet refuses a call. */
 const VOICE_NO_BALANCE_RETRY_MS = 15 * 60_000;
 
-export type VoiceDispatchOutcome = "ok" | "insufficient_balance" | "transient" | "failed";
+/**
+ * In-progress status of a call_queue row between the dispatcher's claim and
+ * the provider answer (then waiting_provider / failed). A crash in between
+ * leaves it here; the observability "recover stuck" action moves old ones to
+ * queued, never back to audio_ready, so a claimed row is never dialed twice.
+ */
+export const VOICE_QUEUE_CLAIMED_STATUS = "calling";
+
+/** Wallet delivery key of a queue item: reference `voice:<queue id>[:gen]`. */
+export function voiceQueueBillingKey(callQueueId: string): string {
+  return callQueueId;
+}
+
+export type VoiceDispatchOutcome =
+  | "ok"
+  | "insufficient_balance"
+  | "expert_cap"
+  | "expert_inactive"
+  | "transient"
+  | "failed";
 
 /**
  * How a queued call's dispatch result is handled. The wallet refusal
@@ -317,6 +337,8 @@ export function classifyVoiceDispatchResult(result: {
 }): VoiceDispatchOutcome {
   if (result.ok) return "ok";
   if (result.errorKind === "insufficient_balance") return "insufficient_balance";
+  if (result.errorKind === "expert_cap") return "expert_cap";
+  if (result.errorKind === "expert_inactive") return "expert_inactive";
   const body = (result.body ?? {}) as { non_json?: boolean };
   if (
     result.status === 0 ||
@@ -361,9 +383,43 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
   // tick instead of each being refused in turn.
   const noBalanceTenants = new Set<string>();
   let skippedNoBalance = 0;
+  // Área do Expert: owner of each item (re-scoped per tick; cap pauses only him).
+  const expertOwners = await loadExpertQueueOwners((queue ?? []).map((q) => q.id));
+  const expertGate = new ExpertVoiceGate();
+  let expertCapped = 0;
+  let notClaimed = 0;
   for (const item of queue ?? []) {
     if (noBalanceTenants.has(item.tenant_id)) {
       skippedNoBalance++;
+      continue;
+    }
+    const expertOwner = expertOwners.get(item.id);
+    if (expertOwner) {
+      // Área do Expert: scope/active check before claiming; never dials a
+      // deactivated expert or a lead outside his current scope.
+      const admission = await expertGate.admit(item, expertOwner);
+      if (admission !== "dial") {
+        deferred++;
+        continue;
+      }
+    }
+    // Atomic claim: only the worker whose conditional update moves the row
+    // out of audio_ready dials it. The cron and "Disparar agora"
+    // (runVoiceQueueDispatcher(1, id)) can select the same row; the loser
+    // matches no row and skips it. Every path below that does not dial puts
+    // the row back (audio_ready / cancelled / failed) explicitly.
+    const { data: claimedRows, error: claimError } = await supabaseAdmin
+      .from("call_queue")
+      .update({ status: VOICE_QUEUE_CLAIMED_STATUS } as never)
+      .eq("id", item.id)
+      .eq("status", "audio_ready")
+      .select("id");
+    if (claimError) {
+      console.error("[voice-queue] claim failed", { id: item.id, error: claimError.message });
+      continue;
+    }
+    if (!claimedRows || claimedRows.length === 0) {
+      notClaimed++;
       continue;
     }
     try {
@@ -443,13 +499,46 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         content = { type: "audio", audioUrl };
       }
 
-      // No idempotency key: each dispatch attempt is its own call, so the
-      // wallet reference is `voice:<fresh uuid>`.
+      // Billing key per queue item: the wallet reference is `voice:<queue id>`
+      // (a refunded attempt moves to `:1`, `:2`...), so a duplicate dispatch
+      // of the same item can never reserve twice. Each dial keeps its own
+      // fresh correlation (no idempotencyKey): a manually re-queued item that
+      // failed before must dial again, not match its old call_history row.
       const result = await callInfobipVoice(to, content, {
         tenantId: item.tenant_id,
         maxSeconds,
+        ...(expertOwner ? { expertId: expertOwner.expertId } : {}),
+        billingKey: voiceQueueBillingKey(item.id),
       });
       const outcome = classifyVoiceDispatchResult(result);
+      if (expertOwner && (outcome === "expert_cap" || outcome === "expert_inactive")) {
+        // Never dialed, nothing reserved; only this expert's items stop.
+        expertCapped++;
+        await (outcome === "expert_cap"
+          ? expertGate.onCapReached(item.tenant_id, expertOwner.expertId)
+          : expertGate.cancelExpertItems(
+              item.tenant_id,
+              expertOwner.expertId,
+              "Expert desativado",
+              "expert_inactive",
+            ));
+        // The claimed row (status 'calling') follows the expert's other items.
+        const { error: releaseError } = await supabaseAdmin
+          .from("call_queue")
+          .update(
+            (outcome === "expert_cap"
+              ? { status: "paused", provider_status: "teto_expert" }
+              : { status: "cancelled", provider_status: "expert_inactive" }) as never,
+          )
+          .eq("id", item.id)
+          .eq("status", VOICE_QUEUE_CLAIMED_STATUS);
+        if (releaseError)
+          console.error("[voice-queue] could not release a claimed expert item", {
+            id: item.id,
+            error: releaseError.message,
+          });
+        continue;
+      }
       if (outcome === "insufficient_balance") {
         // No call was placed and nothing was reserved. Never failed for lack
         // of balance and no attempt consumed: every due audio_ready item of
@@ -459,6 +548,16 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         // (Ruling final-2). Dialed on a later tick once there is balance.
         insufficientBalance++;
         noBalanceTenants.add(item.tenant_id);
+        // This item was claimed: back to audio_ready with the others.
+        await supabaseAdmin
+          .from("call_queue")
+          .update({
+            status: "audio_ready",
+            provider_status: "saldo_insuficiente",
+            scheduled_at: new Date(Date.now() + VOICE_NO_BALANCE_RETRY_MS).toISOString(),
+          } as never)
+          .eq("id", item.id)
+          .eq("status", VOICE_QUEUE_CLAIMED_STATUS);
         const { error: pushError } = await supabaseAdmin
           .from("call_queue")
           .update({
@@ -528,7 +627,15 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
     } catch (cause) {
       // A demo block is not a dispatch failure and is never recorded: no
       // call_history row, and the item is not marked failed/sent.
-      if (isDemoBlockedError(cause)) throw cause;
+      if (isDemoBlockedError(cause)) {
+        // Release the claim untouched (still not dialed, not failed).
+        await supabaseAdmin
+          .from("call_queue")
+          .update({ status: "audio_ready" } as never)
+          .eq("id", item.id)
+          .eq("status", VOICE_QUEUE_CLAIMED_STATUS);
+        throw cause;
+      }
       failed++;
       await supabaseAdmin
         .from("call_queue")
@@ -549,5 +656,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
     failed,
     insufficientBalance,
     skippedNoBalance,
+    expertCapped,
+    notClaimed,
   };
 }

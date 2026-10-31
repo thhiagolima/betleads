@@ -13,3 +13,8 @@ export const EXPERT_CLICK_WINDOW_QUERY_KEY = ["expert-click-window"];
 // `/rendimento/equipe/$expertId` (detalhe) têm suas próprias query keys em
 // `@/components/rendimento/team-ranking` e
 // `@/components/rendimento/credit-statement`.
+// Campanhas dos experts no lado do admin (Área do Expert §8): fila de
+// aprovação (por expert e global), detalhe para revisar e uso do mês × teto.
+export const EXPERT_CAMPAIGNS_ADMIN_QUERY_KEY = ["expert-campaigns-admin"];
+export const EXPERT_CAMPAIGN_DETAIL_ADMIN_QUERY_KEY = ["expert-campaign-detail-admin"];
+export const EXPERT_USAGE_ADMIN_QUERY_KEY = ["expert-usage-admin"];

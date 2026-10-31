@@ -13,6 +13,14 @@ type Result = {
 
 export type FakeDb = ReturnType<typeof createFakeDb>;
 
+/** `col` or `col->>key` (PostgREST JSON text path) of a row. */
+function jsonPath(row: Row, col: string): unknown {
+  if (!col.includes("->>")) return row[col];
+  const [base, key] = col.split("->>");
+  const v = row[base];
+  return v && typeof v === "object" ? (v as Row)[key] : undefined;
+}
+
 function likeToRegex(pattern: string) {
   const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
   return new RegExp(`^${escaped}$`);
@@ -144,7 +152,8 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
         op = "delete";
         return builder;
       },
-      eq: (col: string, value: unknown) => (filters.push((r) => r[col] === value), builder),
+      eq: (col: string, value: unknown) =>
+        (filters.push((r) => jsonPath(r, col) === value), builder),
       neq: (col: string, value: unknown) => (filters.push((r) => r[col] !== value), builder),
       is: (col: string, value: unknown) =>
         (filters.push((r) => (value === null ? r[col] == null : r[col] === value)), builder),
@@ -157,6 +166,29 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
         } else if (operator === "is" && value === null) {
           filters.push((r) => r[col] !== null && r[col] !== undefined);
         }
+        return builder;
+      },
+      // PostgREST `or("a.is.null,b.eq.x,c->>k.neq.y")`: any term matches
+      // (SQL semantics: eq/neq never match a null).
+      or: (expr: string) => {
+        const terms = expr.split(",").map((term) => {
+          const m = /^(.+?)\.(is|eq|neq)\.(.*)$/.exec(term.trim());
+          if (!m) throw new Error(`fake or(): unsupported term ${term}`);
+          const [, field, op, raw] = m;
+          const read = (r: Row) => {
+            const [col, key] = field.split("->>");
+            const v = r[col];
+            if (key === undefined) return v;
+            return v && typeof v === "object" ? (v as Row)[key] : undefined;
+          };
+          return (r: Row) => {
+            const v = read(r);
+            if (op === "is") return raw === "null" ? v == null : String(v) === raw;
+            if (v == null) return false;
+            return op === "eq" ? String(v) === raw : String(v) !== raw;
+          };
+        });
+        filters.push((r) => terms.some((t) => t(r)));
         return builder;
       },
       like: (col: string, pattern: string) => {

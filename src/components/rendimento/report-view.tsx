@@ -4,7 +4,7 @@
 // Cabeçalho (nome, tipo, casa, período, CSV do extrato, "Atualizado às"),
 // bloco 1 (cartões), 2 (funil), 3 (gráfico), 4 (top leads), 5 (extrato) e 6
 // (carteira), mais o histórico do lead num painel lateral.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Download, Pencil, Power } from "lucide-react";
@@ -158,9 +158,10 @@ function MessageCard({ children }: { children: string }) {
 
 /**
  * Relatório de rendimento. Sem `expertId`, é o do próprio usuário (expert ou
- * perfil de equipe vinculado); com `expertId`, é o modo admin.
+ * perfil de equipe vinculado); com `expertId`, é o modo admin. `tabs`: as
+ * abas "Rendimento" | "Campanhas" do admin, logo abaixo do cabeçalho.
  */
-export function ReportView({ expertId }: { expertId?: string }) {
+export function ReportView({ expertId, tabs }: { expertId?: string; tabs?: ReactNode }) {
   const [period, setPeriod] = useState<PeriodKey>(DEFAULT_REPORT_PERIOD);
   const [openLead, setOpenLead] = useState<LeadRef | null>(null);
   const { data: switcher, active } = useActiveTenant();
@@ -177,6 +178,7 @@ export function ReportView({ expertId }: { expertId?: string }) {
     return (
       <Page>
         <PageHeader />
+        {tabs}
         <MessageCard>{actionErrorMessage(reportQuery.error)}</MessageCard>
       </Page>
     );
@@ -209,6 +211,7 @@ export function ReportView({ expertId }: { expertId?: string }) {
           </>
         }
       />
+      {tabs}
 
       {!report ? (
         <MessageCard>Carregando…</MessageCard>

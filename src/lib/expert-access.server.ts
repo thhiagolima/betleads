@@ -21,6 +21,10 @@ export type ExpertContext = {
   nome: string;
   tipo: ExpertTipo;
   affiliateIds: string[];
+  /** Área do Expert §8: 'aprovacao' = campanhas ficam pendentes até o admin aprovar. */
+  envioModo: "livre" | "aprovacao";
+  /** Teto mensal em R$ (todos os canais); null = sem teto; 0 = bloqueia tudo. */
+  tetoMensal: number | null;
 };
 
 export const EXPERT_ACCESS_NOT_FOUND = "Acesso de expert não encontrado ou desativado.";
@@ -37,6 +41,8 @@ type ExpertRow = {
   tenant_id: string;
   nome: string;
   tipo: ExpertTipo;
+  envio_modo?: string | null;
+  teto_mensal?: number | string | null;
 };
 
 /**
@@ -68,7 +74,7 @@ export async function resolveExpertContext(
 
   const { data: expertRows, error: expertErr } = await (supabaseAdmin as any)
     .from("experts")
-    .select("id,tenant_id,nome,tipo")
+    .select("id,tenant_id,nome,tipo,envio_modo,teto_mensal")
     .eq("user_id", userId)
     .eq("ativo", true)
     .in("tenant_id", expertTenantIds);
@@ -110,6 +116,13 @@ export async function resolveExpertContext(
     affiliateIds: ((affiliateRows ?? []) as Array<{ affiliate_id: string }>).map(
       (r) => r.affiliate_id,
     ),
+    envioModo: chosen.envio_modo === "aprovacao" ? "aprovacao" : "livre",
+    tetoMensal:
+      chosen.teto_mensal === null || chosen.teto_mensal === undefined || chosen.teto_mensal === ""
+        ? null
+        : Number.isFinite(Number(chosen.teto_mensal))
+          ? Number(chosen.teto_mensal)
+          : null,
   };
 }
 

@@ -118,14 +118,25 @@ export async function loadSelectionPlayerIds(
   db: SelectionDb,
   tenantId: string,
   audienceId: string,
+  /**
+   * Área do Expert: which owners are allowed. `undefined` keeps the house
+   * behaviour (any audience of the house). For an expert: his own audiences,
+   * plus the house's when `allowHouse` (expert with total access).
+   */
+  owner?: { expertId: string; allowHouse: boolean },
 ): Promise<string[]> {
   if (!tenantId) throw new Error("Casa não identificada.");
-  const { data, error } = await db
+  let query = db
     .from("sms_audiences")
     .select("criteria")
     .eq("id", audienceId)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
+    .eq("tenant_id", tenantId);
+  if (owner) {
+    query = owner.allowHouse
+      ? query.or(`expert_id.is.null,expert_id.eq.${owner.expertId}`)
+      : query.eq("expert_id", owner.expertId);
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) throw new Error(error.message ?? "Falha ao ler o público de seleção.");
   if (!data) throw new PermanentAudienceError(SELECTION_AUDIENCE_MISSING);
   const stored = normalizeOrPermanent(
@@ -161,11 +172,21 @@ const DEFAULT_SETTINGS: ResolvedSmsAudience["settings"] = {
 
 const phoneDigits = (value: string | null | undefined) => (value ?? "").replace(/\D/g, "");
 
+/**
+ * Escopo de um expert (Área do Expert §8), montado só pelo servidor:
+ * `affiliateIds` null = acesso total à casa; lista = expert restrito (só
+ * jogadores com esses affiliate_id, comparados sem espaços; lista vazia =
+ * ninguém). Públicos de seleção valem se forem do próprio expert (ou da casa,
+ * para o de acesso total).
+ */
+export type ExpertAudienceScope = { expertId: string; affiliateIds: string[] | null };
+
 /** Público por regras: o RPC de sempre. Nunca recebe marcador nem lista de seleção. */
 async function rpcAudience(
   db: SelectionDb,
   tenantId: string,
   criteria: SmsAudienceCriteria,
+  affiliateIds?: string[] | null,
 ): Promise<ResolvedSmsAudience> {
   if (
     isSelectionAudience(criteria) ||
@@ -174,12 +195,18 @@ async function rpcAudience(
     criteria.selectionCount !== undefined
   )
     throw new Error("Público de seleção não pode ser calculado por regras.");
+  // `affiliateIds` nunca vem do navegador (o normalizador descarta a chave):
+  // só o escopo do expert restrito, montado no servidor, o adiciona.
   const { data, error } = await db.rpc("resolve_sms_audience_v2", {
     _tenant: tenantId,
-    _criteria: criteria,
+    _criteria: affiliateIds ? { ...criteria, affiliateIds } : criteria,
   });
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Sem acesso aos jogadores desta conta.");
+  // Um RPC anterior à migration 20261126100000 ignora o escopo e devolveria a
+  // casa inteira ao expert restrito. Falha fechado.
+  if (affiliateIds && (data as { affiliateScoped?: unknown }).affiliateScoped !== true)
+    throw new Error("O público do expert ainda não está disponível nesta conta.");
   // Leads mortos: um RPC anterior à migration 20261117100000 ignora o critério
   // e devolveria a casa inteira. Falha fechado em vez de enviar para todos.
   if (criteria.deadLeads && (data as { deadLeadsFilter?: unknown }).deadLeadsFilter !== true)
@@ -195,8 +222,19 @@ export async function resolvePlayerIdsAudience(
   db: SelectionDb,
   tenantId: string,
   playerIds: readonly string[],
+  /** Expert restrito: só jogadores com estes affiliate_id (sem espaços). */
+  affiliateIds?: string[] | null,
 ): Promise<ResolvedSmsAudience> {
-  const players = await loadTenantPlayersByIds<SelectedPlayer>(db, tenantId, playerIds);
+  const loaded = await loadTenantPlayersByIds<SelectedPlayer & { affiliate_id?: string | null }>(
+    db,
+    tenantId,
+    playerIds,
+    affiliateIds ? "id,telefone,email,affiliate_id" : "id,telefone,email",
+  );
+  const allowed = affiliateIds ? new Set(affiliateIds.map((id) => id.trim()).filter(Boolean)) : null;
+  const players = allowed
+    ? loaded.filter((p) => allowed.has((p.affiliate_id ?? "").trim()))
+    : loaded;
   const phones = Array.from(
     new Set(players.map((p) => phoneDigits(p.telefone)).filter((phone) => phone.length >= 10)),
   ).sort();
@@ -221,12 +259,86 @@ export async function resolveAudienceForTenant(
   db: SelectionDb,
   tenantId: string,
   rawCriteria: unknown,
+  /** Área do Expert: escopo do dono, sempre recarregado do banco pelo chamador. */
+  expertScope?: ExpertAudienceScope,
 ): Promise<ResolvedSmsAudience> {
   const criteria = normalizeOrPermanent(rawCriteria, "O público desta campanha está inválido");
-  if (!isSelectionAudience(criteria)) return rpcAudience(db, tenantId, criteria);
+  const affiliateIds = expertScope ? expertScope.affiliateIds : null;
+  if (!isSelectionAudience(criteria)) {
+    // Restrito sem afiliado nenhum: ninguém, sem consultar.
+    if (affiliateIds && affiliateIds.length === 0) return resolvePlayerIdsAudience(db, tenantId, []);
+    return rpcAudience(db, tenantId, criteria, affiliateIds);
+  }
   const playerIds =
-    criteria.playerIds ?? (await loadSelectionPlayerIds(db, tenantId, criteria.audienceId!));
-  return resolvePlayerIdsAudience(db, tenantId, playerIds);
+    criteria.playerIds ??
+    (await loadSelectionPlayerIds(
+      db,
+      tenantId,
+      criteria.audienceId!,
+      expertScope
+        ? { expertId: expertScope.expertId, allowHouse: expertScope.affiliateIds === null }
+        : undefined,
+    ));
+  return resolvePlayerIdsAudience(db, tenantId, playerIds, affiliateIds);
+}
+
+/**
+ * Destinatários de um público no envio de uma campanha agendada. Seleção de
+ * jogadores: um alvo por telefone (só dígitos, 10+), na ordem da seleção,
+ * com o id do jogador escolhido — com telefone compartilhado, fica o
+ * primeiro jogador selecionado, nunca outro jogador que só divide o número.
+ * Regras: os telefones do RPC, sem jogador (resolvidos depois pelo telefone).
+ */
+export async function resolveAudienceTargetsForTenant(
+  db: SelectionDb,
+  tenantId: string,
+  rawCriteria: unknown,
+  /** Área do Expert: escopo do dono, recarregado pelo worker a cada tick. */
+  expertScope?: ExpertAudienceScope,
+): Promise<Array<{ phone: string; playerId: string | null }>> {
+  const criteria = normalizeOrPermanent(rawCriteria, "O público desta campanha está inválido");
+  const affiliateIds = expertScope ? expertScope.affiliateIds : null;
+  if (!isSelectionAudience(criteria)) {
+    // Restrito sem afiliado nenhum: ninguém, sem consultar.
+    if (affiliateIds && affiliateIds.length === 0) return [];
+    const data = await rpcAudience(db, tenantId, criteria, affiliateIds);
+    const phones = Array.isArray(data.phones) ? data.phones : [];
+    return phones
+      .filter((p): p is string => typeof p === "string")
+      .map((phone) => ({ phone, playerId: null }));
+  }
+  const playerIds =
+    criteria.playerIds ??
+    (await loadSelectionPlayerIds(
+      db,
+      tenantId,
+      criteria.audienceId!,
+      expertScope
+        ? { expertId: expertScope.expertId, allowHouse: expertScope.affiliateIds === null }
+        : undefined,
+    ));
+  const loaded = await loadTenantPlayersByIds<SelectedPlayer & { affiliate_id?: string | null }>(
+    db,
+    tenantId,
+    playerIds,
+    affiliateIds ? "id,telefone,email,affiliate_id" : "id,telefone,email",
+  );
+  const allowed = affiliateIds ? new Set(affiliateIds.map((id) => id.trim()).filter(Boolean)) : null;
+  const players = allowed
+    ? loaded.filter((p) => allowed.has((p.affiliate_id ?? "").trim()))
+    : loaded;
+  const byId = new Map(players.map((p) => [p.id, p]));
+  const seenPhones = new Set<string>();
+  const targets: Array<{ phone: string; playerId: string | null }> = [];
+  for (const id of new Set(playerIds)) {
+    const player = byId.get(id);
+    if (!player) continue;
+    const phone = phoneDigits(player.telefone);
+    if (phone.length < 10 || seenPhones.has(phone)) continue;
+    seenPhones.add(phone);
+    targets.push({ phone, playerId: player.id });
+  }
+  return targets;
 }
 
 /** "Seleção de Jogadores · dd/mm hh:mm" no horário de Brasília. */

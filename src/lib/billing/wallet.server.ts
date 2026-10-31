@@ -29,11 +29,36 @@ export type ReserveUsageArgs = {
   referenceType: string;
   referenceId: string;
   idempotencyKey: string;
+  /**
+   * Área do Expert: the send belongs to this expert's campaign. The
+   * reservation goes through `expert_wallet_reserve`, which also checks and
+   * counts the expert's monthly cap in the same transaction.
+   */
+  expertId?: string | null;
 };
+
+/** Refusal of an expert reservation (never the house's balance). */
+export type ExpertWalletRefusal = "expert_cap" | "expert_inactive";
+
+/** Reason text of a reservation refused because the expert hit the monthly cap. */
+export const EXPERT_CAP_REACHED_MESSAGE = "Teto mensal do expert atingido";
+/** Reason text of a reservation refused because the expert was deactivated. */
+export const EXPERT_INACTIVE_MESSAGE = "Expert desativado";
 
 export type ReserveUsageResult =
   | { ok: true; idempotent: boolean; exempt: boolean; amount: number; balance: number }
-  | { ok: false; error: "Saldo insuficiente" };
+  | { ok: false; error: "Saldo insuficiente" }
+  | { ok: false; error: string; refusal: ExpertWalletRefusal };
+
+/** True for an expert refusal (cap or deactivated), by kind or reason text. */
+export function isExpertRefusal(value: unknown): value is ExpertWalletRefusal | string {
+  return (
+    value === "expert_cap" ||
+    value === "expert_inactive" ||
+    value === EXPERT_CAP_REACHED_MESSAGE ||
+    value === EXPERT_INACTIVE_MESSAGE
+  );
+}
 
 export type RefundUsageArgs = {
   tenantId: string;
@@ -54,18 +79,27 @@ export async function reserveUsage(
   client: unknown,
   args: ReserveUsageArgs,
 ): Promise<ReserveUsageResult> {
-  const { data, error } = await looseDb(client).rpc("wallet_reserve", {
+  const rpcArgs = {
     _tenant: args.tenantId,
     _item: args.item,
     _units: args.units,
     _reference_type: args.referenceType,
     _reference_id: args.referenceId,
     _idempotency_key: args.idempotencyKey,
-  });
+  };
+  const { data, error } = args.expertId
+    ? await looseDb(client).rpc("expert_wallet_reserve", { _expert: args.expertId, ...rpcArgs })
+    : await looseDb(client).rpc("wallet_reserve", rpcArgs);
   if (error) {
     const message = String(error.message ?? "");
     if (message.includes("insufficient_balance")) {
       return { ok: false, error: "Saldo insuficiente" };
+    }
+    if (args.expertId && message.includes("expert_cap_reached")) {
+      return { ok: false, error: EXPERT_CAP_REACHED_MESSAGE, refusal: "expert_cap" };
+    }
+    if (args.expertId && message.includes("expert_inactive")) {
+      return { ok: false, error: EXPERT_INACTIVE_MESSAGE, refusal: "expert_inactive" };
     }
     throw new Error(message);
   }
@@ -186,6 +220,8 @@ export type ReserveForDeliveryArgs = {
   deliveryKey: string | null | undefined;
   units: number;
   referenceType: string;
+  /** Expert campaign send: also checks/counts the expert's monthly cap. */
+  expertId?: string | null;
 };
 
 export type ReserveForDeliveryResult =
@@ -193,11 +229,26 @@ export type ReserveForDeliveryResult =
   // `referenceId` is included even on failure (not in the brief's literal
   // shape) because existing SMS callers log it alongside the failure; see
   // the task report for this decision.
-  | { ok: false; referenceId: string; reason: string; balance?: number };
+  | {
+      ok: false;
+      referenceId: string;
+      reason: string;
+      balance?: number;
+      /** Set only when an expert reservation was refused (cap / deactivated). */
+      refusal?: ExpertWalletRefusal;
+    };
 
 async function reserveOnce(
   client: unknown,
-  args: { tenantId: string; item: ReserveUsageArgs["item"]; prefix: string; referenceId: string; units: number; referenceType: string },
+  args: {
+    tenantId: string;
+    item: ReserveUsageArgs["item"];
+    prefix: string;
+    referenceId: string;
+    units: number;
+    referenceType: string;
+    expertId?: string | null;
+  },
 ): Promise<ReserveForDeliveryResult & { idempotent?: boolean }> {
   const reservation = await reserveUsage(client, {
     tenantId: args.tenantId,
@@ -206,9 +257,15 @@ async function reserveOnce(
     referenceType: args.referenceType,
     referenceId: args.referenceId,
     idempotencyKey: `${args.prefix}-reserve:${args.referenceId}`,
+    ...(args.expertId ? { expertId: args.expertId } : {}),
   });
   if (!reservation.ok) {
-    return { ok: false, referenceId: args.referenceId, reason: reservation.error };
+    return {
+      ok: false,
+      referenceId: args.referenceId,
+      reason: reservation.error,
+      ...("refusal" in reservation ? { refusal: reservation.refusal } : {}),
+    };
   }
   return {
     ok: true,
@@ -231,7 +288,7 @@ export async function reserveForDelivery(
   client: unknown,
   args: ReserveForDeliveryArgs,
 ): Promise<ReserveForDeliveryResult> {
-  const { tenantId, item, prefix, deliveryKey, units, referenceType } = args;
+  const { tenantId, item, prefix, deliveryKey, units, referenceType, expertId } = args;
   if (!deliveryKey) {
     const referenceId = crypto.randomUUID();
     const { idempotent, ...result } = await reserveOnce(client, {
@@ -241,6 +298,7 @@ export async function reserveForDelivery(
       referenceId,
       units,
       referenceType,
+      expertId,
     });
     return result;
   }
@@ -253,6 +311,7 @@ export async function reserveForDelivery(
       referenceId,
       units,
       referenceType,
+      expertId,
     });
     if (!result.ok) return result;
     if (!idempotent) return result;

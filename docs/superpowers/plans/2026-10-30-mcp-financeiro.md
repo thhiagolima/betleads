@@ -19,7 +19,7 @@
 - Limits (constants in `src/lib/mcp/config.server.ts`): access token 3600 s; refresh token 30 days; auth code 10 min; preview code 10 min, single use; 31 day entries per call; 60 calls/min per connection; 30 confirmations/hour per user.
 - Flag `MCP_ENABLED` (exactly `"true"` turns it on, default off): off → every MCP/OAuth/well-known route returns 404 and the UI hides the feature. Add `MCP_ENABLED=false` to `.env.example`.
 - New tables: RLS enabled, `revoke all ... from anon, authenticated`, only service_role.
-- Migration file: `supabase/migrations/20261121100000_mcp_financeiro.sql` (next after `20261120100000`).
+- Migration file: `supabase/migrations/20261128100000_mcp_financeiro.sql` (next after `20261120100000`).
 - Out of scope: rates, viewers, billing actions, Pix, wallet/invoice reads, non-Claude clients.
 - `npm run build` must pass before merge (catches `*.server` leaks into the client bundle).
 
@@ -36,7 +36,7 @@
 ## File Structure
 
 ```
-supabase/migrations/20261121100000_mcp_financeiro.sql   tables + RLS
+supabase/migrations/20261128100000_mcp_financeiro.sql   tables + RLS
 src/lib/mcp/config.server.ts         flag + constants
 src/lib/mcp/crypto.server.ts         random tokens, sha256, PKCE
 src/lib/mcp/access.server.ts         level lookup, bearer → identity, connections
@@ -65,7 +65,7 @@ Modified: `src/lib/finance.functions.ts` (ctx `auditMetadata`, export schemas), 
 ### Task 1: Migration — MCP tables
 
 **Files:**
-- Create: `supabase/migrations/20261121100000_mcp_financeiro.sql`
+- Create: `supabase/migrations/20261128100000_mcp_financeiro.sql`
 - Test: `src/lib/mcp/mcp-schema.db.test.ts`
 
 **Interfaces — Produces (tables, all `public.`):**

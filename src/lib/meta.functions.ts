@@ -2,7 +2,18 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { resolveMetaApiVersion } from "@/lib/meta-api-version";
+import { brtHour } from "@/lib/home-dashboard";
+import {
+  MetaApiError,
+  debugMetaToken,
+  isMetaRateLimitCode,
+  isMetaReportNotReady,
+  loadMetaInsightsAsync,
+  metaGet,
+  metaGetAllPages,
+  type MetaTokenInfo,
+  type MetaUsage,
+} from "@/lib/meta-graph.server";
 import {
   INSIGHT_FIELDS,
   catalogRow,
@@ -57,10 +68,39 @@ const TICK_BUDGET_MS = 40_000;
 /** Tamanho da página nas leituras de acessos (o limite do PostgREST). */
 const ACCESS_PAGE_SIZE = 1000;
 /**
- * Nova tentativa depois de um rate limit da Meta: 15 min × 2^(tentativa-1)
- * (15, 30, 60 min), em vez dos 2^n min dos demais erros de leitura.
+ * Espera depois de um rate limit da Meta (base de 15 min, dobrando). Nas 3 primeiras
+ * vezes de um job (MB2-01) a espera é 15 min × 2^rate_limited_count (ou o tempo que a
+ * Meta pede, se maior), limitada a 60 min, mais 0–20 % de folga aleatória, sem gastar
+ * tentativa; depois, 15 min × 2^(tentativa-1) pela regra normal de tentativas. O
+ * teto existe porque o job estacionado em `retry` mantém o run ativo, e run ativo
+ * impede o agendado da casa: sem ele uma casa ficaria horas sem sincronizar.
  */
 const RATE_LIMIT_BACKOFF_MS = 15 * 60_000;
+/** Quantas vezes um job pode voltar para a fila por rate limit sem gastar tentativa. */
+const RATE_LIMIT_PARK_MAX = 3;
+/** Teto da espera de cada volta por rate limit (antes da folga). */
+const RATE_LIMIT_PARK_MAX_DELAY_MS = 60 * 60_000;
+/** Folga aleatória máxima somada à espera do rate limit (fração da espera). */
+const RATE_LIMIT_JITTER = 0.2;
+/**
+ * Uso da cota da Meta (`x-business-use-case-usage` e afins) a partir do qual o tick
+ * termina o job em andamento e devolve os demais para a fila (MB2-01).
+ */
+const USAGE_RELEASE_PCT = 90;
+/** Blocos com mais dias que isto são lidos pelo relatório assíncrono (MB2-07). */
+const ASYNC_INSIGHTS_MIN_DAYS = 7;
+/** MB2-03: a chave é conferida (`debug_token`) uma vez por dia; em erro, a cada 6 h. */
+const HEALTH_STALE_MS = 24 * 60 * 60 * 1000;
+const HEALTH_ERROR_STALE_MS = 6 * 60 * 60 * 1000;
+/** Quantas chaves a checagem de saúde confere por tick. */
+const HEALTH_PER_TICK = 10;
+/** MB2-06: o agendado de 28 dias roda entre 3 h e 5 h (Brasília), uma vez por dia. */
+const DAILY_SYNC_DAYS = 28;
+const DAILY_SYNC_HOURS = new Set([3, 4, 5]);
+const DAILY_SYNC_SPACING_MS = 20 * 60 * 60 * 1000;
+/** Fora disso, um agendado de 3 dias a cada hora (55 min, para não escorregar). */
+const HOURLY_SYNC_DAYS = 3;
+const HOURLY_SYNC_SPACING_MS = 55 * 60_000;
 
 type MetaAccountForSync = {
   id: string;
@@ -100,6 +140,11 @@ const EMPTY_DISCOVERY_MESSAGE =
   "A Meta não devolveu nenhuma conta para esta chave. Teste o acesso.";
 const APP_ACCESS_TIER_MESSAGE =
   "O app da Meta não tem o nível de acesso necessário (Standard Access).";
+const INVALID_TOKEN_MESSAGE = "A chave de acesso é inválida ou expirou.";
+const NOT_SYSTEM_USER_MESSAGE =
+  "Use a chave de um Usuário do Sistema: chaves de usuário comum expiram em até 60 dias.";
+const OTHER_APP_MESSAGE = "A chave foi gerada por outro app da Meta.";
+const TOKEN_REVOKED_MESSAGE = "A chave foi revogada ou expirou. Gere uma nova no Business Manager.";
 
 /**
  * Põe a conexão em erro. Nunca ressuscita uma chave desconectada (`disabled`): o
@@ -140,57 +185,9 @@ type MetaPermission = { permission: string; status: string };
 type MetaApp = { id: string; name?: string };
 type MetaUser = { id: string; name?: string };
 
-/**
- * Erro devolvido pela Graph API, com o código da Meta e o caminho chamado (sem a
- * versão). O worker usa os dois para separar o erro da chave do erro de acesso a
- * uma conta (`metaErrorLevel`). A tabela completa de retentáveis é da MB2.
- */
-export class MetaApiError extends Error {
-  readonly code: number | null;
-  readonly subcode: number | null;
-  readonly status: number;
-  readonly path: string | null;
-
-  constructor(
-    message: string,
-    details: {
-      code?: number | null;
-      subcode?: number | null;
-      status: number;
-      path?: string | null;
-    },
-  ) {
-    super(message);
-    this.name = "MetaApiError";
-    this.code = details.code ?? null;
-    this.subcode = details.subcode ?? null;
-    this.status = details.status;
-    this.path = details.path ?? null;
-  }
-}
-
-type MetaErrorBody = {
-  error?: { message?: string; code?: unknown; error_subcode?: unknown };
-};
-
-/** O caminho da Graph API sem o prefixo de versão (`/v21.0/act_1/ads` → `/act_1/ads`). */
-function graphPath(url: string | URL) {
-  try {
-    return new URL(String(url)).pathname.replace(/^\/v\d+(\.\d+)?(?=\/)/, "");
-  } catch {
-    return null;
-  }
-}
-
-function metaApiError(json: MetaErrorBody, status: number, path: string | null) {
-  const body = json.error ?? {};
-  return new MetaApiError(body.message ?? `Meta API HTTP ${status}`, {
-    code: typeof body.code === "number" ? body.code : null,
-    subcode: typeof body.error_subcode === "number" ? body.error_subcode : null,
-    status,
-    path,
-  });
-}
+// O cliente da Graph API (token só no cabeçalho, timeout, paginação, uso da cota e
+// relatório assíncrono) é o `meta-graph.server`; o erro dele segue exportado daqui.
+export { MetaApiError };
 
 const TOKEN_ERROR_CODES = new Set([190, 102, 463, 467]);
 
@@ -200,12 +197,6 @@ const TOKEN_ERROR_CODES = new Set([190, 102, 463, 467]);
  */
 function isAppAccessTierCode(code: number | null) {
   return code !== null && code >= 270 && code <= 279;
-}
-
-/** Rate limit da Graph API: 4, 17, 32, 613 e a faixa 80000–80014. */
-function isRateLimitCode(code: number | null) {
-  if (code === null) return false;
-  return [4, 17, 32, 613].includes(code) || (code >= 80000 && code <= 80014);
 }
 
 /** Código de permissão da Graph API: 10 ou a faixa 200–299. */
@@ -254,85 +245,179 @@ function metaErrorMessage(error: unknown) {
   return errorMessage(error);
 }
 
-function metaApiVersion() {
-  return resolveMetaApiVersion(process.env.META_API_VERSION);
-}
-
 function accountPath(id: string) {
   return id.startsWith("act_") ? id : `act_${id}`;
 }
 
-/** Uma chamada à Graph API (primeira página ou `paging.next`), com timeout. */
-async function fetchMetaUrl<T>(url: string | URL) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-  let response: Response;
-  try {
-    response = await fetch(url, { signal: controller.signal });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("A Meta demorou demais para responder. Tente novamente.");
-    }
-    throw new Error("Não foi possível acessar a API da Meta.");
-  } finally {
-    clearTimeout(timeout);
-  }
-  const json = (await response.json().catch(() => ({}))) as T &
-    MetaErrorBody & { paging?: { next?: string } };
-  if (!response.ok || json.error) throw metaApiError(json, response.status, graphPath(url));
-  return json as T & { paging?: { next?: string } };
-}
+/** Recebe o uso da cota informado em cada resposta da Meta (MB2-01). */
+type UsageSink = (usage: MetaUsage) => void;
+const ignoreUsage: UsageSink = () => {};
 
-async function fetchMetaJson<T>(path: string, params: Record<string, string>) {
-  const url = new URL(`https://graph.facebook.com/${metaApiVersion()}${path}`);
-  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
-  return fetchMetaUrl<T>(url);
+/** Um objeto da Graph API. O token vai só no cabeçalho (`meta-graph.server`). */
+async function getMeta<T>(
+  path: string,
+  token: string,
+  params: Record<string, string> = {},
+  onUsage: UsageSink = ignoreUsage,
+) {
+  const { data, usage } = await metaGet<T>(path, token, params);
+  onUsage(usage);
+  return data;
 }
 
 /** Todas as páginas de uma listagem da Graph API. */
-async function fetchMetaPages<T>(path: string, params: Record<string, string>) {
-  const first = await fetchMetaJson<{ data?: T[] }>(path, params);
-  const rows = [...(first.data ?? [])];
-  let next = first.paging?.next;
-  while (next) {
-    const page = await fetchMetaUrl<{ data?: T[] }>(next);
-    rows.push(...(page.data ?? []));
-    next = page.paging?.next;
-  }
+async function getMetaPages<T>(
+  path: string,
+  token: string,
+  params: Record<string, string>,
+  onUsage: UsageSink = ignoreUsage,
+) {
+  const { rows, usage } = await metaGetAllPages<T>(path, token, params);
+  onUsage(usage);
   return rows;
 }
 
+/** Dias corridos de uma janela `{ since, until }` (as duas pontas contam). */
+function windowDays(window: { since: string; until: string }) {
+  return Math.round((Date.parse(window.until) - Date.parse(window.since)) / 86_400_000) + 1;
+}
+
+/**
+ * Insights da janela por anúncio e dia. Janela de até 7 dias: leitura direta. Maior
+ * (blocos de backfill e o agendado de 28 dias): relatório assíncrono da Meta
+ * (MB2-07), com `onPoll` renovando o lock do job a cada consulta; lock perdido
+ * interrompe a leitura (`MetaJobInterrupted("lock")`).
+ */
 async function loadInsights(
   accessToken: string,
   adAccountId: string,
   window: { since: string; until: string },
+  hooks: Pick<JobHooks, "onPoll" | "onUsage">,
 ) {
-  return fetchMetaPages<MetaInsight>(`/${accountPath(adAccountId)}/insights`, {
-    access_token: accessToken,
+  const params = {
     fields: INSIGHT_FIELDS,
     level: "ad",
     time_increment: "1",
     limit: "500",
     time_range: JSON.stringify(window),
-  });
+  };
+  if (windowDays(window) <= ASYNC_INSIGHTS_MIN_DAYS) {
+    return getMetaPages<MetaInsight>(
+      `/${accountPath(adAccountId)}/insights`,
+      accessToken,
+      params,
+      hooks.onUsage,
+    );
+  }
+  try {
+    const { rows, usage } = await loadMetaInsightsAsync<MetaInsight>(
+      `/${accountPath(adAccountId)}`,
+      accessToken,
+      params,
+      { onPoll: hooks.onPoll },
+    );
+    hooks.onUsage(usage);
+    return rows;
+  } catch (error) {
+    if (error instanceof MetaApiError && error.type === "aborted") {
+      throw new MetaJobInterrupted("lock");
+    }
+    throw error;
+  }
 }
 
-async function loadActiveAds(accessToken: string, adAccountId: string) {
-  return fetchMetaPages<MetaAd>(`/${accountPath(adAccountId)}/ads`, {
-    access_token: accessToken,
-    fields:
-      "id,name,status,effective_status,campaign{id,name,status,effective_status},adset{id,name,status,effective_status},creative{id,name,thumbnail_url,image_url,effective_object_story_id}",
-    effective_status: JSON.stringify(["ACTIVE"]),
-    limit: "500",
-  });
+async function loadActiveAds(accessToken: string, adAccountId: string, onUsage: UsageSink) {
+  return getMetaPages<MetaAd>(
+    `/${accountPath(adAccountId)}/ads`,
+    accessToken,
+    {
+      fields:
+        "id,name,status,effective_status,campaign{id,name,status,effective_status},adset{id,name,status,effective_status},creative{id,name,thumbnail_url,image_url,effective_object_story_id}",
+      effective_status: JSON.stringify(["ACTIVE"]),
+      limit: "500",
+    },
+    onUsage,
+  );
 }
 
 async function loadAllAdAccounts(accessToken: string) {
-  return fetchMetaPages<MetaAdAccount>("/me/adaccounts", {
-    access_token: accessToken,
+  return getMetaPages<MetaAdAccount>("/me/adaccounts", accessToken, {
     limit: "200",
     fields: "id,account_id,name,currency,timezone_name,account_status,business{id,name}",
   });
+}
+
+function grantedPermissions(permissions: { data?: MetaPermission[] }) {
+  return (permissions.data ?? [])
+    .filter((item) => item.status === "granted")
+    .map((item) => item.permission);
+}
+
+/** Validade e expiração da chave, como `meta_connections` guarda (MB2-03). */
+function tokenInfoColumns(info: MetaTokenInfo) {
+  return {
+    token_type: info.type,
+    token_expires_at: info.expiresAt,
+    data_access_expires_at: info.dataAccessExpiresAt,
+  };
+}
+
+/** A chave foi recusada pela Meta (inválida, sem ads_read, outro app...), não um erro de leitura. */
+class MetaKeyRejected extends Error {}
+
+/**
+ * Validade da chave desconhecida: o `debug_token` falhou sem ser por causa da chave.
+ * Tipo e expirações ficam nulos e nada é recusado por eles.
+ */
+const UNKNOWN_TOKEN_INFO: MetaTokenInfo = {
+  isValid: true,
+  type: null,
+  appId: null,
+  userId: null,
+  expiresAt: null,
+  dataAccessExpiresAt: null,
+  scopes: [],
+};
+
+/**
+ * O resultado de chamadas paralelas à Meta, em ordem fixa: a chave inválida no
+ * `debug_token` vem antes de qualquer outra falha; depois, um erro da chave em
+ * qualquer chamada; por fim, o primeiro erro de leitura. Sem falha, os valores.
+ *
+ * O `debug_token` autorizado pela própria chave pode ser recusado pela Meta para um
+ * Usuário do Sistema que não é admin do app (ela documenta chave de app ou de
+ * desenvolvedor; ex.: #100 "must provide an app access token"). Uma falha dele que
+ * não é da chave (essa, timeout, instabilidade) não recusa nada: a validade fica
+ * desconhecida (`UNKNOWN_TOKEN_INFO`) e as demais chamadas decidem.
+ */
+function settledMetaCalls<T extends unknown[]>(
+  debug: PromiseSettledResult<MetaTokenInfo>,
+  rest: { [K in keyof T]: PromiseSettledResult<T[K]> },
+): { info: MetaTokenInfo; values: T } {
+  if (debug.status === "fulfilled" && !debug.value.isValid) {
+    throw new MetaKeyRejected(INVALID_TOKEN_MESSAGE);
+  }
+  let info: MetaTokenInfo;
+  if (debug.status === "rejected" && metaErrorLevel(debug.reason) !== "token") {
+    console.warn("[meta-connect debug_token]", metaErrorMessage(debug.reason));
+    info = UNKNOWN_TOKEN_INFO;
+  } else if (debug.status === "fulfilled") {
+    info = debug.value;
+  } else {
+    throw new MetaKeyRejected(INVALID_TOKEN_MESSAGE);
+  }
+  const failures = (rest as PromiseSettledResult<unknown>[]).flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
+  const keyFailure = failures.find((reason) => metaErrorLevel(reason) === "token");
+  if (keyFailure !== undefined) throw new MetaKeyRejected(metaErrorMessage(keyFailure));
+  if (failures.length > 0) throw failures[0];
+  return {
+    info,
+    values: (rest as PromiseSettledResult<unknown>[]).map(
+      (result) => (result as PromiseFulfilledResult<unknown>).value,
+    ) as T,
+  };
 }
 
 /** Uma conta como os RPCs `meta_connect_token`/`meta_upsert_connection_accounts` esperam. */
@@ -421,15 +506,33 @@ export async function connectMetaSystemUserTokenFor(
   const tenantId = await requireMetaAdmin(context.supabase);
   await assertTenantNotDemo(tenantId);
   const token = data.accessToken;
-  const [metaUser, metaApp, permissions, adAccounts] = await Promise.all([
-    fetchMetaJson<MetaUser>("/me", { access_token: token, fields: "id,name" }),
-    fetchMetaJson<MetaApp>("/app", { access_token: token, fields: "id,name" }),
-    fetchMetaJson<{ data?: MetaPermission[] }>("/me/permissions", { access_token: token }),
+  const [debug, ...rest] = await Promise.allSettled([
+    debugMetaToken(token),
+    getMeta<MetaUser>("/me", token, { fields: "id,name" }),
+    getMeta<MetaApp>("/app", token, { fields: "id,name" }),
+    getMeta<{ data?: MetaPermission[] }>("/me/permissions", token),
     loadAllAdAccounts(token),
   ]);
-  const granted = (permissions.data ?? [])
-    .filter((item) => item.status === "granted")
-    .map((item) => item.permission);
+  // MB2-03: só chave válida, que não seja de usuário comum com expiração, do mesmo app
+  // que `/app` devolve.
+  const { info, values } = settledMetaCalls<
+    [MetaUser, MetaApp, { data?: MetaPermission[] }, MetaAdAccount[]]
+  >(
+    debug as PromiseSettledResult<MetaTokenInfo>,
+    rest as [
+      PromiseSettledResult<MetaUser>,
+      PromiseSettledResult<MetaApp>,
+      PromiseSettledResult<{ data?: MetaPermission[] }>,
+      PromiseSettledResult<MetaAdAccount[]>,
+    ],
+  );
+  const [metaUser, metaApp, permissions, adAccounts] = values;
+  // Recusa a chave de usuário comum que expira. Tipo ausente ou desconhecido, ou chave
+  // sem expiração, é aceito: o `type` do `debug_token` não é documentado para o
+  // Usuário do Sistema. O app só é comparado quando a Meta o informa.
+  if (info.type === "USER" && info.expiresAt !== null) throw new Error(NOT_SYSTEM_USER_MESSAGE);
+  if (info.appId !== null && info.appId !== metaApp.id) throw new Error(OTHER_APP_MESSAGE);
+  const granted = grantedPermissions(permissions);
   if (!granted.includes("ads_read")) throw new Error("O token não possui a permissão ads_read.");
   if (adAccounts.length === 0)
     throw new Error("O usuário do sistema não possui contas de anúncios atribuídas.");
@@ -447,6 +550,8 @@ export async function connectMetaSystemUserTokenFor(
       token_hint: metaTokenHint(token),
       scopes: granted,
       label: metaUser.name ?? metaApp.name ?? "Conta Meta",
+      // `token_expires_at` nulo: a chave não expira (Usuário do Sistema).
+      ...tokenInfoColumns(info),
     },
     p_accounts: adAccounts.map(accountPayload),
   });
@@ -528,29 +633,48 @@ export async function validateMetaConnectionFor(
 
   let granted: string[];
   let adAccounts: MetaAdAccount[];
+  let info: MetaTokenInfo;
   try {
-    const [metaApp, permissions, accounts] = await Promise.all([
-      fetchMetaJson<MetaApp>("/app", { access_token: token, fields: "id,name" }),
-      fetchMetaJson<{ data?: MetaPermission[] }>("/me/permissions", { access_token: token }),
+    const [debug, ...rest] = await Promise.allSettled([
+      debugMetaToken(token),
+      getMeta<MetaApp>("/app", token, { fields: "id,name" }),
+      getMeta<{ data?: MetaPermission[] }>("/me/permissions", token),
       loadAllAdAccounts(token),
     ]);
-    granted = (permissions.data ?? [])
-      .filter((item) => item.status === "granted")
-      .map((item) => item.permission);
-    if (!granted.includes("ads_read")) throw new Error("A permissão ads_read não está ativa.");
+    const settled = settledMetaCalls<[MetaApp, { data?: MetaPermission[] }, MetaAdAccount[]]>(
+      debug as PromiseSettledResult<MetaTokenInfo>,
+      rest as [
+        PromiseSettledResult<MetaApp>,
+        PromiseSettledResult<{ data?: MetaPermission[] }>,
+        PromiseSettledResult<MetaAdAccount[]>,
+      ],
+    );
+    info = settled.info;
+    const [metaApp, permissions, accounts] = settled.values;
+    granted = grantedPermissions(permissions);
+    if (!granted.includes("ads_read")) {
+      throw new MetaKeyRejected("A permissão ads_read não está ativa.");
+    }
     if (connection.app_id && connection.app_id !== metaApp.id) {
-      throw new Error("O token foi emitido por outro app Meta.");
+      throw new MetaKeyRejected("O token foi emitido por outro app Meta.");
     }
     // Sem filtro por BM (D1): a chave vale por todas as contas que alcança.
     if (accounts.length === 0) {
-      throw new Error("O token não possui mais acesso a nenhuma conta de anúncio.");
+      throw new MetaKeyRejected("O token não possui mais acesso a nenhuma conta de anúncio.");
     }
     adAccounts = accounts;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Não foi possível validar a conexão.";
-    await markConnectionError(tenantId, connection.id, message, {
-      permissions_checked_at: new Date().toISOString(),
-    });
+    const message =
+      error instanceof Error ? metaErrorMessage(error) : "Não foi possível validar a conexão.";
+    // MB2-04: só o erro da chave põe a conexão em erro. Erro de leitura (timeout,
+    // rate limit, instabilidade da Meta) só devolve a mensagem; o status fica.
+    if (error instanceof MetaKeyRejected) {
+      const checkedAt = new Date().toISOString();
+      await markConnectionError(tenantId, connection.id, message, {
+        permissions_checked_at: checkedAt,
+        health_checked_at: checkedAt,
+      });
+    }
     throw new Error(message);
   }
 
@@ -564,6 +688,8 @@ export async function validateMetaConnectionFor(
       scopes: granted,
       token_validated_at: checkedAt,
       permissions_checked_at: checkedAt,
+      health_checked_at: checkedAt,
+      ...tokenInfoColumns(info),
       status: "connected",
       last_error: null,
     })
@@ -722,6 +848,18 @@ class MetaJobInterrupted extends Error {
   }
 }
 
+/**
+ * O que o worker passa para a leitura de um job: `beforeChunk` roda antes de cada
+ * bloco depois do primeiro (renova o lock e confere o orçamento); `onPoll` roda a
+ * cada consulta do relatório assíncrono (renova o lock; `false` interrompe); `onUsage`
+ * recebe o uso da cota de cada resposta.
+ */
+type JobHooks = {
+  beforeChunk: () => Promise<void>;
+  onPoll: () => Promise<boolean>;
+  onUsage: UsageSink;
+};
+
 /** `ads_read` de cada chave, lido no máximo uma vez por tick. */
 type AdsReadCache = Map<string, Promise<boolean>>;
 
@@ -729,9 +867,7 @@ type AdsReadCache = Map<string, Promise<boolean>>;
 function keyHasAdsRead(cache: AdsReadCache, connectionId: string, token: string) {
   let pending = cache.get(connectionId);
   if (!pending) {
-    pending = fetchMetaJson<{ data?: MetaPermission[] }>("/me/permissions", {
-      access_token: token,
-    }).then((permissions) =>
+    pending = getMeta<{ data?: MetaPermission[] }>("/me/permissions", token).then((permissions) =>
       (permissions.data ?? []).some(
         (item) => item.permission === "ads_read" && item.status === "granted",
       ),
@@ -745,18 +881,19 @@ function keyHasAdsRead(cache: AdsReadCache, connectionId: string, token: string)
  * Lê a conta com um token: catálogo de anúncios ativos e insights da janela, em
  * blocos de até 30 dias (do mais antigo ao mais recente). Cada bloco é substituído
  * numa transação; uma falha no meio mantém os blocos anteriores e falha o job.
- * `beforeChunk` roda antes de cada bloco depois do primeiro e pode interromper o
- * job (`MetaJobInterrupted`).
+ * `hooks.beforeChunk` roda antes de cada bloco depois do primeiro e `hooks.onPoll`
+ * durante o relatório assíncrono; os dois podem interromper o job
+ * (`MetaJobInterrupted`).
  */
 async function importMetaAccount(
   tenantId: string,
   account: MetaAccountForSync,
   days: number,
   token: string,
-  beforeChunk: () => Promise<void>,
+  hooks: JobHooks,
 ) {
   const now = new Date().toISOString();
-  const activeAds: MetaAd[] = await loadActiveAds(token, account.meta_ad_account_id);
+  const activeAds: MetaAd[] = await loadActiveAds(token, account.meta_ad_account_id, hooks.onUsage);
   if (activeAds.length > 0) {
     const { error } = await (supabaseAdmin as any).from("meta_ads").upsert(
       activeAds.map((ad) => catalogRow(tenantId, account.meta_ad_account_id, ad, now)),
@@ -769,8 +906,8 @@ async function importMetaAccount(
   let imported = 0;
   const windows = syncWindows(account.timezone_name, days);
   for (const [index, window] of windows.entries()) {
-    if (index > 0) await beforeChunk();
-    const insights = await loadInsights(token, account.meta_ad_account_id, window);
+    if (index > 0) await hooks.beforeChunk();
+    const insights = await loadInsights(token, account.meta_ad_account_id, window, hooks);
     const missingCatalog = catalogRowsFromInsights(
       tenantId,
       account.meta_ad_account_id,
@@ -819,7 +956,7 @@ async function syncMetaAccount(
   tenantId: string,
   account: MetaAccountForSync,
   days: number,
-  beforeChunk: () => Promise<void>,
+  hooks: JobHooks,
   adsReadCache: AdsReadCache,
 ) {
   await (supabaseAdmin as any)
@@ -839,7 +976,7 @@ async function syncMetaAccount(
     let token: string | null = null;
     try {
       token = await connectionToken(candidate.connection);
-      imported = await importMetaAccount(tenantId, account, days, token, beforeChunk);
+      imported = await importMetaAccount(tenantId, account, days, token, hooks);
     } catch (error) {
       let level = metaErrorLevel(error);
       let failure: unknown = error;
@@ -1167,8 +1304,13 @@ function errorMessage(error: unknown) {
  * O erro numa chave é registrado e não para as outras; erro da chave (ou lista
  * vazia) põe a conexão em erro. Cada tentativa grava `permissions_checked_at`: a
  * chave tentada na última hora fica de fora, e as tentadas há mais tempo vêm antes.
+ * `skip`: chaves cuja lista a checagem de saúde já releu neste tick.
  */
-async function rediscoverMetaAccounts(demoTenantIds: Set<string>, overBudget: () => boolean) {
+async function rediscoverMetaAccounts(
+  demoTenantIds: Set<string>,
+  overBudget: () => boolean,
+  skip: Set<string> = new Set(),
+) {
   const { data, error } = await (supabaseAdmin as any)
     .from("meta_connections")
     .select("id,tenant_id,encrypted_access_token,accounts_discovered_at,permissions_checked_at")
@@ -1193,6 +1335,7 @@ async function rediscoverMetaAccounts(demoTenantIds: Set<string>, overBudget: ()
     .filter(
       (connection) =>
         !demoTenantIds.has(connection.tenant_id) &&
+        !skip.has(connection.id) &&
         olderThan(connection.accounts_discovered_at, staleBefore) &&
         olderThan(connection.permissions_checked_at, retryBefore),
     )
@@ -1219,14 +1362,25 @@ async function rediscoverMetaAccounts(demoTenantIds: Set<string>, overBudget: ()
       }
       continue;
     }
-    attempted += 1;
-    // Registra a tentativa antes de chamar a Meta: se ela falhar, a chave espera 1 h.
-    await (supabaseAdmin as any)
+    // Registra a tentativa antes de chamar a Meta (se ela falhar, a chave espera
+    // 1 h), só se ninguém a registrou desde a leitura: com dois ticks sobrepostos,
+    // só um relê a chave.
+    const { data: claimedRows, error: claimError } = await (supabaseAdmin as any)
       .from("meta_connections")
       .update({ permissions_checked_at: new Date().toISOString() })
       .eq("id", connection.id)
       .eq("tenant_id", connection.tenant_id)
-      .neq("status", "disabled");
+      .neq("status", "disabled")
+      .or(
+        `permissions_checked_at.is.null,permissions_checked_at.lt.${new Date(retryBefore).toISOString()}`,
+      )
+      .select("id");
+    if (claimError) {
+      console.error("[meta-sync discover]", connection.id, claimError.message);
+      continue;
+    }
+    if (!claimedRows?.length) continue;
+    attempted += 1;
     try {
       const token = await connectionToken(connection);
       const adAccounts = await loadAllAdAccounts(token);
@@ -1250,7 +1404,179 @@ async function rediscoverMetaAccounts(demoTenantIds: Set<string>, overBudget: ()
   return discovered;
 }
 
-async function enqueueScheduledMetaSyncs(demoTenantIds: Set<string>) {
+type HealthCandidate = MetaConnectionToken & {
+  id: string;
+  status: string;
+  health_checked_at: string | null;
+};
+
+/**
+ * Checagem de saúde diária das chaves (MB2-03/04), depois dos jobs e dentro do
+ * orçamento do tick. Para cada chave de Usuário do Sistema não desconectada cuja
+ * última checagem tem mais de 24 h (6 h se está em erro): `debug_token`. Chave
+ * inválida (ou erro da chave na própria checagem) → erro. Válida → grava tipo e
+ * expirações; se estava em erro, relê `/me/adaccounts` e, com contas e `ads_read`,
+ * volta a `connected` e grava as contas. Erro de leitura não muda o status. Toda
+ * checagem grava `health_checked_at`. Devolve as chaves cuja lista foi relida, para a
+ * redescoberta não ler de novo no mesmo tick.
+ */
+async function checkMetaConnectionsHealth(
+  demoTenantIds: Set<string>,
+  overBudget: () => boolean,
+  now: () => number,
+) {
+  const reread = new Set<string>();
+  const result = { checked: 0, recovered: 0, reread };
+  const { data, error } = await (supabaseAdmin as any)
+    .from("meta_connections")
+    .select("id,tenant_id,encrypted_access_token,status,health_checked_at")
+    .neq("status", "disabled")
+    .eq("auth_type", "system_user_token");
+  if (error) {
+    console.error("[meta-sync health]", error.message);
+    return result;
+  }
+  const startedAt = now();
+  const due = ((data ?? []) as HealthCandidate[])
+    .filter((connection) => {
+      if (demoTenantIds.has(connection.tenant_id)) return false;
+      if (!connection.health_checked_at) return true;
+      const maxAge = connection.status === "error" ? HEALTH_ERROR_STALE_MS : HEALTH_STALE_MS;
+      return Date.parse(connection.health_checked_at) < startedAt - maxAge;
+    })
+    // Nunca checada primeiro; depois a checagem mais antiga.
+    .sort((a, b) =>
+      String(a.health_checked_at ?? "").localeCompare(String(b.health_checked_at ?? "")),
+    );
+
+  for (const connection of due) {
+    if (result.checked >= HEALTH_PER_TICK || overBudget()) break;
+    try {
+      await assertTenantCanOperate(connection.tenant_id);
+    } catch (blockError) {
+      if (!isTenantOperateBlock(blockError)) {
+        console.error("[meta-sync health]", connection.tenant_id, errorMessage(blockError));
+      }
+      continue;
+    }
+    const checkedAt = new Date(now()).toISOString();
+    const updateConnection = (payload: Record<string, unknown>) =>
+      (supabaseAdmin as any)
+        .from("meta_connections")
+        .update(payload)
+        .eq("id", connection.id)
+        .eq("tenant_id", connection.tenant_id)
+        .neq("status", "disabled") as PromiseLike<{ error: { message: string } | null }>;
+
+    // Registra a checagem antes de chamar a Meta, só se ninguém a registrou desde a
+    // leitura: com dois ticks sobrepostos, só um confere a chave.
+    const maxAge = connection.status === "error" ? HEALTH_ERROR_STALE_MS : HEALTH_STALE_MS;
+    const { data: claimedRows, error: claimError } = await (supabaseAdmin as any)
+      .from("meta_connections")
+      .update({ health_checked_at: checkedAt })
+      .eq("id", connection.id)
+      .eq("tenant_id", connection.tenant_id)
+      .neq("status", "disabled")
+      .or(
+        `health_checked_at.is.null,health_checked_at.lt.${new Date(startedAt - maxAge).toISOString()}`,
+      )
+      .select("id");
+    if (claimError) {
+      console.error("[meta-sync health]", connection.id, claimError.message);
+      continue;
+    }
+    if (!claimedRows?.length) continue;
+    result.checked += 1;
+
+    let token: string;
+    let info: MetaTokenInfo;
+    try {
+      token = await connectionToken(connection);
+      info = await debugMetaToken(token);
+    } catch (checkError) {
+      if (metaErrorLevel(checkError) === "token") {
+        const message =
+          errorMessage(checkError) === LEGACY_CONNECTION_MESSAGE
+            ? LEGACY_CONNECTION_MESSAGE
+            : TOKEN_REVOKED_MESSAGE;
+        await markConnectionError(connection.tenant_id, connection.id, message, {
+          health_checked_at: checkedAt,
+        });
+      } else {
+        // Erro que não é da chave (timeout, rate limit, ou a Meta recusando o
+        // `debug_token` pela própria chave, ex.: #100 "must provide an app access
+        // token"): validade desconhecida. O status fica e a chave não é dada como
+        // saudável; a tentativa já foi registrada acima, e a chave é conferida de
+        // novo no próximo ciclo.
+        console.error("[meta-sync health]", connection.id, metaErrorMessage(checkError));
+      }
+      continue;
+    }
+    if (!info.isValid) {
+      await markConnectionError(connection.tenant_id, connection.id, TOKEN_REVOKED_MESSAGE, {
+        health_checked_at: checkedAt,
+        ...tokenInfoColumns(info),
+      });
+      continue;
+    }
+    const { error: stampError } = await updateConnection({
+      health_checked_at: checkedAt,
+      ...tokenInfoColumns(info),
+    });
+    if (stampError) console.error("[meta-sync health]", connection.id, stampError.message);
+    if (connection.status !== "error") continue;
+
+    // A chave em erro voltou a valer: relê as contas e, com sucesso, volta a
+    // `connected` antes de gravar a lista (o RPC só move a preferência de uma conta
+    // para uma chave conectada).
+    reread.add(connection.id);
+    try {
+      // `scopes` vazio (não informado) não recusa: a leitura das contas confere.
+      if (info.scopes.length > 0 && !info.scopes.includes("ads_read")) {
+        throw new MetaKeyRejected(ADS_READ_LOST_MESSAGE);
+      }
+      const adAccounts = await loadAllAdAccounts(token);
+      if (adAccounts.length === 0) throw new MetaKeyRejected(EMPTY_DISCOVERY_MESSAGE);
+      const { error: recoverError } = await updateConnection({
+        status: "connected",
+        last_error: null,
+        permissions_checked_at: checkedAt,
+      });
+      if (recoverError) throw new Error(recoverError.message);
+      await upsertConnectionAccounts(connection.tenant_id, connection.id, adAccounts);
+      result.recovered += 1;
+    } catch (recoverError) {
+      const message = metaErrorMessage(recoverError);
+      console.error("[meta-sync health]", connection.id, message);
+      if (recoverError instanceof MetaKeyRejected || metaErrorLevel(recoverError) === "token") {
+        await markConnectionError(connection.tenant_id, connection.id, message);
+      }
+    }
+  }
+  return result;
+}
+
+/** Algum run `scheduled` da casa criado desde `since` (e com ao menos `minDays`)? */
+async function hasScheduledRunSince(tenantId: string, since: number, minDays?: number) {
+  let query = (supabaseAdmin as any)
+    .from("meta_sync_runs")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("trigger_type", "scheduled")
+    .gte("created_at", new Date(since).toISOString());
+  if (minDays !== undefined) query = query.gte("days", minDays);
+  const { data, error } = await query.limit(1).maybeSingle();
+  if (error) throw new Error(error.message);
+  return Boolean(data);
+}
+
+/**
+ * Agendamento (MB2-06 / D5), por casa com contas elegíveis e sem run ativo (não
+ * backfill; `createMetaSyncRun` reaproveita o ativo): entre 3 h e 5 h de Brasília,
+ * se não houve run agendado de 28 dias nas últimas 20 h, um de 28 dias; senão, se não
+ * houve run agendado nos últimos 55 min, um de 3 dias. O run manual não conta.
+ */
+async function enqueueScheduledMetaSyncs(demoTenantIds: Set<string>, now: () => number) {
   let accounts: Array<{ tenant_id: string }> = [];
   try {
     accounts = await loadEligibleAccounts();
@@ -1261,19 +1587,25 @@ async function enqueueScheduledMetaSyncs(demoTenantIds: Set<string>) {
   const tenantIds: string[] = Array.from(
     new Set<string>(accounts.map((account) => account.tenant_id)),
   ).filter((tenantId) => !demoTenantIds.has(tenantId));
-  const since = new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString();
+  const at = now();
+  const dailyWindow = DAILY_SYNC_HOURS.has(brtHour(new Date(at)));
   let enqueued = 0;
   for (const tenantId of tenantIds) {
-    // Um backfill recente não substitui o agendado.
-    const { data: recent } = await (supabaseAdmin as any)
-      .from("meta_sync_runs")
-      .select("id")
-      .eq("tenant_id", tenantId)
-      .neq("trigger_type", "backfill")
-      .gte("created_at", since)
-      .limit(1)
-      .maybeSingle();
-    if (recent) continue;
+    let days: number | null = null;
+    try {
+      const dailyDue =
+        dailyWindow &&
+        !(await hasScheduledRunSince(tenantId, at - DAILY_SYNC_SPACING_MS, DAILY_SYNC_DAYS));
+      if (dailyDue) {
+        days = DAILY_SYNC_DAYS;
+      } else if (!(await hasScheduledRunSince(tenantId, at - HOURLY_SYNC_SPACING_MS))) {
+        days = HOURLY_SYNC_DAYS;
+      }
+    } catch (error) {
+      console.error("[meta-sync schedule]", tenantId, errorMessage(error));
+      continue;
+    }
+    if (days === null) continue;
     try {
       // Casa suspensa ou bloqueada por cobrança não ganha sincronização agendada.
       await assertTenantCanOperate(tenantId);
@@ -1284,7 +1616,7 @@ async function enqueueScheduledMetaSyncs(demoTenantIds: Set<string>) {
       continue;
     }
     try {
-      const run = await createMetaSyncRun({ tenantId, days: 7, triggerType: "scheduled" });
+      const run = await createMetaSyncRun({ tenantId, days, triggerType: "scheduled" });
       if (!run.reused) enqueued += 1;
     } catch {
       // Uma operação sem contas elegíveis não deve bloquear as demais.
@@ -1302,11 +1634,12 @@ type ClaimedMetaJob = {
   attempt_count: number;
   max_attempts: number;
   next_attempt_at: string | null;
+  rate_limited_count?: number | null;
 };
 
 /**
- * Um tick do worker, nesta ordem: claim → jobs → agendamento → redescoberta. O que
- * chama a Meta respeita o orçamento `TICK_BUDGET_MS` (o cron corta o tick em 55 s):
+ * Um tick do worker, nesta ordem: claim → jobs → agendamento → checagem de saúde das
+ * chaves → redescoberta. O que chama a Meta respeita o orçamento `TICK_BUDGET_MS`:
  *
  * - um job não começado depois de 40 s volta para a fila (`queued`, sem gastar a
  *   tentativa); entre blocos de um backfill, o job também volta para a fila se o
@@ -1314,15 +1647,21 @@ type ClaimedMetaJob = {
  *   para isso, e sem mudar o schema), o primeiro job do tick nunca é interrompido
  *   pelo orçamento — é ele que garante progresso: um backfill devolvido volta como
  *   primeiro do claim seguinte (ordem `next_attempt_at, created_at`) e roda inteiro;
- * - quando o primeiro job é um backfill (mais de um bloco de 30 dias), ele é o
- *   único job do tick: os demais voltam para a fila na hora;
- * - a redescoberta não começa chave nova depois de 40 s.
+ * - quando o job em andamento (inclusive o primeiro) passa dos 40 s, os jobs ainda
+ *   não começados voltam para a fila na hora, sem esperar ele terminar;
+ * - cada renovação de lock renova todos os jobs pendentes do tick, não só o em
+ *   andamento: os não começados não vencem (10 min) atrás de um job longo;
+ * - se alguma resposta da Meta num job informa uso da cota de 90 % ou mais, ou o
+ *   job falha por rate limit, o job termina e os seguintes voltam para a fila (sem
+ *   gastar tentativa), e o tick não faz checagem de saúde nem redescoberta (MB2-01);
+ * - a checagem de saúde e a redescoberta não começam chave nova depois de 40 s.
  *
- * `now` só existe para os testes controlarem o relógio do orçamento.
+ * `now` (relógio do orçamento, do agendamento e da checagem de saúde) e `random`
+ * (folga do rate limit) existem para os testes.
  */
 export async function processMetaSyncQueue(
   limit = 2,
-  { now = Date.now }: { now?: () => number } = {},
+  { now = Date.now, random = Math.random }: { now?: () => number; random?: () => number } = {},
 ) {
   const startedAt = now();
   const overBudget = () => now() - startedAt >= TICK_BUDGET_MS;
@@ -1363,17 +1702,25 @@ export async function processMetaSyncQueue(
         locked_at: null,
       })
       .eq("id", job.id)
-      .eq("worker_id", workerId);
+      .eq("worker_id", workerId)
+      .eq("status", "running");
   }
   for (const runId of new Set<string>(parkedJobs.map((job) => job.run_id))) {
     await refreshMetaSyncRun(runId);
   }
   const runnableJobs = claimed.filter((job) => !tenantBlocked.get(job.tenant_id));
 
-  // Job devolvido à fila sem ter sido concluído (orçamento do tick): volta a
+  // Jobs deste tick ainda nas mãos do worker (o em andamento e os não começados).
+  // Saem daqui ao terminar, ao voltar para a fila ou quando outro worker os pega.
+  const pendingIds = new Set<string>(runnableJobs.map((job) => job.id));
+  let released = 0;
+
+  // Job devolvido à fila sem ter sido concluído (orçamento do tick, cota): volta a
   // `queued` com o lock solto e sem gastar a tentativa, como o da casa bloqueada.
-  // Só se este worker ainda é o dono.
+  // Só se este worker ainda é o dono e o job segue em andamento.
   const releaseJob = async (job: ClaimedMetaJob) => {
+    pendingIds.delete(job.id);
+    released += 1;
     await (supabaseAdmin as any)
       .from("meta_sync_jobs")
       .update({
@@ -1382,7 +1729,40 @@ export async function processMetaSyncQueue(
         attempt_count: Math.max(0, job.attempt_count - 1),
       })
       .eq("id", job.id)
-      .eq("worker_id", workerId);
+      .eq("worker_id", workerId)
+      .eq("status", "running");
+  };
+
+  // Devolve já os jobs ainda não começados (depois de `index`): um job longo que
+  // passou do orçamento não os segura até terminar.
+  const releaseNotStarted = async (index: number) => {
+    for (const pending of runnableJobs.slice(index + 1)) {
+      if (pendingIds.has(pending.id)) await releaseJob(pending);
+    }
+  };
+
+  // Os jobs reclamados rodam em sequência: renova o lock de todos os ainda pendentes
+  // do tick (não só do em andamento), senão um job lento deixa o lock dos seguintes
+  // vencer (10 min) e outro worker os pega gastando tentativa, ou o reaper os falha.
+  // Um job sem linha renovada já é de outro worker: sai dos pendentes. Devolve se o
+  // job `jobId` continua deste worker.
+  const renewLocks = async (jobId: string) => {
+    const ids = [...pendingIds];
+    if (!ids.includes(jobId)) return false;
+    const { data: renewed, error: renewError } = await (supabaseAdmin as any)
+      .from("meta_sync_jobs")
+      .update({ locked_at: new Date().toISOString() })
+      .in("id", ids)
+      .eq("worker_id", workerId)
+      .eq("status", "running")
+      .select("id");
+    if (renewError) {
+      console.error("[meta-sync lock]", jobId, renewError.message);
+      return true;
+    }
+    const kept = new Set(((renewed ?? []) as Array<{ id: string }>).map((row) => String(row.id)));
+    for (const id of ids) if (!kept.has(id)) pendingIds.delete(id);
+    return kept.has(jobId);
   };
 
   const claimedRunIds = [...new Set(runnableJobs.map((job) => job.run_id))];
@@ -1404,33 +1784,23 @@ export async function processMetaSyncQueue(
   let completed = 0;
   let retried = 0;
   let failed = 0;
-  let released = 0;
+  let rateLimited = 0;
+  // Cota da Meta perto do limite (uso ≥ 90 % numa resposta) ou estourada (job que
+  // falhou por rate limit): os jobs seguintes voltam para a fila e o tick não faz
+  // checagem de saúde nem redescoberta.
+  let throttled = false;
   const tenantsToReconcile = new Set<string>();
   for (const [index, job] of runnableJobs.entries()) {
     const firstJob = index === 0;
-    if (!firstJob && overBudget()) {
+    // Já devolvido (orçamento estourado durante o job anterior) ou de outro worker.
+    if (!pendingIds.has(job.id)) continue;
+    if (throttled || (!firstJob && overBudget())) {
       await releaseJob(job);
-      released += 1;
       continue;
     }
+    let jobUsagePct = 0;
 
-    // Os jobs reclamados rodam em sequência: renova o lock antes de cada um, senão um
-    // job lento deixa o lock do próximo vencer (10 min) e outro worker o pega junto.
-    // Sem linha renovada, outro worker já reclamou o job: ele fica com ele.
-    const renewLock = async () => {
-      const { data: renewed, error: renewError } = await (supabaseAdmin as any)
-        .from("meta_sync_jobs")
-        .update({ locked_at: new Date().toISOString() })
-        .eq("id", job.id)
-        .eq("worker_id", workerId)
-        .eq("status", "running")
-        .select("id");
-      if (renewError) {
-        console.error("[meta-sync lock]", job.id, renewError.message);
-        return true;
-      }
-      return Boolean(renewed?.length);
-    };
+    const renewLock = () => renewLocks(job.id);
     if (!(await renewLock())) continue;
 
     // A conta precisa ser da casa do job; as chaves vêm só de acessos da mesma casa
@@ -1457,17 +1827,32 @@ export async function processMetaSyncQueue(
       });
       // Entre os blocos de um backfill: renova o lock (perdido → outro worker fica com
       // o job) e confere o orçamento do tick (só para os jobs depois do primeiro).
+      // No relatório assíncrono, cada consulta renova o lock; perdido, a leitura para.
       const outcome = await syncMetaAccount(
         job.tenant_id,
         account as MetaAccountForSync,
         job.days,
-        async () => {
-          if (!(await renewLock())) throw new MetaJobInterrupted("lock");
-          if (!firstJob && overBudget()) throw new MetaJobInterrupted("budget");
+        {
+          beforeChunk: async () => {
+            if (!(await renewLock())) throw new MetaJobInterrupted("lock");
+            if (overBudget()) {
+              await releaseNotStarted(index);
+              if (!firstJob) throw new MetaJobInterrupted("budget");
+            }
+          },
+          onPoll: async () => {
+            if (!(await renewLock())) return false;
+            if (overBudget()) await releaseNotStarted(index);
+            return true;
+          },
+          onUsage: (usage) => {
+            jobUsagePct = Math.max(jobUsagePct, usage.maxPct);
+          },
         },
         adsReadCache,
       );
       usedConnectionId = outcome.connectionId;
+      pendingIds.delete(job.id);
       await (supabaseAdmin as any)
         .from("meta_sync_jobs")
         .update({
@@ -1477,7 +1862,8 @@ export async function processMetaSyncQueue(
           locked_at: null,
         })
         .eq("id", job.id)
-        .eq("worker_id", workerId);
+        .eq("worker_id", workerId)
+        .eq("status", "running");
       await (supabaseAdmin as any).from("meta_connection_audit").insert({
         tenant_id: job.tenant_id,
         connection_id: outcome.connectionId,
@@ -1495,6 +1881,7 @@ export async function processMetaSyncQueue(
       if (error instanceof MetaJobInterrupted) {
         if (error.reason === "lock") {
           // Outro worker reclamou o job: ele termina. Nada é gravado aqui.
+          pendingIds.delete(job.id);
           console.warn("[meta-sync lock]", job.id, "lock perdido entre blocos");
           continue;
         }
@@ -1506,10 +1893,69 @@ export async function processMetaSyncQueue(
           .update({ sync_status: "queued" })
           .eq("id", job.account_id)
           .eq("tenant_id", job.tenant_id);
-        released += 1;
         continue;
       }
+      pendingIds.delete(job.id);
       const message = error instanceof Error ? error.message : "Erro desconhecido ao sincronizar.";
+      const rateLimitedCount = Math.max(0, Number(job.rate_limited_count ?? 0));
+      const rateLimitError = error instanceof MetaApiError && isMetaRateLimitCode(error.code);
+      // Cota estourada: os jobs seguintes do tick também bateriam nela.
+      if (rateLimitError) throttled = true;
+      if (
+        error instanceof MetaApiError &&
+        (rateLimitError || isMetaReportNotReady(error)) &&
+        rateLimitedCount < RATE_LIMIT_PARK_MAX
+      ) {
+        // MB2-01: rate limit (ou relatório assíncrono que não ficou pronto) não gasta
+        // tentativa, até 3 vezes por job. Espera o que a Meta pede ou 15 min × 2^n, o
+        // maior, limitado a 60 min, mais 0–20 % de folga.
+        const baseDelayMs = Math.min(
+          RATE_LIMIT_PARK_MAX_DELAY_MS,
+          Math.max(error.retryAfterMs ?? 0, RATE_LIMIT_BACKOFF_MS * Math.pow(2, rateLimitedCount)),
+        );
+        const delayMs = Math.round(baseDelayMs * (1 + RATE_LIMIT_JITTER * random()));
+        await (supabaseAdmin as any)
+          .from("meta_sync_jobs")
+          .update({
+            status: "retry",
+            next_attempt_at: new Date(Date.now() + delayMs).toISOString(),
+            attempt_count: Math.max(0, job.attempt_count - 1),
+            rate_limited_count: rateLimitedCount + 1,
+            last_error: message.slice(0, 1000),
+            finished_at: null,
+            locked_at: null,
+          })
+          .eq("id", job.id)
+          .eq("worker_id", workerId)
+          .eq("status", "running");
+        if (account) {
+          await (supabaseAdmin as any)
+            .from("meta_ad_accounts")
+            .update({ sync_status: "queued", last_error: message.slice(0, 1000) })
+            .eq("id", account.id)
+            .eq("tenant_id", job.tenant_id);
+        }
+        if (usedConnectionId) {
+          await (supabaseAdmin as any).from("meta_connection_audit").insert({
+            tenant_id: job.tenant_id,
+            connection_id: usedConnectionId,
+            actor_user_id: null,
+            action: "sync_failed",
+            metadata: {
+              run_id: job.run_id,
+              account_id: job.account_id,
+              retry_scheduled: true,
+              rate_limited: rateLimitedCount + 1,
+              attempt: job.attempt_count,
+            },
+          });
+        }
+        rateLimited += 1;
+        retried += 1;
+        if (jobUsagePct >= USAGE_RELEASE_PCT) throttled = true;
+        await refreshMetaSyncRun(job.run_id);
+        continue;
+      }
       // Um erro da Graph API que chegou aqui já foi classificado como leitura por
       // `metaErrorLevel` (os de chave/conta trocam de chave e terminam em
       // MetaSyncPermanentError): segue a regra de nova tentativa, sem olhar o texto.
@@ -1519,7 +1965,7 @@ export async function processMetaSyncQueue(
       const canRetry = job.attempt_count < job.max_attempts && !permanent;
       // Rate limit da Meta espera mais (15, 30, 60 min); os demais, 2^n min.
       const retryDelayMs =
-        error instanceof MetaApiError && isRateLimitCode(error.code)
+        error instanceof MetaApiError && isMetaRateLimitCode(error.code)
           ? RATE_LIMIT_BACKOFF_MS * Math.pow(2, Math.max(0, job.attempt_count - 1))
           : Math.pow(2, job.attempt_count) * 60_000;
       const retryAt = new Date(Date.now() + retryDelayMs).toISOString();
@@ -1533,7 +1979,8 @@ export async function processMetaSyncQueue(
           locked_at: null,
         })
         .eq("id", job.id)
-        .eq("worker_id", workerId);
+        .eq("worker_id", workerId)
+        .eq("status", "running");
       if (account) {
         // A saúde de leitura fica na conta; a da chave e a do acesso já foram gravadas.
         await (supabaseAdmin as any)
@@ -1562,6 +2009,10 @@ export async function processMetaSyncQueue(
       if (canRetry) retried += 1;
       else failed += 1;
     }
+    if (jobUsagePct >= USAGE_RELEASE_PCT) {
+      console.warn("[meta-sync usage]", job.id, `${jobUsagePct}%`);
+      throttled = true;
+    }
     await refreshMetaSyncRun(job.run_id);
   }
 
@@ -1584,19 +2035,37 @@ export async function processMetaSyncQueue(
   );
   if (pendingError) console.error("[meta-sync reconcile pending]", pendingError.message);
 
-  // Agendamento (só banco) e redescoberta (chama a Meta, dentro do orçamento) vêm
-  // depois dos jobs: os jobs agendados agora são reclamados no próximo tick.
-  const scheduled = await enqueueScheduledMetaSyncs(demoTenantIds);
+  // Agendamento (só banco), checagem de saúde e redescoberta (chamam a Meta, dentro
+  // do orçamento) vêm depois dos jobs: os jobs agendados agora são reclamados no
+  // próximo tick. Com a cota da Meta perto do limite, as leituras de chave esperam.
+  const scheduled = await enqueueScheduledMetaSyncs(demoTenantIds, now);
+  let healthChecked = 0;
+  let recovered = 0;
   let discovered = 0;
-  try {
-    discovered = await rediscoverMetaAccounts(demoTenantIds, overBudget);
-  } catch (error) {
-    console.error("[meta-sync discover]", errorMessage(error));
+  if (!throttled) {
+    let reread = new Set<string>();
+    try {
+      const health = await checkMetaConnectionsHealth(demoTenantIds, overBudget, now);
+      healthChecked = health.checked;
+      recovered = health.recovered;
+      reread = health.reread;
+    } catch (error) {
+      console.error("[meta-sync health]", errorMessage(error));
+    }
+    try {
+      discovered = await rediscoverMetaAccounts(demoTenantIds, overBudget, reread);
+    } catch (error) {
+      console.error("[meta-sync discover]", errorMessage(error));
+    }
   }
 
   return {
     workerId,
     discovered,
+    healthChecked,
+    recovered,
+    throttled,
+    rateLimited,
     scheduled,
     pendingReconciled: Number(pendingReconciled ?? 0),
     claimed: claimed.length,

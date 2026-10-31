@@ -163,6 +163,24 @@ describe("callInfobipVoice wallet reservation", () => {
     expect(wallet.charged()).toBe(5);
   });
 
+  it("billingKey keys the reservation while each dial keeps a fresh correlation", async () => {
+    const first = await callInfobipVoice("+5511999999999", content, {
+      tenantId: NORMAL,
+      billingKey: "queue-1",
+    });
+    // A duplicate dispatch of the same queue item: same reservation, no
+    // second charge.
+    const duplicate = await callInfobipVoice("+5511999999999", content, {
+      tenantId: NORMAL,
+      billingKey: "queue-1",
+    });
+    expect(first.billing?.referenceId).toBe("voice:queue-1");
+    expect(duplicate.billing?.referenceId).toBe("voice:queue-1");
+    expect(first.idempotencyKey).not.toBe(duplicate.idempotencyKey);
+    expect(reservations().map((row) => row.reference_id)).toEqual(["voice:queue-1"]);
+    expect(wallet.charged()).toBe(5);
+  });
+
   it("a demo house never reserves", async () => {
     await expect(
       callInfobipVoice("+5511999999999", content, { tenantId: DEMO }),

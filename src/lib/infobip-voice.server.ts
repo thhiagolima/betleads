@@ -71,6 +71,15 @@ export type InfobipVoiceOptions = {
    * defaults to `VOICE_MAX_CALL_SECONDS` (120).
    */
   maxSeconds?: number | null;
+  /** Área do Expert: owner of the call; the reservation checks his monthly cap. */
+  expertId?: string | null;
+  /**
+   * Wallet delivery key when it must differ from `idempotencyKey` (e.g. the
+   * call_queue item id: one reservation `voice:<queue id>[:gen]` per item,
+   * while each dial keeps its own correlation). Defaults to the idempotency
+   * key, else the fresh uuid.
+   */
+  billingKey?: string | null;
 };
 
 export type InfobipVoiceContent =
@@ -197,10 +206,22 @@ export async function callInfobipVoice(
     tenantId: options.tenantId,
     item: "voice_30s",
     prefix: "voice",
-    deliveryKey: idempotencyKey,
+    deliveryKey: options.billingKey || idempotencyKey,
     units,
     referenceType: "voice_call",
+    ...(options.expertId ? { expertId: options.expertId } : {}),
   });
+  if (!reservation.ok && reservation.refusal) {
+    // Área do Expert: the expert's cap (or deactivation); never dialed.
+    return {
+      ok: false,
+      status: 0,
+      body: { error: reservation.reason },
+      idempotencyKey,
+      providerCallId: null,
+      errorKind: reservation.refusal,
+    };
+  }
   if (!reservation.ok) {
     return {
       ok: false,

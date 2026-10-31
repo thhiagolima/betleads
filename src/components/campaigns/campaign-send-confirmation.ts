@@ -92,3 +92,25 @@ export function campaignSendLabel({
   if (channel === "voice") return `${base} · ${num(cost)} ${cost === 1 ? "chamada" : "chamadas"}`;
   return base;
 }
+
+/**
+ * Texto do botão final do expert: em modo aprovação, "Enviar para
+ * aprovação"; no modo livre, a quem vai e o custo estimado em R$ (todos os
+ * canais — o expert paga pelo teto mensal, não pela carteira da casa).
+ */
+export function expertCampaignSendLabel({
+  when,
+  recipients,
+  cost,
+  approval,
+}: {
+  when: "now" | "schedule";
+  recipients: number;
+  cost: number | null;
+  approval: boolean;
+}): string {
+  if (approval) return "Enviar para aprovação";
+  const verb = when === "schedule" ? "Agendar para" : "Enviar para";
+  const base = `${verb} ${num(recipients)} ${recipients === 1 ? "lead" : "leads"}`;
+  return cost == null ? base : `${base} · ${brl(cost)}`;
+}

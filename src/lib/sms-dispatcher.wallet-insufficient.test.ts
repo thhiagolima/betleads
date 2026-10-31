@@ -86,6 +86,9 @@ vi.mock("./sms.functions", () => ({
   renderSmsVariables: vi.fn((content: string) => content),
 }));
 vi.mock("./billing/wallet-alerts.server", () => ({ notifyNoBalance: vi.fn(async () => false) }));
+vi.mock("./billing/expert-cap-alerts.server", () => ({
+  notifyExpertCapReached: vi.fn(async () => true),
+}));
 vi.mock("./dispatch-pause-insufficient.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./dispatch-pause-insufficient.server")>()),
   pauseChannelForInsufficientFunds: vi.fn(async () => undefined),
@@ -96,6 +99,7 @@ import { sendSmsInternal } from "./sms.functions";
 import { pauseChannelForInsufficientFunds } from "./dispatch-pause-insufficient.server";
 import { registerThrottle } from "./dispatch-rate.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
+import { notifyExpertCapReached } from "./billing/expert-cap-alerts.server";
 
 const TENANT_A = "00000000-0000-4000-8000-00000000000a";
 const TENANT_B = "00000000-0000-4000-8000-00000000000b";
@@ -351,5 +355,136 @@ describe("SMS campaign dispatcher — wallet refusal pauses only that house's ca
     expect(pauseChannelForInsufficientFunds).not.toHaveBeenCalled();
     expect(notifyNoBalance).toHaveBeenCalledWith(TENANT_A);
     expect(notifyNoBalance).not.toHaveBeenCalledWith(TENANT_B);
+  });
+});
+
+// Área do Expert §8 — an expert campaign at the expert's monthly cap pauses
+// only itself with its own reason: never the house's "sem saldo" alert.
+// Every tick re-applies the expert's current scope and active flag.
+describe("SMS campaign dispatcher — expert campaigns", () => {
+  const EXPERT = "00000000-0000-4000-8000-0000000000e1";
+  const P1 = "00000000-0000-4000-8000-000000000101";
+  const P2 = "00000000-0000-4000-8000-000000000102";
+
+  function expertCampaign() {
+    return {
+      id: "camp-x",
+      tenant_id: TENANT_A,
+      expert_id: EXPERT,
+      approval_status: "aprovada",
+      name: "Campanha expert",
+      content: "Oi",
+      route: "iGaming",
+      recipients: [
+        { phone: "+5511900000101", playerId: P1 },
+        { phone: "+5511900000102", playerId: P2 },
+      ],
+      total_count: 2,
+      sent_count: 0,
+      deduplicated_count: 0,
+      failed_count: 0,
+      scheduled_at: new Date(Date.now() - 60_000).toISOString(),
+      sent_cursor: 0,
+      last_error: null,
+      rate_per_minute: 60,
+      track_links: true,
+      status: "enviando",
+      locked_by: "lock-x",
+      audience_resolved_at: new Date().toISOString(),
+    };
+  }
+
+  function seed(opts: { ativo?: boolean; p2Affiliate?: string } = {}) {
+    state.tables = {
+      sms_campaigns: [expertCampaign()],
+      sms_send_logs: [],
+      players: [
+        { id: P1, tenant_id: TENANT_A, affiliate_id: "AFF1" },
+        { id: P2, tenant_id: TENANT_A, affiliate_id: opts.p2Affiliate ?? "AFF1" },
+      ],
+      experts: [
+        {
+          id: EXPERT,
+          tenant_id: TENANT_A,
+          nome: "Expert",
+          tipo: "restrito",
+          ativo: opts.ativo ?? true,
+          envio_modo: "livre",
+          teto_mensal: 1,
+        },
+      ],
+      expert_affiliates: [{ tenant_id: TENANT_A, expert_id: EXPERT, affiliate_id: "AFF1" }],
+    };
+    state.rpc.mockImplementation(async (name: string, args: Row) => {
+      if (name === "claim_due_sms_campaigns") return { data: state.tables.sms_campaigns, error: null };
+      if (name === "consume_channel_budget") {
+        return { data: [{ granted: args.p_n, retry_after_ms: 0, limited_by: null }], error: null };
+      }
+      return { data: null, error: null };
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  }
+
+  beforeEach(() => {
+    vi.mocked(sendSmsInternal).mockReset();
+    vi.mocked(notifyNoBalance).mockClear();
+    vi.mocked(notifyExpertCapReached).mockClear();
+  });
+
+  it("cap refusal pauses the campaign, alerts the admin about the expert, never the house no-balance", async () => {
+    seed();
+    vi.mocked(sendSmsInternal).mockResolvedValue({
+      ok: false,
+      status: 402,
+      error: "Teto mensal do expert atingido",
+      errorKind: "expert_cap",
+    } as any);
+    const { runScheduledSmsCampaigns } = await import("./sms-dispatcher.server");
+    await runScheduledSmsCampaigns({ limit: 10 });
+
+    expect(state.tables.sms_campaigns[0]).toMatchObject({
+      status: "pausada",
+      last_error: "Teto mensal do expert atingido",
+      failed_count: 0,
+      sent_cursor: 0,
+    });
+    expect(notifyNoBalance).not.toHaveBeenCalled();
+    expect(pauseChannelForInsufficientFunds).not.toHaveBeenCalled();
+    expect(notifyExpertCapReached).toHaveBeenCalledWith(TENANT_A, EXPERT);
+  });
+
+  it("sends with the expert as owner and link origin 'expert' (house shortener)", async () => {
+    seed();
+    vi.mocked(sendSmsInternal).mockResolvedValue({ ok: true, status: 200, response: "{}" } as any);
+    const { runScheduledSmsCampaigns } = await import("./sms-dispatcher.server");
+    await runScheduledSmsCampaigns({ limit: 10 });
+
+    expect(sendSmsInternal).toHaveBeenCalledTimes(2);
+    for (const [args] of vi.mocked(sendSmsInternal).mock.calls) {
+      expect(args).toMatchObject({
+        expertId: EXPERT,
+        linkTrackingOrigin: { sourceType: "expert", sourceId: EXPERT, shortDomainId: null },
+      });
+    }
+  });
+
+  it("a player whose affiliate left the expert's scope is not sent to", async () => {
+    seed({ p2Affiliate: "AFF2" });
+    vi.mocked(sendSmsInternal).mockResolvedValue({ ok: true, status: 200, response: "{}" } as any);
+    const { runScheduledSmsCampaigns } = await import("./sms-dispatcher.server");
+    await runScheduledSmsCampaigns({ limit: 10 });
+
+    expect(sendSmsInternal).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendSmsInternal).mock.calls[0][0]).toMatchObject({ playerId: P1 });
+    expect(state.tables.sms_campaigns[0]).toMatchObject({ sent_count: 1, failed_count: 1 });
+  });
+
+  it("a deactivated expert's campaign is cancelled without sending", async () => {
+    seed({ ativo: false });
+    const { runScheduledSmsCampaigns } = await import("./sms-dispatcher.server");
+    await runScheduledSmsCampaigns({ limit: 10 });
+
+    expect(sendSmsInternal).not.toHaveBeenCalled();
+    expect(state.tables.sms_campaigns[0]).toMatchObject({ status: "cancelada", locked_by: null });
   });
 });

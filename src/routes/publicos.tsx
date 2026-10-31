@@ -14,12 +14,14 @@ import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useCampaignDataSource } from "@/hooks/use-campaign-data-source";
+import type { CampaignAudienceRow } from "@/lib/campaign-data-source";
+import { resolveExpertCampaignAudience } from "@/lib/expert-campaigns.functions";
+import { getExpertHome } from "@/lib/expert-leads.functions";
 import {
-  deleteSmsAudience,
-  listSmsAudiences,
-  saveSmsAudience,
-} from "@/lib/sms-audience-crud.functions";
-import { resolveSmsCampaignAudience } from "@/lib/sms-audiences.functions";
+  resolveSmsCampaignAudience,
+  type ResolvedSmsAudience,
+} from "@/lib/sms-audiences.functions";
 import {
   describeSmsAudience,
   EMPTY_SMS_AUDIENCE,
@@ -31,12 +33,10 @@ import {
 
 export const Route = createFileRoute("/publicos")({ component: PublicosPage });
 
-type AudienceRow = {
-  id: string;
-  name: string;
-  description: string | null;
-  criteria: unknown;
-};
+type AudienceRow = CampaignAudienceRow;
+
+/** Preview of the rules; the expert's adds the per-channel counts of their leads. */
+type AudiencePreview = ResolvedSmsAudience & { emailEligible?: number };
 
 type Level = NonNullable<SmsAudienceCriteria["level"]>;
 type Timing = "cooling" | "sleeping" | "inactive30" | "inactive90";
@@ -65,11 +65,25 @@ function LevelMarker({ level }: { level: Level }) {
 
 function PublicosPage() {
   const qc = useQueryClient();
-  const listFn = useServerFn(listSmsAudiences);
-  const saveFn = useServerFn(saveSmsAudience);
-  const deleteFn = useServerFn(deleteSmsAudience);
+  // Same screen for the house and the expert (campaign-data-source.ts): the
+  // expert lists/saves their own audiences, sees the house's read-only, and
+  // the server limits every count to their leads.
+  const source = useCampaignDataSource();
+  const isExpert = source.isExpert;
+  const listFn = source.listAudiences;
+  const saveFn = source.saveAudience;
+  const deleteFn = source.deleteAudience;
   const resolveFn = useServerFn(resolveSmsCampaignAudience);
-  const audiences = useQuery({ queryKey: ["sms-audiences"], queryFn: () => listFn() });
+  const resolveExpertFn = useServerFn(resolveExpertCampaignAudience);
+  const expertHomeFn = useServerFn(getExpertHome);
+  const audiencesKey = source.queryKeys.audiences;
+  const audiences = useQuery({ queryKey: audiencesKey, queryFn: () => listFn() });
+  // Same key as the expert home: access type and how many leads they have.
+  const expertHome = useQuery({
+    queryKey: ["expert-home"],
+    queryFn: () => expertHomeFn(),
+    enabled: isExpert,
+  });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -78,7 +92,16 @@ function PublicosPage() {
   const previewVersion = useRef(0);
 
   const preview = useMutation({
-    mutationFn: (next: SmsAudienceCriteria) => resolveFn({ data: { criteria: next } }),
+    mutationFn: async (next: SmsAudienceCriteria): Promise<AudiencePreview> => {
+      if (!isExpert) return resolveFn({ data: { criteria: next } });
+      // Counts only, in the expert's scope: one call per channel shown.
+      const criteria = next as unknown as Record<string, unknown>;
+      const [sms, email] = await Promise.all([
+        resolveExpertFn({ data: { criteria, channel: "sms" } }),
+        resolveExpertFn({ data: { criteria, channel: "email" } }),
+      ]);
+      return { ...sms, recipientTotal: sms.eligibleTotal, emailEligible: email.eligibleTotal };
+    },
   });
 
   useEffect(() => {
@@ -100,7 +123,7 @@ function PublicosPage() {
     mutationFn: () => saveFn({ data: { id: editingId ?? undefined, name, description, criteria } }),
     onSuccess: () => {
       toast.success(editingId ? "Público atualizado" : "Público criado");
-      qc.invalidateQueries({ queryKey: ["sms-audiences"] });
+      qc.invalidateQueries({ queryKey: audiencesKey });
       reset();
     },
     onError: (error: Error) => toast.error(error.message),
@@ -109,7 +132,7 @@ function PublicosPage() {
     mutationFn: (id: string) => deleteFn({ data: { id } }),
     onSuccess: () => {
       toast.success("Público excluído");
-      qc.invalidateQueries({ queryKey: ["sms-audiences"] });
+      qc.invalidateQueries({ queryKey: audiencesKey });
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -159,11 +182,38 @@ function PublicosPage() {
   const editingSelection = isSelectionAudience(criteria);
   const facets = preview.data?.facets;
   const neverDeposited = criteria.activity.deposit === "never";
-  const savedAudiences = (audiences.data ?? []) as AudienceRow[];
+  const allAudiences = (audiences.data ?? []) as AudienceRow[];
+  // The expert's own audiences; the house's (total-access expert) are listed apart, read-only.
+  const savedAudiences = allAudiences.filter((row) => row.owner !== "casa");
+  const houseAudiences = isExpert ? allAudiences.filter((row) => row.owner === "casa") : [];
+  const home = expertHome.data as { tipo: "restrito" | "total"; totalLeads: number } | undefined;
+  const restricted = isExpert && home?.tipo === "restrito";
+  const noLeads = isExpert && home !== undefined && home.totalLeads === 0;
+  const leads = (count: number) =>
+    `${count.toLocaleString("pt-BR")} ${count === 1 ? "lead" : "leads"}`;
 
   return (
     <Page>
-      <PageHeader subtitle="Separe seus jogadores em grupos para criar campanhas mais precisas." />
+      <PageHeader
+        subtitle={
+          isExpert
+            ? `Separe seus leads em grupos para criar campanhas mais precisas.${
+                restricted ? " (leads dos seus IDs de afiliado)" : ""
+              }`
+            : "Separe seus jogadores em grupos para criar campanhas mais precisas."
+        }
+      />
+
+      {noLeads ? (
+        <p
+          className="rounded-xl border border-warning/40 bg-warning/10 p-3.5 text-body text-foreground"
+          role="status"
+        >
+          {restricted
+            ? "Você ainda não tem leads na sua carteira: seu acesso é restrito aos seus IDs de afiliado e nenhum lead chegou por eles. Se seus IDs ainda não foram cadastrados, fale com o admin da casa."
+            : "Você ainda não tem leads na sua carteira. Os públicos ficam vazios até chegarem leads."}
+        </p>
+      ) : null}
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
         <HomeCard className="min-w-0 space-y-5 p-4 sm:p-5">
@@ -199,8 +249,9 @@ function PublicosPage() {
 
           {editingSelection ? (
             <p className="rounded-xl border border-border bg-secondary/40 p-3.5 text-body text-muted-foreground">
-              Público de seleção: {describeSmsAudience(criteria)} em Jogadores. As regras não se
-              aplicam a ele; você pode alterar o nome e a descrição ou excluí-lo.
+              Público de seleção: {describeSmsAudience(criteria)}{" "}
+              {isExpert ? "nos seus leads" : "em Jogadores"}. As regras não se aplicam a ele; você
+              pode alterar o nome e a descrição ou excluí-lo.
             </p>
           ) : (
             <>
@@ -392,14 +443,24 @@ function PublicosPage() {
               )}
               {calculating
                 ? "Calculando público…"
-                : editingSelection
-                  ? `${(preview.data?.total ?? 0).toLocaleString("pt-BR")} jogadores da seleção nesta casa`
-                  : `${(preview.data?.total ?? 0).toLocaleString("pt-BR")} jogadores atendem a estas regras`}
+                : isExpert
+                  ? editingSelection
+                    ? `${leads(preview.data?.total ?? 0)} da seleção na sua carteira`
+                    : `${leads(preview.data?.total ?? 0)} da sua carteira atendem a estas regras`
+                  : editingSelection
+                    ? `${(preview.data?.total ?? 0).toLocaleString("pt-BR")} jogadores da seleção nesta casa`
+                    : `${(preview.data?.total ?? 0).toLocaleString("pt-BR")} jogadores atendem a estas regras`}
             </div>
             <p className="mt-1.5 text-meta text-muted-foreground">
               {describeSmsAudience(criteria)}
             </p>
-            {!calculating && preview.data && (
+            {!calculating && preview.data && isExpert && (
+              <p className="mt-1 text-meta text-muted-foreground">
+                {preview.data.recipientTotal.toLocaleString("pt-BR")} com celular ·{" "}
+                {(preview.data.emailEligible ?? 0).toLocaleString("pt-BR")} com e-mail
+              </p>
+            )}
+            {!calculating && preview.data && !isExpert && (
               <div className="mt-1 space-y-1 text-meta text-muted-foreground">
                 <p>
                   {preview.data.recipientTotal.toLocaleString("pt-BR")} com telefone válido para
@@ -462,11 +523,31 @@ function PublicosPage() {
                 Não foi possível carregar os públicos: {audiences.error.message}
               </p>
             )}
-            {!audiences.isLoading && !audiences.isError && savedAudiences.length === 0 && (
-              <p className="rounded-xl border border-dashed border-border p-6 text-center text-body text-muted-foreground">
-                Você ainda não criou públicos personalizados.
-              </p>
-            )}
+            {!audiences.isLoading &&
+              !audiences.isError &&
+              savedAudiences.length === 0 &&
+              (isExpert ? (
+                <div className="space-y-3 rounded-xl border border-dashed border-border p-6 text-center">
+                  <p className="text-body text-muted-foreground">
+                    Você ainda não criou públicos. Escolha as regras ao lado para separar os seus
+                    leads e salve o público para usar nas campanhas.
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="h-10 sm:h-9"
+                    onClick={() => {
+                      reset();
+                      document.getElementById("audience-name")?.focus();
+                    }}
+                  >
+                    Criar meu primeiro público
+                  </Button>
+                </div>
+              ) : (
+                <p className="rounded-xl border border-dashed border-border p-6 text-center text-body text-muted-foreground">
+                  Você ainda não criou públicos personalizados.
+                </p>
+              ))}
             <div className="space-y-2">
               {savedAudiences.map((audience) => {
                 const audienceCriteria = normalizeSmsAudienceCriteria(audience.criteria);
@@ -516,6 +597,50 @@ function PublicosPage() {
             </div>
           </section>
 
+          {houseAudiences.length > 0 ? (
+            <section
+              className="space-y-3 border-t border-border/70 pt-5"
+              aria-labelledby="house-audiences-title"
+            >
+              <div>
+                <h2 id="house-audiences-title" className="text-section">
+                  Públicos da casa
+                </h2>
+                <p className="mt-0.5 text-body text-muted-foreground">
+                  Criados pela casa. Use nas suas campanhas ou duplique para ajustar; só os seus
+                  leads entram no envio.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {houseAudiences.map((audience) => {
+                  const audienceCriteria = normalizeSmsAudienceCriteria(audience.criteria);
+                  const selection = isSelectionAudience(audienceCriteria);
+                  return (
+                    <AudienceCard
+                      key={audience.id}
+                      audienceId={audience.id}
+                      name={audience.name}
+                      description={audience.description}
+                      badge="Da casa · somente leitura"
+                      labels={criteriaLabels(audienceCriteria)}
+                      menu={
+                        selection
+                          ? undefined
+                          : [
+                              {
+                                label: "Duplicar como meu público",
+                                icon: <Copy className="size-4" aria-hidden="true" />,
+                                onSelect: () => duplicate(audience),
+                              },
+                            ]
+                      }
+                    />
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+
           <section
             className="space-y-3 border-t border-border/70 pt-5"
             aria-labelledby="system-audiences-title"
@@ -525,8 +650,9 @@ function PublicosPage() {
                 Públicos automáticos
               </h2>
               <p className="mt-0.5 text-body text-muted-foreground">
-                Os níveis de fidelização estão sempre prontos para uso e acompanham a classificação
-                atual dos jogadores.
+                {isExpert
+                  ? "Os níveis de fidelização dos seus leads estão sempre prontos para uso e acompanham a classificação atual."
+                  : "Os níveis de fidelização estão sempre prontos para uso e acompanham a classificação atual dos jogadores."}
               </p>
             </div>
             <div className="grid gap-2 xl:grid-cols-2">
@@ -536,8 +662,10 @@ function PublicosPage() {
                   audienceId={audience.id}
                   name={audience.name}
                   description={audience.description}
+                  badge={isExpert ? "dos seus leads" : undefined}
                   menu={
-                    audience.id === "system:all-leads"
+                    // Jornadas are a house page: no "Usar em jornada" for the expert.
+                    !isExpert && audience.id === "system:all-leads"
                       ? [
                           {
                             label: "Usar em jornada",

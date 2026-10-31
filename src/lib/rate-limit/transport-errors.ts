@@ -34,6 +34,11 @@
 //                     from `provider_account`'s "no_balance" reason, which is
 //                     the provider's OWN account (Short Brasil) out of
 //                     balance.
+//   expert_cap / expert_inactive: Área do Expert — the reservation of an
+//                     expert campaign send was refused because the expert hit
+//                     the monthly cap (or was deactivated). Nothing was sent
+//                     nor charged. Only that expert's campaign/items pause;
+//                     never the house's no-balance alert or backoff.
 //
 // Pure module (no I/O): imported by the SMS, voice and e-mail adapters.
 
@@ -42,7 +47,9 @@ export type ProviderErrorKind =
   | "not_sent"
   | "outcome_unknown"
   | "provider_account"
-  | "insufficient_balance";
+  | "insufficient_balance"
+  | "expert_cap"
+  | "expert_inactive";
 
 // Failures that happen before a TCP connection exists (nothing was written).
 const NOT_SENT_CODES = new Set([
@@ -97,7 +104,10 @@ function messagesOf(error: unknown): string {
  */
 export function transportErrorKind(
   error: unknown,
-): Exclude<ProviderErrorKind, "misconfigured" | "provider_account" | "insufficient_balance"> {
+): Exclude<
+  ProviderErrorKind,
+  "misconfigured" | "provider_account" | "insufficient_balance" | "expert_cap" | "expert_inactive"
+> {
   const codes = codesOf(error);
   if (codes.some((code) => NOT_SENT_CODES.has(code))) return "not_sent";
   // A timeout/abort/reset anywhere in the chain wins over a message match.

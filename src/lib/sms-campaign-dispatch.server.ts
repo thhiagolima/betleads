@@ -44,7 +44,13 @@ export type SmsCampaignRow = {
   /** 'external_list': phones that are not players (see campaign-external-list.ts). */
   recipient_source?: string | null;
   unresolved_recipients?: unknown;
+  /** Área do Expert: owner of the campaign (null = house). */
+  expert_id?: string | null;
+  /** Área do Expert: 'pendente' | 'aprovada' | 'recusada'; null = house / free mode. */
+  approval_status?: string | null;
 };
+
+export type AudienceTarget = { phone: string; playerId: string | null };
 
 export type CampaignTarget = {
   phone: string;
@@ -53,6 +59,13 @@ export type CampaignTarget = {
   external?: boolean;
   /** Set once the recipient was classified as not sendable; it is skipped forever. */
   unresolvedReason?: UnresolvedReason | null;
+  /**
+   * Player the audience itself chose for this phone (dynamic selection
+   * audience). Dispatch-time resolution validates it (same house, the
+   * player's own phone, consent, control group) instead of re-resolving the
+   * phone, which with a shared phone could pick another player.
+   */
+  claimedPlayerId?: string | null;
 };
 
 export function isSendableTarget(t: CampaignTarget): boolean {
@@ -72,11 +85,13 @@ export function parseCampaignTargets(raw: unknown): CampaignTarget[] {
       continue;
     const pid = (r as { playerId?: unknown }).playerId;
     const reason = (r as { unresolvedReason?: unknown }).unresolvedReason;
+    const claimed = (r as { claimedPlayerId?: unknown }).claimedPlayerId;
     out.push({
       phone: (r as { phone: string }).phone,
       playerId: typeof pid === "string" && pid ? pid : null,
       ...((r as { external?: unknown }).external === true ? { external: true } : {}),
       ...(isUnresolvedReason(reason) ? { unresolvedReason: reason } : {}),
+      ...(typeof claimed === "string" && claimed ? { claimedPlayerId: claimed } : {}),
     });
   }
   return out;
@@ -98,11 +113,24 @@ export type SendOutcome = {
    * before this recipient and the campaign is paused until "Retomar".
    */
   insufficientBalance?: boolean;
+  /**
+   * Área do Expert: the EXPERT's monthly cap refused the reservation. Cut
+   * like `insufficientBalance`, but pauses only this campaign with its own
+   * reason and never the house's no-balance alert.
+   */
+  expertCap?: boolean;
+  /** Área do Expert: the owner was deactivated meanwhile; the campaign is cancelled. */
+  expertInactive?: boolean;
   error?: string;
 };
 
 /** last_error of a campaign paused because the house ran out of balance. */
 export const SMS_CAMPAIGN_NO_BALANCE_MESSAGE = "Saldo insuficiente";
+/** last_error of an expert campaign paused at the expert's monthly cap. */
+export const SMS_CAMPAIGN_EXPERT_CAP_MESSAGE = "Teto mensal do expert atingido";
+/** last_error of an expert campaign whose owner was deactivated. */
+export const SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE =
+  "O expert dono desta campanha foi desativado; nada será enviado.";
 
 /**
  * SMS provider circuit breaker, asked before every batch:
@@ -150,8 +178,12 @@ export type CampaignDispatchDeps = {
   }) => Promise<SendOutcome[]>;
   /** SMS provider breaker; absent = always closed. */
   providerGate?: () => Promise<ProviderGateDecision>;
-  /** Phones matching a saved audience rule right now (dynamic audiences). */
-  resolveAudiencePhones?: (tenantId: string, criteria: unknown) => Promise<string[]>;
+  /**
+   * Recipients matching a saved audience right now (dynamic audiences): the
+   * phone and, when the audience is a selection of players, the player it
+   * chose (rule audiences only know phones: playerId null).
+   */
+  resolveAudienceTargets?: (tenantId: string, criteria: unknown) => Promise<AudienceTarget[]>;
   /** External lists: which of these phones registered as players meanwhile. */
   findRegisteredPhones?: (tenantId: string, phones: string[]) => Promise<Set<string>>;
 };
@@ -162,8 +194,8 @@ export type CampaignTickResult = {
   failed: number;
   /** Recipients the cursor moved past in this tick (sendable + skipped). */
   advanced: number;
-  /** "pausada": stopped for lack of house balance; resumed by hand ("Retomar"). */
-  status: "enviado" | "enviando" | "falhou" | "pausada";
+  /** "pausada": stopped for lack of house balance (or the expert's cap); resumed by hand. */
+  status: "enviado" | "enviando" | "falhou" | "pausada" | "cancelada";
   stopReason:
     | "done"
     | "quota"
@@ -174,7 +206,9 @@ export type CampaignTickResult = {
     | "no_recipients"
     | "none_resolved"
     | "provider_unavailable"
-    | "insufficient_balance";
+    | "insufficient_balance"
+    | "expert_cap"
+    | "expert_inactive";
   /** ENV-10: sends whose provider outcome is unknown (counted in `sent`). */
   pendingConfirmation?: number;
 };
@@ -255,11 +289,11 @@ export async function processSmsCampaignTick(
     c.audience_criteria &&
     !c.audience_resolved_at &&
     (c.sent_cursor ?? 0) === 0 &&
-    deps.resolveAudiencePhones
+    deps.resolveAudienceTargets
   ) {
-    let phones: string[];
+    let audience: AudienceTarget[];
     try {
-      phones = await deps.resolveAudiencePhones(c.tenant_id, c.audience_criteria);
+      audience = await deps.resolveAudienceTargets(c.tenant_id, c.audience_criteria);
     } catch (error) {
       // Ex.: o público de seleção foi excluído depois do agendamento. Tentar de
       // novo não resolve: a campanha falha (fechado, nada é enviado).
@@ -283,7 +317,7 @@ export async function processSmsCampaignTick(
       });
       return { ...result, stopReason: "resolution_error" };
     }
-    if (phones.length === 0) {
+    if (audience.length === 0) {
       await deps.updateCampaign(c, {
         status: "falhou",
         recipients: [],
@@ -295,7 +329,13 @@ export async function processSmsCampaignTick(
       });
       return { ...result, status: "falhou", stopReason: "no_recipients" };
     }
-    const fresh: CampaignTarget[] = phones.map((phone) => ({ phone, playerId: null }));
+    // Not resolved yet (step 1 validates every target); the audience's own
+    // player choice travels as the claim.
+    const fresh: CampaignTarget[] = audience.map((t) => ({
+      phone: t.phone,
+      playerId: null,
+      ...(t.playerId ? { claimedPlayerId: t.playerId } : {}),
+    }));
     const resolvedAt = new Date(deps.now()).toISOString();
     const ok = await deps.updateCampaign(c, {
       recipients: fresh,
@@ -324,9 +364,11 @@ export async function processSmsCampaignTick(
   if (pendingIdx.length > 0) {
     let resolution: RecipientResolution;
     try {
+      // A claimed player (selection audience) is validated as the player of
+      // that row; only phone-only rows are looked up by phone.
       resolution = await deps.resolveRecipients(
         c.tenant_id,
-        pendingIdx.map((i) => targets[i]),
+        pendingIdx.map((i) => ({ ...targets[i], playerId: targets[i].claimedPlayerId ?? null })),
       );
     } catch (error) {
       await deps.updateCampaign(c, {
@@ -575,13 +617,27 @@ export async function processSmsCampaignTick(
     const firstRetryable =
       deferredError !== null
         ? 0
-        : outcomes.findIndex((o) => !o?.ok && (o?.retryable || o?.insufficientBalance));
+        : outcomes.findIndex(
+            (o) =>
+              !o?.ok &&
+              (o?.retryable || o?.insufficientBalance || o?.expertCap || o?.expertInactive),
+          );
     if (firstRetryable >= 0) {
-      const noBalance = deferredError === null && outcomes[firstRetryable]?.insufficientBalance === true;
-      lastError = noBalance
-        ? SMS_CAMPAIGN_NO_BALANCE_MESSAGE
-        : (deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível");
-      stop = noBalance ? "insufficient_balance" : "provider_unavailable";
+      const cut = deferredError === null ? outcomes[firstRetryable] : undefined;
+      const noBalance = cut?.insufficientBalance === true;
+      const expertStop = cut?.expertInactive
+        ? ("expert_inactive" as const)
+        : cut?.expertCap
+          ? ("expert_cap" as const)
+          : null;
+      lastError = expertStop
+        ? expertStop === "expert_cap"
+          ? SMS_CAMPAIGN_EXPERT_CAP_MESSAGE
+          : SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE
+        : noBalance
+          ? SMS_CAMPAIGN_NO_BALANCE_MESSAGE
+          : (deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível");
+      stop = expertStop ?? (noBalance ? "insufficient_balance" : "provider_unavailable");
       const cutKey = sends[firstRetryable]?.key;
       const cutAt = batch.findIndex((it) => it.kind === "send" && it.key === cutKey);
       batch = cutAt >= 0 ? batch.slice(0, cutAt) : [];
@@ -607,6 +663,8 @@ export async function processSmsCampaignTick(
     // Ruling (final-2): an earlier failure or pending confirmation in this
     // batch must not replace the pause reason.
     if (stop === "insufficient_balance") lastError = SMS_CAMPAIGN_NO_BALANCE_MESSAGE;
+    if (stop === "expert_cap") lastError = SMS_CAMPAIGN_EXPERT_CAP_MESSAGE;
+    if (stop === "expert_inactive") lastError = SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE;
     result.sent += batchSent;
     result.deduplicated += batchDedup;
     result.failed += batchFailed;
@@ -635,9 +693,11 @@ export async function processSmsCampaignTick(
     ? totalSent + totalDedup === 0
       ? "falhou"
       : "enviado"
-    : stop === "insufficient_balance"
+    : stop === "insufficient_balance" || stop === "expert_cap"
       ? "pausada"
-      : "enviando";
+      : stop === "expert_inactive"
+        ? "cancelada"
+        : "enviando";
   result.stopReason = isDone ? "done" : (stop ?? "quota");
   const patch: Record<string, unknown> = {
     status: result.status,
@@ -646,7 +706,9 @@ export async function processSmsCampaignTick(
   };
   if (
     result.stopReason === "provider_unavailable" ||
-    result.stopReason === "insufficient_balance"
+    result.stopReason === "insufficient_balance" ||
+    result.stopReason === "expert_cap" ||
+    result.stopReason === "expert_inactive"
   )
     patch.last_error = lastError;
   await deps.updateCampaign(c, patch);

@@ -1,3 +1,5 @@
+import sanitizeHtml from "sanitize-html";
+
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { refundForDelivery, reserveForDelivery } from "./billing/wallet.server";
 import { augmentEmailHtml, isSuppressed } from "./email-deliverability.server";
@@ -36,6 +38,8 @@ export type SendEmailInput = {
   idempotencyKey?: string;
   tenantId?: string | null;
   linkTracking?: Omit<LinkTrackingContext, "channel">;
+  /** Área do Expert: owner of the campaign; the reservation checks his monthly cap. */
+  expertId?: string | null;
 };
 
 export type SendEmailResult = Awaited<ReturnType<typeof callInfobipEmail>> & {
@@ -55,13 +59,86 @@ export const EMAIL_RESERVATION_REFERENCE_TYPE = "email_send";
 /** body.error of a send refused by the house's own wallet. */
 export const EMAIL_INSUFFICIENT_BALANCE_MESSAGE = "Saldo insuficiente";
 
+// Allowlist of what an e-mail body may carry: the document shell, text,
+// tables, images, links and inline/head CSS. Everything else (script, iframe,
+// form/inputs, object/embed, base, link, svg/math, every on* attribute, meta
+// http-equiv such as refresh) is dropped. The parser keeps no comments (so no
+// Outlook conditional comments either) and no doctype; a doctype is put back.
+const EMAIL_TAGS = [
+  "html", "head", "body", "meta", "title", "style",
+  "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "col", "colgroup",
+  "div", "span", "p", "br", "hr", "center", "font", "img", "a",
+  "h1", "h2", "h3", "h4", "h5", "h6",
+  "b", "i", "u", "s", "strong", "em", "small", "big", "sub", "sup", "mark", "strike", "del", "ins",
+  "ul", "ol", "li", "dl", "dt", "dd", "blockquote", "pre", "code", "abbr", "address", "cite", "q",
+  "section", "article", "header", "footer", "main", "nav", "aside", "figure", "figcaption", "wbr",
+];
+
+const EMAIL_COMMON_ATTRS = [
+  "style", "class", "id", "dir", "lang", "title", "role", "align", "valign",
+  "width", "height", "bgcolor", "background", "border", "color", "face", "size",
+  "aria-*",
+];
+
+/** CSS that runs or loads code in some engine (IE expression/behavior, XBL, script URLs, imports). */
+const UNSAFE_CSS = /expression\s*\(|javascript\s*:|vbscript\s*:|-moz-binding|behavior\s*:|@import/i;
+
+const EMAIL_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
+  allowedTags: EMAIL_TAGS,
+  // `style` blocks are what responsive e-mail CSS is made of; their content is
+  // raw CSS (never parsed as HTML) and e-mail clients run no scripts.
+  allowVulnerableTags: true,
+  disallowedTagsMode: "discard",
+  // Disallowed tags whose text content is dropped too (not just the tag).
+  nonTextTags: [
+    "script", "style", "textarea", "option", "noscript", "iframe", "object", "embed",
+    "applet", "template", "svg", "math", "noembed", "noframes", "xmp",
+  ],
+  allowedAttributes: {
+    "*": EMAIL_COMMON_ATTRS,
+    meta: ["charset", "name", "content"],
+    a: ["href", "name", "target", "rel"],
+    img: ["src", "alt", "width", "height", "border", "hspace", "vspace"],
+    table: ["cellpadding", "cellspacing", "summary", "frame", "rules"],
+    td: ["colspan", "rowspan", "nowrap", "headers", "scope"],
+    th: ["colspan", "rowspan", "nowrap", "headers", "scope"],
+    col: ["span"],
+    colgroup: ["span"],
+    ol: ["start", "type"],
+    ul: ["type"],
+    li: ["value"],
+  },
+  allowedSchemes: ["http", "https", "mailto", "tel"],
+  // Images may be inline (data:) or attachments (cid:); links never data:.
+  allowedSchemesByTag: { img: ["http", "https", "data", "cid"] },
+  allowedSchemesAppliedToAttributes: ["href", "src", "cite", "background", "poster"],
+  allowProtocolRelative: true,
+  // Keeps the inline CSS byte for byte (no postcss rewrite); a declaration
+  // list that can run code is removed whole below.
+  parseStyleAttributes: false,
+  transformTags: {
+    "*": (tagName, attribs) => {
+      // A meta refresh (any http-equiv) is dropped whole, content included:
+      // renamed to a tag outside the allowlist.
+      if (tagName === "meta" && Object.keys(attribs).some((n) => n.toLowerCase() === "http-equiv")) {
+        return { tagName: "dropped-meta", attribs: {} };
+      }
+      if (attribs.style && UNSAFE_CSS.test(attribs.style)) {
+        const rest = { ...attribs };
+        delete rest.style;
+        return { tagName, attribs: rest };
+      }
+      return { tagName, attribs };
+    },
+  },
+  exclusiveFilter: (frame) => frame.tag === "style" && UNSAFE_CSS.test(frame.text ?? ""),
+};
+
+/** Allowlist sanitizer of every e-mail body before it goes to the provider. */
 export function sanitizeEmailHtml(html: string): string {
-  return (html || "")
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
-    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "")
-    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "")
-    .replace(/javascript:/gi, "");
+  const source = html || "";
+  const clean = sanitizeHtml(source, EMAIL_SANITIZE_OPTIONS);
+  return /^\s*<!doctype\s/i.test(source) ? `<!DOCTYPE html>${clean}` : clean;
 }
 
 function getEmailBaseUrl(): string {
@@ -218,6 +295,7 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
       deliveryKey: idempotencyKey,
       units: 1,
       referenceType: EMAIL_RESERVATION_REFERENCE_TYPE,
+      ...(input.expertId ? { expertId: input.expertId } : {}),
     });
   } catch (error) {
     await markTrackedDispatchesFailed(trackedDispatchIds);
@@ -225,6 +303,17 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
   }
   if (!reservation.ok) {
     await markTrackedDispatchesFailed(trackedDispatchIds);
+    if (reservation.refusal) {
+      // Área do Expert: the expert's cap (or deactivation), not the house.
+      return {
+        ok: false,
+        status: 0,
+        body: { error: reservation.reason },
+        idempotencyKey,
+        temporary: false,
+        errorKind: reservation.refusal,
+      };
+    }
     return {
       ok: false,
       status: 0,

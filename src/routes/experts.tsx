@@ -19,6 +19,12 @@
 // renders only its own list at the exact "/experts" path and defers to
 // <Outlet /> under the child path so the list doesn't render underneath the
 // detail.
+//
+// Área do Expert §8: columns Envio (Livre / Com aprovação), Teto and Uso do
+// mês (listExpertUsageForAdmin), and an "Aprovações pendentes" card with the
+// campaigns waiting for approval across experts (Revisar → Aprovar/Recusar).
+// The per-expert queue lives in the expert's "Campanhas" tab
+// (/rendimento/equipe/$expertId?aba=campanhas).
 import { useState } from "react";
 import { Link, Outlet, createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,6 +32,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Plus, Settings, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -59,6 +66,13 @@ import { ExpertFormDialog } from "@/components/experts/expert-form-dialog";
 import { ExpertInviteDialog } from "@/components/experts/expert-invite-dialog";
 import { ExpertSettingsDialog } from "@/components/experts/expert-settings-dialog";
 import { ExpertTeamLinkDialog } from "@/components/experts/expert-team-link-dialog";
+import {
+  ExpertEnvioCell,
+  ExpertTetoCell,
+  ExpertUsageCell,
+} from "@/components/experts/expert-list-columns";
+import { ExpertCampaignsQueue } from "@/components/experts/expert-campaigns-admin";
+import { useExpertUsageAdmin } from "@/components/experts/use-expert-campaigns-admin";
 
 export const Route = createFileRoute("/experts")({
   component: ExpertsRoute,
@@ -95,6 +109,10 @@ function ExpertsPage() {
     queryKey: EXPERT_CLICK_WINDOW_QUERY_KEY,
     queryFn: () => clickWindowFn(),
   });
+
+  const usageQuery = useExpertUsageAdmin();
+  const usageByExpert = new Map((usageQuery.data?.items ?? []).map((u) => [u.expertId, u]));
+  const pendingTotal = (usageQuery.data?.items ?? []).reduce((sum, u) => sum + u.pendentes, 0);
 
   const experts = expertsQuery.data ?? [];
   const unassigned = unassignedQuery.data ?? [];
@@ -172,6 +190,25 @@ function ExpertsPage() {
         }
       />
 
+      {pendingTotal > 0 && (
+        <Card id="aprovacoes">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Aprovações pendentes
+              <Badge
+                className="border-transparent bg-warning/15 text-warning shadow-none"
+                aria-label={`${pendingTotal} aguardando aprovação`}
+              >
+                {pendingTotal}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ExpertCampaignsQueue pendingOnly emptyText="Nenhuma campanha aguardando aprovação." />
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Experts ({experts.length})</CardTitle>
@@ -184,6 +221,9 @@ function ExpertsPage() {
                 <TableHead>Tipo</TableHead>
                 <TableHead>IDs de afiliado</TableHead>
                 <TableHead>Leads</TableHead>
+                <TableHead>Envio</TableHead>
+                <TableHead>Teto</TableHead>
+                <TableHead>Uso do mês</TableHead>
                 <TableHead>Acesso</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
@@ -217,6 +257,19 @@ function ExpertsPage() {
                     </div>
                   </TableCell>
                   <TableCell>{expert.leads}</TableCell>
+                  <TableCell>
+                    <ExpertEnvioCell
+                      expertId={expert.id}
+                      envioModo={expert.envioModo}
+                      pendentes={usageByExpert.get(expert.id)?.pendentes ?? 0}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <ExpertTetoCell teto={expert.tetoMensal} />
+                  </TableCell>
+                  <TableCell>
+                    <ExpertUsageCell usage={usageByExpert.get(expert.id) ?? null} />
+                  </TableCell>
                   <TableCell>
                     {acessoBadge(expert.acesso, expert.papelEquipe, expert.ativo)}
                   </TableCell>
@@ -346,7 +399,7 @@ function ExpertsPage() {
               ))}
               {experts.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                     Nenhum expert cadastrado.
                   </TableCell>
                 </TableRow>

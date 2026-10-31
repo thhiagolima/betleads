@@ -29,7 +29,7 @@ import {
 } from "./dispatch-pause-insufficient.server";
 import { pingHeartbeat, startJobRun, type JobRunHandle } from "./observability/job-monitor.server";
 import { SMS_CAMPAIGN_RUN_BUDGET_MS, SMS_CAMPAIGN_TICK_SECONDS } from "./campaign-recipients";
-import { resolveAudienceForTenant, type SelectionDb } from "./sms-audience-selection.server";
+import { resolveAudienceTargetsForTenant, type SelectionDb } from "./sms-audience-selection.server";
 import {
   findAcceptedDeliveryKeys,
   findRegisteredPhones,
@@ -49,6 +49,8 @@ import { SmsAccountGates } from "./sms-account-gates.server";
 import { ProviderAccountUnavailableError, resolveSmsAccount } from "./provider-accounts.server";
 import { PROVIDER_ACCOUNT_DEFER_MS } from "./rate-limit/provider-errors.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
+import { notifyExpertCapReached } from "./billing/expert-cap-alerts.server";
+import { expertCampaignDeps } from "./expert-sms-campaign.server";
 
 const SMS_CAMPAIGN_JOB = "sms_campaign_dispatch";
 /** Per-lead backoff when the house's own wallet has no balance (never a global pause). */
@@ -958,17 +960,15 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
       await persistCampaignUnresolved(campaignDb, campaignId, unresolved);
     },
     acquireSendBudget: acquireCampaignSendBudget,
-    async resolveAudiencePhones(tenantId, criteria) {
+    resolveAudienceTargets(tenantId, criteria) {
       // Mesmo avaliador do compositor: seleção carrega a lista do público pelo
-      // id + casa; regras vão ao RPC de sempre. Critério corrompido → erro
-      // permanente (a campanha falha, sem reenvio).
-      const data = await resolveAudienceForTenant(
+      // id + casa (e leva o id de cada jogador); regras vão ao RPC de sempre.
+      // Critério corrompido → erro permanente (a campanha falha, sem reenvio).
+      return resolveAudienceTargetsForTenant(
         supabaseAdmin as unknown as SelectionDb,
         tenantId,
         criteria,
       );
-      const phones = (data as { phones?: unknown }).phones;
-      return Array.isArray(phones) ? phones.filter((p): p is string => typeof p === "string") : [];
     },
     findAcceptedDeliveryKeys: (keys) => findAcceptedDeliveryKeys(campaignDb, keys),
     findRegisteredPhones: (tenantId, phones) => findRegisteredPhones(campaignDb, tenantId, phones),
@@ -988,6 +988,9 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
     },
     async send({ campaign, target, deliveryKey, variables }) {
       const house = await loadHouseLinks(campaign.tenant_id);
+      // Área do Expert: the owner pays through his cap; links carry his origin
+      // and the house's default shortener (never an override).
+      const expertId = campaign.expert_id ?? null;
       const r = await sendSmsInternal({
         to: target.phone,
         content: campaign.content,
@@ -998,13 +1001,16 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
         tenantId: campaign.tenant_id,
         house,
         linkTrackingEnabled: campaign.track_links !== false,
-        linkTrackingOrigin: {
-          sourceType: "campaign",
-          sourceId: campaign.id,
-          shortDomainId: campaign.short_domain_id ?? null,
-          recipientHash: await campaignRecipientHash(campaign.tenant_id, target),
-        },
+        linkTrackingOrigin: expertId
+          ? { sourceType: "expert", sourceId: expertId, shortDomainId: null, recipientHash: null }
+          : {
+              sourceType: "campaign",
+              sourceId: campaign.id,
+              shortDomainId: campaign.short_domain_id ?? null,
+              recipientHash: await campaignRecipientHash(campaign.tenant_id, target),
+            },
         deliveryKey,
+        ...(expertId ? { expertId } : {}),
       });
       const errorKind = r.ok ? undefined : (r as { errorKind?: unknown }).errorKind;
       const providerAccount = errorKind === "provider_account";
@@ -1017,6 +1023,8 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
         providerAccount,
         // PG3 final fix I3: the house's wallet refused; the campaign pauses.
         insufficientBalance: errorKind === "insufficient_balance",
+        expertCap: errorKind === "expert_cap",
+        expertInactive: errorKind === "expert_inactive",
         error: r.ok ? undefined : (r as { error?: string }).error,
       };
     },
@@ -1152,8 +1160,21 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
       continue;
     }
     try {
+      // Área do Expert: re-scoped per tick, never the bulk path; null = nothing to send.
+      const scoped = c.expert_id
+        ? await expertCampaignDeps(c, campaignDeps(false), {
+            resolveAudienceTargets: (tenantId, criteria, scope) =>
+              resolveAudienceTargetsForTenant(
+                supabaseAdmin as unknown as SelectionDb,
+                tenantId,
+                criteria,
+                scope,
+              ),
+          })
+        : campaignDeps(await campaignUsesBulk(c.tenant_id));
+      if (!scoped) continue;
       const deps = {
-        ...campaignDeps(await campaignUsesBulk(c.tenant_id)),
+        ...scoped,
         providerGate: () => campaignProviderGate(gates, c),
       };
       const r = await processSmsCampaignTick(c, deps, {
@@ -1179,6 +1200,9 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
           }),
         );
       }
+      // Área do Expert: only this expert's campaign paused; never the house alert.
+      if (r.stopReason === "expert_cap" && c.expert_id)
+        await notifyExpertCapReached(c.tenant_id, c.expert_id);
     } catch (error) {
       console.error("[sms-campaigns] falha ao processar campanha", {
         campaignId: c.id,

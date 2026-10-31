@@ -632,6 +632,8 @@ describe("e-mail campaign send (runCampaignSend)", () => {
       template_id: TEMPLATE,
       audience_filter: { audience_mode: "leads", target_player_ids: [playerId] },
       track_links: false,
+      // Claimed for this run (runCampaignSend only sends a claimed campaign).
+      status: "enviando",
     });
     fake.db.rows("email_templates").push({
       id: TEMPLATE,

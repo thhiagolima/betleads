@@ -1,4 +1,4 @@
-// SQL test for supabase/migrations/20261121100000_mcp_financeiro.sql: the base
+// SQL test for supabase/migrations/20261128100000_mcp_financeiro.sql: the base
 // tables for the finance MCP server (access level, OAuth, previews, call log).
 // RLS is enabled on every mcp_* table and only service_role gets privileges —
 // later tasks read/write these only through supabaseAdmin.
@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { readMigration, SCHEMA } from "../billing/billing-db-test-support";
 
-const MIGRATION = readMigration("supabase/migrations/20261121100000_mcp_financeiro.sql");
+const MIGRATION = readMigration("supabase/migrations/20261128100000_mcp_financeiro.sql");
 
 let db: PGlite;
 
