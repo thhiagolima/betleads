@@ -197,6 +197,7 @@ describe("resumoFinanceiro", () => {
     });
 
     expect(resumo.totais).toEqual(direct.totals);
+    expect(resumo.kpis).toEqual(direct.kpis);
     expect(resumo.rotulo).toBe(direct.label);
     expect(resumo.casas).toEqual(
       direct.tenants.map((tenant) => ({
@@ -229,6 +230,7 @@ describe("resumoFinanceiro", () => {
     });
 
     expect(resumo.totais).toEqual(direct.totals);
+    expect(resumo.kpis).toEqual(direct.kpis);
   });
 
   it('{tipo:"todas"} for a non-super-admin is refused', async () => {

@@ -89,6 +89,7 @@ function shapeResumo(dashboard: Awaited<ReturnType<typeof getFinanceDashboardFor
     periodo: dashboard.range,
     comparar: dashboard.compareRange,
     totais: dashboard.totals,
+    kpis: dashboard.kpis,
     casas: dashboard.tenants.map((tenant) => ({
       id: tenant.id,
       nome: tenant.nome,
@@ -101,8 +102,8 @@ function shapeResumo(dashboard: Awaited<ReturnType<typeof getFinanceDashboardFor
 }
 
 /**
- * Financial summary of a house, a group or every house (compact shape:
- * totals, one row per house, pending dates and goals — money already as
+ * Financial summary of a house, a group or every house (spec §6 item 2:
+ * totals, per-house rows, KPIs, pending dates and goals — money already as
  * plain reais numbers). Permission is `getFinanceDashboardFor`'s own
  * (`finance_can_view` for a house, group management for a group, super admin
  * for "todas"); this function never pre-checks it itself.
