@@ -109,7 +109,10 @@ const custoShape = z.object({
   descricao: z.string(),
   valor: z.number().describe("Valor em reais, não negativo."),
   categoria: z.string().nullable().optional(),
-  repetir_todo_mes: z.boolean().optional().describe("Repete o custo todo mês no mesmo dia."),
+  repetir_todo_mes: z
+    .boolean()
+    .optional()
+    .describe("Repete o custo todo mês no mesmo dia. Na edição, se omitido, mantém o valor atual."),
 });
 
 const EXCLUSAO_MODOS = {

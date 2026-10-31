@@ -130,12 +130,13 @@ export async function createPreview(
   if (!isWriteActionName(actionName)) throw new Error("Ação desconhecida");
   const action = WRITE_ACTIONS[actionName];
 
-  const input = parseInput(action, rawInput);
-  await requirePermission(action.permission, identity.userId, input.tenantId);
-  await assertTenantNotDemo(input.tenantId);
-  await assertMcpCanWrite(input.tenantId, identity.userId);
+  const parsed = parseInput(action, rawInput);
+  await requirePermission(action.permission, identity.userId, parsed.tenantId);
+  await assertTenantNotDemo(parsed.tenantId);
+  await assertMcpCanWrite(parsed.tenantId, identity.userId);
 
-  const snapshot = await action.snapshot(input.tenantId, input);
+  const snapshot = await action.snapshot(parsed.tenantId, parsed);
+  const input = action.complete ? (action.complete(snapshot, parsed) as typeof parsed) : parsed;
   const { linhas, avisos } = action.describe(snapshot, input, await houseName(input.tenantId));
 
   const code = randomToken(24);

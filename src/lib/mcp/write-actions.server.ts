@@ -47,6 +47,12 @@ export type WriteAction<I> = {
   schema: ZodType<I>;
   permission: "finance_can_edit_values" | "finance_can_manage_goals";
   snapshot(tenantId: string, input: I): Promise<Json>;
+  /**
+   * Optional: fills fields the caller left out from the "before" snapshot
+   * (at preview time, before describe). The completed input is what gets
+   * stored and applied at confirm.
+   */
+  complete?(before: Json, input: I): I;
   describe(before: Json, input: I, houseName: string): { linhas: string[]; avisos: string[] };
   apply(ctx: ServerContext, input: I): Promise<unknown>;
 };
@@ -271,11 +277,18 @@ function storedCategory(categoria: string | null) {
   return categoryKey(label) === categoryKey("Outros") ? null : label;
 }
 
-/** Same check (and message) as saveOtherCostFor, at preview time (before the code is spent). */
-const costSchema = saveOtherCostInput.refine((input) => input.costDate <= todaySaoPaulo(), {
-  message: "Data futura não permitida",
-  path: ["costDate"],
-});
+/**
+ * Same check (and message) as saveOtherCostFor, at preview time (before the
+ * code is spent). `repeatMonthly` has no default here (the panel schema
+ * defaults it to false): an edit that leaves it out keeps the row's current
+ * value (see `complete`), so it never silently ends a series.
+ */
+const costSchema = saveOtherCostInput
+  .extend({ repeatMonthly: z.boolean().optional() })
+  .refine((input) => input.costDate <= todaySaoPaulo(), {
+    message: "Data futura não permitida",
+    path: ["costDate"],
+  });
 type CostInput = z.infer<typeof costSchema>;
 
 const custo: WriteAction<CostInput> = {
@@ -283,6 +296,12 @@ const custo: WriteAction<CostInput> = {
   permission: "finance_can_edit_values",
   async snapshot(tenantId, input) {
     return input.id ? await costSnapshot(tenantId, input.id) : null;
+  },
+  complete(before, input) {
+    if (input.repeatMonthly !== undefined) return input;
+    // Edit: keep the row's current value. Create: absent = false.
+    const snapshot = before as CostSnapshot | null;
+    return { ...input, repeatMonthly: snapshot ? snapshot.row.repeat_monthly : false };
   },
   describe(before, input, houseName) {
     const snapshot = before as CostSnapshot | null;
@@ -296,6 +315,7 @@ const custo: WriteAction<CostInput> = {
       return { linhas, avisos };
     }
     const current = snapshot.row;
+    const repeat = input.repeatMonthly ?? current.repeat_monthly;
     const prefix = `${formatDay(current.cost_date)} ${houseName} — Custo "${current.descricao}":`;
     linhas.push(`${prefix} ${arrow(formatMoney(current.valor), formatMoney(round2(input.valor)))}`);
     if (input.descricao !== current.descricao) {
@@ -313,9 +333,9 @@ const custo: WriteAction<CostInput> = {
         `${prefix} Categoria: ${arrow(categoryLabel(current.categoria), categoryLabel(input.categoria))}`,
       );
     }
-    if (input.repeatMonthly !== current.repeat_monthly) {
+    if (repeat !== current.repeat_monthly) {
       linhas.push(
-        `${prefix} Repetir todo mês: ${arrow(yesNo(current.repeat_monthly), yesNo(input.repeatMonthly))}`,
+        `${prefix} Repetir todo mês: ${arrow(yesNo(current.repeat_monthly), yesNo(repeat))}`,
       );
       // saveOtherCostFor applies the change to the series' newest row too.
       const [newest] = snapshot.series;
@@ -323,7 +343,7 @@ const custo: WriteAction<CostInput> = {
         current.series_id &&
         newest &&
         newest.id !== current.id &&
-        newest.repeat_monthly !== input.repeatMonthly
+        newest.repeat_monthly !== repeat
       ) {
         avisos.push(
           `A mudança de "Repetir todo mês" vale também para a repetição de ${formatDay(newest.cost_date)}`,
@@ -333,7 +353,8 @@ const custo: WriteAction<CostInput> = {
     avisos.push(OVERWRITE);
     return { linhas, avisos };
   },
-  apply: (ctx, input) => saveOtherCostFor(ctx, input),
+  apply: (ctx, input) =>
+    saveOtherCostFor(ctx, { ...input, repeatMonthly: input.repeatMonthly ?? false }),
 };
 
 type DeleteCostInput = z.infer<typeof deleteOtherCostInput>;

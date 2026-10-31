@@ -556,6 +556,42 @@ describe("cost series side effects", () => {
     expect(byId(OCT).repeat_monthly).toBe(false);
   });
 
+  it("custo: editing only valor of a recurring cost keeps the series repeating", async () => {
+    // repetir_todo_mes absent on an edit = keep the row's current value.
+    const preview = await createPreview(identity(ADMIN_A), "custo", {
+      tenantId: HOUSE_A,
+      id: OCT,
+      costDate: "2026-10-05",
+      descricao: "CRM",
+      valor: 45,
+    });
+    expect(preview.linhas).toHaveLength(1);
+    expect(preview.linhas.join(" | ")).not.toContain("Repetir todo mês");
+    expect(preview.avisos.join(" | ")).not.toContain("Repetir todo mês");
+
+    await confirmPreview(identity(ADMIN_A), preview.codigo_confirmacao);
+    expect(byId(OCT).valor).toBe(45);
+    expect(byId(OCT).repeat_monthly).toBe(true);
+    expect(byId(OCT).series_id).toBe(SEP);
+    expect(byId(SEP).repeat_monthly).toBe(true);
+  });
+
+  it("custo: editing only valor of an older row of the series keeps both rows repeating", async () => {
+    const preview = await createPreview(identity(ADMIN_A), "custo", {
+      tenantId: HOUSE_A,
+      id: SEP,
+      costDate: "2026-09-05",
+      descricao: "CRM",
+      valor: 40,
+    });
+    expect(preview.linhas.join(" | ")).not.toContain("Repetir todo mês");
+    expect(preview.avisos.join(" | ")).not.toContain("Repetir todo mês");
+    await confirmPreview(identity(ADMIN_A), preview.codigo_confirmacao);
+    expect(byId(SEP).valor).toBe(40);
+    expect(byId(SEP).repeat_monthly).toBe(true);
+    expect(byId(OCT).repeat_monthly).toBe(true);
+  });
+
   it("custo: a change to another row of the series trips the mudaram check", async () => {
     const preview = await createPreview(identity(ADMIN_A), "custo", {
       tenantId: HOUSE_A,
