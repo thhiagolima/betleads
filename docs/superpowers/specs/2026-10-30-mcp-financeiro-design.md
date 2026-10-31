@@ -1,7 +1,7 @@
 # MCP do Financeiro — design
 
 Data: 2026-10-30
-Status: proposta (branch feat/mcp-financeiro)
+Status: implementado (branch feat/mcp-financeiro)
 Base: o Financeiro da casa e do grupo (`2026-10-24-grupos-de-casas-design.md`) e o painel de
 resultado (`2026-10-27-financeiro-painel-design.md`), já no main.
 
