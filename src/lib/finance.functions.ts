@@ -135,7 +135,7 @@ const goalDirection = z.enum(["gte", "lte"]);
 
 // ─── House month ────────────────────────────────────────────────────────────
 
-const monthInput = z.object({ tenantId: dbUuid(), month: yearMonth });
+export const monthInput = z.object({ tenantId: dbUuid(), month: yearMonth });
 
 export async function getTenantFinanceMonthFor(
   ctx: ServerContext,
@@ -960,7 +960,7 @@ export const setTenantGoal = createServerFn({ method: "POST" })
     setTenantGoalFor(context as unknown as ServerContext, data),
   );
 
-const tenantIdInput = z.object({ tenantId: dbUuid() });
+export const tenantIdInput = z.object({ tenantId: dbUuid() });
 
 export type TenantGoalCurrent = {
   metric: GoalMetric;

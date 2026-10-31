@@ -639,7 +639,7 @@ export async function getFinanceDashboardFor(
   };
 }
 
-const dashboardInput = z.object({
+export const dashboardInput = z.object({
   scope: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("tenant"), tenantId: dbUuid() }),
     z.object({ kind: z.literal("group"), groupId: dbUuid() }),
