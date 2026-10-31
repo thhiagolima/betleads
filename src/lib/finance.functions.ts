@@ -55,7 +55,17 @@ import { auditTenant } from "@/lib/tenant-audit.server";
 import { listTenantMembers } from "@/lib/tenants.functions";
 import { dbUuid } from "@/lib/zod-helpers";
 
-type ServerContext = { userId: string };
+type ServerContext = { userId: string; auditMetadata?: Record<string, unknown> };
+
+/**
+ * Merges `ctx.auditMetadata` (set by the MCP write path, Task 7) into the
+ * metadata passed to `auditTenant`; explicit keys win on conflict. Absent
+ * `auditMetadata`, this is `{ ...explicit }` — same as not passing the
+ * argument at all, so panel writes are unaffected.
+ */
+function withAuditMetadata(ctx: ServerContext, explicit?: Record<string, unknown>) {
+  return { ...ctx.auditMetadata, ...explicit };
+}
 
 type DailyRow = {
   tenant_id: string;
@@ -329,7 +339,7 @@ export const getTenantFinanceMonth = createServerFn({ method: "POST" })
 
 // ─── Manual daily entries ───────────────────────────────────────────────────
 
-const saveDaysInput = z.object({
+export const saveDaysInput = z.object({
   tenantId: dbUuid(),
   entries: z
     .array(
@@ -417,6 +427,7 @@ export async function saveFinanceDaysFor(ctx: ServerContext, data: z.infer<typeo
         entityId: after.date,
         before,
         after,
+        metadata: withAuditMetadata(ctx),
       });
     }
   }
@@ -515,6 +526,7 @@ export async function setMonthlyGgrFor(
     entityId: data.month,
     before,
     after,
+    metadata: withAuditMetadata(ctx),
   });
   return { changed: true };
 }
@@ -659,6 +671,7 @@ export async function saveOtherCostFor(
     entityId: id,
     before,
     after: { id, tenant_id: data.tenantId, ...values },
+    metadata: withAuditMetadata(ctx),
   });
   return { id };
 }
@@ -713,6 +726,7 @@ export async function deleteOtherCostFor(
       entityId: data.id,
       before,
       after: { ...before, valor: 0 },
+      metadata: withAuditMetadata(ctx),
     });
     return { ok: true };
   }
@@ -753,6 +767,7 @@ export async function deleteOtherCostFor(
     entityType: "tenant_finance_other_cost",
     entityId: data.id,
     before,
+    metadata: withAuditMetadata(ctx),
   });
   return { ok: true };
 }
@@ -887,7 +902,7 @@ export const setFinanceViewer = createServerFn({ method: "POST" })
 
 // ─── Goals ──────────────────────────────────────────────────────────────────
 
-const setGoalInput = z.object({
+export const setGoalInput = z.object({
   tenantId: dbUuid(),
   metric: goalMetric,
   direction: goalDirection,
@@ -933,6 +948,7 @@ export async function setTenantGoalFor(ctx: ServerContext, data: z.infer<typeof 
     entityId: `${data.metric}:${validFrom}`,
     before: before ?? null,
     after,
+    metadata: withAuditMetadata(ctx),
   });
   return { ok: true, validFrom };
 }

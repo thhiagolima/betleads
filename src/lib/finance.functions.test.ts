@@ -1402,3 +1402,97 @@ describe("GGR do mês (monthly accumulated total)", () => {
     ).toMatchObject({ ggr: -5 });
   });
 });
+
+describe("writes carry ctx.auditMetadata into tenant_audit_logs", () => {
+  const AUDIT = { origem: "mcp", connectionId: "c1" };
+  const lastAudit = () => fake.admin.rows("tenant_audit_logs").at(-1);
+
+  it("saveFinanceDaysFor", async () => {
+    await saveFinanceDaysFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      entries: [{ date: "2026-10-24", ggr: 10 }],
+    });
+    expect(lastAudit()).toMatchObject({ metadata: {} });
+
+    await saveFinanceDaysFor({ userId: ADMIN_A, auditMetadata: AUDIT }, {
+      tenantId: HOUSE_A,
+      entries: [{ date: "2026-10-23", ggr: 20 }],
+    });
+    expect(lastAudit()?.metadata).toMatchObject(AUDIT);
+  });
+
+  it("setMonthlyGgrFor", async () => {
+    await setMonthlyGgrFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+      ggr: 100,
+      validThrough: "2026-10-24",
+    });
+    expect(lastAudit()).toMatchObject({ metadata: {} });
+
+    await setMonthlyGgrFor(
+      { userId: ADMIN_A, auditMetadata: AUDIT },
+      { tenantId: HOUSE_A, month: "2026-10", ggr: 200, validThrough: "2026-10-24" },
+    );
+    expect(lastAudit()?.metadata).toMatchObject(AUDIT);
+  });
+
+  it("saveOtherCostFor", async () => {
+    await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      costDate: "2026-10-05",
+      descricao: "X",
+      valor: 1,
+    });
+    expect(lastAudit()).toMatchObject({ metadata: {} });
+
+    await saveOtherCostFor(
+      { userId: ADMIN_A, auditMetadata: AUDIT },
+      { tenantId: HOUSE_A, costDate: "2026-10-06", descricao: "Y", valor: 2 },
+    );
+    expect(lastAudit()?.metadata).toMatchObject(AUDIT);
+  });
+
+  it("deleteOtherCostFor (delete and skip_month modes)", async () => {
+    const { id: id1 } = await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      costDate: "2026-10-05",
+      descricao: "X",
+      valor: 1,
+    });
+    await deleteOtherCostFor({ userId: ADMIN_A, auditMetadata: AUDIT }, { tenantId: HOUSE_A, id: id1 });
+    expect(lastAudit()?.metadata).toMatchObject(AUDIT);
+
+    const { id: id2 } = await saveOtherCostFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      costDate: "2026-10-05",
+      descricao: "X",
+      valor: 1,
+      repeatMonthly: true,
+    });
+    await deleteOtherCostFor(ctxFor(ADMIN_A), { tenantId: HOUSE_A, id: id2, mode: "skip_month" });
+    expect(lastAudit()).toMatchObject({ metadata: {} });
+
+    await deleteOtherCostFor(
+      { userId: ADMIN_A, auditMetadata: AUDIT },
+      { tenantId: HOUSE_A, id: id2, mode: "skip_month" },
+    );
+    expect(lastAudit()?.metadata).toMatchObject(AUDIT);
+  });
+
+  it("setTenantGoalFor", async () => {
+    await setTenantGoalFor(ctxFor(G1_MANAGER), {
+      tenantId: HOUSE_A,
+      metric: "ftds",
+      direction: "gte",
+      dailyValue: 5,
+    });
+    expect(lastAudit()).toMatchObject({ metadata: {} });
+
+    await setTenantGoalFor(
+      { userId: G1_MANAGER, auditMetadata: AUDIT },
+      { tenantId: HOUSE_A, metric: "deposits", direction: "gte", dailyValue: 5 },
+    );
+    expect(lastAudit()?.metadata).toMatchObject(AUDIT);
+  });
+});
