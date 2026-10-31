@@ -72,3 +72,12 @@ export async function sendAuthInvite(
   if (!result.ok) throw new Error(INVITE_EMAIL_FAILED_MESSAGE);
   return data.user;
 }
+
+// An invited user arrives signed in but without a password; the auth gate asks
+// for one on first sign-in only when this flag is set.
+export async function flagInitialPassword(userId: string) {
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    app_metadata: { force_password_change: true },
+  });
+  if (error) throw new Error(error.message);
+}

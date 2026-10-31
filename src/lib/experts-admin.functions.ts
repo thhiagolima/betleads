@@ -32,6 +32,7 @@ import {
 } from "@/lib/tenant-access.server";
 import { auditTenant } from "@/lib/tenant-audit.server";
 import { findOrInviteUserByEmail } from "@/lib/tenants.functions";
+import { flagInitialPassword, sendAuthInvite } from "@/lib/invite-email.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type DbError = { message: string; code?: string; details?: string | null };
@@ -439,7 +440,7 @@ export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof i
   // An invite is only sent for an e-mail with no auth user yet, and such a
   // user can be neither a super admin nor have a role here — so checking
   // after the lookup never leaves an invite behind a refusal.
-  const { userId, created } = await findOrInviteUserByEmail(email, {
+  const { userId, created, pendingInvite } = await findOrInviteUserByEmail(email, {
     invitedBy: ctx.userId,
     tenantId,
   });
@@ -499,6 +500,13 @@ export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof i
       });
     }
     throw new Error(linkErr ? linkErr.message : EXPERT_ALREADY_LINKED);
+  }
+
+  // Someone who never accepted an earlier invite (an expired link, or one that
+  // pointed to the wrong host) gets a fresh one, only now that the link stuck.
+  if (pendingInvite) {
+    await sendAuthInvite(email, { invited_by: ctx.userId, tenant_id: tenantId });
+    await flagInitialPassword(userId);
   }
 
   await auditTenant({

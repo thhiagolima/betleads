@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendAuthInvite } from "@/lib/invite-email.server";
+import { flagInitialPassword, sendAuthInvite } from "@/lib/invite-email.server";
 import type { Json } from "@/integrations/supabase/types";
 import {
   getTenantBillingSnapshot,
@@ -273,42 +273,31 @@ export async function findAuthUserByEmail(email: string) {
   return null;
 }
 
-// An invited user arrives signed in but without a password; the auth gate asks
-// for one on first sign-in only when this flag is set.
-async function flagInitialPassword(userId: string) {
-  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-    app_metadata: { force_password_change: true },
-  });
-  if (error) throw new Error(error.message);
-}
-
 /**
  * Finds the auth user for `email`, or creates one: an e-mail invite sent from
  * the platform sender (`sendAuthInvite`) by default, or — only when `password`
  * is given — a confirmed user with that password who must change it on first
  * sign-in. Shared by the team screen (`addUserToTenantFor`) and Experts
- * (`inviteExpertFor`). An existing user is reused (`created: false`); one who
- * never accepted an earlier invite gets a fresh invite e-mail.
+ * (`inviteExpertFor`). An existing user is reused (`created: false`);
+ * `pendingInvite` marks one who never accepted an earlier invite, so the
+ * caller can re-send it once its own checks pass (never before a refusal).
  */
 export async function findOrInviteUserByEmail(
   email: string,
   opts: { invitedBy: string; tenantId: string; password?: string | null },
-): Promise<{ userId: string; created: boolean }> {
+): Promise<{ userId: string; created: boolean; pendingInvite: boolean }> {
   const normalized = email.trim().toLowerCase();
   const existing = await findAuthUserByEmail(normalized);
   const metadata = { invited_by: opts.invitedBy, tenant_id: opts.tenantId };
   if (existing) {
-    if (!opts.password && !existing.last_sign_in_at && !existing.email_confirmed_at) {
-      await sendAuthInvite(normalized, metadata);
-      await flagInitialPassword(existing.id);
-    }
-    return { userId: existing.id, created: false };
+    const pendingInvite = !existing.last_sign_in_at && !existing.email_confirmed_at;
+    return { userId: existing.id, created: false, pendingInvite };
   }
 
   if (!opts.password) {
     const user = await sendAuthInvite(normalized, metadata);
     await flagInitialPassword(user.id);
-    return { userId: user.id, created: true };
+    return { userId: user.id, created: true, pendingInvite: false };
   }
 
   const createRes = await supabaseAdmin.auth.admin.createUser({
@@ -320,7 +309,7 @@ export async function findOrInviteUserByEmail(
   });
   if (createRes.error) throw new Error(createRes.error.message);
   if (!createRes.data.user) throw new Error("Falha ao criar usuário");
-  return { userId: createRes.data.user.id, created: true };
+  return { userId: createRes.data.user.id, created: true, pendingInvite: false };
 }
 
 /** Members of a house (user_roles) with their auth e-mail and sign-in data, oldest first. */
