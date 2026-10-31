@@ -42,6 +42,7 @@ import { Route as WebhooksRouteImport } from './routes/webhooks'
 import { Route as WhatsappRouteImport } from './routes/whatsapp'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known/oauth-authorization-server'
 import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known/oauth-protected-resource'
+import { Route as ApiMcpRouteImport } from './routes/api/mcp'
 import { Route as AutomacoesEmailRouteImport } from './routes/automacoes.email'
 import { Route as AutomacoesLigacoesRouteImport } from './routes/automacoes.ligacoes'
 import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
@@ -274,6 +275,11 @@ const DotwellKnownOauthProtectedResourceRoute =
     path: '/.well-known/oauth-protected-resource',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiMcpRoute = ApiMcpRouteImport.update({
+  id: '/api/mcp',
+  path: '/api/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AutomacoesEmailRoute = AutomacoesEmailRouteImport.update({
   id: '/email',
   path: '/email',
@@ -435,14 +441,14 @@ const DotwellKnownOauthProtectedResourceApiMcpRoute =
     getParentRoute: () => DotwellKnownOauthProtectedResourceRoute,
   } as any)
 const ApiMcpOauthRegisterRoute = ApiMcpOauthRegisterRouteImport.update({
-  id: '/api/mcp/oauth/register',
-  path: '/api/mcp/oauth/register',
-  getParentRoute: () => rootRouteImport,
+  id: '/oauth/register',
+  path: '/oauth/register',
+  getParentRoute: () => ApiMcpRoute,
 } as any)
 const ApiMcpOauthTokenRoute = ApiMcpOauthTokenRouteImport.update({
-  id: '/api/mcp/oauth/token',
-  path: '/api/mcp/oauth/token',
-  getParentRoute: () => rootRouteImport,
+  id: '/oauth/token',
+  path: '/oauth/token',
+  getParentRoute: () => ApiMcpRoute,
 } as any)
 const ApiPublicAutomationsDispatchRoute =
   ApiPublicAutomationsDispatchRouteImport.update({
@@ -656,6 +662,7 @@ export interface FileRoutesByFullPath {
   '/whatsapp': typeof WhatsappRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
+  '/api/mcp': typeof ApiMcpRouteWithChildren
   '/automacoes/email': typeof AutomacoesEmailRoute
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
@@ -755,6 +762,7 @@ export interface FileRoutesByTo {
   '/whatsapp': typeof WhatsappRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
+  '/api/mcp': typeof ApiMcpRouteWithChildren
   '/automacoes/email': typeof AutomacoesEmailRoute
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
@@ -855,6 +863,7 @@ export interface FileRoutesById {
   '/whatsapp': typeof WhatsappRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
+  '/api/mcp': typeof ApiMcpRouteWithChildren
   '/automacoes/email': typeof AutomacoesEmailRoute
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
@@ -956,6 +965,7 @@ export interface FileRouteTypes {
     | '/whatsapp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
+    | '/api/mcp'
     | '/automacoes/email'
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
@@ -1055,6 +1065,7 @@ export interface FileRouteTypes {
     | '/whatsapp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
+    | '/api/mcp'
     | '/automacoes/email'
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
@@ -1154,6 +1165,7 @@ export interface FileRouteTypes {
     | '/whatsapp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
+    | '/api/mcp'
     | '/automacoes/email'
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
@@ -1254,6 +1266,7 @@ export interface RootRouteChildren {
   WhatsappRoute: typeof WhatsappRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   DotwellKnownOauthProtectedResourceRoute: typeof DotwellKnownOauthProtectedResourceRouteWithChildren
+  ApiMcpRoute: typeof ApiMcpRouteWithChildren
   ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
   ExpertLeadsRoute: typeof ExpertLeadsRouteWithChildren
   ExpertModelosRoute: typeof ExpertModelosRoute
@@ -1269,8 +1282,6 @@ export interface RootRouteChildren {
   ApiPublicEvolutionWebhookRoute: typeof ApiPublicEvolutionWebhookRoute
   ApiPublicHealthRoute: typeof ApiPublicHealthRoute
   ApiPublicSmsWebhookRoute: typeof ApiPublicSmsWebhookRoute
-  ApiMcpOauthRegisterRoute: typeof ApiMcpOauthRegisterRoute
-  ApiMcpOauthTokenRoute: typeof ApiMcpOauthTokenRoute
   ApiPublicAutomationsDispatchRoute: typeof ApiPublicAutomationsDispatchRoute
   ApiPublicAutomationsEvaluateRoute: typeof ApiPublicAutomationsEvaluateRoute
   ApiPublicCallFlowsTickRoute: typeof ApiPublicCallFlowsTickRoute
@@ -1537,6 +1548,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DotwellKnownOauthProtectedResourceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mcp': {
+      id: '/api/mcp'
+      path: '/api/mcp'
+      fullPath: '/api/mcp'
+      preLoaderRoute: typeof ApiMcpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/automacoes/email': {
       id: '/automacoes/email'
       path: '/email'
@@ -1756,17 +1774,17 @@ declare module '@tanstack/react-router' {
     }
     '/api/mcp/oauth/register': {
       id: '/api/mcp/oauth/register'
-      path: '/api/mcp/oauth/register'
+      path: '/oauth/register'
       fullPath: '/api/mcp/oauth/register'
       preLoaderRoute: typeof ApiMcpOauthRegisterRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiMcpRoute
     }
     '/api/mcp/oauth/token': {
       id: '/api/mcp/oauth/token'
-      path: '/api/mcp/oauth/token'
+      path: '/oauth/token'
       fullPath: '/api/mcp/oauth/token'
       preLoaderRoute: typeof ApiMcpOauthTokenRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiMcpRoute
     }
     '/api/public/automations/dispatch': {
       id: '/api/public/automations/dispatch'
@@ -2114,6 +2132,19 @@ const DotwellKnownOauthProtectedResourceRouteWithChildren =
     DotwellKnownOauthProtectedResourceRouteChildren,
   )
 
+interface ApiMcpRouteChildren {
+  ApiMcpOauthRegisterRoute: typeof ApiMcpOauthRegisterRoute
+  ApiMcpOauthTokenRoute: typeof ApiMcpOauthTokenRoute
+}
+
+const ApiMcpRouteChildren: ApiMcpRouteChildren = {
+  ApiMcpOauthRegisterRoute: ApiMcpOauthRegisterRoute,
+  ApiMcpOauthTokenRoute: ApiMcpOauthTokenRoute,
+}
+
+const ApiMcpRouteWithChildren =
+  ApiMcpRoute._addFileChildren(ApiMcpRouteChildren)
+
 interface ExpertLeadsRouteChildren {
   ExpertLeadsPlayerIdRoute: typeof ExpertLeadsPlayerIdRoute
 }
@@ -2162,6 +2193,7 @@ const rootRouteChildren: RootRouteChildren = {
     DotwellKnownOauthAuthorizationServerRoute,
   DotwellKnownOauthProtectedResourceRoute:
     DotwellKnownOauthProtectedResourceRouteWithChildren,
+  ApiMcpRoute: ApiMcpRouteWithChildren,
   ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
   ExpertLeadsRoute: ExpertLeadsRouteWithChildren,
   ExpertModelosRoute: ExpertModelosRoute,
@@ -2177,8 +2209,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicEvolutionWebhookRoute: ApiPublicEvolutionWebhookRoute,
   ApiPublicHealthRoute: ApiPublicHealthRoute,
   ApiPublicSmsWebhookRoute: ApiPublicSmsWebhookRoute,
-  ApiMcpOauthRegisterRoute: ApiMcpOauthRegisterRoute,
-  ApiMcpOauthTokenRoute: ApiMcpOauthTokenRoute,
   ApiPublicAutomationsDispatchRoute: ApiPublicAutomationsDispatchRoute,
   ApiPublicAutomationsEvaluateRoute: ApiPublicAutomationsEvaluateRoute,
   ApiPublicCallFlowsTickRoute: ApiPublicCallFlowsTickRoute,

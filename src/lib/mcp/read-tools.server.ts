@@ -126,7 +126,7 @@ export async function resumoFinanceiro(
 
 // ─── mesDaCasa ──────────────────────────────────────────────────────────────
 
-const mesDaCasaInput = z.object({ casa: dbUuid(), mes: z.string() });
+export const mesDaCasaInput = z.object({ casa: dbUuid(), mes: z.string() });
 
 /**
  * A house's financial month close, without `viewers` (gestores and their
@@ -144,7 +144,7 @@ export async function mesDaCasa(identity: McpIdentity, args: z.input<typeof mesD
 
 // ─── metasDaCasa ────────────────────────────────────────────────────────────
 
-const metasDaCasaInput = z.object({ casa: dbUuid() });
+export const metasDaCasaInput = z.object({ casa: dbUuid() });
 
 /** The goal in force today for every metric of a house. */
 export async function metasDaCasa(identity: McpIdentity, args: z.input<typeof metasDaCasaInput>) {
