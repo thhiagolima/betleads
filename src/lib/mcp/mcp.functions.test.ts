@@ -179,6 +179,38 @@ describe("adminSetMcpAccessFor", () => {
     expect(conn?.revoked_at).not.toBeNull();
     expect(await resolveBearer(token)).toBeNull();
   });
+
+  it("writes an admin audit row mcp.access_set with target user and before/after level", async () => {
+    fake.admin.rows("mcp_access").push({ user_id: USER_A, level: "read" });
+    await adminSetMcpAccessFor({ userId: SUPER }, { userId: USER_A, level: "write" });
+    await adminSetMcpAccessFor({ userId: SUPER }, { userId: USER_A, level: "none" });
+
+    expect(fake.admin.rows("admin_audit_logs")).toEqual([
+      expect.objectContaining({
+        actor_user_id: SUPER,
+        action: "mcp.access_set",
+        target_user_id: USER_A,
+        before_data: { level: "read" },
+        after_data: { level: "write" },
+      }),
+      expect.objectContaining({
+        actor_user_id: SUPER,
+        action: "mcp.access_set",
+        target_user_id: USER_A,
+        before_data: { level: "write" },
+        after_data: { level: "none" },
+      }),
+    ]);
+    // The mcp_call_log rows are still written.
+    expect(fake.admin.rows("mcp_call_log")).toHaveLength(2);
+  });
+
+  it("writes no audit row when the caller is not super admin", async () => {
+    await expect(
+      adminSetMcpAccessFor({ userId: USER_A }, { userId: USER_B, level: "write" }),
+    ).rejects.toThrow();
+    expect(fake.admin.rows("admin_audit_logs")).toHaveLength(0);
+  });
 });
 
 describe("adminRevokeConnectionFor", () => {
@@ -201,5 +233,25 @@ describe("adminRevokeConnectionFor", () => {
       tool: "admin.revoke_connection",
       ok: true,
     });
+  });
+
+  it("writes an admin audit row mcp.connection_revoked with target user and connection id", async () => {
+    seedConnection();
+    await adminRevokeConnectionFor({ userId: SUPER }, { connectionId: CONNECTION });
+    expect(fake.admin.rows("admin_audit_logs")).toEqual([
+      expect.objectContaining({
+        actor_user_id: SUPER,
+        action: "mcp.connection_revoked",
+        target_user_id: USER_A,
+        after_data: { connection_id: CONNECTION },
+      }),
+    ]);
+  });
+
+  it("refuses an unknown connection id without auditing", async () => {
+    await expect(
+      adminRevokeConnectionFor({ userId: SUPER }, { connectionId: CONNECTION }),
+    ).rejects.toThrow("Conexão não encontrada.");
+    expect(fake.admin.rows("admin_audit_logs")).toHaveLength(0);
   });
 });

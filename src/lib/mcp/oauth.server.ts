@@ -264,6 +264,25 @@ export async function revokeConnection(connectionId: string) {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Cuts a user off MCP entirely: deletes their `mcp_access` row and revokes
+ * every active connection (so their tokens stop resolving at once). Shared by
+ * the super admin "Sem acesso" level and user deactivation/deletion.
+ */
+export async function removeMcpAccessForUser(userId: string): Promise<void> {
+  const { error: deleteError } = await db().from("mcp_access").delete().eq("user_id", userId);
+  if (deleteError) throw new Error(deleteError.message);
+  const { data: conns, error: connError } = await db()
+    .from("mcp_connections")
+    .select("id")
+    .eq("user_id", userId)
+    .is("revoked_at", null);
+  if (connError) throw new Error(connError.message);
+  for (const conn of (conns ?? []) as Array<{ id: string }>) {
+    await revokeConnection(conn.id);
+  }
+}
+
 type CodeRow = {
   code_hash: string;
   client_id: string;

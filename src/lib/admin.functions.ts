@@ -313,24 +313,34 @@ const setActiveInput = z.object({
 export const adminSetUserActive = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => setActiveInput.parse(data))
-  .handler(async ({ data, context }) => {
-    await assertSuperAdmin(context.userId);
-    if (data.user_id === context.userId) {
-      throw new Error("Você não pode desativar sua própria conta");
-    }
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
-      ban_duration: data.active ? "none" : "876000h", // 100 anos
-    });
-    if (error) throw new Error(error.message);
-    await auditAdminAction({
-      actorUserId: context.userId,
-      action: data.active ? "user.activated" : "user.deactivated",
-      targetUserId: data.user_id,
-      after: { active: data.active },
-    });
-    return { ok: true };
+  .handler(async ({ data, context }) => adminSetUserActiveFor(context, data));
+
+export async function adminSetUserActiveFor(
+  ctx: { userId: string },
+  data: z.infer<typeof setActiveInput>,
+) {
+  await assertSuperAdmin(ctx.userId);
+  if (data.user_id === ctx.userId) {
+    throw new Error("Você não pode desativar sua própria conta");
+  }
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
+    ban_duration: data.active ? "none" : "876000h", // 100 anos
   });
+  if (error) throw new Error(error.message);
+  if (!data.active) {
+    // A banned user keeps no MCP access: tokens already issued stop resolving.
+    const { removeMcpAccessForUser } = await import("@/lib/mcp/oauth.server");
+    await removeMcpAccessForUser(data.user_id);
+  }
+  await auditAdminAction({
+    actorUserId: ctx.userId,
+    action: data.active ? "user.activated" : "user.deactivated",
+    targetUserId: data.user_id,
+    after: { active: data.active },
+  });
+  return { ok: true };
+}
 
 // ─── Excluir usuário ────────────────────────────────────────────────────────
 const deleteInput = z.object({ user_id: dbUuid() });
@@ -338,38 +348,47 @@ const deleteInput = z.object({ user_id: dbUuid() });
 export const adminDeleteUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => deleteInput.parse(data))
-  .handler(async ({ data, context }) => {
-    await assertSuperAdmin(context.userId);
-    if (data.user_id === context.userId) {
-      throw new Error("Você não pode excluir sua própria conta");
-    }
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  .handler(async ({ data, context }) => adminDeleteUserFor(context, data));
 
-    // Descobre o tenant para também limpar
-    const { data: roles } = await supabaseAdmin
-      .from("user_roles")
-      .select("tenant_id")
-      .eq("user_id", data.user_id);
-    const tenantIds = (roles ?? []).map((r) => r.tenant_id).filter(Boolean) as string[];
+export async function adminDeleteUserFor(
+  ctx: { userId: string },
+  data: z.infer<typeof deleteInput>,
+) {
+  await assertSuperAdmin(ctx.userId);
+  if (data.user_id === ctx.userId) {
+    throw new Error("Você não pode excluir sua própria conta");
+  }
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    await auditAdminAction({
-      actorUserId: context.userId,
-      action: "user.deleted",
-      targetUserId: data.user_id,
-      before: { tenant_ids: tenantIds },
-    });
+  // Descobre o tenant para também limpar
+  const { data: roles } = await supabaseAdmin
+    .from("user_roles")
+    .select("tenant_id")
+    .eq("user_id", data.user_id);
+  const tenantIds = (roles ?? []).map((r) => r.tenant_id).filter(Boolean) as string[];
 
-    // Remove roles primeiro (FK protege)
-    await supabaseAdmin.from("user_roles").delete().eq("user_id", data.user_id);
-
-    // Exclui usuário do auth (cascade nas tabelas que referenciam auth.users)
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(data.user_id);
-    if (error) throw new Error(error.message);
-
-    // Opcional: marcar o tenant órfão como desativado. Como pode ter dados
-    // que o super admin queira inspecionar, NÃO apagamos automaticamente.
-    return { ok: true, removed_tenants: tenantIds };
+  await auditAdminAction({
+    actorUserId: ctx.userId,
+    action: "user.deleted",
+    targetUserId: data.user_id,
+    before: { tenant_ids: tenantIds },
   });
+
+  // Corta o MCP antes de tudo: apaga o acesso e revoga as conexões ativas.
+  const { removeMcpAccessForUser } = await import("@/lib/mcp/oauth.server");
+  await removeMcpAccessForUser(data.user_id);
+
+  // Remove roles primeiro (FK protege)
+  await supabaseAdmin.from("user_roles").delete().eq("user_id", data.user_id);
+
+  // Exclui usuário do auth (cascade nas tabelas que referenciam auth.users)
+  const { error } = await supabaseAdmin.auth.admin.deleteUser(data.user_id);
+  if (error) throw new Error(error.message);
+
+  // Opcional: marcar o tenant órfão como desativado. Como pode ter dados
+  // que o super admin queira inspecionar, NÃO apagamos automaticamente.
+  return { ok: true, removed_tenants: tenantIds };
+}
 
 const membershipInput = z.object({
   user_id: dbUuid(),

@@ -10,13 +10,14 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { auditAdminAction } from "@/lib/admin-audit.server";
 import { isSuperAdminUser } from "@/lib/billing/billing-state.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 import { getMcpLevel, type McpLevel } from "./access.server";
 import { logCall } from "./call-log.server";
 import { isMcpEnabled } from "./config.server";
-import { publicBaseUrlFromEnv, revokeConnection } from "./oauth.server";
+import { publicBaseUrlFromEnv, removeMcpAccessForUser, revokeConnection } from "./oauth.server";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- loose client typing, same pattern as access.server.ts's db(). */
 const db = () => supabaseAdmin as any;
@@ -269,18 +270,9 @@ export async function adminSetMcpAccessFor(
   try {
     if (!(await isSuperAdminUser(ctx.userId))) throw new Error(FORBIDDEN);
 
+    const beforeLevel = await getMcpLevel(data.userId);
     if (data.level === "none") {
-      const { error: deleteError } = await db().from("mcp_access").delete().eq("user_id", data.userId);
-      if (deleteError) throw new Error(deleteError.message);
-      const { data: conns, error: connError } = await db()
-        .from("mcp_connections")
-        .select("id")
-        .eq("user_id", data.userId)
-        .is("revoked_at", null);
-      if (connError) throw new Error(connError.message);
-      for (const conn of (conns ?? []) as Array<{ id: string }>) {
-        await revokeConnection(conn.id);
-      }
+      await removeMcpAccessForUser(data.userId);
     } else {
       const { error: upsertError } = await db()
         .from("mcp_access")
@@ -295,6 +287,13 @@ export async function adminSetMcpAccessFor(
         );
       if (upsertError) throw new Error(upsertError.message);
     }
+    await auditAdminAction({
+      actorUserId: ctx.userId,
+      action: "mcp.access_set",
+      targetUserId: data.userId,
+      before: { level: beforeLevel },
+      after: { level: data.level },
+    });
     ok = true;
     return { ok: true };
   } catch (error) {
@@ -332,7 +331,20 @@ export async function adminRevokeConnectionFor(
   let errorMessage: string | undefined;
   try {
     if (!(await isSuperAdminUser(ctx.userId))) throw new Error(FORBIDDEN);
+    const { data: conn, error: connError } = await db()
+      .from("mcp_connections")
+      .select("id, user_id")
+      .eq("id", data.connectionId)
+      .maybeSingle();
+    if (connError) throw new Error(connError.message);
+    if (!conn) throw new Error(CONNECTION_NOT_FOUND);
     await revokeConnection(data.connectionId);
+    await auditAdminAction({
+      actorUserId: ctx.userId,
+      action: "mcp.connection_revoked",
+      targetUserId: conn.user_id,
+      after: { connection_id: data.connectionId },
+    });
     ok = true;
     return { ok: true };
   } catch (error) {
