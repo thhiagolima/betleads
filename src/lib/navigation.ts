@@ -405,6 +405,11 @@ export function isExpertAllowedPath(pathname: string): boolean {
   return isPathUnder(pathname, "/expert");
 }
 
+/** The MCP OAuth consent screen (with or without a trailing slash): no app shell. */
+export function isMcpConsentPath(pathname: string): boolean {
+  return pathname.replace(/\/+$/, "") === "/mcp/autorizar";
+}
+
 /**
  * What the shell's main area shows. Until the active house's role is known,
  * a house route renders nothing: otherwise a pure expert landing on it would

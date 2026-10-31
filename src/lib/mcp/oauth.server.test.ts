@@ -25,9 +25,14 @@ import {
   approveMcpAuthorizationFor,
   exchangeToken,
   getMcpAuthorizationInfoFor,
+  REGISTER_MAX_BODY_BYTES,
   isAllowedRedirectUri,
   issueAuthCode,
+  publicBaseUrl,
+  readRegisterBody,
+  redirectRecipientLabel,
   registerClient,
+  wellKnownResponse,
 } from "./oauth.server";
 import { createFakeDb } from "../sms-bulk.test-support";
 
@@ -319,6 +324,7 @@ describe("consent screen cores", () => {
       { clientId: client.client_id, redirectUri: REDIRECT },
     );
     expect(info).toEqual({
+      recipient: "Claude (claude.ai)",
       clientName: "Claude",
       level: "read",
       scopes: { houses: ["Casa Um"], groups: ["Grupo A"] },
@@ -365,5 +371,112 @@ describe("consent screen cores", () => {
     const code = url.searchParams.get("code")!;
     const tokens = await exchangeToken(codeForm({ code, clientId: client.client_id, verifier }));
     expect(await resolveBearer(tokens.access_token)).not.toBeNull();
+  });
+});
+
+describe("consent recipient (final review 5b)", () => {
+  it("labels the code recipient from the redirect URI, not the client name", async () => {
+    expect(redirectRecipientLabel("https://claude.ai/api/mcp/auth_callback")).toBe(
+      "Claude (claude.ai)",
+    );
+    expect(redirectRecipientLabel("https://claude.com/api/mcp/auth_callback")).toBe(
+      "Claude (claude.ai)",
+    );
+    expect(redirectRecipientLabel("http://localhost:33418/callback")).toBe(
+      "Claude Code no seu computador",
+    );
+    expect(redirectRecipientLabel("http://127.0.0.1:5000/cb")).toBe(
+      "Claude Code no seu computador",
+    );
+
+    const local = "http://localhost:33418/callback";
+    const client = await registerClient({
+      client_name: "Suporte Oficial Betleads",
+      redirect_uris: [local],
+    });
+    const info = await getMcpAuthorizationInfoFor(
+      { userId: USER },
+      { clientId: client.client_id, redirectUri: local },
+    );
+    expect(info.recipient).toBe("Claude Code no seu computador");
+    expect(info.clientName).toBe("Suporte Oficial Betleads");
+  });
+});
+
+describe("readRegisterBody (final review 5d)", () => {
+  const url = "https://app.test/api/mcp/oauth/register";
+
+  it("parses a small JSON body", async () => {
+    const body = { client_name: "Claude", redirect_uris: [REDIRECT] };
+    const request = new Request(url, { method: "POST", body: JSON.stringify(body) });
+    expect(await readRegisterBody(request)).toEqual(body);
+  });
+
+  it("refuses a declared Content-Length over 16 KB", async () => {
+    const request = new Request(url, {
+      method: "POST",
+      body: "{}",
+      headers: { "content-length": String(REGISTER_MAX_BODY_BYTES + 1) },
+    });
+    const error = await expectOAuthError(readRegisterBody(request), "invalid_client_metadata");
+    expect(error.message).toMatch(/grande demais/);
+  });
+
+  it("refuses an actual body over 16 KB even without Content-Length", async () => {
+    const big = JSON.stringify({ client_name: "x".repeat(REGISTER_MAX_BODY_BYTES) });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(big));
+        controller.close();
+      },
+    });
+    const request = new Request(url, {
+      method: "POST",
+      body: stream,
+      // @ts-expect-error Node's fetch needs duplex for a streamed body.
+      duplex: "half",
+    });
+    expect(request.headers.get("content-length")).toBeNull();
+    await expectOAuthError(readRegisterBody(request), "invalid_client_metadata");
+  });
+
+  it("refuses invalid JSON", async () => {
+    const request = new Request(url, { method: "POST", body: "{nope" });
+    const error = await expectOAuthError(readRegisterBody(request), "invalid_client_metadata");
+    expect(error.message).toBe("JSON inválido.");
+  });
+});
+
+describe("publicBaseUrl (final review 5e)", () => {
+  const request = new Request("https://attacker.example/.well-known/oauth-authorization-server");
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses VITE_PUBLIC_APP_URL when set, in any environment", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VITE_PUBLIC_APP_URL", "https://app.betleads.com.br/");
+    expect(publicBaseUrl(request)).toBe("https://app.betleads.com.br");
+  });
+
+  it("falls back to the request origin outside production", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("VITE_PUBLIC_APP_URL", "");
+    expect(publicBaseUrl(request)).toBe("https://attacker.example");
+  });
+
+  it("fails closed in production without VITE_PUBLIC_APP_URL (500, logged, no Host echo)", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VITE_PUBLIC_APP_URL", "");
+    expect(() => publicBaseUrl(request)).toThrow(/VITE_PUBLIC_APP_URL/);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = wellKnownResponse(request, true);
+    expect(response.status).toBe(500);
+    const text = await response.text();
+    expect(text).not.toContain("attacker.example");
+    expect(JSON.parse(text).error).toBe("server_error");
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
   });
 });

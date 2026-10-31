@@ -4,10 +4,10 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { isMcpEnabled } from "@/lib/mcp/config.server";
 import {
-  OAuthError,
   notFound,
   oauthErrorResponse,
   oauthJson,
+  readRegisterBody,
   registerClient,
 } from "@/lib/mcp/oauth.server";
 
@@ -16,13 +16,9 @@ export const Route = createFileRoute("/api/mcp/oauth/register")({
     handlers: {
       POST: async ({ request }) => {
         if (!isMcpEnabled()) return notFound();
-        let body: unknown;
         try {
-          body = await request.json();
-        } catch {
-          return oauthErrorResponse(new OAuthError("invalid_client_metadata", "JSON inválido."));
-        }
-        try {
+          // Body capped at 16 KB (declared and actual) before parsing.
+          const body = await readRegisterBody(request);
           return oauthJson(await registerClient(body), 201);
         } catch (error) {
           return oauthErrorResponse(error);

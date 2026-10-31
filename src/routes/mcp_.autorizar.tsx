@@ -26,7 +26,7 @@ type AutorizarSearch = {
 // Absent params stay absent, so the router never rewrites the OAuth URL.
 const str = (value: unknown) => (typeof value === "string" ? value : undefined);
 
-export const Route = createFileRoute("/mcp/autorizar")({
+export const Route = createFileRoute("/mcp_/autorizar")({
   validateSearch: (search: Record<string, unknown>): AutorizarSearch => ({
     client_id: str(search.client_id),
     redirect_uri: str(search.redirect_uri),
@@ -38,6 +38,11 @@ export const Route = createFileRoute("/mcp/autorizar")({
   beforeLoad: async () => {
     if (!(await mcpConsentEnabled())) throw notFound();
   },
+  // Anti-clickjacking: the consent page can never be framed by another site.
+  headers: () => ({
+    "Content-Security-Policy": "frame-ancestors 'none'",
+    "X-Frame-Options": "DENY",
+  }),
   head: () => ({
     meta: [{ title: "Conectar o Claude" }, { name: "robots", content: "noindex,nofollow" }],
   }),
@@ -109,11 +114,18 @@ function AutorizarPage() {
     body = (
       <div className="space-y-3 text-sm">
         <p>
-          <strong>{info.data.clientName}</strong> quer acessar o financeiro de:{" "}
+          <strong>{info.data.recipient}</strong> quer acessar o financeiro de:{" "}
           {scopeList(info.data.scopes)}
         </p>
         <p className="text-muted-foreground">
           {info.data.level === "write" ? "Nível: leitura e escrita" : "Nível: leitura"}
+        </p>
+        <p className="font-medium">
+          Só clique em Permitir se você acabou de pedir esta conexão no seu Claude.
+        </p>
+        {/* Client-chosen name at registration: secondary text only, never the headline. */}
+        <p className="text-meta text-muted-foreground">
+          Nome informado pelo aplicativo: {info.data.clientName}
         </p>
         {allow.isError ? <p className="text-destructive">{errorMessage(allow.error)}</p> : null}
       </div>

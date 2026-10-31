@@ -55,9 +55,59 @@ export function isAllowedRedirectUri(uri: string): boolean {
   return uri.startsWith(`http://${url.hostname}:${url.port}/`);
 }
 
+/**
+ * Who receives the authorization code, derived from the (allow-listed)
+ * redirect URI — never from the free-text DCR client_name, which anyone
+ * registering a client can set to anything.
+ */
+export function redirectRecipientLabel(uri: string): string {
+  if (CLAUDE_CALLBACKS.has(uri)) return "Claude (claude.ai)";
+  return "Claude Code no seu computador";
+}
+
 // ---------------------------------------------------------------------------
 // Dynamic client registration (RFC 7591)
 // ---------------------------------------------------------------------------
+
+/** Max DCR request body (bytes). Real Claude registrations are well under 1 KB. */
+export const REGISTER_MAX_BODY_BYTES = 16 * 1024;
+
+/**
+ * Reads the DCR body as JSON, refusing (OAuthError) a declared or actual size
+ * over REGISTER_MAX_BODY_BYTES — the stream is cut as soon as it passes the cap.
+ */
+export async function readRegisterBody(request: Request): Promise<unknown> {
+  const tooLarge = () =>
+    new OAuthError("invalid_client_metadata", "Corpo da requisição grande demais.");
+  const declared = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > REGISTER_MAX_BODY_BYTES) throw tooLarge();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  if (request.body) {
+    const reader = request.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > REGISTER_MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw tooLarge();
+      }
+      chunks.push(value);
+    }
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new OAuthError("invalid_client_metadata", "JSON inválido.");
+  }
+}
 
 const registrationBody = z.object({
   redirect_uris: z.array(z.string().max(2048)).min(1).max(10),
@@ -336,9 +386,24 @@ export function publicBaseUrlFromEnv(): string {
   return (process.env.VITE_PUBLIC_APP_URL ?? "").trim().replace(/\/+$/, "");
 }
 
-/** Public base URL: VITE_PUBLIC_APP_URL without trailing slash, else the request origin. */
+export class PublicBaseUrlMissingError extends Error {
+  constructor() {
+    super("VITE_PUBLIC_APP_URL não configurada em produção.");
+    this.name = "PublicBaseUrlMissingError";
+  }
+}
+
+/**
+ * Public base URL: VITE_PUBLIC_APP_URL without trailing slash. Outside
+ * production it falls back to the request origin; in production an unset
+ * variable fails closed (throws), so the OAuth metadata is never built from a
+ * client-controlled Host header.
+ */
 export function publicBaseUrl(request: Request): string {
-  return publicBaseUrlFromEnv() || new URL(request.url).origin;
+  const fromEnv = publicBaseUrlFromEnv();
+  if (fromEnv) return fromEnv;
+  if (process.env.NODE_ENV === "production") throw new PublicBaseUrlMissingError();
+  return new URL(request.url).origin;
 }
 
 export function oauthMetadata(request: Request) {
@@ -388,6 +453,9 @@ export function notFound(): Response {
 // ---------------------------------------------------------------------------
 
 export type McpAuthorizationInfo = {
+  /** Who receives the code, from the redirect URI (shown prominently). */
+  recipient: string;
+  /** Free-text DCR client_name (secondary text only: client-controlled). */
   clientName: string;
   level: "read" | "write";
   scopes: { houses: string[]; groups: string[] };
@@ -410,6 +478,7 @@ export async function getMcpAuthorizationInfoFor(
   if (level === "none") throw new Error(NO_MCP_ACCESS_MESSAGE);
   const scopes = await listFinanceScopesFor(ctx.userId);
   return {
+    recipient: redirectRecipientLabel(data.redirectUri),
     clientName: client.client_name || "Claude",
     level,
     scopes: {
@@ -452,7 +521,13 @@ export async function approveMcpAuthorizationFor(
 /** GET handler body shared by the well-known metadata routes (404 when MCP is off). */
 export function wellKnownResponse(request: Request, enabled: boolean): Response {
   if (!enabled) return notFound();
-  return Response.json(oauthMetadata(request), {
+  let metadata: ReturnType<typeof oauthMetadata>;
+  try {
+    metadata = oauthMetadata(request);
+  } catch (error) {
+    return oauthErrorResponse(error);
+  }
+  return Response.json(metadata, {
     headers: { "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" },
   });
 }

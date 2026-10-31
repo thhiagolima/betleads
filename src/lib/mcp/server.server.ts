@@ -409,7 +409,18 @@ const BEARER = /^Bearer\s+(\S+)\s*$/i;
 
 /** 401 pointing Claude at the protected resource metadata (RFC 9728 §5.1). */
 function unauthorized(request: Request): Response {
-  const metadata = `${publicBaseUrl(request)}/.well-known/oauth-protected-resource/api/mcp`;
+  let base: string;
+  try {
+    base = publicBaseUrl(request);
+  } catch (error) {
+    // Production without VITE_PUBLIC_APP_URL: fail closed, never echo the Host header.
+    console.error("[mcp]", error);
+    return Response.json(
+      { error: "server_error", error_description: "Erro interno." },
+      { status: 500 },
+    );
+  }
+  const metadata = `${base}/.well-known/oauth-protected-resource/api/mcp`;
   return Response.json(
     { error: "invalid_token", error_description: "Token ausente, inválido ou expirado." },
     {

@@ -476,6 +476,17 @@ describe("handleMcpRequest (/api/mcp)", () => {
     expect(resolveBearer).toHaveBeenCalledWith("bad");
   });
 
+  it("production without VITE_PUBLIC_APP_URL: 500 instead of a Host-derived 401 header", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VITE_PUBLIC_APP_URL", "");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await handleMcpRequest(post(initialize));
+    expect(response.status).toBe(500);
+    expect(response.headers.get("www-authenticate")).toBeNull();
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
+  });
+
   it("answers initialize and tools/call as JSON, statelessly, for a valid bearer", async () => {
     vi.mocked(resolveBearer).mockResolvedValue(identity());
     vi.mocked(listarEscopos).mockResolvedValue({

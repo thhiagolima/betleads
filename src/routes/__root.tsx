@@ -19,6 +19,7 @@ import { SystemDialogHost } from "@/components/system-dialog-host";
 import { createClientOnlyFn } from "@tanstack/react-start";
 import { captureClientException } from "@/lib/observability/sentry.client";
 import { SIDEBAR_BOOT_SCRIPT } from "@/components/shell/sidebar-collapse";
+import { isMcpConsentPath } from "@/lib/navigation";
 
 // Compiled away on the server (import protection forbids *.client.ts there).
 const reportBoundaryError = createClientOnlyFn(
@@ -160,7 +161,7 @@ function RootComponent() {
 
   // MCP consent screen: needs the signed-in user (AuthGate shows the login
   // in place, keeping the OAuth query) but not the app shell/onboarding.
-  if (pathname === "/mcp/autorizar") {
+  if (isMcpConsentPath(pathname)) {
     return (
       <QueryClientProvider client={queryClient}>
         <AuthGate>
