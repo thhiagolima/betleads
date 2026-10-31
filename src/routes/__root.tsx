@@ -158,6 +158,19 @@ function RootComponent() {
   // Rotas públicas (sem auth, sem layout do app): página de descadastro.
   const isPublic = pathname.startsWith("/u/");
 
+  // MCP consent screen: needs the signed-in user (AuthGate shows the login
+  // in place, keeping the OAuth query) but not the app shell/onboarding.
+  if (pathname === "/mcp/autorizar") {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <AuthGate>
+          <Outlet />
+        </AuthGate>
+        <Toaster />
+      </QueryClientProvider>
+    );
+  }
+
   if (isPublic) {
     return (
       <QueryClientProvider client={queryClient}>

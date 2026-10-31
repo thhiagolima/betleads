@@ -40,6 +40,8 @@ import { Route as TenantsRouteImport } from './routes/tenants'
 import { Route as TreinoIaRouteImport } from './routes/treino-ia'
 import { Route as WebhooksRouteImport } from './routes/webhooks'
 import { Route as WhatsappRouteImport } from './routes/whatsapp'
+import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known/oauth-authorization-server'
+import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known/oauth-protected-resource'
 import { Route as AutomacoesEmailRouteImport } from './routes/automacoes.email'
 import { Route as AutomacoesLigacoesRouteImport } from './routes/automacoes.ligacoes'
 import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
@@ -56,6 +58,7 @@ import { Route as GrupoPessoasRouteImport } from './routes/grupo_.pessoas'
 import { Route as JornadasJourneyIdRouteImport } from './routes/jornadas.$journeyId'
 import { Route as JornadasNovaRouteImport } from './routes/jornadas.nova'
 import { Route as LinksConfiguracoesRouteImport } from './routes/links.configuracoes'
+import { Route as McpAutorizarRouteImport } from './routes/mcp.autorizar'
 import { Route as PlayersPlayerIdRouteImport } from './routes/players.$playerId'
 import { Route as RelatoriosConversaoRouteImport } from './routes/relatorios.conversao'
 import { Route as RendimentoEquipeRouteImport } from './routes/rendimento.equipe'
@@ -69,6 +72,9 @@ import { Route as CampanhasCampaignIdRelatorioRouteImport } from './routes/campa
 import { Route as ExpertLeadsPlayerIdRouteImport } from './routes/expert.leads.$playerId'
 import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornadas.$journeyId_.relatorio'
 import { Route as RendimentoEquipeExpertIdRouteImport } from './routes/rendimento.equipe.$expertId'
+import { Route as DotwellKnownOauthProtectedResourceApiMcpRouteImport } from './routes/[.]well-known/oauth-protected-resource.api.mcp'
+import { Route as ApiMcpOauthRegisterRouteImport } from './routes/api/mcp.oauth.register'
+import { Route as ApiMcpOauthTokenRouteImport } from './routes/api/mcp.oauth.token'
 import { Route as ApiPublicAutomationsDispatchRouteImport } from './routes/api/public/automations/dispatch'
 import { Route as ApiPublicAutomationsEvaluateRouteImport } from './routes/api/public/automations/evaluate'
 import { Route as ApiPublicCallFlowsTickRouteImport } from './routes/api/public/call-flows/tick'
@@ -256,6 +262,18 @@ const WhatsappRoute = WhatsappRouteImport.update({
   path: '/whatsapp',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DotwellKnownOauthAuthorizationServerRoute =
+  DotwellKnownOauthAuthorizationServerRouteImport.update({
+    id: '/.well-known/oauth-authorization-server',
+    path: '/.well-known/oauth-authorization-server',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DotwellKnownOauthProtectedResourceRoute =
+  DotwellKnownOauthProtectedResourceRouteImport.update({
+    id: '/.well-known/oauth-protected-resource',
+    path: '/.well-known/oauth-protected-resource',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AutomacoesEmailRoute = AutomacoesEmailRouteImport.update({
   id: '/email',
   path: '/email',
@@ -336,6 +354,11 @@ const LinksConfiguracoesRoute = LinksConfiguracoesRouteImport.update({
   path: '/configuracoes',
   getParentRoute: () => LinksRoute,
 } as any)
+const McpAutorizarRoute = McpAutorizarRouteImport.update({
+  id: '/mcp/autorizar',
+  path: '/mcp/autorizar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlayersPlayerIdRoute = PlayersPlayerIdRouteImport.update({
   id: '/$playerId',
   path: '/$playerId',
@@ -405,6 +428,22 @@ const RendimentoEquipeExpertIdRoute =
     path: '/$expertId',
     getParentRoute: () => RendimentoEquipeRoute,
   } as any)
+const DotwellKnownOauthProtectedResourceApiMcpRoute =
+  DotwellKnownOauthProtectedResourceApiMcpRouteImport.update({
+    id: '/api/mcp',
+    path: '/api/mcp',
+    getParentRoute: () => DotwellKnownOauthProtectedResourceRoute,
+  } as any)
+const ApiMcpOauthRegisterRoute = ApiMcpOauthRegisterRouteImport.update({
+  id: '/api/mcp/oauth/register',
+  path: '/api/mcp/oauth/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMcpOauthTokenRoute = ApiMcpOauthTokenRouteImport.update({
+  id: '/api/mcp/oauth/token',
+  path: '/api/mcp/oauth/token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicAutomationsDispatchRoute =
   ApiPublicAutomationsDispatchRouteImport.update({
     id: '/api/public/automations/dispatch',
@@ -615,6 +654,8 @@ export interface FileRoutesByFullPath {
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
+  '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
+  '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
   '/automacoes/email': typeof AutomacoesEmailRoute
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
@@ -630,6 +671,7 @@ export interface FileRoutesByFullPath {
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
+  '/mcp/autorizar': typeof McpAutorizarRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/relatorios/conversao': typeof RelatoriosConversaoRoute
   '/rendimento/equipe': typeof RendimentoEquipeRouteWithChildren
@@ -644,6 +686,9 @@ export interface FileRoutesByFullPath {
   '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/rendimento/equipe/$expertId': typeof RendimentoEquipeExpertIdRoute
+  '/.well-known/oauth-protected-resource/api/mcp': typeof DotwellKnownOauthProtectedResourceApiMcpRoute
+  '/api/mcp/oauth/register': typeof ApiMcpOauthRegisterRoute
+  '/api/mcp/oauth/token': typeof ApiMcpOauthTokenRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -708,6 +753,8 @@ export interface FileRoutesByTo {
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
+  '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
+  '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
   '/automacoes/email': typeof AutomacoesEmailRoute
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
@@ -723,6 +770,7 @@ export interface FileRoutesByTo {
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
+  '/mcp/autorizar': typeof McpAutorizarRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/relatorios/conversao': typeof RelatoriosConversaoRoute
   '/rendimento/equipe': typeof RendimentoEquipeRouteWithChildren
@@ -737,6 +785,9 @@ export interface FileRoutesByTo {
   '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/rendimento/equipe/$expertId': typeof RendimentoEquipeExpertIdRoute
+  '/.well-known/oauth-protected-resource/api/mcp': typeof DotwellKnownOauthProtectedResourceApiMcpRoute
+  '/api/mcp/oauth/register': typeof ApiMcpOauthRegisterRoute
+  '/api/mcp/oauth/token': typeof ApiMcpOauthTokenRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -802,6 +853,8 @@ export interface FileRoutesById {
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
   '/whatsapp': typeof WhatsappRoute
+  '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
+  '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
   '/automacoes/email': typeof AutomacoesEmailRoute
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
@@ -817,6 +870,7 @@ export interface FileRoutesById {
   '/jornadas/$journeyId': typeof JornadasJourneyIdRoute
   '/jornadas/nova': typeof JornadasNovaRoute
   '/links/configuracoes': typeof LinksConfiguracoesRoute
+  '/mcp/autorizar': typeof McpAutorizarRoute
   '/players/$playerId': typeof PlayersPlayerIdRoute
   '/relatorios/conversao': typeof RelatoriosConversaoRoute
   '/rendimento/equipe': typeof RendimentoEquipeRouteWithChildren
@@ -831,6 +885,9 @@ export interface FileRoutesById {
   '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId_/relatorio': typeof JornadasJourneyIdRelatorioRoute
   '/rendimento/equipe/$expertId': typeof RendimentoEquipeExpertIdRoute
+  '/.well-known/oauth-protected-resource/api/mcp': typeof DotwellKnownOauthProtectedResourceApiMcpRoute
+  '/api/mcp/oauth/register': typeof ApiMcpOauthRegisterRoute
+  '/api/mcp/oauth/token': typeof ApiMcpOauthTokenRoute
   '/api/public/automations/dispatch': typeof ApiPublicAutomationsDispatchRoute
   '/api/public/automations/evaluate': typeof ApiPublicAutomationsEvaluateRoute
   '/api/public/call-flows/tick': typeof ApiPublicCallFlowsTickRoute
@@ -897,6 +954,8 @@ export interface FileRouteTypes {
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
+    | '/.well-known/oauth-authorization-server'
+    | '/.well-known/oauth-protected-resource'
     | '/automacoes/email'
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
@@ -912,6 +971,7 @@ export interface FileRouteTypes {
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
+    | '/mcp/autorizar'
     | '/players/$playerId'
     | '/relatorios/conversao'
     | '/rendimento/equipe'
@@ -926,6 +986,9 @@ export interface FileRouteTypes {
     | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
     | '/rendimento/equipe/$expertId'
+    | '/.well-known/oauth-protected-resource/api/mcp'
+    | '/api/mcp/oauth/register'
+    | '/api/mcp/oauth/token'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -990,6 +1053,8 @@ export interface FileRouteTypes {
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
+    | '/.well-known/oauth-authorization-server'
+    | '/.well-known/oauth-protected-resource'
     | '/automacoes/email'
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
@@ -1005,6 +1070,7 @@ export interface FileRouteTypes {
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
+    | '/mcp/autorizar'
     | '/players/$playerId'
     | '/relatorios/conversao'
     | '/rendimento/equipe'
@@ -1019,6 +1085,9 @@ export interface FileRouteTypes {
     | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
     | '/rendimento/equipe/$expertId'
+    | '/.well-known/oauth-protected-resource/api/mcp'
+    | '/api/mcp/oauth/register'
+    | '/api/mcp/oauth/token'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -1083,6 +1152,8 @@ export interface FileRouteTypes {
     | '/treino-ia'
     | '/webhooks'
     | '/whatsapp'
+    | '/.well-known/oauth-authorization-server'
+    | '/.well-known/oauth-protected-resource'
     | '/automacoes/email'
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
@@ -1098,6 +1169,7 @@ export interface FileRouteTypes {
     | '/jornadas/$journeyId'
     | '/jornadas/nova'
     | '/links/configuracoes'
+    | '/mcp/autorizar'
     | '/players/$playerId'
     | '/relatorios/conversao'
     | '/rendimento/equipe'
@@ -1112,6 +1184,9 @@ export interface FileRouteTypes {
     | '/expert/leads/$playerId'
     | '/jornadas/$journeyId_/relatorio'
     | '/rendimento/equipe/$expertId'
+    | '/.well-known/oauth-protected-resource/api/mcp'
+    | '/api/mcp/oauth/register'
+    | '/api/mcp/oauth/token'
     | '/api/public/automations/dispatch'
     | '/api/public/automations/evaluate'
     | '/api/public/call-flows/tick'
@@ -1177,6 +1252,8 @@ export interface RootRouteChildren {
   TreinoIaRoute: typeof TreinoIaRoute
   WebhooksRoute: typeof WebhooksRoute
   WhatsappRoute: typeof WhatsappRoute
+  DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
+  DotwellKnownOauthProtectedResourceRoute: typeof DotwellKnownOauthProtectedResourceRouteWithChildren
   ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
   ExpertLeadsRoute: typeof ExpertLeadsRouteWithChildren
   ExpertModelosRoute: typeof ExpertModelosRoute
@@ -1184,6 +1261,7 @@ export interface RootRouteChildren {
   GrupoCasaRoute: typeof GrupoCasaRoute
   GrupoMetasRoute: typeof GrupoMetasRoute
   GrupoPessoasRoute: typeof GrupoPessoasRoute
+  McpAutorizarRoute: typeof McpAutorizarRoute
   RelatoriosConversaoRoute: typeof RelatoriosConversaoRoute
   ResultadosCompararRoute: typeof ResultadosCompararRoute
   UTokenRoute: typeof UTokenRoute
@@ -1191,6 +1269,8 @@ export interface RootRouteChildren {
   ApiPublicEvolutionWebhookRoute: typeof ApiPublicEvolutionWebhookRoute
   ApiPublicHealthRoute: typeof ApiPublicHealthRoute
   ApiPublicSmsWebhookRoute: typeof ApiPublicSmsWebhookRoute
+  ApiMcpOauthRegisterRoute: typeof ApiMcpOauthRegisterRoute
+  ApiMcpOauthTokenRoute: typeof ApiMcpOauthTokenRoute
   ApiPublicAutomationsDispatchRoute: typeof ApiPublicAutomationsDispatchRoute
   ApiPublicAutomationsEvaluateRoute: typeof ApiPublicAutomationsEvaluateRoute
   ApiPublicCallFlowsTickRoute: typeof ApiPublicCallFlowsTickRoute
@@ -1443,6 +1523,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WhatsappRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/.well-known/oauth-authorization-server': {
+      id: '/.well-known/oauth-authorization-server'
+      path: '/.well-known/oauth-authorization-server'
+      fullPath: '/.well-known/oauth-authorization-server'
+      preLoaderRoute: typeof DotwellKnownOauthAuthorizationServerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/oauth-protected-resource': {
+      id: '/.well-known/oauth-protected-resource'
+      path: '/.well-known/oauth-protected-resource'
+      fullPath: '/.well-known/oauth-protected-resource'
+      preLoaderRoute: typeof DotwellKnownOauthProtectedResourceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/automacoes/email': {
       id: '/automacoes/email'
       path: '/email'
@@ -1555,6 +1649,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LinksConfiguracoesRouteImport
       parentRoute: typeof LinksRoute
     }
+    '/mcp/autorizar': {
+      id: '/mcp/autorizar'
+      path: '/mcp/autorizar'
+      fullPath: '/mcp/autorizar'
+      preLoaderRoute: typeof McpAutorizarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/players/$playerId': {
       id: '/players/$playerId'
       path: '/$playerId'
@@ -1645,6 +1746,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/rendimento/equipe/$expertId'
       preLoaderRoute: typeof RendimentoEquipeExpertIdRouteImport
       parentRoute: typeof RendimentoEquipeRoute
+    }
+    '/.well-known/oauth-protected-resource/api/mcp': {
+      id: '/.well-known/oauth-protected-resource/api/mcp'
+      path: '/api/mcp'
+      fullPath: '/.well-known/oauth-protected-resource/api/mcp'
+      preLoaderRoute: typeof DotwellKnownOauthProtectedResourceApiMcpRouteImport
+      parentRoute: typeof DotwellKnownOauthProtectedResourceRoute
+    }
+    '/api/mcp/oauth/register': {
+      id: '/api/mcp/oauth/register'
+      path: '/api/mcp/oauth/register'
+      fullPath: '/api/mcp/oauth/register'
+      preLoaderRoute: typeof ApiMcpOauthRegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mcp/oauth/token': {
+      id: '/api/mcp/oauth/token'
+      path: '/api/mcp/oauth/token'
+      fullPath: '/api/mcp/oauth/token'
+      preLoaderRoute: typeof ApiMcpOauthTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/public/automations/dispatch': {
       id: '/api/public/automations/dispatch'
@@ -1977,6 +2099,21 @@ const SmsRouteChildren: SmsRouteChildren = {
 
 const SmsRouteWithChildren = SmsRoute._addFileChildren(SmsRouteChildren)
 
+interface DotwellKnownOauthProtectedResourceRouteChildren {
+  DotwellKnownOauthProtectedResourceApiMcpRoute: typeof DotwellKnownOauthProtectedResourceApiMcpRoute
+}
+
+const DotwellKnownOauthProtectedResourceRouteChildren: DotwellKnownOauthProtectedResourceRouteChildren =
+  {
+    DotwellKnownOauthProtectedResourceApiMcpRoute:
+      DotwellKnownOauthProtectedResourceApiMcpRoute,
+  }
+
+const DotwellKnownOauthProtectedResourceRouteWithChildren =
+  DotwellKnownOauthProtectedResourceRoute._addFileChildren(
+    DotwellKnownOauthProtectedResourceRouteChildren,
+  )
+
 interface ExpertLeadsRouteChildren {
   ExpertLeadsPlayerIdRoute: typeof ExpertLeadsPlayerIdRoute
 }
@@ -2021,6 +2158,10 @@ const rootRouteChildren: RootRouteChildren = {
   TreinoIaRoute: TreinoIaRoute,
   WebhooksRoute: WebhooksRoute,
   WhatsappRoute: WhatsappRoute,
+  DotwellKnownOauthAuthorizationServerRoute:
+    DotwellKnownOauthAuthorizationServerRoute,
+  DotwellKnownOauthProtectedResourceRoute:
+    DotwellKnownOauthProtectedResourceRouteWithChildren,
   ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
   ExpertLeadsRoute: ExpertLeadsRouteWithChildren,
   ExpertModelosRoute: ExpertModelosRoute,
@@ -2028,6 +2169,7 @@ const rootRouteChildren: RootRouteChildren = {
   GrupoCasaRoute: GrupoCasaRoute,
   GrupoMetasRoute: GrupoMetasRoute,
   GrupoPessoasRoute: GrupoPessoasRoute,
+  McpAutorizarRoute: McpAutorizarRoute,
   RelatoriosConversaoRoute: RelatoriosConversaoRoute,
   ResultadosCompararRoute: ResultadosCompararRoute,
   UTokenRoute: UTokenRoute,
@@ -2035,6 +2177,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicEvolutionWebhookRoute: ApiPublicEvolutionWebhookRoute,
   ApiPublicHealthRoute: ApiPublicHealthRoute,
   ApiPublicSmsWebhookRoute: ApiPublicSmsWebhookRoute,
+  ApiMcpOauthRegisterRoute: ApiMcpOauthRegisterRoute,
+  ApiMcpOauthTokenRoute: ApiMcpOauthTokenRoute,
   ApiPublicAutomationsDispatchRoute: ApiPublicAutomationsDispatchRoute,
   ApiPublicAutomationsEvaluateRoute: ApiPublicAutomationsEvaluateRoute,
   ApiPublicCallFlowsTickRoute: ApiPublicCallFlowsTickRoute,
