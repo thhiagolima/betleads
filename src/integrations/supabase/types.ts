@@ -6327,6 +6327,7 @@ export type Database = {
       sms_send_logs: {
         Row: {
           billed_units: number | null;
+          campaign_id: string | null;
           provider_account_id: string | null;
           content: string;
           created_at: string;
@@ -6351,6 +6352,7 @@ export type Database = {
         };
         Insert: {
           billed_units?: number | null;
+          campaign_id?: string | null;
           provider_account_id?: string | null;
           content: string;
           created_at?: string;
@@ -6375,6 +6377,7 @@ export type Database = {
         };
         Update: {
           billed_units?: number | null;
+          campaign_id?: string | null;
           provider_account_id?: string | null;
           content?: string;
           created_at?: string;
