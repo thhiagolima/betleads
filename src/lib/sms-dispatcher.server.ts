@@ -996,6 +996,8 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
         content: campaign.content,
         playerId: target.playerId,
         triggerName: `campanha:${campaign.name}:${campaign.route}`,
+        // Two campaigns may share a name; the log keeps the one that sent it.
+        campaignId: campaign.id,
         // External numbers have no player: only the house links are available.
         variables: target.playerId ? variables : houseLinkVariables(house),
         tenantId: campaign.tenant_id,

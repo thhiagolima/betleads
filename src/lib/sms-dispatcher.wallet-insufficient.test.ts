@@ -352,6 +352,10 @@ describe("SMS campaign dispatcher — wallet refusal pauses only that house's ca
       locked_by: null,
     });
     expect(b).toMatchObject({ status: "enviado", sent_count: 2 });
+    // The log keeps the campaign that sent it (two campaigns may share a name).
+    for (const [args] of vi.mocked(sendSmsInternal).mock.calls) {
+      expect(args.campaignId).toBe(args.tenantId === TENANT_A ? "camp-a" : "camp-b");
+    }
     expect(pauseChannelForInsufficientFunds).not.toHaveBeenCalled();
     expect(notifyNoBalance).toHaveBeenCalledWith(TENANT_A);
     expect(notifyNoBalance).not.toHaveBeenCalledWith(TENANT_B);
@@ -463,6 +467,7 @@ describe("SMS campaign dispatcher — expert campaigns", () => {
     for (const [args] of vi.mocked(sendSmsInternal).mock.calls) {
       expect(args).toMatchObject({
         expertId: EXPERT,
+        campaignId: state.tables.sms_campaigns[0].id,
         linkTrackingOrigin: { sourceType: "expert", sourceId: EXPERT, shortDomainId: null },
       });
     }

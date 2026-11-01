@@ -198,6 +198,24 @@ describe("SMS delivery idempotency (ENV-02)", () => {
     expect(state.smsLogs).toHaveLength(1);
   });
 
+  it("records the sending campaign on the log only when one is given", async () => {
+    vi.stubGlobal("fetch", providerAccepts());
+    await sendSmsInternal({
+      to: "+5511999999999",
+      content: "Oi",
+      tenantId: TENANT,
+      playerId: "00000000-0000-4000-8000-000000000101",
+      deliveryKey: KEY,
+      campaignId: "00000000-0000-4000-8000-0000000000c1",
+    });
+    expect(state.smsLogs[0]).toMatchObject({ campaign_id: "00000000-0000-4000-8000-0000000000c1" });
+
+    state.smsLogs.length = 0;
+    vi.stubGlobal("fetch", providerAccepts());
+    await sendSmsInternal({ to: "+5511999999998", content: "Oi", tenantId: TENANT });
+    expect(state.smsLogs[0]).not.toHaveProperty("campaign_id");
+  });
+
   it("accepted but the send log failed: still reported as sent, so nobody retries and resends it", async () => {
     const fetchMock = providerAccepts();
     vi.stubGlobal("fetch", fetchMock);

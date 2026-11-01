@@ -577,6 +577,8 @@ async function logSend(row: {
   provider_account_id?: string | null;
   /** Default: short-brasil (the platform SMS account). */
   provider?: "short-brasil" | "infobip";
+  /** Campaign that sent it. Without it a DB trigger guesses the campaign by name. */
+  campaign_id?: string | null;
 }) {
   const { data, error } = await supabaseAdmin
     .from("sms_send_logs")
@@ -597,6 +599,7 @@ async function logSend(row: {
       step_index: row.step_index ?? null,
       step_label: row.step_label ?? null,
       flow_lead_id: row.flow_lead_id ?? null,
+      ...(row.campaign_id ? { campaign_id: row.campaign_id } : {}),
       ...(row.tenant_id ? { tenant_id: row.tenant_id } : {}),
       billed_units: row.billed_units ?? null,
       provider_account_id: row.provider_account_id ?? null,
@@ -824,6 +827,8 @@ export async function sendSmsInternal(args: {
   house?: HouseLinks | null;
   /** Área do Expert: owner of the campaign; the reservation checks his monthly cap. */
   expertId?: string | null;
+  /** Campaign worker sends: recorded on sms_send_logs instead of the by-name guess. */
+  campaignId?: string | null;
 }) {
   // Demo guard first: before the phone check, billing, link tracking or any
   // sms_send_logs / sms_credit_ledger / link_dispatches write. Fail-closed: a
@@ -853,6 +858,7 @@ export async function sendSmsInternal(args: {
       player_id: args.playerId,
       flow_id: args.flowId,
       trigger_name: args.triggerName,
+      campaign_id: args.campaignId,
       step_index: args.stepIndex,
       step_label: args.stepLabel,
       flow_lead_id: args.flowLeadId,
@@ -888,6 +894,7 @@ export async function sendSmsInternal(args: {
         player_id: args.playerId,
         flow_id: args.flowId,
         trigger_name: args.triggerName,
+        campaign_id: args.campaignId,
         step_index: args.stepIndex,
         step_label: args.stepLabel,
         flow_lead_id: args.flowLeadId,
@@ -960,6 +967,7 @@ export async function sendSmsInternal(args: {
         player_id: args.playerId,
         flow_id: args.flowId,
         trigger_name: args.triggerName,
+        campaign_id: args.campaignId,
         step_index: args.stepIndex,
         step_label: args.stepLabel,
         flow_lead_id: args.flowLeadId,
@@ -1053,6 +1061,7 @@ export async function sendSmsInternal(args: {
     player_id: args.playerId,
     flow_id: args.flowId,
     trigger_name: args.triggerName,
+    campaign_id: args.campaignId,
     step_index: args.stepIndex,
     step_label: args.stepLabel,
     flow_lead_id: args.flowLeadId,
