@@ -45,6 +45,10 @@ const DORMANT_FIRST_DEPOSIT_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261109100000_crm_influenced_dormant_first_deposit.sql"),
   "utf8",
 );
+const CONSUMO_P0_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261129100000_supabase_consumo_p0.sql"),
+  "utf8",
+);
 // The current refresh_crm_results_day reads the SMS price through
 // crm_sms_report_price (billing); stand-in with the legacy price chain.
 const REPORT_PRICE_STUB = `
@@ -187,6 +191,8 @@ beforeAll(async () => {
   await db.exec(`begin; ${DORMANT_FIRST_DEPOSIT_MIGRATION}; commit;`);
   await db.exec(`begin; ${FINISHED_WITHOUT_MESSAGE_MIGRATION}; commit;`);
   await db.exec(`begin; ${FINISHED_WITHOUT_MESSAGE_MIGRATION}; commit;`);
+  await db.exec(`begin; ${CONSUMO_P0_MIGRATION}; commit;`);
+  await db.exec(`begin; ${CONSUMO_P0_MIGRATION}; commit;`);
   // The home dashboard function reads tables this schema does not model.
   const reports = `begin; set local check_function_bodies = off; ${REPORTS_MIGRATION}; commit;`;
   await db.exec(reports);
@@ -302,6 +308,46 @@ describe("crm_results_daily (golden day)", () => {
     const before = strip(await rows());
     await db.query(`select refresh_crm_results_day($1, $2::date)`, [T, DAY]);
     expect(strip(await rows())).toEqual(before);
+  });
+});
+
+describe("consumption P0: journey join as uuid, quiet days skipped", () => {
+  it("turns a text key into a uuid and anything else into null", async () => {
+    const { rows: out } = await db.query<{ ok: string | null; bad: string | null; none: string | null }>(
+      `select crm_try_uuid($1) ok, crm_try_uuid('k-d') bad, crm_try_uuid(null) none`,
+      [KEY_A.toUpperCase()],
+    );
+    expect(out[0]).toEqual({ ok: KEY_A, bad: null, none: null });
+  });
+
+  it("rebuilds only the houses with activity or stored rows that day", async () => {
+    const BUSY = "00000000-0000-4000-8000-0000000000b4";
+    const STALE = "00000000-0000-4000-8000-0000000000b5";
+    const QUIET = "00000000-0000-4000-8000-0000000000b6";
+    await db.exec("begin");
+    try {
+      await db.exec(`
+        alter table tenants add column if not exists is_demo boolean not null default false;
+        insert into tenants (id, slug) values ('${BUSY}', 'busy'), ('${STALE}', 'stale'), ('${QUIET}', 'quiet');
+        insert into sms_send_logs (tenant_id, status, trigger_name, idempotency_key, created_at)
+          values ('${BUSY}', 'sent', 'outro', 'k', now());
+        insert into crm_results_daily (tenant_id, metric_date, source_type, source_key, player_state)
+          values ('${STALE}', (now() at time zone 'America/Sao_Paulo')::date, 'other', 'x', 'ativo');
+        create table rebuilt (tenant_id uuid);
+        create or replace function refresh_crm_results_day(_tenant uuid, _day date)
+        returns integer language sql as $$ insert into rebuilt values (_tenant) returning 1 $$;
+        create or replace function refresh_player_lifecycle_day(_tenant uuid, _day date)
+        returns integer language sql as $$ select 0 $$;
+      `);
+      const { rows: failed } = await db.query<{ n: number }>(`select refresh_crm_results_recent(1) n`);
+      expect(failed[0].n).toBe(0);
+      const { rows: done } = await db.query<{ tenant_id: string }>(
+        `select tenant_id from rebuilt order by tenant_id`,
+      );
+      expect(done.map((r) => r.tenant_id)).toEqual([BUSY, STALE]);
+    } finally {
+      await db.exec("rollback");
+    }
   });
 });
 

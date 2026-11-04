@@ -1187,7 +1187,9 @@ export async function syncShortioMetrics(
               tracked_link_id: link.id,
               snapshot_at: snapshotAt.toISOString(),
               clicks,
-              payload,
+              // The raw Short.io series is never read and made this table
+              // most of the database (~2 kB a row); only the total is kept.
+              payload: {},
             },
             { onConflict: "tracked_link_id,snapshot_at" },
           );
