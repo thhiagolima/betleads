@@ -7,9 +7,12 @@
 --    Measured on prod, one house and one day: 386k -> 28k buffers.
 -- 2. refresh_crm_results_recent skips the day rebuild of a house with no
 --    activity that day and no rows to clear: the rebuild would write nothing.
--- 3. Cadence: today every 15 min, today + yesterday hourly (was both every
---    10 min); the 8-day rebuild at 03:20 BRT stays. Short.io sync every 5 min
---    (was every minute): first-party clicks are the source of truth.
+-- 3. Cadence: today every 15 min; today + yesterday once at 00:10 BRT to close
+--    the day's last minutes (was both every 10 min); the 8-day rebuild at
+--    03:20 BRT stays and takes the late events. Measured on prod over 14 days:
+--    attributions and clicks never arrive after the day; 47 deposits did, all
+--    within 4 min of midnight; 2 (R$ 135) after 03:20. Short.io sync every
+--    5 min (was every minute): first-party clicks are the source of truth.
 -- 4. cron.job_run_details kept for 3 days (it had no cleanup: 385k rows, 525 MB).
 
 -- Text key -> uuid, null when it is not a uuid (inlined by the planner).
@@ -289,11 +292,11 @@ begin
       '*/15 * * * *',
       $cron$set statement_timeout = '300s'; select public.refresh_crm_results_recent(1);$cron$
     );
-    -- Today and yesterday, hourly, off the quarter-hours so it does not lose
-    -- the lock to the run above.
+    -- Today and yesterday once, 00:10 BRT (03:10 UTC): the day's last minutes.
+    -- Off the quarter-hours so it does not lose the lock to the run above.
     perform cron.schedule(
       'betleads-crm-results-yesterday',
-      '7 * * * *',
+      '10 3 * * *',
       $cron$set statement_timeout = '300s'; select public.refresh_crm_results_recent(2);$cron$
     );
 
