@@ -227,8 +227,32 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
     return builder;
   }
 
+  // Read-only RPCs emulated over the in-memory tables, unless a test overrides them.
+  const builtinRpcs: Record<string, (args: Row) => Result> = {
+    // public.shortio_sync_recent_links: active links of the house created since
+    // p_since, least recently synced first (rows without created_at count as recent).
+    shortio_sync_recent_links: (args) => {
+      const since = String(args.p_since);
+      const picked = rows("tracked_links")
+        .filter(
+          (r) =>
+            r.tenant_id === args.p_tenant_id &&
+            r.status === "active" &&
+            (r.created_at == null || String(r.created_at) >= since),
+        )
+        .sort((a, b) => {
+          if (a.last_synced_at == null || b.last_synced_at == null)
+            return a.last_synced_at == null ? (b.last_synced_at == null ? 0 : -1) : 1;
+          return String(a.last_synced_at).localeCompare(String(b.last_synced_at));
+        })
+        .slice(0, Number(args.p_limit ?? 0))
+        .map((r) => ({ id: r.id, tenant_id: r.tenant_id, shortio_link_id: r.shortio_link_id }));
+      return { data: picked, error: null };
+    },
+  };
+
   async function rpc(fn: string, args: Row): Promise<Result> {
-    const handler = rpcHandlers.get(fn);
+    const handler = rpcHandlers.get(fn) ?? builtinRpcs[fn];
     if (!handler) throw new Error(`unexpected rpc ${fn}`);
     return handler(args);
   }

@@ -1089,15 +1089,14 @@ export async function syncShortioMetrics(
   // with the remaining capacity.
   const recentLimit = Math.max(1, Math.min(limit, Math.ceil(limit * 0.8)));
   const recentSince = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
-  const recentResult = await db
-    .from("tracked_links")
-    .select("id,tenant_id,shortio_link_id")
-    .eq("status", "active")
-    .eq("tenant_id", tenantId)
-    .gte("created_at", recentSince)
-    .order("last_synced_at", { ascending: true, nullsFirst: true })
-    .order("created_at", { ascending: false })
-    .limit(recentLimit);
+  // Same pick as a plain select ordered by last_synced_at, but the RPC filters
+  // by created_at first: the plain select walked every active link of the
+  // house (317k buffers on pixpgf against 8.7k).
+  const recentResult = await (db as any).rpc("shortio_sync_recent_links", {
+    p_tenant_id: tenantId,
+    p_since: recentSince,
+    p_limit: recentLimit,
+  });
   if (recentResult.error)
     throw new Error(`Falha ao listar links recentes: ${recentResult.error.message}`);
 
@@ -1111,8 +1110,9 @@ export async function syncShortioMetrics(
         .eq("status", "active")
         .eq("tenant_id", tenantId)
         .gte("created_at", windowSince)
+        // No created_at tie-break: it made Postgres sort every match instead
+        // of stopping at the limit on the (tenant_id, status, last_synced_at) index.
         .order("last_synced_at", { ascending: true, nullsFirst: true })
-        .order("created_at", { ascending: true })
         .limit(backgroundLimit + recentLinks.length)
     : { data: [], error: null };
   if (backgroundResult.error)

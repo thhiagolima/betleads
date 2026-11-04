@@ -36,7 +36,6 @@ const ROW_FILTERED = [
   // Journey maintenance RPCs the dispatcher/scanner call every tick.
   "recover_orphaned_journey_claims",
   "resume_priority_paused_journeys",
-  "sweep_journey_exits",
   "sync_journey_scan_jobs",
 ];
 
@@ -56,6 +55,9 @@ const TENANT_LOOPS = [
   "refresh_recent_dashboard_metrics_slot",
   "refresh_crm_results_recent",
   "check_crm_results_recent",
+  // Journey sweeps: a join on tenants.is_demo instead of is_demo_tenant() per row.
+  "sweep_journey_exits",
+  "sweep_dead_lead_revivals",
 ];
 
 function escapeRegExp(text: string) {
