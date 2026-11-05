@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { PLAYERS_CSV_HEADERS, playersCsv, type PlayersCsvRow } from "./players-csv";
+import {
+  PLAYERS_CSV_HEADERS,
+  playersCsv,
+  playersCsvHeaders,
+  type PlayersCsvRow,
+} from "./players-csv";
 
 const row = (overrides: Partial<PlayersCsvRow>): PlayersCsvRow => ({
   nome: "Ana",
@@ -48,8 +53,24 @@ describe("playersCsv", () => {
     const at = (header: string) => cells[PLAYERS_CSV_HEADERS.indexOf(header)];
     expect(at("Nível")).toBe("Prata");
     expect(at("VIP")).toBe("sim");
-    expect(at("Saldo")).toBe("15");
-    expect(at("Lucro")).toBe("500");
+    expect(at("Saldo (BRL)")).toBe("15");
+    expect(at("Lucro (BRL)")).toBe("500");
+  });
+
+  it("põe o código da moeda da casa nos cabeçalhos de valor e mantém o número cru", () => {
+    const csv = playersCsv(
+      [row({ total_depositado: 10000.5, total_sacado: 500 })],
+      undefined,
+      "ARS",
+    );
+    const [header, line] = csv.split("\n");
+    expect(header).toBe(playersCsvHeaders("ARS").join(","));
+    const headers = header.split(",");
+    const cells = line.split(",");
+    expect(headers).toContain("Total depositado (ARS)");
+    expect(headers).toContain("Lucro (ARS)");
+    expect(headers).not.toContain("Total depositado (BRL)");
+    expect(cells[headers.indexOf("Total depositado (ARS)")]).toBe("10000.5");
   });
 
   it("escapa vírgula e aspas", () => {

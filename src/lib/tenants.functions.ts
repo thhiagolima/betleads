@@ -16,6 +16,8 @@ import {
   type BillingRole,
 } from "@/lib/billing/billing-view";
 import { cancelOpenInvoiceCharges } from "@/lib/billing/invoices.server";
+import { TENANT_CURRENCIES, toTenantCurrency } from "@/lib/currency";
+import { invalidateHouseLinks } from "@/lib/house-links.server";
 import {
   EXPERT_MEMBER_GUARD,
   HOUSE_MEMBER_ROLES,
@@ -72,6 +74,8 @@ type TenantRow = {
   // 1); follows the established `(supabaseAdmin as any)` / loose-row-type
   // pattern used elsewhere for this column.
   is_demo?: boolean | null;
+  /** Moeda de exibição dos valores da casa (`@/lib/currency`); cobrança é sempre BRL. */
+  moeda?: string | null;
 };
 
 type TenantMemberRow = {
@@ -186,7 +190,7 @@ async function getAccessibleTenants(ctx: ServerContext) {
   if (superAdmin) {
     const { data, error } = await db()
       .from<TenantRow[]>("tenants")
-      .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at,is_demo")
+      .select("id,nome,slug,status,plano,crm_model,moeda,limits,metadata,created_at,updated_at,is_demo")
       .order("nome", { ascending: true });
     if (error) throw new Error(error.message);
     return { superAdmin, tenants: data ?? [] };
@@ -207,7 +211,7 @@ async function getAccessibleTenants(ctx: ServerContext) {
 
   const { data, error } = await db()
     .from<TenantRow[]>("tenants")
-    .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at,is_demo")
+    .select("id,nome,slug,status,plano,crm_model,moeda,limits,metadata,created_at,updated_at,is_demo")
     .in("id", tenantIds)
     .order("nome", { ascending: true });
   if (error) throw new Error(error.message);
@@ -407,7 +411,7 @@ async function buildTenantDetail(
   ] = await Promise.all([
     db()
       .from<TenantRow>("tenants")
-      .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
+      .select("id,nome,slug,status,plano,crm_model,moeda,limits,metadata,created_at,updated_at")
       .eq("id", tenantId)
       .maybeSingle(),
     listTenantMembers(tenantId),
@@ -603,7 +607,7 @@ export async function getTenantSwitcherFor(ctx: ServerContext) {
   const tenantIds = roles.map((membership) => membership.tenant_id);
   const { data: tenants, error: tenantsErr } = await db()
     .from<TenantRow[]>("tenants")
-    .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at,is_demo")
+    .select("id,nome,slug,status,plano,crm_model,moeda,limits,metadata,created_at,updated_at,is_demo")
     .in(
       "id",
       superAdmin ? (await getAccessibleTenants(ctx)).tenants.map((tenant) => tenant.id) : tenantIds,
@@ -636,6 +640,7 @@ export async function getTenantSwitcherFor(ctx: ServerContext) {
     slug: tenant.slug,
     role: superAdmin ? "super_admin" : (roleByTenant.get(tenant.id) ?? "member"),
     is_demo: tenant.is_demo === true,
+    moeda: toTenantCurrency(tenant.moeda),
     has_team_profile:
       isHouseMemberRole(roleByTenant.get(tenant.id)) && activeProfileTenantIds.has(tenant.id),
   }));
@@ -754,7 +759,7 @@ export async function getCurrentTenantAccessStatusFor(ctx: ServerContext) {
   const [{ data: tenant, error }, billing] = await Promise.all([
     db()
       .from<TenantRow>("tenants")
-      .select("id,nome,slug,status,plano,crm_model,created_at,updated_at")
+      .select("id,nome,slug,status,plano,crm_model,moeda,created_at,updated_at")
       .eq("id", tenantId)
       .maybeSingle(),
     tenantAccessBilling(ctx, tenantId, false),
@@ -810,7 +815,7 @@ export const adminCreateTenant = createServerFn({ method: "POST" })
         plano: data.plano,
         crm_model: data.crm_model,
       })
-      .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
+      .select("id,nome,slug,status,plano,crm_model,moeda,limits,metadata,created_at,updated_at")
       .single();
     if (error) throw new Error(error.message);
     if (!tenant) throw new Error("Falha ao criar tenant");
@@ -843,6 +848,8 @@ const updateTenantInput = z.object({
   status: tenantStatus,
   plano: tenantPlan,
   crm_model: crmModel,
+  // Moeda de exibição; só o super admin altera (ignorada no patch da casa).
+  moeda: z.enum(TENANT_CURRENCIES).optional(),
   // Required (>= 5 chars) only when `plano` changes into or out of
   // 'interno'; optional otherwise (see `updateTenantSettingsFor` below).
   planReason: z.string().max(500).optional().nullable(),
@@ -863,7 +870,7 @@ export async function updateTenantSettingsFor(
 
   const { data: before, error: beforeErr } = await db()
     .from<TenantRow>("tenants")
-    .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
+    .select("id,nome,slug,status,plano,crm_model,moeda,limits,metadata,created_at,updated_at")
     .eq("id", data.tenantId)
     .maybeSingle();
   if (beforeErr) throw new Error(beforeErr.message);
@@ -899,6 +906,7 @@ export async function updateTenantSettingsFor(
         status: data.status,
         plano: data.plano,
         crm_model: data.crm_model,
+        ...(data.moeda ? { moeda: data.moeda } : {}),
         updated_at: new Date().toISOString(),
       }
     : {
@@ -910,9 +918,11 @@ export async function updateTenantSettingsFor(
     .from<TenantRow>("tenants")
     .update(patch)
     .eq("id", data.tenantId)
-    .select("id,nome,slug,status,plano,crm_model,limits,metadata,created_at,updated_at")
+    .select("id,nome,slug,status,plano,crm_model,moeda,limits,metadata,created_at,updated_at")
     .single();
   if (error) throw new Error(error.message);
+  // A moeda entra nas variáveis de mensagem via `loadHouseLinks` (cache 60s).
+  if (tenant?.moeda !== before.moeda) invalidateHouseLinks(data.tenantId);
 
   const pixCancel = openInvoiceBefore ? await cancelPixOfClosedInvoice(openInvoiceBefore) : null;
 

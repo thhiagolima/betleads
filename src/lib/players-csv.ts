@@ -1,6 +1,7 @@
 // CSV da lista de Jogadores (C-06). Função pura: recebe as linhas do filtro
 // inteiro e as faixas de nível configuradas, devolve o texto do arquivo.
 import { neutralizeCsvFormula } from "@/lib/csv-safe";
+import { DEFAULT_CURRENCY, toTenantCurrency, type TenantCurrency } from "@/lib/currency";
 import {
   DEFAULT_LEVEL_THRESHOLDS,
   LEVEL_LABEL,
@@ -27,25 +28,31 @@ export type PlayersCsvRow = {
   tags: string[] | null;
 };
 
-export const PLAYERS_CSV_HEADERS = [
-  "Nome",
-  "Telefone",
-  "E-mail",
-  "ID externo",
-  "Origem",
-  "Expert",
-  "Status",
-  "VIP",
-  "Nível",
-  "Último login",
-  "Último jogo",
-  "Último depósito",
-  "Total depositado",
-  "Total sacado",
-  "Saldo",
-  "Lucro",
-  "Tags",
-];
+/** Colunas de valor da casa: o número sai cru e o cabeçalho leva o código da moeda. */
+const MONEY_HEADERS = ["Total depositado", "Total sacado", "Saldo", "Lucro"] as const;
+
+/** Cabeçalhos do CSV; as colunas de valor dizem a moeda da casa ("Saldo (ARS)"). */
+export function playersCsvHeaders(currency: TenantCurrency = DEFAULT_CURRENCY): string[] {
+  const code = toTenantCurrency(currency);
+  return [
+    "Nome",
+    "Telefone",
+    "E-mail",
+    "ID externo",
+    "Origem",
+    "Expert",
+    "Status",
+    "VIP",
+    "Nível",
+    "Último login",
+    "Último jogo",
+    "Último depósito",
+    ...MONEY_HEADERS.map((header) => `${header} (${code})`),
+    "Tags",
+  ];
+}
+
+export const PLAYERS_CSV_HEADERS = playersCsvHeaders(DEFAULT_CURRENCY);
 
 function escapeCsv(value: unknown) {
   const text = neutralizeCsvFormula(value);
@@ -55,8 +62,9 @@ function escapeCsv(value: unknown) {
 export function playersCsv(
   rows: PlayersCsvRow[],
   thresholds: LevelThresholds = DEFAULT_LEVEL_THRESHOLDS,
+  currency: TenantCurrency = DEFAULT_CURRENCY,
 ): string {
-  const lines = [PLAYERS_CSV_HEADERS.map(escapeCsv).join(",")];
+  const lines = [playersCsvHeaders(currency).map(escapeCsv).join(",")];
   for (const p of rows) {
     const depositado = Number(p.total_depositado ?? 0);
     const sacado = Number(p.total_sacado ?? 0);

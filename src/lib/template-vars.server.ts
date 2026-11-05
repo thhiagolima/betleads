@@ -1,5 +1,6 @@
 // Renderiza variáveis {token} em mensagens de fluxo usando dados do player.
 // Espelha a lógica de `components/ligacoes/shared.ts` no lado servidor.
+import { formatMoney, type TenantCurrency } from "@/lib/currency";
 import type { HouseLinks } from "@/lib/house-links.server";
 
 export type PlayerVarsInput = {
@@ -21,12 +22,8 @@ export type PlayerVarsInput = {
   last_cashback_amount?: number | null;
 };
 
-function brl(v: number | null | undefined) {
-  if (v == null || Number.isNaN(Number(v))) return "R$ 0,00";
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(Number(v));
+function money(v: number | null | undefined, currency: TenantCurrency) {
+  return formatMoney(v == null || Number.isNaN(Number(v)) ? 0 : Number(v), currency);
 }
 
 function firstName(full?: string | null) {
@@ -70,6 +67,8 @@ export function buildPlayerVariables(
   const cashback = p.last_cashback_amount != null ? Number(p.last_cashback_amount) : null;
   const cashbackPaidAt = p.last_cashback_paid_at ? new Date(p.last_cashback_paid_at) : null;
   const links = houseLinkVariables(house);
+  const currency = house?.currency ?? "BRL";
+  const brl = (v: number | null | undefined) => money(v, currency);
   return {
     primeiro_nome: firstName(p.nome),
     nome: safe(p.nome, "amigo"),

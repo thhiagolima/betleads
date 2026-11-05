@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { toTenantCurrency } from "./currency";
 import { getReportUnitPrices } from "./billing/pricing.server";
 import {
   buildJourneyStepConversions,
@@ -964,6 +965,13 @@ export const exportConversionDrilldownCsv = createServerFn({ method: "POST" })
     const tenantId = await resolveOperationalTenantId(context.supabase);
     await requireConversionReportAdmin(context, tenantId);
     const db = context.supabase as any;
+    // O valor do depósito vem na moeda da casa; o código vai no nome da coluna.
+    const { data: tenant } = await (supabaseAdmin as any)
+      .from("tenants")
+      .select("moeda")
+      .eq("id", tenantId)
+      .maybeSingle();
+    const currency = toTenantCurrency(tenant?.moeda).toLowerCase();
     const { data: rows, error } = await db
       .from("conversion_attributions")
       .select(
@@ -977,7 +985,7 @@ export const exportConversionDrilldownCsv = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     const cell = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const csv = [
-      "nome,email,telefone,event_type,event_id,ocorrido_em,valor,is_ftd,ja_ativo_no_clique",
+      `nome,email,telefone,event_type,event_id,ocorrido_em,valor_${currency},is_ftd,ja_ativo_no_clique`,
       ...(rows ?? []).map((row: any) =>
         [
           row.players?.nome,

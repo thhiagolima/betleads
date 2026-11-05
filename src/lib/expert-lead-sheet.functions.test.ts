@@ -485,9 +485,9 @@ describe("getExpertLeadSheetFor", () => {
       expect(has(table, table === "players" ? "id" : "player_id", PLAYER)).toBe(true);
     }
     // Lookups that are not per-lead (settings, claim holder, link dispatches)
-    // are still pinned to the house.
+    // are still pinned to the house; the house row itself (moeda) by its id.
     for (const table of new Set(fake.tables)) {
-      expect(has(table, "tenant_id", TENANT)).toBe(true);
+      expect(has(table, table === "tenants" ? "id" : "tenant_id", TENANT)).toBe(true);
     }
     // link_dispatches is read only for the ids of this lead's expert_links.
     expect(fake.filters).toContainEqual({

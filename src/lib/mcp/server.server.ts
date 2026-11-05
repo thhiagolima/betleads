@@ -41,7 +41,8 @@ import type { WriteActionName } from "./write-actions.server";
 
 const CONFIRM_HINT =
   "Mostre a prévia ao usuário e só chame confirmar_alteracao depois que ele aprovar.";
-const MONEY_HINT = "Valores em dinheiro: número em reais com ponto decimal (ex.: 12345.00).";
+const MONEY_HINT =
+  "Valores em dinheiro: número com ponto decimal (ex.: 12345.00), na moeda da casa (campo moeda; reais nas casas em BRL). Custos Betleads (envios, mensalidade) são sempre BRL; fora do BRL o lucro líquido e o ROI vêm null (sem câmbio), e nunca some valores de moedas diferentes.";
 const CASA_HINT = "casa: id da casa, vindo de listar_escopos.";
 const INTERNAL_ERROR = "Erro interno.";
 
@@ -107,7 +108,7 @@ const custoShape = z.object({
   id: z.string().optional().describe("Id do custo a editar. Ausente cria um custo novo."),
   data: dataIso.describe("Dia do custo (AAAA-MM-DD), hoje ou antes."),
   descricao: z.string(),
-  valor: z.number().describe("Valor em reais, não negativo."),
+  valor: z.number().describe("Valor na moeda da casa (reais nas casas em BRL), não negativo."),
   categoria: z.string().nullable().optional(),
   repetir_todo_mes: z
     .boolean()

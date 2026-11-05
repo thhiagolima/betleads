@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 
-import { dateTime, maskContact, money, number } from "./format";
+import { useMoney } from "@/hooks/use-tenant-currency";
+import { dateTime, maskContact, number } from "./format";
 import { PlayerName } from "./report-parts";
 
 export type ReportRecipient = {
@@ -66,6 +67,7 @@ const stageTone: Record<string, string> = {
 };
 
 function RecipientValue({ row }: { row: ReportRecipient }) {
+  const { money } = useMoney();
   if (row.depositValue)
     return <span className="font-semibold text-success">{money(row.depositValue)}</span>;
   if (row.activeDepositValue)
@@ -188,6 +190,7 @@ function formatElapsed(value: number | null) {
 
 /** "Quem clicou e depositou": table on desktop, cards on the phone. */
 export function ConversionList({ rows }: { rows: ReportRecipient[] }) {
+  const { money } = useMoney();
   const elapsedOf = (row: ReportRecipient) =>
     row.clickedAt && row.depositAt
       ? Math.max(0, new Date(row.depositAt).getTime() - new Date(row.clickedAt).getTime())
@@ -266,6 +269,7 @@ export type TrackedLead = {
 
 /** Journey tracked leads: table on desktop, cards on the phone. */
 export function TrackedLeadList({ rows }: { rows: TrackedLead[] }) {
+  const { money } = useMoney();
   const stage = (row: TrackedLead) =>
     row.depositedAt
       ? row.alreadyActive

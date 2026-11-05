@@ -10,6 +10,8 @@ import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { assertTenantNotDemoForSend, listDemoTenantIds } from "./tenant-access.server";
 import { isDemoBlockedError } from "./demo-tenant";
 import { ExpertVoiceGate, loadExpertQueueOwners } from "./expert-voice.server";
+import { loadHouseLinks } from "./house-links.server";
+import { DEFAULT_CURRENCY, formatMoney, type TenantCurrency } from "./currency";
 
 // ============================================================
 // Tipos
@@ -32,6 +34,8 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
 
 export interface LeadLike {
   id?: string | null;
+  /** Casa do lead; só usada para achar a moeda quando o chamador não a tem. */
+  tenant_id?: string | null;
   nome?: string | null;
   telefone?: string | null;
   email?: string | null;
@@ -65,12 +69,9 @@ export const FAKE_LEAD: LeadLike = {
 // ============================================================
 // Formatadores
 // ============================================================
-function brl(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return "R$ 0,00";
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(Number(value));
+/** Valor da casa (saldo, depósitos) na moeda dela. */
+function money(value: number | null | undefined, currency: TenantCurrency): string {
+  return formatMoney(value == null || Number.isNaN(Number(value)) ? 0 : Number(value), currency);
 }
 
 function firstName(full: string | null | undefined): string {
@@ -93,7 +94,10 @@ function safe(value: string | number | null | undefined, fallback: string): stri
 // ============================================================
 // Renderização de variáveis
 // ============================================================
-export function buildVariables(lead: LeadLike): Record<string, string> {
+export function buildVariables(
+  lead: LeadLike,
+  currency: TenantCurrency = DEFAULT_CURRENCY,
+): Record<string, string> {
   const dl = daysSince(lead.ultimo_login);
   const dj = daysSince(lead.ultimo_jogo);
   const dd = daysSince(lead.ultimo_deposito);
@@ -102,7 +106,7 @@ export function buildVariables(lead: LeadLike): Record<string, string> {
     primeiro_nome: firstName(lead.nome),
     nome: safe(lead.nome, "amigo"),
     telefone: safe(lead.telefone, ""),
-    saldo: brl(lead.saldo_carteira ?? 0),
+    saldo: money(lead.saldo_carteira ?? 0, currency),
     ultimo_login: lead.ultimo_login
       ? new Date(lead.ultimo_login).toLocaleDateString("pt-BR")
       : "há algum tempo",
@@ -115,7 +119,7 @@ export function buildVariables(lead: LeadLike): Record<string, string> {
       ? new Date(lead.ultimo_deposito).toLocaleDateString("pt-BR")
       : "há algum tempo",
     dias_sem_depositar: dd == null ? "alguns dias" : String(dd),
-    total_depositado: brl(lead.total_depositado ?? 0),
+    total_depositado: money(lead.total_depositado ?? 0, currency),
     categoria: lead.vip ? "VIP" : safe(lead.risco, "regular"),
     status_lead: safe(lead.status, "ativo"),
     nome_expert: safe(lead.expert, "Equipe BETLEADS"),
@@ -123,8 +127,12 @@ export function buildVariables(lead: LeadLike): Record<string, string> {
   };
 }
 
-export function renderCallScript(scriptContent: string, lead: LeadLike): string {
-  const vars = buildVariables(lead);
+export function renderCallScript(
+  scriptContent: string,
+  lead: LeadLike,
+  currency: TenantCurrency = DEFAULT_CURRENCY,
+): string {
+  const vars = buildVariables(lead, currency);
   return scriptContent.replace(/\{(\w+)\}/g, (_match, key: string) => {
     const v = vars[key];
     return v ?? "";
@@ -314,12 +322,7 @@ export function voiceQueueBillingKey(callQueueId: string): string {
 }
 
 export type VoiceDispatchOutcome =
-  | "ok"
-  | "insufficient_balance"
-  | "expert_cap"
-  | "expert_inactive"
-  | "transient"
-  | "failed";
+  "ok" | "insufficient_balance" | "expert_cap" | "expert_inactive" | "transient" | "failed";
 
 /**
  * How a queued call's dispatch result is handled. The wallet refusal
@@ -492,7 +495,8 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           .eq("tenant_id", item.tenant_id)
           .maybeSingle();
         if (!script?.content) throw new Error("Script de voz não encontrado.");
-        renderedText = renderCallScript(script.content, player ?? FAKE_LEAD);
+        const { currency } = await loadHouseLinks(item.tenant_id);
+        renderedText = renderCallScript(script.content, player ?? FAKE_LEAD, currency);
         content = { type: "tts", text: renderedText, language: "pt" };
       } else {
         if (!audioUrl) throw new Error("Áudio da ligação não está pronto.");
@@ -602,9 +606,14 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         provider: "infobip",
         provider_call_id: result.providerCallId ?? result.idempotencyKey,
         provider_response: {
-          ...((result.body && typeof result.body === "object" && !Array.isArray(result.body)) ? result.body : {}),
+          ...(result.body && typeof result.body === "object" && !Array.isArray(result.body)
+            ? result.body
+            : {}),
           correlation_id: result.idempotencyKey,
-          cml: content.type === "tts" ? { type: "say", text: content.text, language: content.language ?? "pt" } : undefined,
+          cml:
+            content.type === "tts"
+              ? { type: "say", text: content.text, language: content.language ?? "pt" }
+              : undefined,
         } as never,
         provider_status_code: result.status,
         error_message: result.ok ? null : JSON.stringify(result.body).slice(0, 1000),

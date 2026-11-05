@@ -1,7 +1,7 @@
 import { Info } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { ratio } from "./format";
+import { crossCurrencyNote, isCrossCurrency, ratio } from "./format";
 import { PERIODS, type PeriodKey } from "./search";
 
 const decimal = (value: number, digits: number) =>
@@ -99,7 +99,22 @@ export function NotPeriodBadge() {
 }
 
 /** Return multiple coloured by payback; small samples are dimmed (B-06). */
-export function RoiValue({ roi, smallSample }: { roi: number | null; smallSample?: boolean }) {
+export function RoiValue({
+  roi,
+  smallSample,
+  currency,
+}: {
+  roi: number | null;
+  smallSample?: boolean;
+  /** Moeda da casa: fora de BRL o retorno não é calculado (receita e custo em moedas diferentes). */
+  currency: string;
+}) {
+  if (isCrossCurrency(currency))
+    return (
+      <span className="text-muted-foreground" title={crossCurrencyNote(currency)}>
+        —
+      </span>
+    );
   if (roi == null || roi === 0) return <span className="text-muted-foreground">—</span>;
   if (smallSample)
     return (

@@ -316,10 +316,26 @@ describe("listExpertCreditsFor / exportExpertCreditsCsvFor (Task 8)", () => {
 
     expect(result.csv.startsWith("﻿")).toBe(true);
     const lines = result.csv.slice(1).split("\n");
-    expect(lines[0]).toBe("Data;Lead;Valor;Origem;Oferta;Clique em;Primeiro depósito;Reativação");
+    expect(lines[0]).toBe(
+      "Data;Lead;Valor (BRL);Origem;Oferta;Clique em;Primeiro depósito;Reativação",
+    );
     expect(lines[1]).toBe("23/10/2026 12:30;Jogador 1;1234,50;Afiliado;;23/10/2026 11:00;Sim;Sim");
     expect(lines[2]).toBe("Total;;1234,50;;;;;");
     expect(result.filename).toBe("extrato-ana-2026-09-25-a-2026-10-24.csv");
+  });
+
+  it("csv puts the house currency in the amount header, keeping raw numbers", async () => {
+    fake.admin.rows("tenants")[0].moeda = "ARS";
+    addCredit("d-1", ME, { deposit_at: "2026-10-23T15:30:00Z", valor: 1234.5 });
+
+    const result = await exportExpertCreditsCsvFor(ctxFor(ADMIN), { expertId: ME, period: "30" });
+    const lines = result.csv.slice(1).split("\n");
+
+    expect(lines[0]).toBe(
+      "Data;Lead;Valor (ARS);Origem;Oferta;Clique em;Primeiro depósito;Reativação",
+    );
+    expect(lines[1]).toContain(";1234,50;");
+    expect(lines.at(-1)).toBe("Total;;1234,50;;;;;");
   });
 
   it("statement and csv follow the calendar month periods", async () => {

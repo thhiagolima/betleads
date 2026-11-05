@@ -5,6 +5,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { aggregateCrmResults, type CrmResultRow, withPeriodPlayers } from "./crm-results";
 import { loadPeriodPlayers } from "./crm-results.functions";
+import { toTenantCurrency } from "./currency";
 import { comparableTenantIds } from "./tenant-comparison";
 
 const PAGE = 1000;
@@ -21,7 +22,7 @@ async function comparableTenants(userId: string) {
       db.from("user_roles").select("tenant_id,role").eq("user_id", userId),
     ]);
   if (superAdminError || rolesError) throw new Error("Não foi possível validar a permissão.");
-  const { data: tenants, error } = await db.from("tenants").select("id,nome").order("nome");
+  const { data: tenants, error } = await db.from("tenants").select("id,nome,moeda").order("nome");
   if (error) throw new Error("Não foi possível carregar as casas.");
   const allowed = new Set(
     comparableTenantIds(
@@ -30,8 +31,8 @@ async function comparableTenants(userId: string) {
       ((tenants ?? []) as Array<{ id: string }>).map((tenant) => tenant.id),
     ),
   );
-  return ((tenants ?? []) as Array<{ id: string; nome: string }>).filter((tenant) =>
-    allowed.has(tenant.id),
+  return ((tenants ?? []) as Array<{ id: string; nome: string; moeda: string | null }>).filter(
+    (tenant) => allowed.has(tenant.id),
   );
 }
 
@@ -108,6 +109,8 @@ export const getTenantComparison = createServerFn({ method: "GET" })
           .at(-1);
         return {
           tenant: tenant.nome,
+          // Receita da casa vem na moeda dela; o custo em SMS é sempre BRL.
+          moeda: toTenantCurrency(tenant.moeda),
           clicks: totals.humanClicks,
           clickRate: totals.clickRate,
           directPlayers: totals.directPlayers,

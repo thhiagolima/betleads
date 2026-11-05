@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 
 import { HOLDOUT_MIN_PLAYERS, HOLDOUT_MIN_RETURNS } from "@/lib/crm-results";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { num } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
 import { type Data, money, pct } from "./format";
 
 export function Holdout({ data }: { data: Data }) {
+  const { currency } = useMoney();
   const withResults = new Set(data.holdout.map((row) => row.journeyId));
   const pending = data.holdoutSetup.filter((journey) => !withResults.has(journey.journeyId));
   return (
@@ -111,7 +113,7 @@ export function Holdout({ data }: { data: Data }) {
                         : num(Math.round(row.incrementalPlayers))}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {money(row.incrementalRevenue)}
+                      {money(row.incrementalRevenue, currency)}
                     </TableCell>
                     <TableCell>
                       {!row.sufficient ? (

@@ -26,6 +26,18 @@ vi.mock("@/lib/journeys.functions", () => ({
   runDeadLeadBackfill: vi.fn(),
 }));
 vi.mock("@/components/system-dialog-host", () => ({ requestConfirmation: vi.fn() }));
+// A moeda vem da casa ativa (switcher); aqui, uma casa em BRL.
+vi.mock("@/hooks/use-tenant-currency", async () => {
+  const { formatMoney } = await import("@/lib/currency");
+  return {
+    useMoney: () => ({
+      currency: "BRL",
+      symbol: "R$",
+      money: (value: number | null | undefined, options?: { decimals?: number }) =>
+        formatMoney(value, "BRL", options),
+    }),
+  };
+});
 
 import { DeadLeadsPanel, type DeadLeadRow } from "./dead-leads-panel";
 

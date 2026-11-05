@@ -2,11 +2,14 @@
 // (`template-vars.server.ts`). Cached per tenant for 60s so a batch dispatch
 // (campaign/journey run) doesn't hit the DB once per recipient.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { toTenantCurrency, type TenantCurrency } from "@/lib/currency";
 import { buildQuickLinkUrl } from "@/lib/house-config";
 
 export type HouseLinks = {
   siteUrl: string | null;
   quickLinks: Record<string, string>;
+  /** Moeda dos valores da casa nas variáveis ({saldo}, {total_depositado}…). Ausente = BRL. */
+  currency?: TenantCurrency;
 };
 
 const HOUSE_LINKS_CACHE_TTL_MS = 60_000;
@@ -40,7 +43,7 @@ export async function loadHouseLinks(tenantId: string): Promise<HouseLinks> {
   try {
     const { data: tenant, error: tenantError } = await supabaseAdmin
       .from("tenants")
-      .select("site_url")
+      .select("site_url,moeda")
       .eq("id", tenantId)
       .maybeSingle();
     if (tenantError) throw new Error(`Falha ao carregar a URL da casa: ${tenantError.message}`);
@@ -60,7 +63,7 @@ export async function loadHouseLinks(tenantId: string): Promise<HouseLinks> {
       );
     }
 
-    const value: HouseLinks = { siteUrl, quickLinks };
+    const value: HouseLinks = { siteUrl, quickLinks, currency: toTenantCurrency(tenant?.moeda) };
     houseLinksCache.set(tenantId, { value, expiresAt: Date.now() + HOUSE_LINKS_CACHE_TTL_MS });
     return value;
   } catch (error) {

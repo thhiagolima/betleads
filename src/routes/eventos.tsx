@@ -6,7 +6,8 @@ import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { brl, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { describeEventType, type EventTypeDisplay } from "@/lib/webhook-events";
 import { IdentityIcon } from "@/components/identity/identity-badge";
 import { EVENT_IDENTITY, type EventKind } from "@/components/identity/identity";
@@ -51,6 +52,7 @@ function EventosPage() {
   // The feed belongs to the house chosen in the header, even for people who see several.
   const { active } = useActiveTenant();
   const tenantId = active?.id ?? null;
+  const { money } = useMoney();
   const { data, isLoading, isError, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["events", tenantId],
     enabled: Boolean(tenantId),
@@ -144,7 +146,7 @@ function EventosPage() {
                     </div>
                     {e.valor != null && (
                       <p className="shrink-0 text-body font-semibold tabular-nums">
-                        {brl(Number(e.valor))}
+                        {money(Number(e.valor))}
                       </p>
                     )}
                   </li>

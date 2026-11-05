@@ -29,6 +29,8 @@ import {
   resolveOperationalTenantId,
 } from "./tenant-access.server";
 import { tenantReads } from "@/lib/active-tenant-filter";
+import { loadHouseLinks } from "./house-links.server";
+import { DEFAULT_CURRENCY, type TenantCurrency } from "./currency";
 
 // ============================================================
 // Schemas
@@ -118,12 +120,18 @@ export const deleteCallScript = createServerFn({ method: "POST" })
 // ============================================================
 // GERAÇÃO DE ÁUDIO (com cache)
 // ============================================================
+/** Moeda da casa para {saldo}/{total_depositado}; sem casa conhecida, BRL. */
+async function houseCurrency(tenantId: string | null | undefined): Promise<TenantCurrency> {
+  if (!tenantId) return DEFAULT_CURRENCY;
+  return (await loadHouseLinks(tenantId)).currency ?? DEFAULT_CURRENCY;
+}
+
 async function loadLead(supabase: any, leadId: string | null | undefined): Promise<LeadLike> {
   if (!leadId) return FAKE_LEAD;
   const { data, error } = await supabase
     .from("players")
     .select(
-      "id, nome, telefone, email, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, status, expert, vip, risco",
+      "id, tenant_id, nome, telefone, email, saldo_carteira, ultimo_login, ultimo_jogo, ultimo_deposito, total_depositado, status, expert, vip, risco",
     )
     .eq("id", leadId)
     .maybeSingle();
@@ -169,7 +177,11 @@ export const generateLeadVoiceAudio = createServerFn({ method: "POST" })
     const tenantId = script.tenant_id as string;
 
     const lead = await loadLead(supabase, data.lead_id ?? null);
-    const renderedText = renderCallScript(script.content as string, lead);
+    const renderedText = renderCallScript(
+      script.content as string,
+      lead,
+      await houseCurrency(tenantId),
+    );
 
     const voiceId = data.voice_id || (script.default_voice_id as string | null) || defaultVoiceId();
     const voiceSettings: VoiceSettings = (data.voice_settings ??
@@ -352,7 +364,8 @@ export const getCallAudioPreview = createServerFn({ method: "POST" })
     }
 
     const lead = await loadLead(supabase, data.lead_id ?? null);
-    const renderedText = renderCallScript(content, lead);
+    // Prévia sem lead (dados fake) sai em BRL: a casa só é resolvida mais abaixo.
+    const renderedText = renderCallScript(content, lead, await houseCurrency(lead.tenant_id));
 
     const hash = computeAudioHash({
       rendered_text: renderedText,
@@ -743,7 +756,11 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
         .maybeSingle();
       if (scriptError) throw new Error(scriptError.message);
       if (!script?.content) throw new Error("Script de voz não encontrado");
-      renderedText = renderCallScript(script.content, await loadLead(supabase, q.lead_id));
+      renderedText = renderCallScript(
+        script.content,
+        await loadLead(supabase, q.lead_id),
+        await houseCurrency(tenantId),
+      );
       content = { type: "tts", text: renderedText, language: "pt" };
     } else {
       content = { type: "audio", audioUrl: q.audio_url! };

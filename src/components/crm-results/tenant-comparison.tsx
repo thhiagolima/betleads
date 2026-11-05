@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
 import { getTenantComparison } from "@/lib/tenant-comparison.functions";
+import { formatMoney } from "@/lib/currency";
 import { brl, num } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,8 +28,6 @@ const ratio = (value: number | null) =>
   value == null
     ? "—"
     : `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}x`;
-const money = (value: number | null) => (value == null ? "—" : brl(value));
-
 type Row = Awaited<ReturnType<typeof getTenantComparison>>["rows"][number];
 
 const pctFine = (value: number | null) =>
@@ -40,20 +39,31 @@ type Metric = {
   label: string;
   hint?: string;
   raw: (row: Row) => number | null;
-  format: (value: number | null) => string;
+  format: (value: number | null, row: Row) => string;
   /** Which end is better; the best house in the row is highlighted. */
   better?: "high" | "low";
+  /** Valor na moeda da casa: só compara (destaca a melhor) entre casas da mesma moeda. */
+  houseMoney?: boolean;
 };
 
 const count = (value: number | null) => (value == null ? "—" : num(value));
-const currency = (value: number | null) => money(value);
+/** Custo da plataforma, sempre BRL. */
+const cost = (value: number | null) => (value == null ? "—" : brl(value));
+/** Valor da casa (depósitos recuperados) na moeda de cada casa. */
+const houseMoney = (value: number | null, row: Row) =>
+  value == null ? "—" : formatMoney(value, row.moeda);
+const CROSS_CURRENCY_NOTE = "receita e custo em moedas diferentes";
+/** Retorno só existe quando a receita também está em BRL (sem câmbio entre moedas). */
+const sameCurrencyRoi = (value: (row: Row) => number | null) => (row: Row) =>
+  row.moeda === "BRL" ? value(row) : null;
+const roiFormat = (value: number | null, row: Row) => (row.moeda === "BRL" ? ratio(value) : "—");
 
 const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
   {
     title: "Recuperado pelo CRM",
     metrics: [
       { label: "SMS enviados", raw: (row) => row.sent, format: count },
-      { label: "Custo em SMS", raw: (row) => row.cost, format: currency },
+      { label: "Custo em SMS", raw: (row) => row.cost, format: cost },
       {
         label: "Taxa de clique",
         hint: "SMS clicados ÷ SMS enviados.",
@@ -78,20 +88,21 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
       {
         label: "Recuperado pelo CRM",
         raw: (row) => row.directRevenue,
-        format: currency,
+        format: houseMoney,
         better: "high",
+        houseMoney: true,
       },
       {
         label: "Custo por jogador convertido",
         raw: (row) => row.costPerConversion,
-        format: currency,
+        format: cost,
         better: "low",
       },
       {
         label: "Retorno",
-        hint: "Recuperado pelo CRM ÷ custo.",
-        raw: (row) => row.clickRoi,
-        format: ratio,
+        hint: `Recuperado pelo CRM ÷ custo. Só em casas em BRL (${CROSS_CURRENCY_NOTE} nas demais).`,
+        raw: sameCurrencyRoi((row) => row.clickRoi),
+        format: roiFormat,
         better: "high",
       },
     ],
@@ -106,11 +117,16 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
         format: count,
         better: "high",
       },
-      { label: "Valor recuperado", raw: (row) => row.influencedRevenue, format: currency },
+      {
+        label: "Valor recuperado",
+        raw: (row) => row.influencedRevenue,
+        format: houseMoney,
+        houseMoney: true,
+      },
       {
         label: "Custo por recuperado",
         raw: (row) => row.costPerRecovered,
-        format: currency,
+        format: cost,
         better: "low",
       },
       {
@@ -150,6 +166,7 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
 /** Index of the best house for a metric, or -1 when there is no clear best. */
 function bestIndex(metric: Metric, rows: Row[]) {
   if (!metric.better) return -1;
+  if (metric.houseMoney && new Set(rows.map((row) => row.moeda)).size > 1) return -1;
   const values = rows.map(metric.raw);
   const present = values.filter((value): value is number => value != null);
   if (present.length < 2 || new Set(present).size === 1) return -1;
@@ -246,7 +263,7 @@ export function TenantComparison() {
                                 index === best ? "font-semibold text-success" : ""
                               }`}
                             >
-                              {metric.format(metric.raw(row))}
+                              {metric.format(metric.raw(row), row)}
                               {index === best && <span className="sr-only"> (melhor)</span>}
                             </TableCell>
                           ))}

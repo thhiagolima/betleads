@@ -14,6 +14,7 @@ import {
 
 import { getCrmRetention } from "@/lib/crm-results.functions";
 import { PLAYER_STATE_LABELS, RECOVERABLE_STATES } from "@/lib/crm-results";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
 import {
   CHART_COLORS,
@@ -32,7 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { type Data, dayLabel, money, pct } from "./format";
+import { type Data, cost, dayLabel, pct } from "./format";
 import { PERIODS, type PeriodKey } from "./search";
 import { CentralPeriodPicker, EmptyCard, InfoTip, NotPeriodBadge, RoiValue } from "./shared";
 
@@ -110,6 +111,7 @@ function Bars({ items, total }: { items: Array<{ label: string; value: number }>
 /** Where the money goes by the player's situation at send, and where it converts (C-06). */
 /** Central › Origens: SMS cost and CRM result by the player's situation at send time. */
 export function SpendByState({ data }: { data: Data }) {
+  const { currency, money } = useMoney();
   const states = data.states.filter((state) => state.sent > 0 || state.directPlayers > 0);
   if (states.length === 0) return null;
   const totalCost = states.reduce((sum, state) => sum + state.cost, 0);
@@ -165,13 +167,17 @@ export function SpendByState({ data }: { data: Data }) {
                 <TableCell className="text-right tabular-nums">{num(state.recipients)}</TableCell>
                 <TableCell className="text-right tabular-nums">
                   {num(state.directPlayers)}
-                  <div className="text-xs text-muted-foreground">{brl(state.directRevenue)}</div>
+                  <div className="text-xs text-muted-foreground">{money(state.directRevenue)}</div>
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {money(state.costPerConversion)}
+                  {cost(state.costPerConversion)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  <RoiValue roi={state.clickRoi} smallSample={state.smallSample} />
+                  <RoiValue
+                    roi={state.clickRoi}
+                    smallSample={state.smallSample}
+                    currency={currency}
+                  />
                 </TableCell>
                 <TableCell className="text-right tabular-nums text-muted-foreground">
                   {RECOVERABLE_STATES.has(state.state) ? num(state.influencedPlayers) : "—"}
@@ -271,6 +277,7 @@ const heat = (value: number | null, max: number) =>
       };
 
 function Cohorts({ retention }: { retention: Retention }) {
+  const { money } = useMoney();
   const { cohorts } = retention;
   const max = Math.max(
     0,
@@ -321,7 +328,9 @@ function Cohorts({ retention }: { retention: Retention }) {
                   <TableCell className="text-right tabular-nums">
                     {hours(row.medianHoursToSecond)}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{money(row.revenue30d)}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.revenue30d == null ? "—" : money(row.revenue30d)}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

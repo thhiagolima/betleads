@@ -268,7 +268,7 @@ describe("waterfall ends at cashResult and omits Mensalidade when fee is null", 
     const total = steps[steps.length - 1];
     expect(total.kind).toBe("total");
     expect(total.label).toBe("Lucro líquido");
-    expect(total.end).toBeCloseTo(summary.cashResult, 2);
+    expect(total.end).toBeCloseTo(summary.cashResult!, 2);
     expect(steps.some((s) => s.key === "fee")).toBe(true);
   });
 

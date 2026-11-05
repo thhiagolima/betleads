@@ -45,6 +45,8 @@ import { MetricCard } from "@/components/ui-premium/metric-card";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { useMoney } from "@/hooks/use-tenant-currency";
+import { crossCurrencyNote, isCrossCurrency } from "@/components/crm-results/format";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { getMarketingOverview } from "@/lib/marketing.functions";
 import type {
@@ -140,6 +142,24 @@ function ratio(value: number | null | undefined) {
 
 function pct(value: number | null | undefined) {
   return value == null ? "-" : `${value.toFixed(2).replace(".", ",")}%`;
+}
+
+/**
+ * Depósitos, saques e líquido vêm da casa, na moeda dela; o gasto em mídia
+ * somado aqui é o das contas em BRL. Fora de BRL o ROAS misturaria moedas sem
+ * câmbio, então não é calculado.
+ */
+function useHouseMoney() {
+  const { currency, money } = useMoney();
+  const crossCurrency = isCrossCurrency(currency);
+  return {
+    crossCurrency,
+    crossNote: crossCurrencyNote(currency),
+    house: (value: number | null | undefined) => money(value, { decimals: 0 }),
+    roas: (value: number | null | undefined) => (crossCurrency ? "—" : ratio(value)),
+    roasOf: (net: number, spend: number) =>
+      crossCurrency || spend <= 0 ? "—" : ratio(net / spend),
+  };
 }
 
 function syncStatusLabel(status: MetaSyncRun["status"]) {
@@ -375,6 +395,7 @@ function VisualizacaoSection({
   syncRuns: MetaSyncRun[];
 }) {
   const isDemo = useIsDemoTenant();
+  const { house, roas, crossCurrency, crossNote } = useHouseMoney();
   // Só o admin da casa (ou o super admin) sincroniza a Meta; o servidor também confere.
   // Enquanto o papel carrega, nada fica bloqueado.
   const { active } = useActiveTenant();
@@ -602,7 +623,7 @@ function VisualizacaoSection({
             {num(totals?.orphanPlayers)} cadastros marcados sem anúncio correspondente nas contas
             conectadas
           </strong>
-          : {brl(orphanRevenue)} de depósitos e {num(orphanFtd)} primeiros depósitos sem gasto
+          : {house(orphanRevenue)} de depósitos e {num(orphanFtd)} primeiros depósitos sem gasto
           importado. Veja os detalhes na aba Diagnóstico.
         </div>
       )}
@@ -615,8 +636,12 @@ function VisualizacaoSection({
         />
         <Kpi
           title="ROAS líquido"
-          value={ratio(totals?.roas)}
-          detail={`depósitos − saques ÷ investido · bruto ${ratio(totals?.roasGross)}`}
+          value={roas(totals?.roas)}
+          detail={
+            crossCurrency
+              ? crossNote
+              : `depósitos − saques ÷ investido · bruto ${ratio(totals?.roasGross)}`
+          }
           tone="info"
         />
         <Kpi
@@ -631,8 +656,8 @@ function VisualizacaoSection({
         />
         <Kpi
           title="Depósito líquido"
-          value={brl(totals?.net)}
-          detail={`${brl(totals?.revenue)} depositados − ${brl(totals?.withdrawals)} sacados`}
+          value={house(totals?.net)}
+          detail={`${house(totals?.revenue)} depositados − ${house(totals?.withdrawals)} sacados`}
           tone="success"
           className="col-span-2 xl:col-span-1"
         />
@@ -640,19 +665,20 @@ function VisualizacaoSection({
 
       <p className="text-meta text-muted-foreground">
         Como o ROAS é calculado:{" "}
-        <strong className="text-foreground">{brl(totals?.ftdRevenue)}</strong> em{" "}
+        <strong className="text-foreground">{house(totals?.ftdRevenue)}</strong> em{" "}
         {num(totals?.paidFtd)} primeiros depósitos
         <span className="px-1">+</span>
-        <strong className="text-foreground">{brl(totals?.redepositRevenue)}</strong> de redepósito
+        <strong className="text-foreground">{house(totals?.redepositRevenue)}</strong> de redepósito
         <span className="px-1">−</span>
-        <strong className="text-foreground">{brl(totals?.withdrawals)}</strong> de saques
+        <strong className="text-foreground">{house(totals?.withdrawals)}</strong> de saques
         <span className="px-1">=</span>
-        <strong className="text-success">{brl(totals?.net)}</strong> líquidos
+        <strong className="text-success">{house(totals?.net)}</strong> líquidos
         <span className="px-1">÷</span>
         <strong className="text-foreground">{brl(totals?.spend)}</strong> investidos
         <span className="px-1">=</span>
-        <strong className="text-success">{ratio(totals?.roas)}</strong>. Conta os jogadores que se
-        cadastraram no período por um anúncio (horário de Brasília).
+        <strong className="text-success">{roas(totals?.roas)}</strong>
+        {crossCurrency && ` (${crossNote.toLowerCase()})`}. Conta os jogadores que se cadastraram no
+        período por um anúncio (horário de Brasília).
       </p>
 
       <Tabs value={reportView} onValueChange={(value) => setReportView(value as typeof reportView)}>
@@ -950,6 +976,7 @@ function sumBusiness(
 }
 
 function BusinessCells({ spend, players, ftd, net }: Omit<BusinessTotals, "revenue">) {
+  const { house, roasOf } = useHouseMoney();
   return (
     <>
       <TableCell className="text-right">{players > 0 ? num(players) : "—"}</TableCell>
@@ -958,10 +985,8 @@ function BusinessCells({ spend, players, ftd, net }: Omit<BusinessTotals, "reven
       </TableCell>
       <TableCell className="text-right font-semibold">{ftd > 0 ? num(ftd) : "—"}</TableCell>
       <TableCell className="text-right">{ftd > 0 && spend > 0 ? brl2(spend / ftd) : "—"}</TableCell>
-      <TableCell className="text-right">{brl(net)}</TableCell>
-      <TableCell className="text-right font-semibold">
-        {spend > 0 ? ratio(net / spend) : "—"}
-      </TableCell>
+      <TableCell className="text-right">{house(net)}</TableCell>
+      <TableCell className="text-right font-semibold">{roasOf(net, spend)}</TableCell>
     </>
   );
 }
@@ -1071,6 +1096,7 @@ function CampaignTable({
   orphanRevenue: number;
 }) {
   const isDemo = useIsDemoTenant();
+  const { house } = useHouseMoney();
   const rows = campaigns;
   const totals = sumBusiness(rows, others);
   const othersCount = others?.count ?? 0;
@@ -1155,7 +1181,7 @@ function CampaignTable({
             ROAS líquido é o que os jogadores da campanha depositaram, menos os saques, dividido
             pelo investido. Campanhas de contas de anúncio não conectadas ficam sem investimento e
             sem ROAS
-            {orphanRevenue > 0 ? ` (${brl(orphanRevenue)} de depósitos nessa situação)` : ""}.
+            {orphanRevenue > 0 ? ` (${house(orphanRevenue)} de depósitos nessa situação)` : ""}.
           </p>
         </div>
       )}
@@ -1171,6 +1197,7 @@ function OrphanAttributionTable({
   isLoading: boolean;
 }) {
   const isDemo = useIsDemoTenant();
+  const { house } = useHouseMoney();
   return (
     <DataCard
       title="Marcações sem anúncio correspondente"
@@ -1223,7 +1250,7 @@ function OrphanAttributionTable({
                 </TableCell>
                 <TableCell className="text-right">{num(row.players)}</TableCell>
                 <TableCell className="text-right">{num(row.ftd)}</TableCell>
-                <TableCell className="text-right">{brl(row.revenue)}</TableCell>
+                <TableCell className="text-right">{house(row.revenue)}</TableCell>
                 <TableCell className="text-right text-muted-foreground">não encontrado</TableCell>
                 <TableCell className="text-right text-muted-foreground">não calculado</TableCell>
               </TableRow>
@@ -1247,6 +1274,7 @@ function CreativeTable({
   isLoading: boolean;
 }) {
   const isDemo = useIsDemoTenant();
+  const { house, roas, roasOf } = useHouseMoney();
   const rows = creatives;
   const othersCount = others?.count ?? 0;
 
@@ -1326,11 +1354,11 @@ function CreativeTable({
                       {row.ftd > 0 && row.spend > 0 ? brl2(row.spend / row.ftd) : "—"}
                     </TableCell>
                     <TableCell className="text-right">
-                      <p className="font-medium">{brl(row.net)}</p>
-                      <p className="text-xs text-muted-foreground">{brl(row.revenue)} bruto</p>
+                      <p className="font-medium">{house(row.net)}</p>
+                      <p className="text-xs text-muted-foreground">{house(row.revenue)} bruto</p>
                     </TableCell>
                     <TableCell className="text-right font-semibold">
-                      {row.spend > 0 ? ratio(row.net / row.spend) : "—"}
+                      {roasOf(row.net, row.spend)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1342,7 +1370,7 @@ function CreativeTable({
                     <TableCell className="text-right">{num(others?.players)}</TableCell>
                     <TableCell className="text-right">{num(others?.ftd)}</TableCell>
                     <TableCell className="text-right">—</TableCell>
-                    <TableCell className="text-right">{brl(others?.net)}</TableCell>
+                    <TableCell className="text-right">{house(others?.net)}</TableCell>
                     <TableCell className="text-right">—</TableCell>
                   </TableRow>
                 )}
@@ -1355,8 +1383,8 @@ function CreativeTable({
                   <TableCell className="text-right">
                     {totals?.cpaFtd == null ? "—" : brl2(totals.cpaFtd)}
                   </TableCell>
-                  <TableCell className="text-right">{brl(totals?.net)}</TableCell>
-                  <TableCell className="text-right">{ratio(totals?.roas)}</TableCell>
+                  <TableCell className="text-right">{house(totals?.net)}</TableCell>
+                  <TableCell className="text-right">{roas(totals?.roas)}</TableCell>
                 </TableRow>
               </TableBody>
             </Table>

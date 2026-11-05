@@ -121,7 +121,7 @@ export function shortStepLabel(label: string): string {
  * deposits, and either before the scope's data starts or with no ads either.
  */
 export function emptyMonth(point: MonthPoint, betleadsSince: string | null): boolean {
-  if (point.cashResult !== 0 || point.net !== 0 || point.depositAmount !== 0) return false;
+  if ((point.cashResult ?? 0) !== 0 || point.net !== 0 || point.depositAmount !== 0) return false;
   const beforeData = betleadsSince === null || point.month < betleadsSince.slice(0, 7);
   return beforeData || point.adSpend === 0;
 }

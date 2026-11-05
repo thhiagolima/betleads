@@ -7,6 +7,7 @@
 // The snapshots are the only direct reads of tenant_finance_* / tenant_goals
 // in MCP code (global-constraints.md); preview.server.ts runs them only after
 // requirePermission has passed for the action's permission.
+import { formatMoney as formatCurrency, type TenantCurrency } from "@/lib/currency";
 import type { ZodType } from "zod";
 import { z } from "zod";
 
@@ -53,7 +54,13 @@ export type WriteAction<I> = {
    * stored and applied at confirm.
    */
   complete?(before: Json, input: I): I;
-  describe(before: Json, input: I, houseName: string): { linhas: string[]; avisos: string[] };
+  /** `currency`: moeda da casa; os valores lançados (anúncios, GGR, custos, metas) estão nela. */
+  describe(
+    before: Json,
+    input: I,
+    houseName: string,
+    currency?: TenantCurrency,
+  ): { linhas: string[]; avisos: string[] };
   apply(ctx: ServerContext, input: I): Promise<unknown>;
 };
 
@@ -64,10 +71,16 @@ const EMPTY = "vazio";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
-/** "R$ 12.345,00" with a plain space (Intl puts a NBSP after "R$"). */
-export function formatMoney(value: number | null): string {
+/**
+ * "R$ 12.345,00" with a plain space (Intl puts a NBSP after "R$"). Os valores
+ * aqui são lançamentos da casa, na moeda dela: fora do BRL, no formato do país
+ * ("$ 12.345,00" em ARS).
+ */
+export function formatMoney(value: number | null, currency: TenantCurrency = "BRL"): string {
   if (value === null) return EMPTY;
-  return brl.format(value).replace(/\s/g, " ");
+  const text =
+    currency === "BRL" ? brl.format(value) : formatCurrency(value, currency, { decimals: 2 });
+  return text.replace(/\s/g, " ");
 }
 
 /** "2026-10-15" -> "15/10". */
@@ -122,7 +135,7 @@ const lancamentoDias: WriteAction<DaysInput> = {
     });
     return snapshot;
   },
-  describe(before, input, houseName) {
+  describe(before, input, houseName, currency = "BRL") {
     const snapshot = before as DaySnapshot;
     const linhas: string[] = [];
     const avisos: string[] = [];
@@ -136,7 +149,7 @@ const lancamentoDias: WriteAction<DaysInput> = {
         const next = value === null ? null : round2(value);
         if (was === next) continue;
         linhas.push(
-          `${formatDay(entry.date)} ${houseName} — ${field.label}: ${arrow(formatMoney(was), formatMoney(next))}`,
+          `${formatDay(entry.date)} ${houseName} — ${field.label}: ${arrow(formatMoney(was, currency), formatMoney(next, currency))}`,
         );
         if (next === null)
           avisos.push(`Vai apagar o valor de ${field.label} de ${formatDay(entry.date)}`);
@@ -188,7 +201,7 @@ const ggrMensal: WriteAction<MonthlyGgrInput> = {
       : null;
     return snapshot;
   },
-  describe(before, input, houseName) {
+  describe(before, input, houseName, currency = "BRL") {
     const current = before as MonthlyGgrSnapshot;
     const prefix = `${formatMonth(input.month)} ${houseName} —`;
     const next = input.ggr === null ? null : round2(input.ggr);
@@ -196,7 +209,7 @@ const ggrMensal: WriteAction<MonthlyGgrInput> = {
     const avisos: string[] = [];
     if ((current?.ggr ?? null) !== next) {
       linhas.push(
-        `${prefix} GGR do mês: ${arrow(formatMoney(current?.ggr ?? null), formatMoney(next))}`,
+        `${prefix} GGR do mês: ${arrow(formatMoney(current?.ggr ?? null, currency), formatMoney(next, currency))}`,
       );
     }
     if (next !== null && current?.valid_through !== input.validThrough) {
@@ -303,13 +316,13 @@ const custo: WriteAction<CostInput> = {
     const snapshot = before as CostSnapshot | null;
     return { ...input, repeatMonthly: snapshot ? snapshot.row.repeat_monthly : false };
   },
-  describe(before, input, houseName) {
+  describe(before, input, houseName, currency = "BRL") {
     const snapshot = before as CostSnapshot | null;
     const linhas: string[] = [];
     const avisos: string[] = [];
     if (!snapshot) {
       linhas.push(
-        `${formatDay(input.costDate)} ${houseName} — Custo "${input.descricao}": ${arrow(EMPTY, formatMoney(round2(input.valor)))}`,
+        `${formatDay(input.costDate)} ${houseName} — Custo "${input.descricao}": ${arrow(EMPTY, formatMoney(round2(input.valor), currency))}`,
       );
       if (input.repeatMonthly) avisos.push("Repete todo mês");
       return { linhas, avisos };
@@ -317,7 +330,9 @@ const custo: WriteAction<CostInput> = {
     const current = snapshot.row;
     const repeat = input.repeatMonthly ?? current.repeat_monthly;
     const prefix = `${formatDay(current.cost_date)} ${houseName} — Custo "${current.descricao}":`;
-    linhas.push(`${prefix} ${arrow(formatMoney(current.valor), formatMoney(round2(input.valor)))}`);
+    linhas.push(
+      `${prefix} ${arrow(formatMoney(current.valor, currency), formatMoney(round2(input.valor), currency))}`,
+    );
     if (input.descricao !== current.descricao) {
       linhas.push(
         `${prefix} Descrição: ${arrow(`"${current.descricao}"`, `"${input.descricao}"`)}`,
@@ -370,13 +385,15 @@ const exclusaoCusto: WriteAction<DeleteCostInput> = {
     }
     return snapshot;
   },
-  describe(before, input, houseName) {
+  describe(before, input, houseName, currency = "BRL") {
     const { row: current, series } = before as CostSnapshot;
     const day = formatDay(current.cost_date);
     const prefix = `${day} ${houseName} — Custo "${current.descricao}":`;
     if (input.mode === "skip_month") {
       return {
-        linhas: [`${prefix} ${arrow(formatMoney(current.valor), formatMoney(0))}`],
+        linhas: [
+          `${prefix} ${arrow(formatMoney(current.valor, currency), formatMoney(0, currency))}`,
+        ],
         avisos: [`Pula o custo "${current.descricao}" neste mês; a repetição continua`],
       };
     }
@@ -394,7 +411,7 @@ const exclusaoCusto: WriteAction<DeleteCostInput> = {
     } else if (input.mode === "end_series") {
       avisos.push("Encerra a repetição da série");
     }
-    return { linhas: [`${prefix} ${arrow(formatMoney(current.valor), EMPTY)}`], avisos };
+    return { linhas: [`${prefix} ${arrow(formatMoney(current.valor, currency), EMPTY)}`], avisos };
   },
   apply: (ctx, input) => deleteOtherCostFor(ctx, input),
 };
@@ -412,12 +429,12 @@ const METRIC_LABEL: Record<GoalMetric, string> = {
   roi: "ROI caixa",
 };
 
-function formatGoal(metric: GoalMetric, value: number | null) {
+function formatGoal(metric: GoalMetric, value: number | null, currency: TenantCurrency) {
   if (value === null) return EMPTY;
   if (metric === "registrations" || metric === "ftds") return value.toLocaleString("pt-BR");
   // ROI is stored as a fraction (0.3 = 30%), see components/group/goal-units.ts.
   if (metric === "roi") return `${Number((value * 100).toFixed(2)).toLocaleString("pt-BR")}%`;
-  return formatMoney(value);
+  return formatMoney(value, currency);
 }
 
 /**
@@ -460,13 +477,13 @@ const meta: WriteAction<GoalInput> = {
       : null;
     return snapshot;
   },
-  describe(before, input, houseName) {
+  describe(before, input, houseName, currency = "BRL") {
     const current = before as GoalSnapshot;
     const was = current?.daily_value ?? null;
     const label = METRIC_LABEL[input.metric];
     const direction = input.direction === "gte" ? "no mínimo" : "no máximo";
     const linhas = [
-      `A partir de ${formatDay(input.validFrom)} ${houseName} — Meta diária de ${label} (${direction}): ${arrow(formatGoal(input.metric, was), formatGoal(input.metric, input.dailyValue))}`,
+      `A partir de ${formatDay(input.validFrom)} ${houseName} — Meta diária de ${label} (${direction}): ${arrow(formatGoal(input.metric, was, currency), formatGoal(input.metric, input.dailyValue, currency))}`,
     ];
     const avisos: string[] = [];
     if (input.dailyValue === null && was !== null) {

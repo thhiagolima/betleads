@@ -10,6 +10,8 @@ export type TenantOption = {
   slug: string;
   role: ShellRole;
   is_demo?: boolean;
+  /** Moeda de exibição dos valores da casa (ISO 4217, padrão BRL). */
+  moeda?: string;
   can_view_finance?: boolean;
   /** Papel na casa (HOUSE_MEMBER_ROLES) + perfil de rendimento ativo vinculado a este usuário ali. */
   has_team_profile?: boolean;

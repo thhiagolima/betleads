@@ -11,6 +11,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { toTenantCurrency } from "@/lib/currency";
 import { round2, summarize } from "@/lib/finance/calc";
 import { hasMissingSendCost, sendLines } from "@/lib/finance/kpis";
 import {
@@ -86,7 +87,7 @@ type GoalRow = {
   direction: GoalDirection;
   daily_value: number | string | null;
 };
-type TenantLite = { id: string; nome: string };
+type TenantLite = { id: string; nome: string; moeda?: string | null };
 
 /** Spreadsheet defaults when a house has no rate row (same as finance_days in SQL). */
 const DEFAULT_GGR_FEE_PCT = 16;
@@ -117,12 +118,12 @@ function notInThePast(validFrom: string | undefined) {
 async function getTenantLite(tenantId: string) {
   const { data, error } = await db()
     .from<TenantLite>("tenants")
-    .select("id,nome")
+    .select("id,nome,moeda")
     .eq("id", tenantId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Casa não encontrada");
-  return { id: data.id, nome: data.nome };
+  return { id: data.id, nome: data.nome, moeda: toTenantCurrency(data.moeda) };
 }
 
 // ─── Input schemas ──────────────────────────────────────────────────────────
@@ -144,15 +145,15 @@ export async function getTenantFinanceMonthFor(
   const { tenantId } = data;
   await requirePermission("finance_can_view", ctx.userId, tenantId);
 
-  const [canEditValues, canEditRates, canManageViewers, canManageGoals, tenant] = await Promise.all(
-    [
+  const [canEditValues, canEditRates, canManageViewers, canManageGoals, houseRow] =
+    await Promise.all([
       can("finance_can_edit_values", ctx.userId, tenantId),
       can("finance_can_edit_rates", ctx.userId, tenantId),
       can("finance_can_manage_viewers", ctx.userId, tenantId),
       can("finance_can_manage_goals", ctx.userId, tenantId),
       getTenantLite(tenantId),
-    ],
-  );
+    ]);
+  const { moeda, ...tenant } = houseRow;
 
   const today = todaySaoPaulo();
   const monthStart = `${data.month}-01`;
@@ -251,6 +252,7 @@ export async function getTenantFinanceMonthFor(
     ),
     today,
     { usage: betleadsUsage, fee: betleadsFee },
+    { currency: moeda },
   );
   const categories = mergeCategories(
     FIXED_COST_CATEGORIES,
@@ -275,6 +277,11 @@ export async function getTenantFinanceMonthFor(
 
   return {
     tenant,
+    /**
+     * Moeda da casa: dias, GGR, anúncios e outros custos estão nela; envios e
+     * mensalidade em BRL. Fora do BRL, summary.cashResult/roi são null.
+     */
+    moeda,
     days,
     summary,
     /** The month's accumulated GGR ("GGR do mês"); null when the month uses daily GGR. */

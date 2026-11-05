@@ -34,7 +34,8 @@ import {
   linkSourceLabel,
   recordStatusLabel,
 } from "@/components/players/player-labels";
-import { brl, num, timeAgo } from "@/lib/format";
+import { num, timeAgo } from "@/lib/format";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { getPlayerDetail, type PlayerDetail } from "@/lib/player-detail.functions";
 import { getPlayerLinkHistory } from "@/lib/shortio.functions";
 import { nextPrecallCopy } from "@/lib/precall-copy";
@@ -84,6 +85,8 @@ function PlayerDetailPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [idCopied, setIdCopied] = useState(false);
   const [campaignBusy, setCampaignBusy] = useState(false);
+  // Valores do player na moeda da casa dele (o super admin pode abrir outra casa).
+  const { money } = useMoney((data?.player?.tenant_id as string | undefined) ?? null);
 
   if (isLoading) return <DetailSkeleton />;
 
@@ -195,12 +198,12 @@ function PlayerDetailPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <KpiCard title="Total depositado" value={brl(p.total_depositado)} />
-        <KpiCard title="Total sacado" value={brl(p.total_sacado)} />
-        <KpiCard title="Saldo informado" value={brl(data.metrics.saldo_total)} />
+        <KpiCard title="Total depositado" value={money(p.total_depositado)} />
+        <KpiCard title="Total sacado" value={money(p.total_sacado)} />
+        <KpiCard title="Saldo informado" value={money(data.metrics.saldo_total)} />
         <KpiCard
           title="Resultado da casa"
-          value={brl(data.metrics.lucro)}
+          value={money(data.metrics.lucro)}
           detail="depositado menos sacado"
         />
       </div>
@@ -343,7 +346,7 @@ function PlayerDetailPage() {
                 <Muted>Sem dado</Muted>
               ) : (
                 <>
-                  {brl(data.media.spend_estimate)}
+                  {money(data.media.spend_estimate)}
                   <span className="ml-1.5 font-normal text-muted-foreground">
                     · {mediaBasis(data.media.spend_basis)}
                   </span>
@@ -353,7 +356,7 @@ function PlayerDetailPage() {
           />
           <MetricRow
             label="Resultado da mídia"
-            value={data.media.result == null ? <Muted>Sem dado</Muted> : brl(data.media.result)}
+            value={data.media.result == null ? <Muted>Sem dado</Muted> : money(data.media.result)}
             valueClassName={
               data.media.result == null
                 ? undefined
@@ -371,7 +374,7 @@ function PlayerDetailPage() {
             label="Total recebido"
             value={
               <>
-                {brl(p.total_cashback_paid)}
+                {money(p.total_cashback_paid)}
                 <span className="ml-1.5 font-normal text-muted-foreground">
                   · {num(data.metrics.cashback_count)}{" "}
                   {data.metrics.cashback_count === 1 ? "pagamento" : "pagamentos"}
@@ -384,7 +387,7 @@ function PlayerDetailPage() {
             value={
               p.last_cashback_paid_at ? (
                 <>
-                  {brl(p.last_cashback_amount)}
+                  {money(p.last_cashback_amount)}
                   <span className="ml-1.5 font-normal text-muted-foreground">
                     · {formatDate(p.last_cashback_paid_at)}
                   </span>
@@ -403,7 +406,7 @@ function PlayerDetailPage() {
                 >
                   <span className="text-muted-foreground">{formatDate(c.paid_at)}</span>
                   <span className="truncate">{recordStatusLabel(c.status) ?? "Cashback"}</span>
-                  <span className="font-semibold tabular-nums">{brl(c.cashback_amount)}</span>
+                  <span className="font-semibold tabular-nums">{money(c.cashback_amount)}</span>
                 </li>
               ))}
             </ul>
@@ -471,7 +474,7 @@ function PlayerDetailPage() {
         ) : (
           <ul className="max-h-[560px] divide-y divide-border/60 overflow-y-auto pr-1">
             {data.timeline.map((item) => (
-              <TimelineItem key={item.id} item={item} />
+              <TimelineItem key={item.id} item={item} money={money} />
             ))}
           </ul>
         )}
@@ -559,7 +562,13 @@ function Score({ value }: { value: number }) {
   );
 }
 
-function TimelineItem({ item }: { item: PlayerDetail["timeline"][number] }) {
+function TimelineItem({
+  item,
+  money,
+}: {
+  item: PlayerDetail["timeline"][number];
+  money: (value: number | null | undefined) => string;
+}) {
   const label =
     item.type === "followup"
       ? `Contato · ${alertTypeLabel(item.label.replace(/^Follow-up - /, ""))}`
@@ -594,7 +603,7 @@ function TimelineItem({ item }: { item: PlayerDetail["timeline"][number] }) {
           {timeAgo(item.at)}
         </p>
         {item.amount != null && (
-          <p className="mt-0.5 text-body font-semibold tabular-nums">{brl(item.amount)}</p>
+          <p className="mt-0.5 text-body font-semibold tabular-nums">{money(item.amount)}</p>
         )}
       </div>
     </li>

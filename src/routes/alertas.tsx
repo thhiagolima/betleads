@@ -8,7 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { brl, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
+import { useMoney } from "@/hooks/use-tenant-currency";
+import type { TenantCurrency } from "@/lib/currency";
 import { toast } from "sonner";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import {
@@ -86,7 +88,7 @@ type EnrichedPlayer = PlayerLike & {
   followups: Followup[];
 };
 
-async function fetchAlertsData(): Promise<EnrichedPlayer[]> {
+async function fetchAlertsData(currency: TenantCurrency): Promise<EnrichedPlayer[]> {
   const iso30 = new Date(Date.now() - 30 * 86400000).toISOString();
   const iso60 = new Date(Date.now() - 60 * 86400000).toISOString();
 
@@ -222,7 +224,7 @@ async function fetchAlertsData(): Promise<EnrichedPlayer[]> {
     };
 
     if (!isRelevante(enriched)) continue;
-    const alertas = detectAlerts(enriched);
+    const alertas = detectAlerts(enriched, currency);
     if (!alertas.length) continue;
 
     out.push({
@@ -346,6 +348,7 @@ function AlertRow({
   p: EnrichedPlayer;
   onAction: (player: EnrichedPlayer, alerta: Alerta, acao: AcaoRecomendada) => void;
 }) {
+  const { money } = useMoney();
   const c = priorityColor(p.topPrioridade);
   const dep = Number(p.total_depositado ?? 0);
   const saldo = Number(p.saldo_carteira ?? 0);
@@ -425,7 +428,7 @@ function AlertRow({
               saldo >= 200 ? "text-success" : saldo > 0 ? "text-warning" : "text-muted-foreground",
             )}
           >
-            {brl(saldo)}
+            {money(saldo)}
           </p>
         </div>
       </div>
@@ -434,7 +437,7 @@ function AlertRow({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-3">
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
           <p className="text-label text-muted-foreground">Depositado</p>
-          <p className="font-semibold mt-0.5">{brl(dep)}</p>
+          <p className="font-semibold mt-0.5">{money(dep)}</p>
         </div>
         <div className="rounded-md bg-muted/30 px-2.5 py-1.5">
           <p className="text-label text-muted-foreground">Últ. login</p>
@@ -506,8 +509,8 @@ function AlertRow({
             <Sparkles className="h-3 w-3 text-success" /> Potencial de recuperação
           </p>
           <p className="text-sm font-bold text-success mt-1 leading-none">
-            {brl(recup.min)} <span className="text-muted-foreground font-normal">–</span>{" "}
-            {brl(recup.max)}
+            {money(recup.min)} <span className="text-muted-foreground font-normal">–</span>{" "}
+            {money(recup.max)}
           </p>
         </div>
         <div className="rounded-lg border border-border/40 bg-muted/20 px-3 py-2">
@@ -561,9 +564,10 @@ function AlertRow({
 
 function AlertasPage() {
   const qc = useQueryClient();
+  const { currency } = useMoney();
   const { data, isLoading, refetch, isFetching, dataUpdatedAt } = useQuery({
-    queryKey: ["alertas"],
-    queryFn: fetchAlertsData,
+    queryKey: ["alertas", currency],
+    queryFn: () => fetchAlertsData(currency),
     staleTime: 30_000,
     refetchInterval: POLL_INTERVALS.stats,
     refetchOnWindowFocus: true,
@@ -617,7 +621,7 @@ function AlertasPage() {
   }, [enriched, statusTab]);
 
   const handleAction = async (player: EnrichedPlayer, alerta: Alerta, acao: AcaoRecomendada) => {
-    const msg = whatsappMessageFor(alerta, player);
+    const msg = whatsappMessageFor(alerta, player, currency);
     const tel = (player.telefone ?? "").replace(/\D/g, "");
 
     if (acao === "whatsapp" || acao === "sms") {
@@ -634,7 +638,7 @@ function AlertasPage() {
       if (!ok) return;
       const url =
         acao === "whatsapp"
-          ? buildWhatsAppLink(player, alerta)
+          ? buildWhatsAppLink(player, alerta, currency)
           : `sms:${tel}?body=${encodeURIComponent(msg)}`;
       if (!url) {
         // Do not record a contact that could not be opened.

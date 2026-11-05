@@ -48,7 +48,9 @@ import {
   TechnicalDetails,
   WindowCaption,
 } from "@/components/reports/report-parts";
-import { dateTime, day, money, number, percent, ratio } from "@/components/reports/format";
+import { cost, dateTime, day, number, percent, ratio } from "@/components/reports/format";
+import { crossCurrencyNote, isCrossCurrency } from "@/components/crm-results/format";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { cn } from "@/lib/utils";
 
 type RecipientFilter =
@@ -322,6 +324,9 @@ function CampaignReport({
 }) {
   const [filter, setFilter] = useState<RecipientFilter>("all");
   const [page, setPage] = useState(1);
+  const { currency, money } = useMoney();
+  // Recuperado na moeda da casa, custo em BRL: fora de BRL não há retorno.
+  const crossCurrency = isCrossCurrency(currency);
   const pageSize = 50;
   const campaign = details?.campaign;
   const recipients = useMemo(
@@ -463,9 +468,20 @@ function CampaignReport({
           />
           <MetricRow
             label={isEmail ? "Consumo de e-mail" : "Custo em SMS"}
-            value={smsCost === null ? `${number(data.sent)} envios` : money(smsCost)}
+            value={smsCost === null ? `${number(data.sent)} envios` : cost(smsCost)}
           />
-          <MetricRow label="Retorno" value={smsCost ? `${ratio(directRevenue / smsCost)}x` : "—"} />
+          <MetricRow
+            label="Retorno"
+            value={
+              crossCurrency ? (
+                <span title={crossCurrencyNote(currency)}>—</span>
+              ) : smsCost ? (
+                `${ratio(directRevenue / smsCost)}x`
+              ) : (
+                "—"
+              )
+            }
+          />
           {data.assistedRevenue > 0 ? (
             <MetricRow
               label="Receita assistida (fora do total)"
@@ -476,7 +492,11 @@ function CampaignReport({
             <p>
               {smsCost === null
                 ? "Custo financeiro indisponível para este canal."
-                : `Custo: ${number(data.sent)} envios × ${money(data.smsPrice ?? 0)}. Retorno = recuperado ÷ custo.`}{" "}
+                : `Custo: ${number(data.sent)} envios × ${cost(data.smsPrice ?? 0)}. ${
+                    crossCurrency
+                      ? `Retorno não calculado: ${crossCurrencyNote(currency).toLowerCase()}.`
+                      : "Retorno = recuperado ÷ custo."
+                  }`}{" "}
               Recuperado de {attributedPlayers}.
             </p>
             <ActiveNote players={data.activeDepositors} revenue={data.activeRevenue} />
@@ -760,6 +780,7 @@ function UnresolvedRecipientsCard({
 
 /** Click deposits of players already active: reported apart, never in the totals. */
 function ActiveNote({ players, revenue }: { players?: number; revenue?: number }) {
+  const { money } = useMoney();
   if (!players) return null;
   return (
     <p className="text-meta text-muted-foreground">
@@ -790,6 +811,7 @@ function JourneyReport({
   onLoadDrilldown: () => void;
   alerts: Array<{ code: string; message: string }>;
 }) {
+  const { money } = useMoney();
   const journey = details?.journey;
   const allSteps: any[] = details?.steps ?? [];
   const actionableSteps = allSteps.filter((step) => !["wait", "end"].includes(step.step_type));
@@ -1106,6 +1128,7 @@ function JourneyCopyTable({
   }>;
   withoutVariant?: { sent: number; clicked: number; deposits: number; recovered: number };
 }) {
+  const { money } = useMoney();
   const byIndex = new Map(variants.map((row) => [row.variant, row]));
   const indexes = [
     ...new Set([...copies.map((_, index) => index), ...variants.map((row) => row.variant)]),

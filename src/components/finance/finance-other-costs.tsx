@@ -11,7 +11,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { Check, ChevronsUpDown, Info, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { formatBRL } from "@/components/finance/format";
+import { formatMoneyIn } from "@/components/finance/format";
+import type { TenantCurrency } from "@/lib/currency";
 import { currentMonth } from "@/components/finance/day-entry";
 import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
 import { deleteOtherCost, getTenantFinanceMonth, saveOtherCost } from "@/lib/finance.functions";
@@ -121,12 +122,23 @@ export function deleteToast(mode: DeleteMode): string {
   return "Custo removido";
 }
 
-/** The Valor cell: the amount, or "pulado neste mês" for a skipped month. */
-export function CostValueLabel({ valor, skipped }: { valor: number; skipped: boolean }) {
+/**
+ * The Valor cell: the amount (na moeda da casa, um custo lançado por ela), or
+ * "pulado neste mês" for a skipped month.
+ */
+export function CostValueLabel({
+  valor,
+  skipped,
+  currency = "BRL",
+}: {
+  valor: number;
+  skipped: boolean;
+  currency?: TenantCurrency;
+}) {
   if (skipped) {
     return <span className="text-xs italic text-muted-foreground">pulado neste mês</span>;
   }
-  return <>{formatBRL(valor)}</>;
+  return <>{formatMoneyIn(valor, currency)}</>;
 }
 
 /** The two answers when a repeating row is deleted. */
@@ -479,7 +491,11 @@ export function FinanceOtherCosts({
                 </TableCell>
                 <TableCell className="whitespace-nowrap">{cost.categoria}</TableCell>
                 <TableCell className="whitespace-nowrap">
-                  <CostValueLabel valor={cost.valor} skipped={isSkippedCost(cost)} />
+                  <CostValueLabel
+                    valor={cost.valor}
+                    skipped={isSkippedCost(cost)}
+                    currency={query.data?.moeda}
+                  />
                 </TableCell>
                 {canEdit && (
                   <TableCell>
@@ -555,7 +571,10 @@ export function FinanceOtherCosts({
       </AlertDialog>
       {otherCosts.length > 0 && (
         <p className="text-sm text-muted-foreground">
-          Total do mês: <span className="font-medium text-foreground">{formatBRL(total)}</span>
+          Total do mês:{" "}
+          <span className="font-medium text-foreground">
+            {formatMoneyIn(total, query.data?.moeda)}
+          </span>
         </p>
       )}
 

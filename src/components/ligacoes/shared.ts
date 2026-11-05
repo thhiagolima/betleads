@@ -1,5 +1,6 @@
 // Helpers client-side compartilhados pelos componentes do módulo Ligações.
 // Espelha a renderização do server para preview ao vivo (sem chamada de rede).
+import { DEFAULT_CURRENCY, formatMoney, type TenantCurrency } from "@/lib/currency";
 
 export interface LeadLite {
   id?: string | null;
@@ -31,9 +32,9 @@ export const FAKE_LEAD_CLIENT: LeadLite = {
   risco: "baixo",
 };
 
-function brl(v: number | null | undefined) {
-  if (v == null || Number.isNaN(v)) return "R$ 0,00";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v));
+/** Valor da casa na moeda dela (como o server faz em template-vars). */
+function money(v: number | null | undefined, currency: TenantCurrency) {
+  return formatMoney(v == null || Number.isNaN(Number(v)) ? 0 : Number(v), currency);
 }
 function firstName(full?: string | null) {
   if (!full) return "amigo";
@@ -50,7 +51,10 @@ function safe(v: string | number | null | undefined, fb: string) {
   return String(v);
 }
 
-export function buildVariablesClient(lead: LeadLite): Record<string, string> {
+export function buildVariablesClient(
+  lead: LeadLite,
+  currency: TenantCurrency = DEFAULT_CURRENCY,
+): Record<string, string> {
   const dl = daysSince(lead.ultimo_login);
   const dj = daysSince(lead.ultimo_jogo);
   const dd = daysSince(lead.ultimo_deposito);
@@ -58,7 +62,7 @@ export function buildVariablesClient(lead: LeadLite): Record<string, string> {
     primeiro_nome: firstName(lead.nome),
     nome: safe(lead.nome, "amigo"),
     telefone: safe(lead.telefone, ""),
-    saldo: brl(lead.saldo_carteira ?? 0),
+    saldo: money(lead.saldo_carteira ?? 0, currency),
     ultimo_login: lead.ultimo_login
       ? new Date(lead.ultimo_login).toLocaleDateString("pt-BR")
       : "há algum tempo",
@@ -71,7 +75,7 @@ export function buildVariablesClient(lead: LeadLite): Record<string, string> {
       ? new Date(lead.ultimo_deposito).toLocaleDateString("pt-BR")
       : "há algum tempo",
     dias_sem_depositar: dd == null ? "alguns dias" : String(dd),
-    total_depositado: brl(lead.total_depositado ?? 0),
+    total_depositado: money(lead.total_depositado ?? 0, currency),
     categoria: lead.vip ? "VIP" : safe(lead.risco, "regular"),
     status_lead: safe(lead.status, "ativo"),
     nome_expert: safe(lead.expert, "Equipe BETLEADS"),
@@ -79,8 +83,12 @@ export function buildVariablesClient(lead: LeadLite): Record<string, string> {
   };
 }
 
-export function renderScriptClient(content: string, lead: LeadLite): string {
-  const vars = buildVariablesClient(lead);
+export function renderScriptClient(
+  content: string,
+  lead: LeadLite,
+  currency: TenantCurrency = DEFAULT_CURRENCY,
+): string {
+  const vars = buildVariablesClient(lead, currency);
   return content.replace(/\{(\w+)\}/g, (_m, key: string) => vars[key] ?? "");
 }
 
@@ -100,7 +108,7 @@ export const SCRIPT_VARIABLES: { key: string; label: string }[] = [
   { key: "status_lead", label: "Status do jogador" },
   { key: "nome_expert", label: "Nome do expert" },
   { key: "link_deposito", label: "Link de depósito" },
-  { key: "cashback_valor", label: "Cashback (R$)" },
+  { key: "cashback_valor", label: "Cashback (valor com moeda)" },
   { key: "cashback_amount", label: "Cashback (valor numérico)" },
   { key: "cashback_pago_em", label: "Cashback pago em (data/hora)" },
   { key: "id_push", label: "ID Push / ID na plataforma" },

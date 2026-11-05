@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { formatBrtDate } from "@/components/expert/sheet-format";
 import { downloadCsv } from "@/components/rendimento/download-csv";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
@@ -30,7 +31,7 @@ import {
   listExpertPortfolio,
   type PortfolioRow,
 } from "@/lib/expert-report.functions";
-import { brl, num } from "@/lib/format";
+import { num } from "@/lib/format";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -80,6 +81,7 @@ export function TopLeadsCard({
   rows: PortfolioRow[];
   onOpenLead: (lead: LeadRef) => void;
 }) {
+  const { money } = useMoney();
   return (
     <Card>
       <CardHeader>
@@ -101,7 +103,7 @@ export function TopLeadsCard({
                   <LeadButton row={row} onOpen={onOpenLead} />
                 </span>
                 <span className="shrink-0 text-right">
-                  <span className="block font-medium tabular-nums">{brl(row.creditado)}</span>
+                  <span className="block font-medium tabular-nums">{money(row.creditado)}</span>
                   <span className="block text-label text-muted-foreground">
                     {num(row.depositos)} {row.depositos === 1 ? "depósito" : "depósitos"} ·{" "}
                     {ORIGEM_LABEL[row.origem]}
@@ -150,6 +152,7 @@ export function PortfolioTable({
 }) {
   const { data: switcher } = useActiveTenant();
   const tenantId = switcher?.activeTenantId ?? null;
+  const { money } = useMoney();
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -289,7 +292,7 @@ export function PortfolioTable({
                         <LeadMarks row={row} />
                       </span>
                     </TableCell>
-                    <TableCell className="tabular-nums">{brl(row.creditado)}</TableCell>
+                    <TableCell className="tabular-nums">{money(row.creditado)}</TableCell>
                     <TableCell className="tabular-nums">{num(row.depositos)}</TableCell>
                     <TableCell>{ORIGEM_LABEL[row.origem]}</TableCell>
                     <TableCell>{formatBrtDate(row.primeiroCredito)}</TableCell>

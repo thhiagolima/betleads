@@ -793,7 +793,7 @@ describe("sends, activity and KPIs", () => {
     });
     const houseTotal = house.waterfall.at(-1);
     expect(houseTotal).toMatchObject({ key: "profit", kind: "total" });
-    expect(houseTotal?.end).toBeCloseTo(house.totals.current.cashResult, 2);
+    expect(houseTotal?.end).toBeCloseTo(house.totals.current.cashResult!, 2);
     expect(house.waterfall[0]).toMatchObject({ key: "deposits", end: 1000.33 });
     // Only the house's own other costs of the window, by category.
     expect(
@@ -808,7 +808,7 @@ describe("sends, activity and KPIs", () => {
       scope: { kind: "group", groupId: G1 },
       ...monthToDate,
     });
-    expect(group.waterfall.at(-1)?.end).toBeCloseTo(group.totals.current.cashResult, 2);
+    expect(group.waterfall.at(-1)?.end).toBeCloseTo(group.totals.current.cashResult!, 2);
     const equipe = group.waterfall.find((step) => step.key === "category:Equipe");
     expect(equipe && round(equipe.start - equipe.end)).toBe(103.33);
 
@@ -817,7 +817,7 @@ describe("sends, activity and KPIs", () => {
       scope: { kind: "tenant", tenantId: HOUSE_A },
       ...last7Days,
     });
-    expect(week.waterfall.at(-1)?.end).toBeCloseTo(week.totals.current.cashResult, 2);
+    expect(week.waterfall.at(-1)?.end).toBeCloseTo(week.totals.current.cashResult!, 2);
     expect(week.waterfall.some((step) => step.key.startsWith("category:"))).toBe(false);
   });
 
@@ -846,7 +846,7 @@ describe("sends, activity and KPIs", () => {
     expect(dashboard.waterfall.find((step) => step.key === "sends")?.label).toBe(
       "Envios (parcial)",
     );
-    expect(dashboard.waterfall.at(-1)?.end).toBeCloseTo(dashboard.totals.current.cashResult, 2);
+    expect(dashboard.waterfall.at(-1)?.end).toBeCloseTo(dashboard.totals.current.cashResult!, 2);
   });
 
   it("a house margin is n.a. when its net is zero or negative", async () => {
@@ -971,7 +971,7 @@ describe("tenant scope month total equals the month view total", () => {
         previousAmount: octoberDashboard.sends.find((d) => d.item === line.item)?.previousAmount,
       })),
     );
-    expect(augustDashboard.waterfall.at(-1)?.end).toBeCloseTo(augustMonth.summary.cashResult, 2);
+    expect(augustDashboard.waterfall.at(-1)?.end).toBeCloseTo(augustMonth.summary.cashResult!, 2);
   });
 
   it("also matches for months with a monthly GGR total (closed and in progress)", async () => {
@@ -1843,5 +1843,107 @@ describe("comparison modes", () => {
       preset: "custom",
     });
     expect(dashboard.compareRange).toEqual({ from: "2025-09-01", to: "2025-09-30" });
+  });
+});
+
+describe("moeda da casa", () => {
+  const setMoeda = (tenantId: string, moeda: string) => {
+    const row = fake.admin.rows("tenants").find((t) => t.id === tenantId);
+    if (row) row.moeda = moeda;
+  };
+
+  it("casa fora do BRL: valores da casa somam, Lucro líquido/ROI null, waterfall sem custos BRL", async () => {
+    setMoeda(HOUSE_A, "ARS");
+    financeDayRows.push(complete(HOUSE_A, "2026-10-20", 10000, 1000));
+    usageRows.push({ tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 5 });
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(ADMIN_A), {
+      scope: { kind: "tenant", tenantId: HOUSE_A },
+      ...monthToDate,
+    });
+
+    expect(dashboard.currency).toBe("ARS");
+    expect(dashboard.tenants[0].moeda).toBe("ARS");
+    expect(dashboard.totals.current.depositAmount).toBe(10000);
+    expect(dashboard.totals.current.betleadsUsage).toBe(5);
+    expect(dashboard.totals.current.cashResult).toBeNull();
+    expect(dashboard.totals.current.roi).toBeNull();
+    expect(dashboard.tenants[0].margin).toBeNull();
+    expect(dashboard.waterfall.at(-1)).toMatchObject({ key: "house_result", end: 9000 });
+    expect(dashboard.waterfall.some((step) => step.key === "sends")).toBe(false);
+    expect(dashboard.months.every((point) => point.cashResult === null)).toBe(true);
+  });
+
+  it("grupo com moedas diferentes: sem total somado, um total por moeda; envios BRL somam", async () => {
+    setMoeda(HOUSE_B, "ARS");
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-10-20", 1000, 100),
+      complete(HOUSE_B, "2026-10-20", 50000, 5000),
+    );
+    usageRows.push(
+      { tenant_id: HOUSE_A, metric_date: "2026-10-20", amount: 7.5 },
+      { tenant_id: HOUSE_B, metric_date: "2026-10-20", amount: 2.5 },
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+
+    expect(dashboard.currency).toBeNull();
+    expect(
+      dashboard.currencyTotals.map((t) => [
+        t.currency,
+        t.houses,
+        t.current.depositAmount,
+        t.current.cashResult,
+      ]),
+    ).toEqual([
+      ["BRL", 1, 1000, 892.5],
+      ["ARS", 1, 50000, null],
+    ]);
+    // Nenhuma soma entre moedas no total do escopo.
+    expect(dashboard.totals.current.depositAmount).toBe(0);
+    expect(dashboard.waterfall).toEqual([]);
+    expect(dashboard.costs).toEqual([]);
+    expect(dashboard.sends.reduce((total, line) => total + line.amount, 0)).toBe(10);
+    expect(dashboard.tenants.map((row) => [row.nome, row.moeda, row.current.cashResult])).toEqual([
+      ["Casa A", "BRL", 892.5],
+      ["Casa B", "ARS", null],
+    ]);
+  });
+
+  it("grupo todo na mesma moeda fora do BRL soma normalmente nela", async () => {
+    setMoeda(HOUSE_A, "ARS");
+    setMoeda(HOUSE_B, "ARS");
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-10-20", 1000, 100),
+      complete(HOUSE_B, "2026-10-20", 50000, 5000),
+    );
+
+    const dashboard = await getFinanceDashboardFor(ctxFor(G1_MANAGER), {
+      scope: { kind: "group", groupId: G1 },
+      ...last7Days,
+    });
+
+    expect(dashboard.currency).toBe("ARS");
+    expect(dashboard.totals.current.depositAmount).toBe(51000);
+    expect(dashboard.totals.current.cashResult).toBeNull();
+    expect(dashboard.currencyTotals).toHaveLength(1);
+  });
+
+  it("o mês da casa traz a moeda e, fora do BRL, Lucro líquido null", async () => {
+    setMoeda(HOUSE_A, "ARS");
+    financeDayRows.push(complete(HOUSE_A, "2026-10-20", 10000, 1000));
+
+    const month = await getTenantFinanceMonthFor(ctxFor(ADMIN_A), {
+      tenantId: HOUSE_A,
+      month: "2026-10",
+    });
+
+    expect(month.moeda).toBe("ARS");
+    expect(month.tenant).toEqual({ id: HOUSE_A, nome: "Casa A" });
+    expect(month.summary.depositAmount).toBe(10000);
+    expect(month.summary.cashResult).toBeNull();
   });
 });

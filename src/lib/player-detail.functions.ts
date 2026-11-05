@@ -7,6 +7,7 @@ import {
   riskScore,
   conversionScore,
 } from "./player-rules";
+import { toTenantCurrency } from "./currency";
 import { lastActivityMs } from "./player-activity";
 import { depositCountFor } from "./player-deposit-count";
 import { levelForTotal, thresholdsFromSettingsRow, type LevelSlug } from "./player-level";
@@ -116,6 +117,7 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
       settingsRes,
       smsSentRes,
       smsFailedRes,
+      tenantRes,
     ] = await Promise.all([
       supabase
         .from("deposits")
@@ -201,6 +203,8 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
         .eq("tenant_id", tenantId)
         .eq("player_id", playerId)
         .in("status", SMS_FAILED_STATUSES),
+      // Moeda da casa, para os valores no texto dos alertas.
+      supabase.from("tenants").select("moeda").eq("id", tenantId).maybeSingle(),
     ]);
 
     const required = [
@@ -282,7 +286,10 @@ export const getPlayerDetail = createServerFn({ method: "POST" })
         conversion_score: conversionScore(player),
       },
       attribution,
-      alerts: detectAlerts(player),
+      alerts: detectAlerts(
+        player,
+        toTenantCurrency(tenantRes.error ? null : tenantRes.data?.moeda),
+      ),
       deposits,
       withdrawals,
       cashbacks,

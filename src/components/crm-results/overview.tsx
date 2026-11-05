@@ -14,6 +14,7 @@ import {
 
 import { buildRecommendations } from "@/lib/crm-recommendations";
 import type { CrmSource } from "@/lib/crm-results";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
 import {
   CHART_COLORS,
@@ -25,7 +26,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecommendationList } from "./recommendations";
-import { type Data, dayLabel, isWaste, money, pct, ratio } from "./format";
+import {
+  type Data,
+  cost,
+  crossCurrencyNote,
+  dayLabel,
+  isCrossCurrency,
+  isWaste,
+  pct,
+  ratio,
+} from "./format";
 import { Delta, EmptyCard, InfoTip, Kpi } from "./shared";
 
 /** Conversions arrive up to 7 days after the click: the last week is still filling in. */
@@ -38,6 +48,9 @@ export function Overview({
   onOpenOrigin: (name: string) => void;
 }) {
   const [showAllRecommendations, setShowAllRecommendations] = useState(false);
+  const { currency, money } = useMoney();
+  // Casa fora de BRL: receita na moeda dela, custo em BRL, retorno não calculado.
+  const crossCurrency = isCrossCurrency(currency);
   const { totals } = data;
   const previous = data.previous.totals;
   if (totals.sent === 0 && totals.directPlayers === 0 && totals.influencedPlayers === 0)
@@ -110,7 +123,7 @@ export function Overview({
             <div className="lg:text-right">
               <p className="text-label text-muted-foreground">Valor recuperado pelo CRM</p>
               <div className="flex items-baseline gap-2 lg:justify-end">
-                <p className="text-kpi tabular-nums text-success">{brl(totals.directRevenue)}</p>
+                <p className="text-kpi tabular-nums text-success">{money(totals.directRevenue)}</p>
                 <Delta current={totals.directRevenue} previous={previous?.directRevenue} />
               </div>
             </div>
@@ -127,7 +140,7 @@ export function Overview({
           />
           <Kpi
             label="Custo por jogador convertido"
-            value={money(totals.costPerConversion)}
+            value={cost(totals.costPerConversion)}
             detail="custo ÷ jogadores convertidos"
             delta={
               <Delta
@@ -139,9 +152,13 @@ export function Overview({
           />
           <Kpi
             label="Retorno"
-            value={ratio(totals.clickRoi)}
-            detail="recuperado pelo CRM ÷ custo"
-            delta={<Delta current={totals.clickRoi} previous={previous?.clickRoi} />}
+            value={crossCurrency ? "—" : ratio(totals.clickRoi)}
+            detail={crossCurrency ? crossCurrencyNote(currency) : "recuperado pelo CRM ÷ custo"}
+            delta={
+              crossCurrency ? undefined : (
+                <Delta current={totals.clickRoi} previous={previous?.clickRoi} />
+              )
+            }
           />
         </div>
 
@@ -149,8 +166,8 @@ export function Overview({
           <p className="text-xs text-muted-foreground">
             Fora da conta: {num(totals.directActivePlayers)}{" "}
             {totals.directActivePlayers === 1 ? "jogador já ativo" : "jogadores já ativos"}{" "}
-            (depositaram nas 48 h antes do clique) somaram {brl(totals.directActiveRevenue)} depois
-            de clicar. Esse valor não entra no retorno.
+            (depositaram nas 48 h antes do clique) somaram {money(totals.directActiveRevenue)}{" "}
+            depois de clicar. Esse valor não entra no retorno.
           </p>
         )}
 
@@ -177,9 +194,9 @@ export function Overview({
           <div className="flex shrink-0 flex-wrap gap-6 tabular-nums">
             {[
               [num(totals.influencedPlayers), "recuperados"],
-              [brl(totals.influencedRevenue), "valor"],
-              [money(totals.costPerRecovered), "por recuperado"],
-              [ratio(totals.roi), "retorno"],
+              [money(totals.influencedRevenue), "valor"],
+              [cost(totals.costPerRecovered), "por recuperado"],
+              [crossCurrency ? "—" : ratio(totals.roi), "retorno"],
             ].map(([value, label]) => (
               <div key={label}>
                 <p className="text-kpi-sm">{value}</p>
@@ -222,6 +239,9 @@ export function Overview({
 }
 
 function DailyChart({ data }: { data: Data }) {
+  const { currency, money } = useMoney();
+  // Fora de BRL, custo (BRL) e recuperado (moeda da casa) ganham eixos separados.
+  const crossCurrency = isCrossCurrency(currency);
   if (data.days === 1)
     return (
       <EmptyCard>
@@ -252,26 +272,51 @@ function DailyChart({ data }: { data: Data }) {
           <ComposedChart data={points}>
             <CartesianGrid {...chartGridProps} />
             <XAxis dataKey="label" {...chartAxisProps} />
-            <YAxis {...chartAxisProps} width={80} tickFormatter={(value) => brl(Number(value))} />
+            <YAxis
+              yAxisId="cost"
+              {...chartAxisProps}
+              width={80}
+              tickFormatter={(value) => brl(Number(value))}
+            />
+            {crossCurrency && (
+              <YAxis
+                yAxisId="revenue"
+                orientation="right"
+                {...chartAxisProps}
+                width={90}
+                tickFormatter={(value) => money(Number(value), { compact: true })}
+              />
+            )}
             <Tooltip
               {...chartTooltipProps}
-              formatter={(value: number, name: string) => [brl(Number(value)), names[name] ?? name]}
+              formatter={(value: number, name: string) => [
+                name === "cost" ? brl(Number(value)) : money(Number(value)),
+                names[name] ?? name,
+              ]}
             />
             <Legend {...chartLegendProps} formatter={(name: string) => names[name] ?? name} />
             <Bar
+              yAxisId="cost"
               dataKey="cost"
               fill={CHART_COLORS.warning}
               fillOpacity={0.6}
               radius={[4, 4, 0, 0]}
             />
             <Line
+              yAxisId={crossCurrency ? "revenue" : "cost"}
               dataKey="recovered"
               stroke={CHART_COLORS.muted}
               strokeWidth={1.5}
               strokeDasharray="2 3"
               dot={false}
             />
-            <Line dataKey="converted" stroke={CHART_COLORS.success} strokeWidth={3} dot={false} />
+            <Line
+              yAxisId={crossCurrency ? "revenue" : "cost"}
+              dataKey="converted"
+              stroke={CHART_COLORS.success}
+              strokeWidth={3}
+              dot={false}
+            />
           </ComposedChart>
         </ResponsiveContainer>
       </CardContent>
@@ -280,6 +325,7 @@ function DailyChart({ data }: { data: Data }) {
 }
 
 function Highlights({ data, onOpenOrigin }: { data: Data; onOpenOrigin: (name: string) => void }) {
+  const { money } = useMoney();
   const { totals, sources } = data;
   const best = [...sources]
     .filter((source) => !source.smallSample && source.costPerConversion != null)
@@ -301,8 +347,8 @@ function Highlights({ data, onOpenOrigin }: { data: Data; onOpenOrigin: (name: s
               <button type="button" className={linkClass} onClick={() => onOpenOrigin(best.name)}>
                 {best.name}
               </button>{" "}
-              converte mais barato: {money(best.costPerConversion)} por jogador (
-              {num(best.directPlayers)} jogadores, {brl(best.directRevenue)}).
+              converte mais barato: {cost(best.costPerConversion)} por jogador (
+              {num(best.directPlayers)} jogadores, {money(best.directRevenue)}).
             </span>
           </p>
         ) : (

@@ -2,6 +2,8 @@
 // values that are missing render as "n.a." everywhere in that page, whether
 // they are literally absent (no rate yet) or not applicable (division by
 // zero upstream in src/lib/finance/calc.ts).
+import { formatMoney, type TenantCurrency } from "@/lib/currency";
+import type { CurrencyTotal } from "@/lib/finance/money";
 
 const NA = "n.a.";
 
@@ -23,6 +25,27 @@ export function formatBRL(value: number | null | undefined): string {
       maximumFractionDigits: 2,
     }),
   );
+}
+
+/**
+ * Um valor da casa na moeda dela ("$ 10.000,00" em ARS), sempre com 2 casas
+ * como o formatBRL; BRL (ou sem moeda) é exatamente o formatBRL. Custos
+ * Betleads (envios, mensalidade) continuam em formatBRL.
+ */
+export function formatMoneyIn(
+  value: number | null | undefined,
+  currency: TenantCurrency | null | undefined,
+): string {
+  if (!currency || currency === "BRL") return formatBRL(value);
+  if (value === null || value === undefined) return NA;
+  return stripNbsp(formatMoney(value, currency, { decimals: 2 }));
+}
+
+/** Totais por moeda numa linha: "R$ 1.000,00 · $ 50.000,00" ("—" para um total sem valor). */
+export function formatCurrencyTotals(totals: CurrencyTotal[]): string {
+  return totals
+    .map((total) => (total.amount === null ? "—" : formatMoneyIn(total.amount, total.currency)))
+    .join(" · ");
 }
 
 /** A fraction (0.3855) as a one-decimal percentage ("38,6%"). */

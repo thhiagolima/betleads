@@ -15,6 +15,7 @@ import {
   resolveOperationalTenantId,
 } from "@/lib/tenant-access.server";
 import { getReportUnitPrices } from "./billing/pricing.server";
+import { toTenantCurrency } from "./currency";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { loadHouseLinks, type HouseLinks } from "./house-links.server";
 import {
@@ -1958,9 +1959,15 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
     // Same report price the Central de Resultados uses as cost: segments
     // actually billed (billed_units, defaulting legacy null rows to 1), not
     // the row count.
-    const { sms: smsPrice } = await getReportUnitPrices(tenantId);
+    const [{ sms: smsPrice }, { data: tenantRow }] = await Promise.all([
+      getReportUnitPrices(tenantId),
+      (supabaseAdmin as any).from("tenants").select("moeda").eq("id", tenantId).maybeSingle(),
+    ]);
     const totalCost = billedUnitsTotal * smsPrice;
-    const roi_brl = Math.max(0, convertedRevenue - totalCost);
+    // Receita na moeda da casa, custo em BRL: fora de BRL não se subtrai um do
+    // outro (sem câmbio), e o retorno fica nulo.
+    const moeda = toTenantCurrency(tenantRow?.moeda);
+    const roi_brl = moeda === "BRL" ? Math.max(0, convertedRevenue - totalCost) : null;
 
     const series = denseSeries(rangeDays, buckets, endDate);
 
@@ -1981,8 +1988,10 @@ export const getSmsDashboard = createServerFn({ method: "POST" })
         active_flows: activeFlows ?? 0,
         players_in_flow: playersInFlow,
         conversions,
+        moeda,
+        /** Na moeda da casa (`moeda`); o nome ficou do tempo em que toda casa era BRL. */
         revenue_brl: Number(convertedRevenue.toFixed(2)),
-        roi_brl: Number(roi_brl.toFixed(2)),
+        roi_brl: roi_brl == null ? null : Number(roi_brl.toFixed(2)),
         unique_recipients: uniquePhonesPeriod.size,
       },
       by_day: series.map((s) => ({

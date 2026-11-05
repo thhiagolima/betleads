@@ -73,6 +73,7 @@ import { EmptyState } from "@/components/ui-premium/empty-state";
 import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { CURRENCY_LABEL, TENANT_CURRENCIES, toTenantCurrency } from "@/lib/currency";
 
 export const Route = createFileRoute("/tenants")({
   component: TenantsPage,
@@ -85,6 +86,7 @@ type TenantRow = {
   status: "active" | "suspended" | "trial" | "canceled";
   plano: "starter" | "pro" | "enterprise" | "interno";
   crm_model?: "CRM_PLATAFORMA" | "CRM_EXPERT" | null;
+  moeda?: string | null;
   created_at: string;
   updated_at: string | null;
   is_demo?: boolean | null;
@@ -1219,6 +1221,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
     status: tenant.status,
     plano: tenant.plano,
     crm_model: tenant.crm_model ?? "CRM_PLATAFORMA",
+    moeda: toTenantCurrency(tenant.moeda),
   });
   const [planReason, setPlanReason] = useState("");
 
@@ -1228,9 +1231,10 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
       status: tenant.status,
       plano: tenant.plano,
       crm_model: tenant.crm_model ?? "CRM_PLATAFORMA",
+      moeda: toTenantCurrency(tenant.moeda),
     });
     setPlanReason("");
-  }, [tenant.id, tenant.nome, tenant.status, tenant.plano, tenant.crm_model]);
+  }, [tenant.id, tenant.nome, tenant.status, tenant.plano, tenant.crm_model, tenant.moeda]);
 
   // Required (>= 5 chars) only when the plano select moves into or out of
   // 'interno' — same rule `updateTenantSettingsFor` enforces server-side.
@@ -1243,6 +1247,8 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
     onSuccess: () => {
       toast.success("Casa atualizada");
       qc.invalidateQueries({ queryKey: ["tenants-console"] });
+      // A moeda de exibição vem do switcher: todas as telas da casa a releem.
+      qc.invalidateQueries({ queryKey: ["active-tenant-switcher"] });
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -1321,6 +1327,31 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
               )}
             </SelectContent>
           </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Moeda</Label>
+          <Select
+            value={form.moeda}
+            disabled={!isSuperAdmin}
+            onValueChange={(value) =>
+              setForm((prev) => ({ ...prev, moeda: toTenantCurrency(value) }))
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TENANT_CURRENCIES.map((code) => (
+                <SelectItem key={code} value={code}>
+                  {CURRENCY_LABEL[code]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Como depósitos, saques e resultados da casa aparecem no CRM. A cobrança da plataforma
+            continua em reais.
+          </p>
         </div>
       </div>
       {planTouchesInterno && (

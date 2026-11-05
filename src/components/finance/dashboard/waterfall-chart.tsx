@@ -6,8 +6,12 @@
 // column hangs below zero. Entradas are blue-gray, saídas red, the subtotal
 // slate and the total green or red by sign. On a phone the columns keep a
 // minimum width (88px) and scroll sideways inside the card; the zero line
-// and the axis span every column while scrolling.
-import { formatBRL } from "@/components/finance/format";
+// and the axis span every column while scrolling. Fora do BRL os valores vêm
+// na moeda da casa e o gráfico para antes dos custos Betleads (em BRL), com
+// a nota de câmbio (ver waterfallSteps).
+import { formatMoneyIn } from "@/components/finance/format";
+import type { TenantCurrency } from "@/lib/currency";
+import { mixedCurrencyNote, profitComputable } from "@/lib/finance/money";
 import type { WaterfallStep } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +21,11 @@ import { shortStepLabel } from "./display";
 export const NO_FEE_NOTE = "Resultado sem a mensalidade do mês (entra no fechamento do mês).";
 
 export const HIDDEN_STEPS_NOTE = "Passos sem valor no período não aparecem.";
+
+/** Fora do BRL: por que o gráfico não chega ao Lucro líquido. */
+export function betleadsOutsideNote(currency: TenantCurrency): string {
+  return `${mixedCurrencyNote(currency)}. Envios e mensalidade (BRL) ficam fora do gráfico.`;
+}
 
 export type WaterfallTone = "in" | "down" | "subtotal" | "positive" | "negative";
 
@@ -112,16 +121,21 @@ const LEGEND: { label: string; className: string }[] = [
   { label: "Subtotal", className: TONE_BAR.subtotal },
 ];
 
-const shortBRL = (value: number) => formatBRL(value).replace(/,\d\d$/, "");
+const shortMoney = (value: number, currency: TenantCurrency) =>
+  formatMoneyIn(value, currency).replace(/,\d\d$/, "");
 
 export function WaterfallChart({
   steps,
   withoutFee = false,
+  currency = "BRL",
 }: {
   steps: WaterfallStep[];
   /** The window is not a closed month: no Mensalidade step, say so. */
   withoutFee?: boolean;
+  /** Moeda das casas do escopo (todas na mesma). */
+  currency?: TenantCurrency;
 }) {
+  const sameCurrency = profitComputable(currency);
   if (!steps.length) {
     return <p className="py-4 text-sm text-muted-foreground">Sem dados no período.</p>;
   }
@@ -146,8 +160,8 @@ export function WaterfallChart({
                     <div
                       data-step={bar.key}
                       role="img"
-                      aria-label={`${bar.fullLabel}: ${formatBRL(bar.amount)}`}
-                      title={`${bar.fullLabel}: ${formatBRL(bar.amount)}`}
+                      aria-label={`${bar.fullLabel}: ${formatMoneyIn(bar.amount, currency)}`}
+                      title={`${bar.fullLabel}: ${formatMoneyIn(bar.amount, currency)}`}
                       className={cn("absolute inset-x-[18%] rounded-md", TONE_BAR[bar.tone])}
                       style={{
                         bottom: `${bar.bottomPct}%`,
@@ -162,7 +176,7 @@ export function WaterfallChart({
                           TONE_TEXT[bar.tone],
                         )}
                       >
-                        {shortBRL(bar.amount)}
+                        {shortMoney(bar.amount, currency)}
                       </span>
                     </div>
                   </div>
@@ -200,9 +214,14 @@ export function WaterfallChart({
         ))}
         <span>{HIDDEN_STEPS_NOTE}</span>
       </div>
-      {withoutFee && (
+      {withoutFee && sameCurrency && (
         <p data-note="no-fee" className="text-xs text-muted-foreground">
           {NO_FEE_NOTE}
+        </p>
+      )}
+      {!sameCurrency && (
+        <p data-note="mixed-currency" className="text-xs text-muted-foreground">
+          {betleadsOutsideNote(currency)}
         </p>
       )}
     </div>

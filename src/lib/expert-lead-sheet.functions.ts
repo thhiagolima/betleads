@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { toTenantCurrency } from "@/lib/currency";
 import { requireExpertContext } from "@/lib/expert-access.server";
 import { isExpertAffiliate, loadVisibleLead } from "@/lib/expert-lead-access.server";
 import {
@@ -110,6 +111,7 @@ export async function getExpertLeadSheetFor(
     settingsRes,
     walletRes,
     expertSettingsRes,
+    tenantRes,
   ] = await Promise.all([
     scoped("deposits", "id,valor,created_at")
       .eq("status", "aprovado")
@@ -175,6 +177,8 @@ export async function getExpertLeadSheetFor(
     // Janela de crédito por clique da casa (72h é o default do SQL), para a
     // dica de link fixo na ação "Link da oferta".
     db.from("expert_settings").select("click_window_hours").eq("tenant_id", tenantId).maybeSingle(),
+    // Moeda da casa: o {saldo} dos SMS/e-mails sai no formato dela.
+    db.from("tenants").select("moeda").eq("id", tenantId).maybeSingle(),
   ]);
 
   const deposits = rowsOf<MoneyRow>(depositsRes);
@@ -193,6 +197,8 @@ export async function getExpertLeadSheetFor(
   if (claimRes.error) throw new Error(claimRes.error.message);
   if (walletRes.error) throw new Error(walletRes.error.message);
   if (expertSettingsRes.error) throw new Error(expertSettingsRes.error.message);
+  if (tenantRes.error) throw new Error(tenantRes.error.message);
+  const currency = toTenantCurrency((tenantRes.data as { moeda?: string | null } | null)?.moeda);
   const janelaHoras =
     (expertSettingsRes.data as { click_window_hours?: number } | null)?.click_window_hours ?? 72;
   const wallet = walletRes.data as WalletRow | null;
@@ -231,12 +237,12 @@ export async function getExpertLeadSheetFor(
     })),
     sms: sms.map((s) => ({
       id: s.id,
-      content: maskHouseMessageText(s.content, { saldoValues }),
+      content: maskHouseMessageText(s.content, { saldoValues, currency }),
       at: s.created_at,
     })),
     emails: emails.map((e) => ({
       id: e.id,
-      subject: maskHouseMessageText(e.subject, { saldoValues }),
+      subject: maskHouseMessageText(e.subject, { saldoValues, currency }),
       at: e.sent_at ?? e.created_at,
     })),
     links: links.map((l) => ({

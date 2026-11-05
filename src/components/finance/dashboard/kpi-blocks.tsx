@@ -7,11 +7,13 @@
 // saques, custos) invert the color. A value missing for a known reason reads
 // "—" plus the reason ("sem anúncios", "não lançado"). The Meta KPIs (CPM,
 // CTR, Custo por clique) only show when the house has Meta data (not null).
-// Relies on a TooltipProvider above it (the dashboard root).
+// Relies on a TooltipProvider above it (the dashboard root). Os valores em
+// dinheiro da casa vêm na moeda dela (`currency`); os envios, em BRL.
 
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
-import { formatBRL, formatCount, formatInt, formatPct } from "@/components/finance/format";
+import { formatCount, formatInt, formatMoneyIn, formatPct } from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
+import type { TenantCurrency } from "@/lib/currency";
 import type { FinanceKpis, PeriodSummary, SendLine } from "@/lib/finance/types";
 
 import { costPerPlayerReason, ggrNotLaunched, periodHasData } from "./display";
@@ -45,14 +47,22 @@ function formatDecimal(value: number | null) {
   return value.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
 }
 
-function formatValue(format: Format, value: number | null) {
-  if (format === "money") return formatBRL(value);
+function formatValue(format: Format, value: number | null, currency: TenantCurrency) {
+  if (format === "money") return formatMoneyIn(value, currency);
   if (format === "pct") return formatPct(value);
   if (format === "decimal") return formatDecimal(value);
   return formatInt(value);
 }
 
-function KpiRowView({ row, hasPrevious }: { row: KpiRow; hasPrevious: boolean }) {
+function KpiRowView({
+  row,
+  hasPrevious,
+  currency,
+}: {
+  row: KpiRow;
+  hasPrevious: boolean;
+  currency: TenantCurrency;
+}) {
   return (
     <KpiRowShell
       attrs={{ "data-kpi": row.key }}
@@ -65,7 +75,7 @@ function KpiRowView({ row, hasPrevious }: { row: KpiRow; hasPrevious: boolean })
         </>
       }
       detail={row.detail}
-      value={row.missing ? "—" : formatValue(row.format, row.current)}
+      value={row.missing ? "—" : formatValue(row.format, row.current, currency)}
       sub={row.missing?.reason ?? undefined}
       variation={
         row.missing ? undefined : (
@@ -91,12 +101,15 @@ export function KpiBlocks({
   sends,
   exemptHouse,
   betleadsNote,
+  currency = "BRL",
 }: {
   totals: { current: PeriodSummary; previous: PeriodSummary };
   kpis: { current: FinanceKpis; previous: FinanceKpis };
   sends: SendLine[];
   exemptHouse: boolean;
   betleadsNote: string | null;
+  /** Moeda das casas do escopo (todas na mesma). */
+  currency?: TenantCurrency;
 }) {
   const { current: s, previous: ps } = totals;
   const { current: k, previous: pk } = kpis;
@@ -300,7 +313,9 @@ export function KpiBlocks({
   ];
 
   const rows = (list: KpiRow[]) =>
-    list.map((row) => <KpiRowView key={row.key} row={row} hasPrevious={hasPrevious} />);
+    list.map((row) => (
+      <KpiRowView key={row.key} row={row} hasPrevious={hasPrevious} currency={currency} />
+    ));
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -337,6 +352,7 @@ export function KpiBlocks({
           hasPrevious={hasPrevious}
           exemptHouse={exemptHouse}
           betleadsNote={betleadsNote}
+          currency={currency}
         />
       </KpiBlock>
     </div>

@@ -20,6 +20,7 @@
 // with no stored result (storeResult failed, the process died after the mark,
 // or a concurrent confirm is still applying) throws UNKNOWN_RESULT — never
 // `ok`: a write whose outcome is unknown is not reported as success.
+import { toTenantCurrency, type TenantCurrency } from "@/lib/currency";
 import { z } from "zod";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
@@ -88,15 +89,16 @@ function parseInput<I>(action: WriteAction<I>, raw: unknown): I & { tenantId: st
   return parsed.data as I & { tenantId: string };
 }
 
-async function houseName(tenantId: string): Promise<string> {
+/** Nome e moeda da casa: a prévia mostra os valores lançados na moeda dela. */
+async function houseOf(tenantId: string): Promise<{ nome: string; moeda: TenantCurrency }> {
   const { data, error } = await db()
     .from("tenants")
-    .select("nome")
+    .select("nome,moeda")
     .eq("id", tenantId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Casa não encontrada");
-  return data.nome;
+  return { nome: data.nome, moeda: toTenantCurrency((data as { moeda?: unknown }).moeda) };
 }
 
 /** Deep equality that ignores object key order (jsonb reorders keys). */
@@ -137,7 +139,8 @@ export async function createPreview(
 
   const snapshot = await action.snapshot(parsed.tenantId, parsed);
   const input = action.complete ? (action.complete(snapshot, parsed) as typeof parsed) : parsed;
-  const { linhas, avisos } = action.describe(snapshot, input, await houseName(input.tenantId));
+  const house = await houseOf(input.tenantId);
+  const { linhas, avisos } = action.describe(snapshot, input, house.nome, house.moeda);
 
   const code = randomToken(24);
   const expiresAt = new Date(Date.now() + PREVIEW_TTL_S * 1000).toISOString();

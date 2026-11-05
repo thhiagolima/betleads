@@ -1,4 +1,7 @@
+import type { TenantCurrency } from "@/lib/currency";
+
 import { round2 } from "./calc";
+import { profitComputable } from "./money";
 import type {
   DayActivity,
   FinanceKpis,
@@ -90,9 +93,9 @@ export function hasMissingSendCost(sends: SendUsage[] | undefined): boolean {
   return (sends ?? []).some((usage) => usage.missingCostUnits > 0);
 }
 
-/** Lucro líquido ÷ net; n.a. (null) when the net is zero or negative. */
-export function marginOf(cashResult: number, net: number): number | null {
-  return net > 0 ? cashResult / net : null;
+/** Lucro líquido ÷ net; n.a. (null) when the net is zero or negative, or there is no Lucro líquido. */
+export function marginOf(cashResult: number | null, net: number): number | null {
+  return net > 0 && cashResult !== null ? cashResult / net : null;
 }
 
 /**
@@ -100,6 +103,8 @@ export function marginOf(cashResult: number, net: number): number | null {
  * `metaSpend` is the Meta spend (Σ adSpendSuggested) over the same houses and
  * days as `activity`: CPM and Custo por clique divide it, not Anúncios (which
  * may hold other networks the Meta impressions/clicks do not cover).
+ * Fora do BRL (`currency`), os retornos do CRM (receita da casa ÷ envios em
+ * BRL) ficam null: não há câmbio entre as duas moedas.
  */
 export function computeKpis(
   summary: PeriodSummary,
@@ -107,8 +112,10 @@ export function computeKpis(
   sends: SendUsage[],
   days: number,
   metaSpend: number,
+  currency?: TenantCurrency | null,
 ): FinanceKpis {
   const sendCost = round2(sends.reduce((total, usage) => total + usage.amount, 0));
+  const sameCurrency = profitComputable(currency);
 
   const hasImpressions = activity.adImpressions > 0;
   const cpm = hasImpressions ? (metaSpend / activity.adImpressions) * 1000 : null;
@@ -134,8 +141,8 @@ export function computeKpis(
     sendCostIncomplete: hasMissingSendCost(sends),
     crmDirectRevenue: activity.crmDirectRevenue,
     crmInfluencedRevenue: activity.crmInfluencedRevenue,
-    crmDirectReturn: ratio(activity.crmDirectRevenue, sendCost),
-    crmInfluencedReturn: ratio(activity.crmInfluencedRevenue, sendCost),
+    crmDirectReturn: sameCurrency ? ratio(activity.crmDirectRevenue, sendCost) : null,
+    crmInfluencedReturn: sameCurrency ? ratio(activity.crmInfluencedRevenue, sendCost) : null,
   };
 }
 
@@ -151,13 +158,17 @@ export function computeKpis(
  * (e.g. a negative GGR fee) raises the result, so its step is "up". With
  * `sendCostIncomplete` (some sends without a registered provider cost) the
  * Envios step reads "Envios (parcial)" and shows even at R$ 0.
+ * Fora do BRL (`currency`) os passos em BRL (Envios, Mensalidade) saem do
+ * gráfico e ele termina no subtotal "Antes dos custos Betleads" (key
+ * "house_result"), na moeda da casa, em vez do Lucro líquido.
  */
 export function waterfallSteps(
   summary: PeriodSummary,
   sendCost: number,
   categories: Record<string, number>,
-  options: { sendCostIncomplete?: boolean } = {},
+  options: { sendCostIncomplete?: boolean; currency?: TenantCurrency | null } = {},
 ): WaterfallStep[] {
+  const sameCurrency = profitComputable(options.currency);
   const steps: WaterfallStep[] = [];
   let running = summary.depositAmount;
   steps.push({ key: "deposits", label: "Depósitos", kind: "start", start: 0, end: running });
@@ -176,10 +187,13 @@ export function waterfallSteps(
   down("ggr_fee", "Taxa de GGR", summary.ggrFee);
   down("movement_fee", "Taxa de movimentação", summary.movementFee);
   down("ad_spend", "Anúncios", summary.adSpend);
-  if (options.sendCostIncomplete) down("sends", "Envios (parcial)", sendCost, true);
-  else down("sends", "Envios", sendCost);
-  if (summary.betleadsFee !== null) {
-    down("fee", "Mensalidade", summary.betleadsFee);
+  // Envios e Mensalidade são BRL: ficam fora de um gráfico na moeda da casa.
+  if (sameCurrency) {
+    if (options.sendCostIncomplete) down("sends", "Envios (parcial)", sendCost, true);
+    else down("sends", "Envios", sendCost);
+    if (summary.betleadsFee !== null) {
+      down("fee", "Mensalidade", summary.betleadsFee);
+    }
   }
   let categorized = 0;
   for (const [name, amount] of Object.entries(categories)) {
@@ -202,13 +216,17 @@ export function waterfallSteps(
     });
   }
 
-  steps.push({
-    key: "profit",
-    label: "Lucro líquido",
-    kind: "total",
-    start: running,
-    end: running,
-  });
+  steps.push(
+    sameCurrency
+      ? { key: "profit", label: "Lucro líquido", kind: "total", start: running, end: running }
+      : {
+          key: "house_result",
+          label: "Antes dos custos Betleads",
+          kind: "subtotal",
+          start: running,
+          end: running,
+        },
+  );
 
   return steps;
 }

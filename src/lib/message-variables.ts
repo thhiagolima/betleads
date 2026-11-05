@@ -40,7 +40,7 @@ export const MESSAGE_VARIABLES: MessageVariable[] = [
     label: "Link de depósito (URL rápida \"deposito\", ou URL do site da casa)",
     channels: allChannels,
   },
-  { key: "cashback_valor", label: "Cashback (R$)", channels: allChannels },
+  { key: "cashback_valor", label: "Cashback (valor com moeda)", channels: allChannels },
   { key: "cashback_amount", label: "Cashback (valor numérico)", channels: allChannels },
   { key: "cashback_pago_em", label: "Cashback pago em", channels: allChannels },
   { key: "id_push", label: "ID Push / plataforma", channels: allChannels },

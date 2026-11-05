@@ -79,3 +79,21 @@ describe("renderTemplate — chaves duplas", () => {
     expect(renderTemplate("Oi {{inexistente}}", {})).toBe("Oi {{inexistente}}");
   });
 });
+
+describe("valores na moeda da casa", () => {
+  const plain = (s: string) => s.split(String.fromCharCode(160)).join(" ");
+
+  it("formata {saldo} e {total_depositado} em pesos numa casa ARS", () => {
+    const vars = buildPlayerVariables(
+      { saldo_carteira: 10000, total_depositado: 15000, total_sacado: 5000 },
+      { siteUrl: null, quickLinks: {}, currency: "ARS" },
+    );
+    expect(plain(vars.saldo)).toBe("$ 10.000,00");
+    expect(plain(vars.total_depositado)).toBe("$ 15.000,00");
+    expect(plain(vars.lucro)).toBe("$ 10.000,00");
+  });
+
+  it("continua em reais sem casa ou casa sem moeda", () => {
+    expect(plain(buildPlayerVariables({ saldo_carteira: 73.5 }).saldo)).toBe("R$ 73,50");
+  });
+});

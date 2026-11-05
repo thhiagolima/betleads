@@ -5,7 +5,9 @@
 // saved one day at a time), the "Usar gasto da Meta nos dias vazios" shortcut
 // and the month summary. `dia` in the URL opens the modal on that day.
 // Reused read-only by /grupo/casa with `readOnly`; the demo house is
-// read-only too.
+// read-only too. Os valores da casa vêm na moeda dela (data.moeda, do
+// servidor: o gestor do grupo pode não ser membro da casa); envios e
+// mensalidade em BRL.
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -13,7 +15,7 @@ import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { SendCostAmount } from "@/components/finance/dashboard/sends-block";
-import { betleadsUsageNote, formatBRL } from "@/components/finance/format";
+import { betleadsUsageNote, formatBRL, formatMoneyIn } from "@/components/finance/format";
 import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { currentMonth, metaFillEntries, todaySaoPaulo } from "@/components/finance/day-entry";
 import { DayList } from "@/components/finance/day-list";
@@ -25,7 +27,9 @@ import {
   type MonthlyGgrFormValue,
 } from "@/components/finance/finance-monthly-ggr";
 import { financeMonthQueryKey, invalidateFinanceAfterSave } from "@/components/finance/query-keys";
+import type { TenantCurrency } from "@/lib/currency";
 import { round2 } from "@/lib/finance/calc";
+import { mixedCurrencyNote } from "@/lib/finance/money";
 import type { PeriodSummary } from "@/lib/finance/types";
 import { getTenantFinanceMonth, saveFinanceDays, setMonthlyGgr } from "@/lib/finance.functions";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
@@ -149,6 +153,7 @@ export function FinanceMonthView({
   }
 
   const { days, summary } = data;
+  const currency = data.moeda;
   const betleadsNote = betleadsUsageNote(month, data.betleadsSince);
 
   return (
@@ -191,6 +196,7 @@ export function FinanceMonthView({
           month={month}
           today={todaySaoPaulo()}
           current={data.monthlyGgr}
+          currency={currency}
           canEdit={canEditValues}
           disabled={isDemo}
           saving={saveMonthlyGgr.isPending}
@@ -206,6 +212,7 @@ export function FinanceMonthView({
         onOpen={openDay}
         focusDate={focusDate}
         usingMonthlyGgr={data.monthlyGgr !== null}
+        currency={currency}
       />
       <p className="text-xs text-muted-foreground">
         A mensalidade entra só no total do mês fechado, não nos dias.
@@ -225,6 +232,7 @@ export function FinanceMonthView({
         summary={summary}
         sendCostIncomplete={data.sendCostIncomplete}
         betleadsNote={betleadsNote}
+        currency={currency}
       />
     </div>
   );
@@ -249,22 +257,25 @@ export function MonthSummary({
   summary,
   sendCostIncomplete,
   betleadsNote,
+  currency = "BRL",
 }: {
   summary: PeriodSummary;
   sendCostIncomplete: boolean;
   /** betleadsUsageNote(month, betleadsSince): no usage data before a date. */
   betleadsNote: string | null;
+  /** Moeda da casa (taxas e outros custos); envios e mensalidade são BRL. */
+  currency?: TenantCurrency;
 }) {
   return (
     <div className="grid gap-2 rounded-lg border border-border/40 bg-background/30 p-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
       <SummaryTile id="movementFee" label={FINANCE_TERMS.movementFee.label}>
-        <p className="font-medium">{formatBRL(summary.movementFee)}</p>
+        <p className="font-medium">{formatMoneyIn(summary.movementFee, currency)}</p>
       </SummaryTile>
       <SummaryTile id="ggrFee" label={FINANCE_TERMS.ggrFee.label}>
-        <p className="font-medium">{formatBRL(summary.ggrFee)}</p>
+        <p className="font-medium">{formatMoneyIn(summary.ggrFee, currency)}</p>
       </SummaryTile>
       <SummaryTile id="otherCosts" label={FINANCE_TERMS.otherCosts.label}>
-        <p className="font-medium">{formatBRL(summary.otherCosts)}</p>
+        <p className="font-medium">{formatMoneyIn(summary.otherCosts, currency)}</p>
       </SummaryTile>
       <SummaryTile id="sends" label={FINANCE_TERMS.sends.label}>
         <p className="font-medium">
@@ -276,7 +287,16 @@ export function MonthSummary({
         <p className="font-medium">{formatBRL(round2(summary.betleadsFee ?? 0))}</p>
       </SummaryTile>
       <SummaryTile id="cashResult" label={FINANCE_TERMS.cashResult.label}>
-        <p className="text-lg font-semibold">{formatBRL(summary.cashResult)}</p>
+        {summary.cashResult === null ? (
+          <>
+            <p className="text-lg font-semibold text-muted-foreground">—</p>
+            <p data-note="mixed-currency" className="text-xs text-muted-foreground">
+              {mixedCurrencyNote(currency)}
+            </p>
+          </>
+        ) : (
+          <p className="text-lg font-semibold">{formatMoneyIn(summary.cashResult, currency)}</p>
+        )}
       </SummaryTile>
     </div>
   );

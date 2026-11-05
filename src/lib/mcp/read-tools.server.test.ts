@@ -203,6 +203,7 @@ describe("resumoFinanceiro", () => {
       direct.tenants.map((tenant) => ({
         id: tenant.id,
         nome: tenant.nome,
+        moeda: tenant.moeda,
         atual: tenant.current,
         anterior: tenant.previous,
         metas: tenant.goals,

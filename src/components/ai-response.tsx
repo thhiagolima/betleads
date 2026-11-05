@@ -1,4 +1,5 @@
-import { brl, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -168,6 +169,7 @@ function InsightCard({ i }: { i: AIInsight }) {
 }
 
 function PlayerCard({ p }: { p: AIPlayer }) {
+  const { money } = useMoney();
   const dep = p.total_depositado ?? 0;
   const saq = p.total_sacado ?? 0;
   const lucro = p.lucro ?? dep - saq;
@@ -234,7 +236,7 @@ function PlayerCard({ p }: { p: AIPlayer }) {
             }`}
           >
             {lucro >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-            {brl(lucro)}
+            {money(lucro)}
           </p>
         </div>
       </div>
@@ -254,15 +256,15 @@ function PlayerCard({ p }: { p: AIPlayer }) {
           <>
             <div className="rounded-lg bg-success/10 border border-success/30 px-2.5 py-1.5">
               <p className="text-label text-success">Saldo na banca</p>
-              <p className="font-semibold text-success">{brl(p.saldo_atual ?? 0)}</p>
+              <p className="font-semibold text-success">{money(p.saldo_atual ?? 0)}</p>
             </div>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
               <p className="text-label text-muted-foreground">Depositado</p>
-              <p className="font-medium text-foreground">{brl(dep)}</p>
+              <p className="font-medium text-foreground">{money(dep)}</p>
             </div>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
               <p className="text-label text-muted-foreground">Sacado</p>
-              <p className="font-medium text-foreground">{brl(saq)}</p>
+              <p className="font-medium text-foreground">{money(saq)}</p>
             </div>
           </>
         ) : hasHoje ? (
@@ -277,23 +279,23 @@ function PlayerCard({ p }: { p: AIPlayer }) {
                     : ""}
               </p>
               <p className="font-semibold text-success">
-                {brl(p.depositado_hoje ?? p.sacado_hoje ?? 0)}
+                {money(p.depositado_hoje ?? p.sacado_hoje ?? 0)}
               </p>
             </div>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
               <p className="text-label text-muted-foreground">Total histórico</p>
-              <p className="font-medium text-foreground">{brl(dep)}</p>
+              <p className="font-medium text-foreground">{money(dep)}</p>
             </div>
           </>
         ) : (
           <>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
               <p className="text-label text-muted-foreground">Depositado</p>
-              <p className="font-medium text-foreground">{brl(dep)}</p>
+              <p className="font-medium text-foreground">{money(dep)}</p>
             </div>
             <div className="rounded-lg bg-muted/30 px-2.5 py-1.5">
               <p className="text-label text-muted-foreground">Sacado</p>
-              <p className="font-medium text-foreground">{brl(saq)}</p>
+              <p className="font-medium text-foreground">{money(saq)}</p>
             </div>
           </>
         )}

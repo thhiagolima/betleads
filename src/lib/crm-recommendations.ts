@@ -16,6 +16,8 @@ export const MIN_COST = 50;
 /** Below this many SMS a click rate is too noisy to compare. */
 export const MIN_SENT_FOR_CLICK_RATE = 1000;
 
+// Todo valor aqui é custo de envio (cobrança da plataforma), sempre em BRL,
+// mesmo em casa de outra moeda.
 const money = (value: number) =>
   value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const percent = (value: number) => `${Math.round(value * 100)}%`;

@@ -24,7 +24,7 @@ describe("loadHouseLinks", () => {
   it("retorna siteUrl null e quickLinks vazio quando a casa não tem site", () => {
     fake.db.rows("tenants").push({ id: TENANT, site_url: null });
     return loadHouseLinks(TENANT).then((house) => {
-      expect(house).toEqual({ siteUrl: null, quickLinks: {} });
+      expect(house).toEqual({ siteUrl: null, quickLinks: {}, currency: "BRL" });
     });
   });
 
@@ -40,14 +40,21 @@ describe("loadHouseLinks", () => {
     expect(house).toEqual({
       siteUrl: "https://x.com",
       quickLinks: { login: "https://x.com/login", promo: "https://x.com/promo" },
+      currency: "BRL",
     });
+  });
+
+  it("traz a moeda da casa para as variáveis de mensagem", async () => {
+    fake.db.rows("tenants").push({ id: TENANT, site_url: null, moeda: "ARS" });
+    const house = await loadHouseLinks(TENANT);
+    expect(house.currency).toBe("ARS");
   });
 
   it("ignora URLs rápidas quando não há site_url", async () => {
     fake.db.rows("tenants").push({ id: TENANT, site_url: null });
     fake.db.rows("tenant_quick_links").push({ tenant_id: TENANT, key: "login", path: "/login" });
     const house = await loadHouseLinks(TENANT);
-    expect(house).toEqual({ siteUrl: null, quickLinks: {} });
+    expect(house).toEqual({ siteUrl: null, quickLinks: {}, currency: "BRL" });
   });
 
   it("usa cache por 60s — não refaz a query na segunda chamada", async () => {
@@ -70,7 +77,7 @@ describe("loadHouseLinks", () => {
   it("normaliza site_url vazio para null", async () => {
     fake.db.rows("tenants").push({ id: TENANT, site_url: "" });
     const house = await loadHouseLinks(TENANT);
-    expect(house).toEqual({ siteUrl: null, quickLinks: {} });
+    expect(house).toEqual({ siteUrl: null, quickLinks: {}, currency: "BRL" });
   });
 
   // Important 2 (controller ruling) — a DB error must never break a send: a
@@ -88,7 +95,7 @@ describe("loadHouseLinks", () => {
 
     // Not cached: a retry now succeeds and reflects the real data.
     const house = await loadHouseLinks(TENANT);
-    expect(house).toEqual({ siteUrl: "https://x.com", quickLinks: {} });
+    expect(house).toEqual({ siteUrl: "https://x.com", quickLinks: {}, currency: "BRL" });
     errorSpy.mockRestore();
   });
 });

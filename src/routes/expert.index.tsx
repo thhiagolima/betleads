@@ -44,7 +44,8 @@ import {
 import { getExpertHome } from "@/lib/expert-leads.functions";
 import { getExpertDashboard } from "@/lib/expert-metrics.functions";
 import { DEFAULT_EXPERT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
-import { brl, num } from "@/lib/format";
+import { num } from "@/lib/format";
+import { useMoney } from "@/hooks/use-tenant-currency";
 
 const FOLLOWUPS_DUE_QUERY_KEY = ["expert-followups-due"];
 const ENTERED_RISK_QUERY_KEY = ["expert-leads-entered-risk"];
@@ -69,6 +70,8 @@ const CHART_CONFIG: ChartConfig = {
 };
 
 function DepositedChart({ serie }: { serie: { dia: string; depositado: number }[] }) {
+  // Depósitos atribuídos são valores da casa: moeda dela, não BRL.
+  const { money } = useMoney();
   if (serie.every((d) => d.depositado === 0)) {
     return (
       <Card>
@@ -94,11 +97,11 @@ function DepositedChart({ serie }: { serie: { dia: string; depositado: number }[
           <BarChart data={points}>
             <CartesianGrid {...chartGridProps} />
             <XAxis dataKey="dia" {...chartAxisProps} />
-            <YAxis {...chartAxisProps} width={80} tickFormatter={(value) => brl(Number(value))} />
+            <YAxis {...chartAxisProps} width={80} tickFormatter={(value) => money(Number(value))} />
             <ChartTooltip
               content={
                 <ChartTooltipContent
-                  formatter={(value) => brl(Number(value))}
+                  formatter={(value) => money(Number(value))}
                   labelKey="dia"
                   nameKey="depositado"
                 />

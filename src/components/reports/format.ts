@@ -1,8 +1,13 @@
 import { maskPhone } from "@/lib/campaign-recipients";
+import { formatMoney, type TenantCurrency } from "@/lib/currency";
+import { brl } from "@/lib/format";
 
 /** Display formatters shared by the campaign and journey reports (pt-BR). */
-export const money = (value: number) =>
-  value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+/** Valor da casa (depósito, recuperado) na moeda dela, no formato do país. */
+export const money = (value: number, currency: TenantCurrency | string) =>
+  formatMoney(value, currency);
+/** Custo da plataforma (SMS, e-mail), sempre em BRL. */
+export const cost = (value: number) => brl(value);
 export const number = (value: number) => value.toLocaleString("pt-BR");
 export const percent = (part: number, whole: number) =>
   `${((part / whole) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;

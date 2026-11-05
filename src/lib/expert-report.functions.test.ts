@@ -480,7 +480,7 @@ describe("listExpertPortfolioFor / exportExpertPortfolioCsvFor", () => {
     expect(result.csv.startsWith("﻿")).toBe(true);
     const lines = result.csv.slice(1).split("\n");
     expect(lines[0]).toBe(
-      "Lead;Telefone;Creditado;Depósitos;Origem;1º crédito;Último depósito;Último contato;FTD;Reativado",
+      "Lead;Telefone;Creditado (BRL);Depósitos;Origem;1º crédito;Último depósito;Último contato;FTD;Reativado",
     );
     expect(lines[1]).toBe(
       "Jogador 1;5511999990000;1234,50;3;Ambos;10/09/2026 12:30;20/10/2026 10:00;Prometeu depositar em 19/10/2026 18:15;Sim;Não",
@@ -729,7 +729,7 @@ describe("getTeamReportFor / exportTeamReportCsvFor", () => {
     expect(result.csv.startsWith("﻿")).toBe(true);
     const lines = result.csv.slice(1).split("\n");
     expect(lines[0]).toBe(
-      "Pessoa;Tipo;Creditado;Variação;FTD;Redepósitos;Reativados;Clique→depósito;Ticket médio",
+      "Pessoa;Tipo;Creditado (BRL);Variação;FTD;Redepósitos;Reativados;Clique→depósito;Ticket médio (BRL)",
     );
     expect(lines[1]).toBe("Ana Souza;Expert total;123,40;0,0%;1;2;0;50,0%;41,13");
     expect(result.filename).toBe("equipe-2026-10-01-a-2026-10-24.csv");

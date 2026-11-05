@@ -14,6 +14,7 @@ import type {
   PeriodPreset,
   PeriodSummary,
 } from "./types";
+import { toTenantCurrency, type TenantCurrency } from "@/lib/currency";
 
 const SAO_PAULO_TIME_ZONE = "America/Sao_Paulo";
 
@@ -68,13 +69,16 @@ export function computeDay(d: FinanceDayInput): FinanceDay {
  * (Net, GGR, fees, Resultado, ROI) sum every day, a pending one included
  * (computeDay counts its missing inputs as 0). `pendingDays` counts distinct
  * dates, so a summary over several houses never counts a day twice.
+ * `options.currency` é a moeda da casa (ou das casas, todas na mesma): fora
+ * do BRL o Lucro líquido, o ROI e a média diária ficam null, pois somariam a
+ * receita da casa com os custos Betleads em BRL (sem câmbio).
  */
 export function summarize(
   days: FinanceDay[],
   otherCosts: number,
   today?: string,
   betleads?: BetleadsCost,
-  options?: { ggrEstimated?: boolean },
+  options?: { ggrEstimated?: boolean; currency?: TenantCurrency | string | null },
 ): PeriodSummary {
   const pendingDates = new Set(days.filter((d) => d.pending).map((d) => d.date));
   const pendingToday = today !== undefined && pendingDates.has(today);
@@ -95,11 +99,16 @@ export function summarize(
 
   const betleadsUsage = betleads?.usage ?? 0;
   const betleadsFee = betleads?.fee ?? null;
-  const cashResult = round2(rawCashResult - otherCosts - betleadsUsage - (betleadsFee ?? 0));
-  const roi = adSpend === 0 ? null : cashResult / adSpend;
+  const comparable =
+    options?.currency === undefined || toTenantCurrency(options.currency) === "BRL";
+  const cashResult = comparable
+    ? round2(rawCashResult - otherCosts - betleadsUsage - (betleadsFee ?? 0))
+    : null;
+  const roi = adSpend === 0 || cashResult === null ? null : cashResult / adSpend;
   const costPerRegistration = registrations === 0 ? null : adSpend / registrations;
   const costPerFtd = ftds === 0 ? null : adSpend / ftds;
-  const avgDailyCashResult = days.length === 0 ? null : cashResult / days.length;
+  const avgDailyCashResult =
+    days.length === 0 || cashResult === null ? null : cashResult / days.length;
 
   return {
     days: days.length,

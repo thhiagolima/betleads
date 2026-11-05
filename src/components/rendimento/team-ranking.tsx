@@ -17,10 +17,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { VariationTag } from "@/components/rendimento/report-cards";
 import { CLIQUE_DEPOSITO_DEFINICAO } from "@/components/rendimento/report-funnel";
 import type { TeamReportRow } from "@/lib/expert-report.functions";
-import { brl, num } from "@/lib/format";
+import { num } from "@/lib/format";
 
 // Exportada para a rota /rendimento/equipe (query key) e para a "Regras de
 // crédito" dialog invalidar o ranking depois de salvar a janela de clique.
@@ -133,6 +134,7 @@ function SortHeader({
 /** Ranking da equipe (spec §5): colunas, ordenação no cliente e badge "Inativo". */
 export function TeamRanking({ rows }: { rows: TeamReportRow[] }) {
   const [sort, setSort] = useState(DEFAULT_SORT);
+  const { money } = useMoney();
 
   function handleSort(key: SortKey) {
     setSort((current) =>
@@ -188,7 +190,7 @@ export function TeamRanking({ rows }: { rows: TeamReportRow[] }) {
                     </span>
                   </TableCell>
                   <TableCell>{row.tipoLabel}</TableCell>
-                  <TableCell className="text-right tabular-nums">{brl(row.creditado)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{money(row.creditado)}</TableCell>
                   <TableCell className="text-right">
                     <VariationTag value={row.variacao} />
                   </TableCell>
@@ -206,7 +208,7 @@ export function TeamRanking({ rows }: { rows: TeamReportRow[] }) {
                     {pctLabel(row.cliqueDeposito)}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {row.ticket === null ? "—" : brl(row.ticket)}
+                    {row.ticket === null ? "—" : money(row.ticket)}
                   </TableCell>
                 </TableRow>
               ))}

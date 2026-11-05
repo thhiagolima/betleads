@@ -83,16 +83,33 @@ function toRangeAndPreset(periodo: z.infer<typeof periodoInput>, now: Date) {
 
 export type ResumoFinanceiroResult = ReturnType<typeof shapeResumo>;
 
+/**
+ * Moeda: cada casa traz `moeda` (seus valores estão nela; envios e
+ * mensalidade são BRL, e fora do BRL o lucro líquido/ROI vêm null, sem
+ * câmbio). `moeda` do resumo é a única das casas, ou null quando há mais de
+ * uma: aí `totais`/`kpis` vêm null (nunca uma soma entre moedas) e
+ * `totais_por_moeda` traz um total por moeda.
+ */
 function shapeResumo(dashboard: Awaited<ReturnType<typeof getFinanceDashboardFor>>) {
+  const mixed = dashboard.currency === null;
   return {
     rotulo: dashboard.label,
     periodo: dashboard.range,
     comparar: dashboard.compareRange,
-    totais: dashboard.totals,
-    kpis: dashboard.kpis,
+    moeda: dashboard.currency,
+    totais: mixed ? null : dashboard.totals,
+    totais_por_moeda: dashboard.currencyTotals.map((total) => ({
+      moeda: total.currency,
+      casas: total.houses,
+      atual: total.current,
+      anterior: total.previous,
+    })),
+    moeda_custos_betleads: "BRL" as const,
+    kpis: mixed ? null : dashboard.kpis,
     casas: dashboard.tenants.map((tenant) => ({
       id: tenant.id,
       nome: tenant.nome,
+      moeda: tenant.moeda,
       atual: tenant.current,
       anterior: tenant.previous,
       metas: tenant.goals,
@@ -103,8 +120,8 @@ function shapeResumo(dashboard: Awaited<ReturnType<typeof getFinanceDashboardFor
 
 /**
  * Financial summary of a house, a group or every house (spec §6 item 2:
- * totals, per-house rows, KPIs, pending dates and goals — money already as
- * plain reais numbers). Permission is `getFinanceDashboardFor`'s own
+ * totals, per-house rows, KPIs, pending dates and goals — money as plain
+ * numbers in each house's `moeda`, Betleads costs in BRL; see shapeResumo). Permission is `getFinanceDashboardFor`'s own
  * (`finance_can_view` for a house, group management for a group, super admin
  * for "todas"); this function never pre-checks it itself.
  */
@@ -134,6 +151,8 @@ export const mesDaCasaInput = z.object({ casa: dbUuid(), mes: z.string() });
  * data ever leaves the MCP read path. Permission is
  * `getTenantFinanceMonthFor`'s own (`finance_can_view`).
  */
+// O resultado traz `moeda` (a da casa): dias, GGR, anúncios e custos nela;
+// envios e mensalidade em BRL; fora do BRL summary.cashResult/roi vêm null.
 export async function mesDaCasa(identity: McpIdentity, args: z.input<typeof mesDaCasaInput>) {
   const { casa, mes } = mesDaCasaInput.parse(args);
   const parsed = monthInput.parse({ tenantId: casa, month: mes });

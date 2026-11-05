@@ -15,6 +15,7 @@ import {
   type DeadLeadStatus,
 } from "@/lib/dead-leads.shared";
 import { timeAgo } from "@/lib/format";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { HomeCard, KpiCard } from "@/components/home/home-cards";
@@ -61,8 +62,6 @@ type DeadLeadsPage = {
   summary: { dead: number; revivedLast30d: number; enabled: boolean; threshold: number };
 };
 
-const brl = (value: number) =>
-  value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 const absoluteDate = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo",
@@ -404,6 +403,7 @@ function DeadLeadTableRow({
   reviveBusy: boolean;
   onRevive: () => void;
 }) {
+  const { money } = useMoney();
   const contact = [row.telefone, row.email].filter(Boolean).join(" · ");
   const revivedReason = deadLeadRevivedReasonLabel(row.revivedReason);
   return (
@@ -459,7 +459,7 @@ function DeadLeadTableRow({
         )}
       </td>
       <td className="px-3 py-3">
-        <span className="tabular-nums">{brl(row.totalDepositado)}</span>
+        <span className="tabular-nums">{money(row.totalDepositado, { decimals: 0 })}</span>
         <p className="text-[12px] text-muted-foreground">
           {row.hasFtd ? "Com FTD" : "Sem FTD"}
           {row.ultimoDeposito ? (

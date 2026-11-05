@@ -4,7 +4,10 @@
 // getFinanceDashboard. Top to bottom (spec §3.2): result band, the "Do
 // depósito ao lucro" waterfall, the KPI blocks (Movimentação, Aquisição, GGR,
 // Envios e CRM), the 12-month chart and, in group/all scope, "Lucro por
-// casa" and the goal scoreboard.
+// casa" and the goal scoreboard. Moeda: os valores da casa vêm na moeda do
+// escopo (dashboard.currency); com casas em moedas diferentes (currency
+// null) a faixa, a cascata, os KPIs e o gráfico dão lugar aos totais por
+// moeda (CurrencyTotals), e cada linha das tabelas fica na moeda da sua casa.
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState, type ReactNode } from "react";
@@ -22,10 +25,16 @@ import {
 
 import { FINANCE_DASHBOARD_QUERY_KEY } from "@/components/finance/query-keys";
 
+import { CurrencyTotals } from "./currency-totals";
 import { periodLabel } from "./display";
 import { KpiBlocks } from "./kpi-blocks";
 import { PendingBanner } from "./pending-banner";
-import { ProfitTrendChart, trendChartTitle, type TrendMetric } from "./profit-trend-chart";
+import {
+  ProfitTrendChart,
+  trendChartTitle,
+  trendMetrics,
+  type TrendMetric,
+} from "./profit-trend-chart";
 import { ResultBand } from "./result-band";
 import { scopeToValue, tenantClickAction } from "./scope";
 import { ScopePicker } from "./scope-picker";
@@ -72,6 +81,33 @@ function DashboardBody({
   // The 12-month chart's metric: its card title follows it.
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("cashResult");
 
+  if (dashboard.currency === null) {
+    return (
+      <TooltipProvider delayDuration={150}>
+        <div className="space-y-8">
+          <PendingBanner
+            scopeKind={dashboard.scope.kind}
+            tenants={tenants}
+            duplicateBetleadsCosts={dashboard.duplicateBetleadsCosts}
+            onLaunchPending={onLaunchPending}
+          />
+          <Section title="Totais por moeda" aside={periodLabel(dashboard.range)}>
+            <CurrencyTotals rows={dashboard.currencyTotals} sends={dashboard.sends} />
+          </Section>
+          <Section title="Lucro por casa">
+            <TenantProfitTable rows={tenants} onOpenTenant={onOpenTenant} comparing={comparing} />
+          </Section>
+          <GroupScoreboard rows={tenants} onRowClick={onOpenTenant} />
+        </div>
+      </TooltipProvider>
+    );
+  }
+  const currency = dashboard.currency;
+  // Fora do BRL não há Lucro líquido: o gráfico mostra a primeira métrica que existe.
+  const shownTrendMetric = trendMetrics(currency).some((item) => item.key === trendMetric)
+    ? trendMetric
+    : trendMetrics(currency)[0].key;
+
   return (
     // One TooltipProvider for every TermTooltip of the painel.
     <TooltipProvider delayDuration={150}>
@@ -89,6 +125,7 @@ function DashboardBody({
           roiReference={dashboard.roiReference}
           houseCount={multi ? tenants.length : undefined}
           comparing={comparing}
+          currency={currency}
         />
         <Section
           title={multi ? "Do depósito ao lucro (somado)" : "Do depósito ao lucro"}
@@ -97,6 +134,7 @@ function DashboardBody({
           <WaterfallChart
             steps={dashboard.waterfall}
             withoutFee={totals.current.betleadsFee === null}
+            currency={currency}
           />
         </Section>
         <KpiBlocks
@@ -105,16 +143,18 @@ function DashboardBody({
           sends={dashboard.sends}
           exemptHouse={dashboard.exemptHouse}
           betleadsNote={sendsBetleadsNote(dashboard.range.from, dashboard.betleadsSince)}
+          currency={currency}
         />
         <Section>
           <ProfitTrendChart
-            title={trendChartTitle(multi, trendMetric)}
+            title={trendChartTitle(multi, shownTrendMetric)}
             months={dashboard.months}
             tenants={tenants}
             stacked={multi}
             betleadsSince={dashboard.betleadsSince}
             metric={trendMetric}
             onMetricChange={setTrendMetric}
+            currency={currency}
           />
         </Section>
         {multi && (

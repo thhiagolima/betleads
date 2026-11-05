@@ -1,9 +1,28 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { TenantCurrency } from "@/lib/currency";
 import type { ExpertMetrics } from "@/lib/expert-metrics.functions";
 
 import { ExpertMetricCards } from "./expert-metric-cards";
+
+// Sem QueryClient no render estático: a moeda da casa vem de um mock trocável.
+const tenantCurrency = vi.hoisted(() => ({ value: "BRL" as TenantCurrency }));
+vi.mock("@/hooks/use-tenant-currency", async () => {
+  const { currencySymbol, formatMoney } =
+    await vi.importActual<typeof import("@/lib/currency")>("@/lib/currency");
+  return {
+    useMoney: () => ({
+      currency: tenantCurrency.value,
+      money: (value: number | null | undefined) => formatMoney(value, tenantCurrency.value),
+      symbol: currencySymbol(tenantCurrency.value),
+    }),
+  };
+});
+
+afterEach(() => {
+  tenantCurrency.value = "BRL";
+});
 
 const metrics: ExpertMetrics = {
   expertId: "e1",
@@ -26,6 +45,14 @@ describe("ExpertMetricCards", () => {
     expect(html).toContain("R$ 1.234,50");
     expect(html).toContain("por clique R$ 1.000,00");
     expect(html).toContain("por afiliado R$ 234,50");
+  });
+
+  it("formats the deposited amounts in the house currency (ARS)", () => {
+    tenantCurrency.value = "ARS";
+    const html = renderToStaticMarkup(<ExpertMetricCards metrics={metrics} />).replace(/\s/g, " ");
+    expect(html).toContain("$ 1.234,50");
+    expect(html).toContain("por clique $ 1.000,00");
+    expect(html).not.toContain("R$");
   });
 
   it("shows reactivations, first deposits and clicks/links", () => {

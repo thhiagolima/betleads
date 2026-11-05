@@ -1,11 +1,30 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { TenantCurrency } from "@/lib/currency";
 import type { ReportBlock } from "@/lib/expert-report.functions";
 
 import { ReportCards, VariationTag } from "./report-cards";
 import { CLIQUE_DEPOSITO_DEFINICAO, ReportFunnel } from "./report-funnel";
 import { pctLabel } from "./team-ranking";
+
+// Sem QueryClient no render estático: a moeda da casa vem de um mock trocável.
+const tenantCurrency = vi.hoisted(() => ({ value: "BRL" as TenantCurrency }));
+vi.mock("@/hooks/use-tenant-currency", async () => {
+  const { currencySymbol, formatMoney } =
+    await vi.importActual<typeof import("@/lib/currency")>("@/lib/currency");
+  return {
+    useMoney: () => ({
+      currency: tenantCurrency.value,
+      money: (value: number | null | undefined) => formatMoney(value, tenantCurrency.value),
+      symbol: currencySymbol(tenantCurrency.value),
+    }),
+  };
+});
+
+afterEach(() => {
+  tenantCurrency.value = "BRL";
+});
 
 const block: ReportBlock = {
   depositado: 1500,
@@ -40,6 +59,17 @@ describe("ReportCards", () => {
     expect(html).toContain("R$ 1.200,00 · ticket R$ 300,00");
     expect(html).toContain("Reativados");
     expect(html).toContain("leads que estavam dormindo");
+  });
+
+  it("formats the credited amounts in the house currency (ARS)", () => {
+    tenantCurrency.value = "ARS";
+    const html = renderToStaticMarkup(<ReportCards current={block} variacao={variacao} />).replace(
+      /\s/g,
+      " ",
+    );
+    expect(html).toContain("clique $ 1.000,00 · afiliado $ 500,00");
+    expect(html).toContain("$ 1.200,00 · ticket $ 300,00");
+    expect(html).not.toContain("R$");
   });
 
   it("shows a dash for the ticket without redeposits", () => {

@@ -149,6 +149,19 @@ describe("maskHouseMessageText", () => {
     );
   });
 
+  it("masks the balance in the house currency format and in the legacy BRL one", () => {
+    const house = { siteUrl: null, quickLinks: {}, currency: "ARS" as const };
+    const vars = buildPlayerVariables({ saldo_carteira: 1234.5 }, house);
+    const text = `Tu saldo: ${vars.saldo}; antes R$ 1.234,50; o 1.234,50`;
+    expect(maskHouseMessageText(text, { saldoValues: [1234.5], currency: "ARS" })).toBe(
+      "Tu saldo: [saldo]; antes [saldo]; o [saldo]",
+    );
+    const usd = buildPlayerVariables({ saldo_carteira: 1234.5 }, { ...house, currency: "USD" });
+    expect(
+      maskHouseMessageText(`Balance ${usd.saldo}`, { saldoValues: [1234.5], currency: "USD" }),
+    ).toBe("Balance [saldo]");
+  });
+
   it("does not mask other amounts or a balance embedded in a larger number", () => {
     const text = "Deposite R$ 50,00 e ganhe R$ 150,00 ou 50,005";
     expect(maskHouseMessageText(text, { saldoValues: [0.5, 10] })).toBe(text);

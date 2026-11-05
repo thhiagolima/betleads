@@ -125,6 +125,19 @@ describe("askAi (src/lib/ai.functions.ts)", () => {
     expect(fake.db.rows("ai_logs")[0]).toMatchObject({ tenant_id: NORMAL });
   });
 
+  it("o prompt diz a moeda da casa (BRL por padrão, ARS quando configurada)", async () => {
+    await askAiFor({ pergunta: "Quem é VIP?" }, fakeContext(NORMAL));
+    expect(generateTextMock.mock.calls[0][0].system).toContain("estão em BRL");
+    generateTextMock.mockClear();
+    const normal = fake.db.rows("tenants").find((t) => t.id === NORMAL);
+    if (normal) normal.moeda = "ARS";
+    await askAiFor({ pergunta: "Quem é VIP?" }, fakeContext(NORMAL));
+    const system = generateTextMock.mock.calls[0][0].system as string;
+    expect(system).toContain("estão em ARS");
+    expect(system).toContain("$ 1.234,50");
+    expect(system).not.toContain("R$");
+  });
+
   it("fails closed when the tenant lookup errors (no provider call)", async () => {
     fake.db.failNext("tenants", "select", "connection reset");
     await expect(askAiFor({ pergunta: "Quem é VIP?" }, fakeContext(NORMAL))).rejects.toThrow();

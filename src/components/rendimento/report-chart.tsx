@@ -12,8 +12,9 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { CHART_COLORS, chartAxisProps, chartGridProps } from "@/lib/chart-theme";
-import { brl, num } from "@/lib/format";
+import { num } from "@/lib/format";
 
 export type ReportSeriePoint = {
   dia: string;
@@ -34,6 +35,7 @@ function dayLabel(dia: string): string {
 }
 
 export function ReportChart({ serie }: { serie: ReportSeriePoint[] }) {
+  const { money } = useMoney();
   const empty = serie.every((d) => d.valorFtd === 0 && d.valorRedeposito === 0);
   const points = serie.map((d) => ({ ...d, label: dayLabel(d.dia) }));
 
@@ -54,7 +56,7 @@ export function ReportChart({ serie }: { serie: ReportSeriePoint[] }) {
                 yAxisId="valor"
                 {...chartAxisProps}
                 width={80}
-                tickFormatter={(value) => brl(Number(value))}
+                tickFormatter={(value) => money(Number(value))}
               />
               <YAxis
                 yAxisId="depositantes"
@@ -73,7 +75,7 @@ export function ReportChart({ serie }: { serie: ReportSeriePoint[] }) {
                           {CHART_CONFIG[String(name)]?.label ?? String(name)}
                         </span>
                         <span className="font-medium tabular-nums">
-                          {name === "depositantes" ? num(Number(value)) : brl(Number(value))}
+                          {name === "depositantes" ? num(Number(value)) : money(Number(value))}
                         </span>
                       </span>
                     )}

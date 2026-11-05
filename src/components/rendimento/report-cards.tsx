@@ -2,8 +2,9 @@
 // quatro cartões com a variação contra o período anterior de mesma duração.
 // Puramente apresentacional — os números vêm de `getExpertReport`.
 import { Kpi } from "@/components/crm-results/shared";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import type { ReportBlock } from "@/lib/expert-report.functions";
-import { brl, num } from "@/lib/format";
+import { num } from "@/lib/format";
 
 export type ReportVariacao = {
   depositado: number | null;
@@ -46,26 +47,28 @@ export function ReportCards({
   current: ReportBlock;
   variacao: ReportVariacao;
 }) {
-  const ticket = current.ticketRedeposito === null ? "—" : brl(current.ticketRedeposito);
+  // Depósitos creditados são valores da casa: moeda dela.
+  const { money } = useMoney();
+  const ticket = current.ticketRedeposito === null ? "—" : money(current.ticketRedeposito);
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Kpi
         label="Depositado creditado"
-        value={brl(current.depositado)}
+        value={money(current.depositado)}
         delta={<VariationTag value={variacao.depositado} />}
-        detail={`clique ${brl(current.depositadoClique)} · afiliado ${brl(current.depositadoAfiliado)}`}
+        detail={`clique ${money(current.depositadoClique)} · afiliado ${money(current.depositadoAfiliado)}`}
       />
       <Kpi
         label="FTDs"
         value={num(current.ftds)}
         delta={<VariationTag value={variacao.ftds} />}
-        detail={`${brl(current.valorFtd)} em 1º depósito`}
+        detail={`${money(current.valorFtd)} em 1º depósito`}
       />
       <Kpi
         label="Redepósitos"
         value={num(current.redepositos)}
         delta={<VariationTag value={variacao.redepositos} />}
-        detail={`${brl(current.valorRedeposito)} · ticket ${ticket}`}
+        detail={`${money(current.valorRedeposito)} · ticket ${ticket}`}
       />
       <Kpi
         label="Reativados"

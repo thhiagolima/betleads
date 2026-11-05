@@ -21,6 +21,7 @@ import { HouseSetupChecklist } from "@/components/onboarding/house-setup-checkli
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { POLL_INTERVALS, useUpdatedAgo } from "@/hooks/use-updated-ago";
 import { getDashboardSummary } from "@/lib/dashboard.functions";
 import { brl, num, timeAgo } from "@/lib/format";
@@ -66,6 +67,7 @@ function fmtRoi(value: number) {
 }
 
 function CashflowChart({ data }: { data: DashboardData }) {
+  const { money } = useMoney();
   return (
     <HomeCard className="flex h-full flex-col p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -73,11 +75,11 @@ function CashflowChart({ data }: { data: DashboardData }) {
         <div className="flex gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span className="h-[3px] w-2.5 rounded-full bg-chart-1" aria-hidden="true" />
-            Depósitos <strong className="text-foreground">{brl(data.depositAmount)}</strong>
+            Depósitos <strong className="text-foreground">{money(data.depositAmount)}</strong>
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-[3px] w-2.5 rounded-full bg-chart-5" aria-hidden="true" />
-            Saques <strong className="text-foreground">{brl(data.withdrawalAmount)}</strong>
+            Saques <strong className="text-foreground">{money(data.withdrawalAmount)}</strong>
           </span>
         </div>
       </div>
@@ -92,11 +94,11 @@ function CashflowChart({ data }: { data: DashboardData }) {
             </defs>
             <CartesianGrid {...chartGridProps} />
             <XAxis dataKey="label" {...chartAxisProps} minTickGap={16} />
-            <YAxis {...chartAxisProps} tickFormatter={(v) => brl(Number(v))} width={78} />
+            <YAxis {...chartAxisProps} tickFormatter={(v) => money(Number(v))} width={78} />
             <Tooltip
               contentStyle={chartTooltipStyle}
               formatter={(value: number, name: string) => [
-                brl(Number(value)),
+                money(Number(value)),
                 name === "deposits" ? "Depósitos" : "Saques",
               ]}
             />
@@ -124,11 +126,15 @@ function CashflowChart({ data }: { data: DashboardData }) {
 }
 
 function CrmCard({ data }: { data: DashboardData }) {
+  const { currency, money } = useMoney();
+  // Recuperado vem na moeda da casa e o gasto em SMS é sempre BRL: só faz
+  // sentido dividir um pelo outro quando a casa também opera em BRL.
+  const roi = currency === "BRL" ? data.messageRoi : 0;
   return (
     <HomeCard className="flex h-full flex-col border-success/30 p-4 sm:p-5">
       <h2 className="text-[12.5px] font-semibold text-success">Recuperado pelo CRM</h2>
       <p className="mt-1.5 text-[28px] font-semibold tracking-[-0.03em] tabular-nums sm:text-[32px]">
-        {brl(data.recoveredAmount)}
+        {money(data.recoveredAmount)}
       </p>
       <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
         {data.recoveredPlayers > 0
@@ -139,8 +145,8 @@ function CrmCard({ data }: { data: DashboardData }) {
         <MetricRow label="Gasto em SMS" value={brl(data.messageCost)} />
         <MetricRow
           label="Retorno sobre o envio"
-          value={data.messageRoi > 0 ? fmtRoi(data.messageRoi) : "—"}
-          valueClassName={data.messageRoi > 0 ? "text-success" : undefined}
+          value={roi > 0 ? fmtRoi(roi) : "—"}
+          valueClassName={roi > 0 ? "text-success" : undefined}
         />
         <MetricRow
           label="Em jornada agora"
@@ -164,16 +170,17 @@ function CrmCard({ data }: { data: DashboardData }) {
 }
 
 function SecondaryMetrics({ data }: { data: DashboardData }) {
+  const { money } = useMoney();
   const cells = [
     {
       label: "Novos clientes",
       value: num(data.newPlayers),
       trend: trendDisplay(data.newPlayersGrowth),
     },
-    { label: "Ticket médio", value: brl(data.ticket), trend: trendDisplay(data.ticketGrowth) },
+    { label: "Ticket médio", value: money(data.ticket), trend: trendDisplay(data.ticketGrowth) },
     {
       label: "Redepósitos",
-      value: brl(data.redepositAmount),
+      value: money(data.redepositAmount),
       trend: trendDisplay(data.redepositGrowth),
       detail: `${num(data.redepositPlayers)} jogadores`,
     },
@@ -224,6 +231,7 @@ const eventDot = {
 } as const;
 
 function LiveFeed({ events }: { events: DashboardData["liveEvents"] }) {
+  const { money } = useMoney();
   return (
     <HomeCard className="p-4 sm:px-5">
       <div className="flex items-center justify-between gap-3">
@@ -254,7 +262,9 @@ function LiveFeed({ events }: { events: DashboardData["liveEvents"] }) {
                 <strong className="font-semibold">{event.player}</strong> {event.action}
               </p>
               {typeof event.amount === "number" && event.amount > 0 && (
-                <strong className="shrink-0 font-semibold tabular-nums">{brl(event.amount)}</strong>
+                <strong className="shrink-0 font-semibold tabular-nums">
+                  {money(event.amount)}
+                </strong>
               )}
               <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(event.at)}</span>
             </li>
@@ -289,6 +299,7 @@ function Dashboard() {
   // The house is chosen only in the header; the home follows it.
   const tenant = useActiveTenant();
   const tenantId = tenant.data?.activeTenantId ?? null;
+  const { money } = useMoney();
 
   const fetchDashboard = useServerFn(getDashboardSummary);
   const includesToday = brtDayStart(to).getTime() >= brtDayStart(new Date()).getTime();
@@ -390,7 +401,7 @@ function Dashboard() {
         <KpiCard
           className="col-span-2 xl:col-span-1"
           title="Depositado"
-          value={brl(data.depositAmount)}
+          value={money(data.depositAmount)}
           trend={trendDisplay(data.depositGrowth)}
           detail={comparison}
           sparkline={sparkline}

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Search } from "lucide-react";
 
 import type { CrmMetricsWithRatios, CrmSource } from "@/lib/crm-results";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { type Data, isWaste, money, pct } from "./format";
+import { type Data, cost, isWaste, pct } from "./format";
 import { EmptyCard, InfoTip, RoiValue } from "./shared";
 
 type SortKey =
@@ -333,6 +334,7 @@ function MetricCells({
   maxRevenue: number;
   compact?: boolean;
 }) {
+  const { currency, money } = useMoney();
   const share = maxRevenue > 0 ? metrics.directRevenue / maxRevenue : 0;
   const muted = <span className="text-muted-foreground">—</span>;
   return (
@@ -354,7 +356,7 @@ function MetricCells({
               <span className={compact ? "font-medium" : "font-semibold"}>
                 {num(metrics.directPlayers)} jog.
               </span>
-              <span className="text-muted-foreground">{brl(metrics.directRevenue)}</span>
+              <span className="text-muted-foreground">{money(metrics.directRevenue)}</span>
             </div>
             <div className="h-1 rounded-full bg-muted" aria-hidden="true">
               <div
@@ -370,12 +372,12 @@ function MetricCells({
           muted
         ) : (
           <span className={metrics.smallSample ? "text-muted-foreground" : ""}>
-            {money(metrics.costPerConversion)}
+            {cost(metrics.costPerConversion)}
           </span>
         )}
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        <RoiValue roi={metrics.clickRoi} smallSample={metrics.smallSample} />
+        <RoiValue roi={metrics.clickRoi} smallSample={metrics.smallSample} currency={currency} />
       </TableCell>
       <TableCell className="text-right tabular-nums text-muted-foreground">
         {metrics.influencedPlayers === 0 ? (
@@ -383,7 +385,7 @@ function MetricCells({
         ) : (
           <>
             {num(metrics.influencedPlayers)}
-            <div className="text-xs">{brl(metrics.influencedRevenue)}</div>
+            <div className="text-xs">{money(metrics.influencedRevenue)}</div>
           </>
         )}
       </TableCell>

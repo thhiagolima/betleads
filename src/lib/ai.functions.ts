@@ -5,6 +5,7 @@ import { generateText } from "ai";
 import { createLovableAiGatewayProvider } from "./ai-gateway";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertTenantNotDemoForSend, resolveCurrentTenantId } from "./tenant-access.server";
+import { formatMoney, toTenantCurrency, type TenantCurrency } from "./currency";
 
 /** Modelo da Lovable AI Gateway usado por toda a análise de IA do BETLEADS. */
 export const LOVABLE_MODEL_ID = "google/gemini-3-flash-preview";
@@ -17,6 +18,26 @@ function getSupabase() {
     process.env.SUPABASE_PUBLISHABLE_KEY ??
     process.env.VITE_SUPABASE_PUBLISHABLE_KEY!;
   return createClient(url, key, { auth: { persistSession: false } });
+}
+
+/** Moeda da casa; falha na leitura não bloqueia a pergunta (cai em BRL). */
+async function loadTenantCurrency(supabase: any, tenantId: string): Promise<TenantCurrency> {
+  try {
+    const { data } = await supabase
+      .from("tenants")
+      .select("moeda")
+      .eq("id", tenantId)
+      .maybeSingle();
+    return toTenantCurrency(data?.moeda);
+  } catch {
+    return toTenantCurrency(null);
+  }
+}
+
+/** Instrução de moeda do prompt: os valores dos dados já vêm na moeda da casa. */
+export function moneyPromptHint(currency: TenantCurrency): string {
+  const example = formatMoney(1234.5, currency).replaceAll(String.fromCharCode(160), " ");
+  return `Os valores em dinheiro dos dados estão em ${currency}. Mostre-os nessa moeda, no formato ${example} (não converta para outra moeda).`;
 }
 
 async function buildContext(sb: ReturnType<typeof getSupabase>) {
@@ -77,14 +98,18 @@ export async function askAiFor(data: { pergunta: string }, context: { supabase: 
   await assertTenantNotDemoForSend(tenantId);
 
   // Use o client autenticado (RLS aplicada) — garante isolamento por tenant.
-  const ctx = await buildContext(context.supabase as any);
+  const [ctx, currency] = await Promise.all([
+    buildContext(context.supabase as any),
+    loadTenantCurrency(context.supabase, tenantId),
+  ]);
   const gateway = createLovableAiGatewayProvider(apiKey);
 
   const system = `Você é a inteligência analítica da BETLEADS, plataforma de monitoramento de players de uma casa de aposta.
 Responda em português brasileiro, de forma direta e prática.
 Use markdown para organizar a resposta: títulos, listas e tabelas quando fizer sentido.
 SEMPRE base sua resposta nos dados JSON fornecidos abaixo (não invente).
-Quando listar players, mostre nome + métricas relevantes. Inclua valores em R$.
+Quando listar players, mostre nome + métricas relevantes, com os valores em dinheiro.
+${moneyPromptHint(currency)}
 Se não houver dados suficientes, diga claramente.
 
 DADOS (data de referência: ${ctx.hoje}):

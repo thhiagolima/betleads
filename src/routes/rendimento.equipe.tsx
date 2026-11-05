@@ -21,9 +21,10 @@ import { downloadCsv } from "@/components/rendimento/download-csv";
 import { TeamRanking, TEAM_REPORT_QUERY_KEY } from "@/components/rendimento/team-ranking";
 import { updatedLabel } from "@/components/rendimento/updated-label";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { exportTeamReportCsv, getTeamReport } from "@/lib/expert-report.functions";
 import { DEFAULT_REPORT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
-import { brl, num } from "@/lib/format";
+import { num } from "@/lib/format";
 
 export const Route = createFileRoute("/rendimento/equipe")({
   component: RendimentoEquipeRoute,
@@ -73,6 +74,7 @@ function RendimentoEquipePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { data: switcher } = useActiveTenant();
   const tenantId = switcher?.activeTenantId ?? null;
+  const { money } = useMoney();
 
   const teamReportFn = useServerFn(getTeamReport);
   const teamReportQuery = useQuery({
@@ -121,7 +123,7 @@ function RendimentoEquipePage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Kpi
               label="Total creditado à equipe"
-              value={brl(report.totais.creditado)}
+              value={money(report.totais.creditado)}
               detail={
                 pctLabel(report.totais.pctCasaDepositado)
                   ? `· ${pctLabel(report.totais.pctCasaDepositado)} do depositado na casa`

@@ -7069,6 +7069,7 @@ export type Database = {
           id: string;
           legacy_webhook: boolean;
           limits: Json;
+          moeda: string;
           metadata: Json;
           nome: string;
           onboarding_completed_at: string | null;
@@ -7088,6 +7089,7 @@ export type Database = {
           id?: string;
           legacy_webhook?: boolean;
           limits?: Json;
+          moeda?: string;
           metadata?: Json;
           nome: string;
           onboarding_completed_at?: string | null;
@@ -7107,6 +7109,7 @@ export type Database = {
           id?: string;
           legacy_webhook?: boolean;
           limits?: Json;
+          moeda?: string;
           metadata?: Json;
           nome?: string;
           onboarding_completed_at?: string | null;

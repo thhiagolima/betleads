@@ -306,7 +306,7 @@ describe("summarize", () => {
     const withCosts = summarize(days, 100);
 
     expect(withoutCosts.otherCosts).toBe(0);
-    expect(withCosts.cashResult).toBeCloseTo(withoutCosts.cashResult - 100, 2);
+    expect(withCosts.cashResult).toBeCloseTo(withoutCosts.cashResult! - 100, 2);
     expect(withCosts.net).toBe(withoutCosts.net);
     expect(withCosts.ggrFee).toBe(withoutCosts.ggrFee);
     expect(withCosts.movementFee).toBe(withoutCosts.movementFee);

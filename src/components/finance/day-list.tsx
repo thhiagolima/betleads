@@ -2,13 +2,15 @@
 // §3.4), replacing the 13-column grid: one row per day with its status chip,
 // Net, Envios and Lucro líquido. A row opens the day modal (day-modal.tsx).
 // No table: on a phone each row wraps into two lines, so nothing scrolls
-// sideways.
+// sideways. Net e Lucro na moeda da casa; Envios em BRL. Fora do BRL o
+// Lucro líquido do dia é "—" (receita e envios em moedas diferentes).
 import type { ReactNode } from "react";
 
 import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { dayLabel, dayResult, dayStatus, type DayStatus } from "@/components/finance/day-entry";
 import { SendCostAmount } from "@/components/finance/dashboard/sends-block";
-import { formatBRL } from "@/components/finance/format";
+import { formatMoneyIn } from "@/components/finance/format";
+import type { TenantCurrency } from "@/lib/currency";
 import type { FinanceDay, SendUsage } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +50,7 @@ export function DayList({
   onOpen,
   focusDate,
   usingMonthlyGgr = false,
+  currency = "BRL",
 }: {
   days: FinanceDay[];
   sendsByDay: Record<string, SendUsage[]>;
@@ -57,6 +60,8 @@ export function DayList({
   focusDate?: string;
   /** The month has a "GGR do mês" total (a day without GGR lacks the month's). */
   usingMonthlyGgr?: boolean;
+  /** Moeda da casa. */
+  currency?: TenantCurrency;
 }) {
   if (days.length === 0) {
     return (
@@ -86,6 +91,7 @@ export function DayList({
             day,
             sendsByDay[day.date],
             costs,
+            currency,
           );
           return (
             <li key={day.date}>
@@ -103,17 +109,23 @@ export function DayList({
                   <span className="font-medium tabular-nums">{dayLabel(day.date)}</span>
                   <DayStatusChip status={dayStatus(day, usingMonthlyGgr)} />
                 </span>
-                <DayFigure label={FINANCE_TERMS.net.label} value={summary.net} />
+                <DayFigure
+                  label={FINANCE_TERMS.net.label}
+                  value={summary.net}
+                  currency={currency}
+                />
                 <DayFigure
                   label={FINANCE_TERMS.sends.label}
                   value={sendCost}
+                  currency="BRL"
                   display={<SendCostAmount amount={sendCost} incomplete={sendCostIncomplete} />}
                 />
                 <DayFigure
                   label={FINANCE_TERMS.cashResult.label}
                   value={summary.cashResult}
+                  currency={currency}
                   strong
-                  negative={summary.cashResult < 0}
+                  negative={summary.cashResult !== null && summary.cashResult < 0}
                 />
               </button>
             </li>
@@ -131,9 +143,12 @@ function DayFigure({
   strong = false,
   negative = false,
   display,
+  currency,
 }: {
   label: string;
-  value: number;
+  /** null: sem valor (Lucro fora do BRL), "—". */
+  value: number | null;
+  currency: TenantCurrency;
   strong?: boolean;
   negative?: boolean;
   /** Replaces the plain formatted value (e.g. a partial Envios). */
@@ -149,7 +164,7 @@ function DayFigure({
           negative && "text-destructive",
         )}
       >
-        {display ?? formatBRL(value)}
+        {display ?? (value === null ? "—" : formatMoneyIn(value, currency))}
       </span>
     </span>
   );

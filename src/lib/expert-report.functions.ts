@@ -26,8 +26,11 @@ import {
   creditsCsvCell,
   formatBrtDateTimeCsv,
   getClickWindowHours,
+  loadTenantCurrencyForCsv,
+  moneyCsvHeader,
   slugify,
 } from "@/lib/expert-metrics.functions";
+import type { TenantCurrency } from "@/lib/currency";
 import {
   comparisonRange,
   EXPERT_PERIOD_KEYS,
@@ -343,10 +346,10 @@ export async function listExpertPortfolioFor(
   );
 }
 
-const PORTFOLIO_CSV_HEADER = [
+const portfolioCsvHeader = (currency: TenantCurrency) => [
   "Lead",
   "Telefone",
-  "Creditado",
+  moneyCsvHeader("Creditado", currency),
   "Depósitos",
   "Origem",
   "1º crédito",
@@ -399,7 +402,8 @@ export async function exportExpertPortfolioCsvFor(
     if (chunk.rows.length < PORTFOLIO_CSV_CHUNK) break;
   }
 
-  const lines = [PORTFOLIO_CSV_HEADER.join(";")];
+  const currency = await loadTenantCurrencyForCsv(subject.tenantId);
+  const lines = [portfolioCsvHeader(currency).join(";")];
   let soma = 0;
   let depositos = 0;
   for (const row of rows) {
@@ -727,16 +731,16 @@ export async function getTeamReportFor(
   };
 }
 
-const TEAM_REPORT_CSV_HEADER = [
+const teamReportCsvHeader = (currency: TenantCurrency) => [
   "Pessoa",
   "Tipo",
-  "Creditado",
+  moneyCsvHeader("Creditado", currency),
   "Variação",
   "FTD",
   "Redepósitos",
   "Reativados",
   "Clique→depósito",
-  "Ticket médio",
+  moneyCsvHeader("Ticket médio", currency),
 ];
 
 /** Percentual pt-BR de 1 casa decimal com "%", "" quando null. `pct` já em percentual (não fração). */
@@ -763,8 +767,10 @@ export async function exportTeamReportCsvFor(
   const input = teamReportInput.parse(data);
   const report = await getTeamReportFor(ctx, input);
   const range = periodRange(input.period, new Date());
+  // `getTeamReportFor` já validou o admin; aqui só se recupera a casa para a moeda.
+  const currency = await loadTenantCurrencyForCsv(await requireExpertAdminTenant(ctx));
 
-  const lines = [TEAM_REPORT_CSV_HEADER.join(";")];
+  const lines = [teamReportCsvHeader(currency).join(";")];
   for (const row of report.rows) {
     lines.push(
       [

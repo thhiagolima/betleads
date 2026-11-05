@@ -128,7 +128,7 @@ const DEFAULTS: Record<QuickModelo, Partial<QuickState>> = {
       "Identificamos que seu saldo está disponível e sem movimentação. Que tal voltar e usar o que é seu?",
     textoSecundario: "Seu saldo continua disponível para uso imediato.",
     cupom: "",
-    beneficio: "Saldo disponível: R$ {saldo}",
+    beneficio: "Saldo disponível: {saldo}",
     ctaTexto: "Usar meu saldo",
     textoUrgencia: "Saldo disponível para uso imediato",
   },

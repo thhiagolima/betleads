@@ -11,7 +11,9 @@
 // shows the month's lucro, anúncios and ROI from the MonthPoint totals.
 // A toggle switches the metric (spec §3.2.4): Lucro líquido | Net |
 // Depósitos. Only the profit is split by house (byTenant), so Net and
-// Depósitos are one bar per month in every scope.
+// Depósitos are one bar per month in every scope. Fora do BRL não há Lucro
+// líquido (ver summarize): o toggle fica só com Net e Depósitos, na moeda da
+// casa.
 import { useState } from "react";
 import {
   Bar,
@@ -30,10 +32,12 @@ import {
 
 import {
   betleadsMissingNote,
-  formatBRL,
+  formatMoneyIn,
   formatRatio,
   monthLabel,
 } from "@/components/finance/format";
+import type { TenantCurrency } from "@/lib/currency";
+import { profitComputable } from "@/lib/finance/money";
 import {
   CHART_COLORS,
   CHART_SERIES,
@@ -65,9 +69,14 @@ export function trendChartTitle(stacked: boolean, metric: TrendMetric): string {
     : "Últimos 12 meses";
 }
 
-/** The month's value for the picked metric. */
+/** The month's value for the picked metric (a month without Lucro líquido counts as 0). */
 export function trendValue(point: MonthPoint, metric: TrendMetric): number {
-  return point[metric];
+  return point[metric] ?? 0;
+}
+
+/** The toggle's metrics: without Lucro líquido outside BRL. */
+export function trendMetrics(currency: TenantCurrency = "BRL") {
+  return profitComputable(currency) ? METRICS : METRICS.filter((item) => item.key !== "cashResult");
 }
 
 /**
@@ -84,7 +93,8 @@ export function trendDomain(values: number[]): [number, number] {
   return [0, max || 1];
 }
 
-const shortBRL = (value: number) => formatBRL(value).replace(/,\d\d$/, "");
+const shortMoney = (value: number, currency: TenantCurrency) =>
+  formatMoneyIn(value, currency).replace(/,\d\d$/, "");
 
 type BarShapeProps = { x: number; y: number; width: number; height: number; index: number };
 
@@ -120,7 +130,16 @@ function stackSeries(months: MonthPoint[], tenants: { id: string; nome: string }
 
 type TooltipPayload = { payload?: MonthPoint & { label: string } };
 
-function MonthTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayload[] }) {
+function MonthTooltip({
+  active,
+  payload,
+  currency = "BRL",
+}: {
+  active?: boolean;
+  payload?: TooltipPayload[];
+  currency?: TenantCurrency;
+}) {
+  const money = (value: number) => formatMoneyIn(value, currency);
   const point = active ? payload?.[0]?.payload : undefined;
   if (!point) return null;
   return (
@@ -130,10 +149,10 @@ function MonthTooltip({ active, payload }: { active?: boolean; payload?: Tooltip
         {point.inProgress && " · em andamento"}
         {point.incomplete && " · incompleto"}
       </p>
-      <p>Lucro líquido: {formatBRL(point.cashResult)}</p>
-      <p>Net: {formatBRL(point.net)}</p>
-      <p>Depósitos: {formatBRL(point.depositAmount)}</p>
-      <p>Anúncios: {formatBRL(point.adSpend)}</p>
+      {point.cashResult !== null && <p>Lucro líquido: {money(point.cashResult)}</p>}
+      <p>Net: {money(point.net)}</p>
+      <p>Depósitos: {money(point.depositAmount)}</p>
+      <p>Anúncios: {money(point.adSpend)}</p>
       <p>ROI: {formatRatio(point.roi)}</p>
     </div>
   );
@@ -147,6 +166,7 @@ export function ProfitTrendChart({
   metric: controlledMetric,
   onMetricChange,
   title,
+  currency = "BRL",
 }: {
   months: MonthPoint[];
   /** Houses of the scope, sorted by name (dashboard.tenants). */
@@ -159,9 +179,14 @@ export function ProfitTrendChart({
   onMetricChange?: (metric: TrendMetric) => void;
   /** Header title; trendChartTitle(stacked, metric) when omitted. */
   title?: string;
+  /** Moeda das casas do escopo (todas na mesma). */
+  currency?: TenantCurrency;
 }) {
-  const [ownMetric, setOwnMetric] = useState<TrendMetric>("cashResult");
-  const metric = controlledMetric ?? ownMetric;
+  const metrics = trendMetrics(currency);
+  const [ownMetric, setOwnMetric] = useState<TrendMetric>(metrics[0].key);
+  const picked = controlledMetric ?? ownMetric;
+  // Sem Lucro líquido (fora do BRL), o gráfico cai no primeiro que existe.
+  const metric = metrics.some((item) => item.key === picked) ? picked : metrics[0].key;
   const setMetric = (next: TrendMetric) => {
     setOwnMetric(next);
     onMetricChange?.(next);
@@ -177,7 +202,7 @@ export function ProfitTrendChart({
         role="group"
         aria-label="Métrica do gráfico"
       >
-        {METRICS.map((item) => (
+        {metrics.map((item) => (
           <button
             key={item.key}
             type="button"
@@ -235,7 +260,7 @@ export function ProfitTrendChart({
   // Stacked bars reach the sum of each sign's parts.
   const extents = byHouse
     ? months.flatMap((point) => {
-        const parts = Object.values(point.byTenant);
+        const parts = Object.values(point.byTenant).map((part) => part ?? 0);
         return [
           parts.filter((part) => part > 0).reduce((sum, part) => sum + part, 0),
           parts.filter((part) => part < 0).reduce((sum, part) => sum + part, 0),
@@ -292,11 +317,11 @@ export function ProfitTrendChart({
               width={88}
               domain={domain}
               allowDataOverflow
-              tickFormatter={(value) => formatBRL(Number(value)).replace(/,00$/, "")}
+              tickFormatter={(value) => formatMoneyIn(Number(value), currency).replace(/,00$/, "")}
             />
             <ReferenceLine y={0} stroke="var(--color-border)" />
             <Tooltip
-              content={<MonthTooltip />}
+              content={<MonthTooltip currency={currency} />}
               cursor={{ fill: "var(--color-secondary)", opacity: 0.5 }}
             />
             {byHouse ? (
@@ -366,7 +391,7 @@ export function ProfitTrendChart({
                         fontWeight={600}
                         fill={value < 0 ? CHART_COLORS.danger : "var(--color-foreground)"}
                       >
-                        {shortBRL(value)}
+                        {shortMoney(value, currency)}
                       </text>
                     );
                   }}

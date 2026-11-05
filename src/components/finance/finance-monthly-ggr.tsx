@@ -3,7 +3,8 @@
 // the day it is valid through. The server spreads it over the month's days
 // (allocateMonthlyGgr); while it exists the daily GGR column is read-only.
 // Clearing the value removes the total and the month goes back to daily GGR.
-import { formatBRL } from "@/components/finance/format";
+import { formatMoneyIn } from "@/components/finance/format";
+import type { TenantCurrency } from "@/lib/currency";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -74,9 +75,13 @@ export function monthlyGgrFormError(
   return null;
 }
 
-export function monthlyGgrStatus(current: MonthlyGgrCurrent): string {
+/** O GGR é da casa: vem na moeda dela (`currency`, BRL por padrão). */
+export function monthlyGgrStatus(
+  current: MonthlyGgrCurrent,
+  currency: TenantCurrency = "BRL",
+): string {
   return current
-    ? `Total do mês ${formatBRL(current.ggr)}, atualizado até ${ddmm(current.validThrough)}.`
+    ? `Total do mês ${formatMoneyIn(current.ggr, currency)}, atualizado até ${ddmm(current.validThrough)}.`
     : "Sem total do mês: o GGR vem dos dias.";
 }
 
@@ -85,6 +90,7 @@ export function MonthlyGgrFields({
   month,
   today,
   current,
+  currency = "BRL",
   canEdit,
   disabled,
   saving,
@@ -97,6 +103,8 @@ export function MonthlyGgrFields({
   /** "YYYY-MM-DD" in São Paulo. */
   today: string;
   current: MonthlyGgrCurrent;
+  /** Moeda da casa. */
+  currency?: TenantCurrency;
   canEdit: boolean;
   /** Demo house: shown but not editable. */
   disabled: boolean;
@@ -152,7 +160,7 @@ export function MonthlyGgrFields({
       ) : (
         <p className="text-xs text-muted-foreground">{MONTHLY_GGR_LABEL}</p>
       )}
-      <p className="text-xs text-muted-foreground">{monthlyGgrStatus(current)}</p>
+      <p className="text-xs text-muted-foreground">{monthlyGgrStatus(current, currency)}</p>
       {canEdit && error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );

@@ -65,4 +65,25 @@ describe("crmResultsCsv", () => {
   it("escapes quotes in names", () => {
     expect(lines.some((line) => line.includes('"Promo ""VIP"""'))).toBe(true);
   });
+
+  it("names the currency of each money column (cost in BRL, revenue in the house currency)", () => {
+    expect(lines[0]).toContain('"custo_brl"');
+    expect(lines[0]).toContain('"receita_clique_brl"');
+    expect(lines[0]).toContain('"custo_por_convertido_brl"');
+  });
+
+  it("uses the house currency for revenue and leaves the return blank outside BRL", () => {
+    const ars = crmResultsCsv(results, { from: "2026-10-01", to: "2026-10-10" }, "ARS")
+      .replace("﻿", "")
+      .split("\n");
+    const cells = (line: string): string[] => line.match(/"(?:[^"]|"")*"/g) ?? [];
+    const cols = cells(ars[0]);
+    expect(cols).toContain('"receita_influenciada_ars"');
+    expect(cols).toContain('"custo_brl"');
+    const roi = cols.indexOf('"retorno_recuperados"');
+    const total = cells(ars[1]);
+    expect(total[roi]).toBe('""');
+    const brlTotal = cells(lines[1]);
+    expect(brlTotal[roi]).toBe('"26.32"');
+  });
 });

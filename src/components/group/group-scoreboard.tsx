@@ -4,12 +4,14 @@
 // Cadastros/GGR behind "mais colunas". Every cell shows the value and its
 // variation vs the compared window (fix round 1, item 1); a goal cell also
 // gets the green/yellow/red/gray class from evaluateGoal (spec §7) plus a
-// "meta X" caption.
+// "meta X" caption. Cada linha na moeda da sua casa (dinheiro e meta); fora
+// do BRL o Lucro líquido e o ROI são "—" (sem câmbio). Ordenar por uma
+// coluna em dinheiro agrupa por moeda antes (BRL primeiro).
 import { useMemo, useState } from "react";
 
 import {
-  formatBRL,
   formatInt,
+  formatMoneyIn,
   formatPct,
   formatPp,
   formatRatio,
@@ -19,6 +21,8 @@ import { periodHasData, visibleChange } from "@/components/finance/dashboard/dis
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
 import { TermTooltip } from "@/components/finance/term-tooltip";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { toTenantCurrency, type TenantCurrency } from "@/lib/currency";
+import { byCurrency, mixedCurrencyNote } from "@/lib/finance/money";
 import type { GoalEvaluation, GoalMetric, GoalStatus, PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +32,8 @@ export type ScoreboardRow = {
   current: PeriodSummary;
   previous: PeriodSummary;
   goals: GoalEvaluation[];
+  /** Moeda da casa; ausente = BRL. */
+  moeda?: TenantCurrency;
 };
 
 export type ScoreboardColumnKey =
@@ -108,8 +114,8 @@ export const GOAL_STATUS_CLASS: Record<GoalStatus, string> = {
   gray: "bg-muted/40 text-muted-foreground",
 };
 
-function formatValue(format: ColumnDef["format"], value: number | null) {
-  if (format === "money") return formatBRL(value);
+function formatValue(format: ColumnDef["format"], value: number | null, currency?: TenantCurrency) {
+  if (format === "money") return formatMoneyIn(value, currency);
   if (format === "ratio") return formatRatio(value);
   return formatInt(value);
 }
@@ -129,6 +135,10 @@ export function sortScoreboardRows(
   const def = ALL_COLUMNS.find((c) => c.key === column);
   if (!def) return rows;
   return [...rows].sort((a, b) => {
+    if (def.format === "money") {
+      const byMoeda = byCurrency(toTenantCurrency(a.moeda), toTenantCurrency(b.moeda));
+      if (byMoeda !== 0) return byMoeda;
+    }
     const av = def.pick(a.current);
     const bv = def.pick(b.current);
     if (av === null && bv === null) return 0;
@@ -233,11 +243,20 @@ export function GroupScoreboard({
                       onClick={() => onRowClick?.(row.id)}
                     >
                       {row.nome}
+                      {row.moeda && row.moeda !== "BRL" && (
+                        <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                          {row.moeda}
+                        </span>
+                      )}
                     </button>
                   </td>
                   {columns.map((column) => {
                     const goal = goalFor(row.goals, column.goalMetric);
                     const value = column.pick(row.current);
+                    // Lucro líquido/ROI de uma casa fora do BRL: não existem (sem câmbio).
+                    const noProfit =
+                      row.current.cashResult === null &&
+                      (column.key === "cashResult" || column.key === "roi");
                     return (
                       <td
                         key={column.key}
@@ -246,7 +265,16 @@ export function GroupScoreboard({
                           goal && GOAL_STATUS_CLASS[goal.status],
                         )}
                       >
-                        <span>{formatValue(column.format, value)}</span>
+                        {noProfit ? (
+                          <span
+                            className="text-muted-foreground"
+                            title={mixedCurrencyNote(row.moeda)}
+                          >
+                            —
+                          </span>
+                        ) : (
+                          <span>{formatValue(column.format, value, row.moeda)}</span>
+                        )}
                         <VariationLabel
                           column={column}
                           current={value}
@@ -255,7 +283,7 @@ export function GroupScoreboard({
                         />
                         {goal && (
                           <span className="block text-[10px] opacity-60">
-                            meta {formatValue(column.format, goal.target)}
+                            meta {formatValue(column.format, goal.target, row.moeda)}
                           </span>
                         )}
                         {!goal && column.goalMetric && (

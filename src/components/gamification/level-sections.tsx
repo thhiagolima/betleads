@@ -12,7 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { brl, num } from "@/lib/format";
+import { num } from "@/lib/format";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { LEVEL_LABEL } from "@/lib/player-level";
 import { cn } from "@/lib/utils";
 import type {
@@ -50,6 +51,7 @@ export type LevelDraft = {
 /* ------------------------------------------------------------------ */
 
 export function LevelStrip({ data }: { data: GamificationData }) {
+  const { currency } = useMoney();
   return (
     <section
       aria-label="Jogadores por nível"
@@ -69,7 +71,8 @@ export function LevelStrip({ data }: { data: GamificationData }) {
             </h3>
             <p className="mt-1.5 text-kpi-sm tabular-nums">{num(level.count)}</p>
             <p className="text-meta text-muted-foreground">
-              {level.percent}% da base · {levelRange(level.slug, data.settings.thresholds)}
+              {level.percent}% da base ·{" "}
+              {levelRange(level.slug, data.settings.thresholds, currency)}
             </p>
             <Link
               to="/players"
@@ -99,6 +102,7 @@ export function PlayerLine({
   position?: number;
   showStatus?: boolean;
 }) {
+  const { money } = useMoney();
   return (
     <Link
       to="/players/$playerId"
@@ -115,7 +119,7 @@ export function PlayerLine({
         <div className="flex items-baseline justify-between gap-3">
           <span className="truncate text-body font-medium">{player.nome}</span>
           <span className="shrink-0 text-body font-semibold tabular-nums">
-            {brl(player.total_depositado)}
+            {money(player.total_depositado)}
           </span>
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-meta text-muted-foreground">
@@ -210,6 +214,7 @@ export function LevelRulesCard({
   saving: boolean;
   onSave: () => void;
 }) {
+  const { symbol } = useMoney();
   return (
     <HomeCard className="p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
@@ -235,7 +240,7 @@ export function LevelRulesCard({
             </Label>
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-body text-muted-foreground">
-                R$
+                {symbol}
               </span>
               <Input
                 id={`threshold-${level}`}

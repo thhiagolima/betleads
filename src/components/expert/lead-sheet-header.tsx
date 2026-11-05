@@ -10,8 +10,9 @@ import { HomeCard, KpiCard } from "@/components/home/home-cards";
 import { PageHeader } from "@/components/ui-premium/page-header";
 import { LevelBadge } from "@/components/players/level-badge";
 import { SituationText } from "@/components/players/situation-text";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import type { ExpertLeadSheet } from "@/lib/expert-lead-sheet";
-import { brl, num } from "@/lib/format";
+import { num } from "@/lib/format";
 
 import { formatBrtDate, formatBrtDdMm } from "./sheet-format";
 
@@ -61,21 +62,22 @@ function semDepositarLabel(lead: ExpertLeadSheet["lead"]): string {
 }
 
 export function LeadSheetStats({ lead }: { lead: ExpertLeadSheet["lead"] }) {
+  const { money } = useMoney();
   return (
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
       <KpiCard title="Sem depositar" value={semDepositarLabel(lead)} />
-      <KpiCard title="Total depositado" value={brl(lead.totalDepositado)} />
+      <KpiCard title="Total depositado" value={money(lead.totalDepositado)} />
       <KpiCard title="Depósitos" value={num(lead.depositos)} />
       <KpiCard
         title="Ticket médio"
-        value={lead.ticketMedio == null ? "—" : brl(lead.ticketMedio)}
+        value={lead.ticketMedio == null ? "—" : money(lead.ticketMedio)}
       />
       <KpiCard
         title="Último depósito"
-        value={lead.ultimoDeposito ? brl(lead.ultimoDeposito.valor) : "—"}
+        value={lead.ultimoDeposito ? money(lead.ultimoDeposito.valor) : "—"}
         detail={lead.ultimoDeposito ? formatBrtDate(lead.ultimoDeposito.at) : undefined}
       />
-      <KpiCard title="Saques" value={brl(lead.totalSacado)} />
+      <KpiCard title="Saques" value={money(lead.totalSacado)} />
     </div>
   );
 }
@@ -84,6 +86,7 @@ export function LeadBenefits({ beneficios }: { beneficios: ExpertLeadSheet["bene
   // O saldo de bônus atual não é um benefício recebido: aparece à parte.
   const recebidos = beneficios.filter((b) => b.tipo === "cashback");
   const bonusAtual = beneficios.find((b) => b.tipo === "bonus_atual");
+  const { money } = useMoney();
   return (
     <HomeCard className="p-4 sm:p-5">
       <h2 className="text-section">Benefícios já recebidos</h2>
@@ -100,7 +103,7 @@ export function LeadBenefits({ beneficios }: { beneficios: ExpertLeadSheet["bene
                 Cashback
                 {b.at && <span> · {formatBrtDate(b.at)}</span>}
               </span>
-              <strong className="font-semibold tabular-nums">{brl(b.valor)}</strong>
+              <strong className="font-semibold tabular-nums">{money(b.valor)}</strong>
             </li>
           ))}
         </ul>
@@ -108,7 +111,7 @@ export function LeadBenefits({ beneficios }: { beneficios: ExpertLeadSheet["bene
       {bonusAtual && (
         <div className="mt-2 flex items-center justify-between gap-3 border-t border-border/70 pt-2.5 text-[13.5px]">
           <span className="text-muted-foreground">Saldo de bônus atual</span>
-          <strong className="font-semibold tabular-nums">{brl(bonusAtual.valor)}</strong>
+          <strong className="font-semibold tabular-nums">{money(bonusAtual.valor)}</strong>
         </div>
       )}
     </HomeCard>

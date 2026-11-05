@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { BookOpen, Download } from "lucide-react";
 
+import { useTenantCurrency } from "@/hooks/use-tenant-currency";
 import { getCrmResults } from "@/lib/crm-results.functions";
 import { getComparisonAccess } from "@/lib/tenant-comparison.functions";
 import { crmResultsCsv } from "@/lib/crm-results-csv";
@@ -38,6 +39,7 @@ export function CentralResults() {
   const setSearch = (next: Partial<CentralSearch>, replace = false) =>
     void navigate({ search: (current) => ({ ...current, ...next }), replace });
 
+  const currency = useTenantCurrency();
   const load = useServerFn(getCrmResults);
   const query = useQuery({
     queryKey: ["crm-results", period.key],
@@ -76,7 +78,7 @@ export function CentralResults() {
                   size="sm"
                   variant="outline"
                   className="gap-2"
-                  onClick={() => downloadCsv(query.data, period.key)}
+                  onClick={() => downloadCsv(query.data, period.key, currency)}
                 >
                   <Download className="h-4 w-4" aria-hidden="true" />
                   CSV
@@ -127,9 +129,9 @@ export function CentralResults() {
   );
 }
 
-function downloadCsv(data: Data, periodKey: PeriodKey) {
+function downloadCsv(data: Data, periodKey: PeriodKey, currency: string) {
   const url = URL.createObjectURL(
-    new Blob([crmResultsCsv(data, data)], { type: "text/csv;charset=utf-8" }),
+    new Blob([crmResultsCsv(data, data, currency)], { type: "text/csv;charset=utf-8" }),
   );
   const anchor = document.createElement("a");
   anchor.href = url;

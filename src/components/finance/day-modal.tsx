@@ -26,7 +26,13 @@ import {
 import { SendCostAmount } from "@/components/finance/dashboard/sends-block";
 import { DayStatusChip } from "@/components/finance/day-list";
 import { FINANCE_TERMS } from "@/components/finance/definitions";
-import { formatBRL, formatCount, formatInt, GGR_COLUMN_LABEL } from "@/components/finance/format";
+import {
+  formatCount,
+  formatInt,
+  formatMoneyIn,
+  GGR_COLUMN_LABEL,
+} from "@/components/finance/format";
+import type { TenantCurrency } from "@/lib/currency";
 import {
   MONTHLY_GGR_COLUMN_NOTE,
   type MonthlyGgrCurrent,
@@ -112,6 +118,8 @@ export type DayModalContentProps = {
   costForm?: ReactNode;
   /** "Editar em Outros custos": opens that tab on the month (edit/delete live there). */
   onEditCosts?: () => void;
+  /** Moeda da casa (valores do dia); envios em BRL. */
+  currency?: TenantCurrency;
 };
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -165,7 +173,9 @@ export function DayModalContent({
   dirty,
   costForm,
   onEditCosts,
+  currency = "BRL",
 }: DayModalContentProps) {
+  const money = (value: number | null) => formatMoneyIn(value, currency);
   // "Resultado do dia" previews what is typed (still unsaved).
   const preview = readOnly
     ? day
@@ -174,7 +184,7 @@ export function DayModalContent({
         adSpend: parseMoneyInput(adSpend),
         ggr: usingMonthlyGgr ? day.ggr : parseMoneyInput(ggr),
       });
-  const { steps } = dayResult(preview, sends, otherCosts);
+  const { steps } = dayResult(preview, sends, otherCosts, currency);
   const lines = sendLines(sends, null);
   const canTypeGgr = !readOnly && !usingMonthlyGgr;
 
@@ -185,14 +195,14 @@ export function DayModalContent({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
             <Figure label="Cadastros">{formatInt(day.registrations)}</Figure>
             <Figure label="FTDs">{formatInt(day.ftds)}</Figure>
-            <Figure label="Valor de FTD">{formatBRL(day.ftdDepositAmount)}</Figure>
+            <Figure label="Valor de FTD">{money(day.ftdDepositAmount)}</Figure>
             <Figure
               label="Depósitos"
               detail={
                 activity ? formatCount(activity.depositCount, "depósito", "depósitos") : undefined
               }
             >
-              {formatBRL(day.depositAmount)}
+              {money(day.depositAmount)}
             </Figure>
             <Figure
               label="Saques"
@@ -200,7 +210,7 @@ export function DayModalContent({
                 activity ? formatCount(activity.withdrawalCount, "saque", "saques") : undefined
               }
             >
-              {formatBRL(day.withdrawalAmount)}
+              {money(day.withdrawalAmount)}
             </Figure>
             <Figure
               label={
@@ -210,10 +220,10 @@ export function DayModalContent({
                 </>
               }
             >
-              {formatBRL(day.net)}
+              {money(day.net)}
             </Figure>
             {day.adSpendSuggested !== null && (
-              <Figure label="Gasto da Meta">{formatBRL(day.adSpendSuggested)}</Figure>
+              <Figure label="Gasto da Meta">{money(day.adSpendSuggested)}</Figure>
             )}
           </dl>
           <div className="rounded-md border border-border/40 px-3 py-2">
@@ -248,7 +258,7 @@ export function DayModalContent({
               <p className="text-[11px] text-muted-foreground">Anúncios</p>
               {readOnly ? (
                 <p className="text-sm font-medium tabular-nums">
-                  {day.adSpend === null ? <Pending /> : formatBRL(day.adSpend)}
+                  {day.adSpend === null ? <Pending /> : money(day.adSpend)}
                 </p>
               ) : (
                 <>
@@ -270,7 +280,7 @@ export function DayModalContent({
                       onClick={() => onAdSpendChange(String(day.adSpendSuggested))}
                     >
                       <Sparkles className="h-3.5 w-3.5 shrink-0" />
-                      {`Usar valor da Meta (${formatBRL(day.adSpendSuggested)})`}
+                      {`Usar valor da Meta (${money(day.adSpendSuggested)})`}
                     </Button>
                   )}
                 </>
@@ -295,7 +305,7 @@ export function DayModalContent({
                   {day.ggr === null ? (
                     <Pending />
                   ) : (
-                    <span className={cn(day.ggrEstimated && "italic")}>{formatBRL(day.ggr)}</span>
+                    <span className={cn(day.ggrEstimated && "italic")}>{money(day.ggr)}</span>
                   )}
                 </p>
               )}
@@ -336,7 +346,11 @@ export function DayModalContent({
                       )}
                     </span>
                     <span className="tabular-nums">
-                      <CostValueLabel valor={cost.valor} skipped={isSkippedCost(cost)} />
+                      <CostValueLabel
+                        valor={cost.valor}
+                        skipped={isSkippedCost(cost)}
+                        currency={currency}
+                      />
                     </span>
                   </li>
                 ))}
@@ -347,7 +361,7 @@ export function DayModalContent({
         </Section>
 
         <Section title="Resultado do dia">
-          <MiniWaterfall steps={steps} />
+          <MiniWaterfall steps={steps} currency={currency} />
         </Section>
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-4">
@@ -386,7 +400,14 @@ export function DayModalContent({
 
 /** The day's waterfall as compact rows: label, amount and a bar of its size. */
 /** Has its own TooltipProvider (the "Lucro líquido" TermTooltip), so it renders anywhere. */
-export function MiniWaterfall({ steps }: { steps: WaterfallStep[] }) {
+/** Fora do BRL os passos vêm na moeda da casa e param antes dos envios (ver waterfallSteps). */
+export function MiniWaterfall({
+  steps,
+  currency = "BRL",
+}: {
+  steps: WaterfallStep[];
+  currency?: TenantCurrency;
+}) {
   const size = (step: WaterfallStep) =>
     step.kind === "down" || step.kind === "up"
       ? Math.abs(step.end - step.start)
@@ -415,7 +436,7 @@ export function MiniWaterfall({ steps }: { steps: WaterfallStep[] }) {
                 )}
               >
                 {step.kind === "down" ? "− " : step.kind === "up" ? "+ " : ""}
-                {formatBRL(amount)}
+                {formatMoneyIn(amount, currency)}
               </span>
               <span className="col-span-2 h-1 overflow-hidden rounded-full bg-muted/40">
                 <span
@@ -563,6 +584,8 @@ export type DayModalData = {
   otherCosts: DayModalCost[];
   categories: string[];
   monthlyGgr: MonthlyGgrCurrent;
+  /** Moeda da casa; ausente = BRL. */
+  moeda?: TenantCurrency;
 };
 
 type DirtyState = { dayDirty: boolean; costDirty: boolean; saving: boolean };
@@ -658,6 +681,7 @@ function DayModalBody({
       otherCosts={data.otherCosts.filter((cost) => cost.costDate === day.date)}
       usingMonthlyGgr={usingMonthlyGgr}
       readOnly={readOnly}
+      currency={data.moeda}
       adSpend={adSpend}
       ggr={ggr}
       onAdSpendChange={setAdSpend}

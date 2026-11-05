@@ -16,11 +16,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { formatBrtDate, formatBrtDateTime } from "@/components/expert/sheet-format";
 import type { LeadRef } from "@/components/rendimento/portfolio-table";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { getExpertLeadTimeline, type TimelineItem } from "@/lib/expert-report.functions";
-import { brl, num } from "@/lib/format";
+import { num } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 type DepositStatus = NonNullable<TimelineItem["status"]>;
@@ -43,6 +44,7 @@ function TimelineEntry({ item }: { item: TimelineItem }) {
   const status = item.kind === "deposito" ? item.status : null;
   // Não creditado em cinza; o creditado ganha a cor da casa com o motivo.
   const muted = status === "nao_creditado";
+  const { money } = useMoney();
   return (
     <li
       className={cn("relative border-l border-border pb-4 pl-4", muted && "text-muted-foreground")}
@@ -59,7 +61,7 @@ function TimelineEntry({ item }: { item: TimelineItem }) {
           {item.titulo}
           {item.valor !== null && (
             <span className={cn("ml-2 tabular-nums", status === "creditado" && "text-success")}>
-              {brl(item.valor)}
+              {money(item.valor)}
             </span>
           )}
         </span>
@@ -119,6 +121,7 @@ export function LeadHistorySheet({
   const tenantId = switcher?.activeTenantId ?? null;
   // Quem vê é o próprio expert: a ficha dele; para a equipe e o admin, a da casa.
   const fichaDoExpert = !expertId && active?.role === "expert";
+  const { money } = useMoney();
 
   const timelineFn = useServerFn(getExpertLeadTimeline);
   const timelineQuery = useInfiniteQuery({
@@ -161,7 +164,7 @@ export function LeadHistorySheet({
             <>
               {resumo && (
                 <div className="grid grid-cols-3 gap-3 rounded-lg border border-border/70 p-3">
-                  <SummaryStat label="Creditado" value={brl(resumo.creditado)} />
+                  <SummaryStat label="Creditado" value={money(resumo.creditado)} />
                   <SummaryStat label="Depósitos" value={num(resumo.depositos)} />
                   <SummaryStat
                     label="Desde"

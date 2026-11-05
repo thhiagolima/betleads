@@ -29,6 +29,7 @@ import { DEFAULT_EXPERT_PERIOD, periodRange, type PeriodKey } from "@/lib/expert
 import { resolveReportSubject } from "@/lib/expert-report-subject.server";
 import { requireExpertAdminTenant } from "@/lib/experts-admin.functions";
 import { neutralizeCsvFormula } from "@/lib/csv-safe";
+import { toTenantCurrency, type TenantCurrency } from "@/lib/currency";
 import { brtDayKey, brtDayStart } from "@/lib/tz";
 import { assertTenantNotDemo } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
@@ -468,10 +469,32 @@ export function creditsCsvCell(value: unknown): string {
   return /[;"\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-const CREDITS_CSV_HEADER = [
+/**
+ * Cabeçalho de coluna de valor da casa nos CSVs do rendimento: o número sai
+ * cru e o cabeçalho leva o código da moeda ("Valor (ARS)"), como no CSV de players.
+ */
+export function moneyCsvHeader(label: string, currency: TenantCurrency): string {
+  return `${label} (${currency})`;
+}
+
+/**
+ * Moeda da casa para os CSVs. Lê direto (sem o cache de `loadHouseLinks`, que
+ * cai em BRL quando falha): um erro aqui não pode rotular pesos como reais.
+ */
+export async function loadTenantCurrencyForCsv(tenantId: string): Promise<TenantCurrency> {
+  const { data, error } = await supabaseAdmin
+    .from("tenants")
+    .select("moeda")
+    .eq("id", tenantId)
+    .maybeSingle();
+  if (error) throw new Error(`Falha ao carregar a moeda da casa: ${error.message}`);
+  return toTenantCurrency((data as { moeda?: string | null } | null)?.moeda);
+}
+
+const creditsCsvHeader = (currency: TenantCurrency) => [
   "Data",
   "Lead",
-  "Valor",
+  moneyCsvHeader("Valor", currency),
   "Origem",
   "Oferta",
   "Clique em",
@@ -503,8 +526,9 @@ export async function exportExpertCreditsCsvFor(
 
   const dbRows = await fetchAllCredits(tenantId, expertId, from, to);
   const rows = await mapCreditRows(tenantId, dbRows);
+  const currency = await loadTenantCurrencyForCsv(tenantId);
 
-  const lines = [CREDITS_CSV_HEADER.join(";")];
+  const lines = [creditsCsvHeader(currency).join(";")];
   let soma = 0;
   for (const row of rows) {
     soma += row.valor;

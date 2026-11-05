@@ -7,10 +7,17 @@
 // group); all scope → is_super_admin. Totals are summarize() over every
 // house's days, so ratios (ROI, cost per unit) come from the sums, never from
 // averaging houses.
+//
+// Moeda: cada casa soma na sua (tenants.moeda). Um escopo com casas em
+// moedas diferentes não tem total somado: `currency` vem null, os totais do
+// escopo (totals, kpis, waterfall, costs, months) ficam vazios e
+// `currencyTotals` traz um total por moeda. Fora do BRL o Lucro líquido e o
+// ROI são null (ver summarize); os envios (BRL) somam entre todas as casas.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { toTenantCurrency, type TenantCurrency } from "@/lib/currency";
 import {
   compareRange,
   costBreakdown,
@@ -28,6 +35,7 @@ import {
   sumActivity,
   waterfallSteps,
 } from "@/lib/finance/kpis";
+import { distinctCurrencies, singleCurrency } from "@/lib/finance/money";
 import {
   OTHER_COST_COLUMNS,
   clampToToday,
@@ -77,7 +85,14 @@ import { managedGroupIds } from "@/lib/tenants.functions";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type ServerContext = { userId: string };
-type TenantLite = { id: string; nome: string };
+type TenantLite = { id: string; nome: string; moeda: TenantCurrency };
+type TenantRow = { id: string; nome: string; moeda?: string | null };
+
+const toTenantLite = (row: TenantRow): TenantLite => ({
+  id: row.id,
+  nome: row.nome,
+  moeda: toTenantCurrency(row.moeda),
+});
 
 export type DashboardScope =
   { kind: "tenant"; tenantId: string } | { kind: "group"; groupId: string } | { kind: "all" };
@@ -92,6 +107,8 @@ export type DashboardInput = {
 export type DashboardTenantRow = {
   id: string;
   nome: string;
+  /** Moeda da casa: os valores da casa desta linha estão nela; Envios em BRL. */
+  moeda: TenantCurrency;
   current: PeriodSummary;
   previous: PeriodSummary;
   goals: GoalEvaluation[];
@@ -114,6 +131,18 @@ export type FinanceDashboard = {
   scope: DashboardScope;
   /** House name, group name or "Todas as casas". */
   label: string;
+  /**
+   * Moeda única das casas do escopo; null quando há mais de uma. Aí totals,
+   * kpis, waterfall, costs e months vêm vazios: use currencyTotals.
+   */
+  currency: TenantCurrency | null;
+  /** Um total por moeda (BRL primeiro), com quantas casas entram em cada um. */
+  currencyTotals: Array<{
+    currency: TenantCurrency;
+    houses: number;
+    current: PeriodSummary;
+    previous: PeriodSummary;
+  }>;
   range: DateRange;
   /** The comparison window; null for "Sem comparação" (previous values are then empty). */
   compareRange: DateRange | null;
@@ -184,21 +213,22 @@ async function requireSuperAdmin(userId: string) {
 
 async function selectTenants(ids: string[]): Promise<TenantLite[]> {
   if (!ids.length) return [];
-  const { data, error } = await db().from<TenantLite[]>("tenants").select("id,nome").in("id", ids);
+  const { data, error } = await db()
+    .from<TenantRow[]>("tenants")
+    .select("id,nome,moeda")
+    .in("id", ids);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => ({ id: row.id, nome: row.nome }));
+  return (data ?? []).map(toTenantLite);
 }
 
 /** "Todas as casas": active houses, demo left out (spec §6). */
 async function activeRealTenants(): Promise<TenantLite[]> {
   const { data, error } = await db()
-    .from<Array<TenantLite & { is_demo: boolean | null }>>("tenants")
-    .select("id,nome,is_demo")
+    .from<Array<TenantRow & { is_demo: boolean | null }>>("tenants")
+    .select("id,nome,is_demo,moeda")
     .eq("status", "active");
   if (error) throw new Error(error.message);
-  return (data ?? [])
-    .filter((row) => row.is_demo !== true)
-    .map((row) => ({ id: row.id, nome: row.nome }));
+  return (data ?? []).filter((row) => row.is_demo !== true).map(toTenantLite);
 }
 
 /** The scope's label and houses, after checking the caller may see it. */
@@ -218,7 +248,7 @@ async function resolveScope(
     if (!managed.includes(scope.groupId)) throw new Error("Sem permissão");
 
     const { data: group, error: groupErr } = await db()
-      .from<TenantLite>("tenant_groups")
+      .from<{ id: string; nome: string }>("tenant_groups")
       .select("id,nome")
       .eq("id", scope.groupId)
       .maybeSingle();
@@ -280,20 +310,41 @@ function monthsOfWindow(window: DateRange): string[] {
 }
 
 const ALL_TENANTS = "*";
+/** Dono de bucket que nunca existe: o total de um escopo com moedas diferentes fica vazio. */
+const NO_TENANTS = "-";
+/** Dono de bucket das casas de uma moeda. */
+const currencyOwner = (currency: TenantCurrency) => `moeda:${currency}`;
 const bucketKey = (tenantId: string, month: string) => `${tenantId}|${month}`;
 
-/** Pushes `item` under its house and month, and under every house (ALL_TENANTS) of that month. */
-function addToBuckets<T>(buckets: Map<string, T[]>, tenantId: string, month: string, item: T) {
-  for (const key of [bucketKey(tenantId, month), bucketKey(ALL_TENANTS, month)]) {
+/**
+ * Pushes `item` under its house and month, under its house's currency
+ * (currencyOwner) and under every house (ALL_TENANTS) of that month.
+ */
+function addToBuckets<T>(
+  buckets: Map<string, T[]>,
+  tenantId: string,
+  currency: TenantCurrency,
+  month: string,
+  item: T,
+) {
+  for (const owner of [tenantId, currencyOwner(currency), ALL_TENANTS]) {
+    const key = bucketKey(owner, month);
     const list = buckets.get(key);
     if (list) list.push(item);
     else buckets.set(key, [item]);
   }
 }
 
-/** Adds `amount` under its house and month, and under every house (ALL_TENANTS) of that month. */
-function addToSums(sums: Map<string, number>, tenantId: string, month: string, amount: number) {
-  for (const key of [bucketKey(tenantId, month), bucketKey(ALL_TENANTS, month)]) {
+/** Adds `amount` under its house, its house's currency and every house (ALL_TENANTS) of that month. */
+function addToSums(
+  sums: Map<string, number>,
+  tenantId: string,
+  currency: TenantCurrency,
+  month: string,
+  amount: number,
+) {
+  for (const owner of [tenantId, currencyOwner(currency), ALL_TENANTS]) {
+    const key = bucketKey(owner, month);
     sums.set(key, (sums.get(key) ?? 0) + amount);
   }
 }
@@ -313,6 +364,12 @@ export async function getFinanceDashboardFor(
   const { label, tenants: unsorted } = await resolveScope(ctx.userId, data.scope);
   const tenants = [...unsorted].sort(byNome);
   const tenantIds = tenants.map((tenant) => tenant.id);
+  const currencyById = new Map(tenants.map((tenant) => [tenant.id, tenant.moeda]));
+  const currencyOf = (tenantId: string) => currencyById.get(tenantId) ?? toTenantCurrency(null);
+  const currency = singleCurrency(tenants.map((tenant) => tenant.moeda));
+  const currencies = distinctCurrencies(tenants.map((tenant) => tenant.moeda));
+  // Moedas diferentes: o total do escopo não soma ninguém (vem por moeda).
+  const aggregateOwner = currency === null ? NO_TENANTS : ALL_TENANTS;
 
   const today = todaySaoPaulo();
   const previousRange = compareRange(data.range, data.compare, data.preset);
@@ -400,13 +457,15 @@ export async function getFinanceDashboardFor(
         })
       : [];
 
-  const allocationsByTenant = new Map<string, MonthlyGgr[]>();
+  // Allocations by house, by currency (currencyOwner) and of every house.
+  const allocationsByOwner = new Map<string, MonthlyGgr[]>();
   for (const row of monthlyRows) {
-    const list = allocationsByTenant.get(row.tenant_id) ?? [];
-    list.push(toMonthlyGgr(row));
-    allocationsByTenant.set(row.tenant_id, list);
+    for (const owner of [row.tenant_id, currencyOwner(currencyOf(row.tenant_id)), ALL_TENANTS]) {
+      const list = allocationsByOwner.get(owner) ?? [];
+      list.push(toMonthlyGgr(row));
+      allocationsByOwner.set(owner, list);
+    }
   }
-  const allAllocations = monthlyRows.map(toMonthlyGgr);
 
   // Days, usage, other costs and fees are indexed once by house and month
   // (and by month for every house), so each window reads only its months.
@@ -417,22 +476,42 @@ export async function getFinanceDashboardFor(
     monthlyRows,
   )) {
     allDays.push(day);
-    addToBuckets(dayBuckets, tenantId, monthStartOf(day.date), day);
+    addToBuckets(dayBuckets, tenantId, currencyOf(tenantId), monthStartOf(day.date), day);
   }
   const sendBuckets = new Map<string, SendUsageRow[]>();
   for (const row of sendRows) {
-    addToBuckets(sendBuckets, row.tenant_id, monthStartOf(row.metric_date), row);
+    addToBuckets(
+      sendBuckets,
+      row.tenant_id,
+      currencyOf(row.tenant_id),
+      monthStartOf(row.metric_date),
+      row,
+    );
   }
   const activityBuckets = new Map<string, ActivityDayRow[]>();
   for (const row of activityRows) {
-    addToBuckets(activityBuckets, row.tenant_id, monthStartOf(row.metric_date), row);
+    addToBuckets(
+      activityBuckets,
+      row.tenant_id,
+      currencyOf(row.tenant_id),
+      monthStartOf(row.metric_date),
+      row,
+    );
   }
   const costBuckets = new Map<string, OtherCostRow[]>();
   for (const row of costRows) {
-    addToBuckets(costBuckets, row.tenant_id, monthStartOf(row.cost_date), row);
+    addToBuckets(
+      costBuckets,
+      row.tenant_id,
+      currencyOf(row.tenant_id),
+      monthStartOf(row.cost_date),
+      row,
+    );
   }
   const feeSums = new Map<string, number>();
-  for (const row of feeRows) addToSums(feeSums, row.tenant_id, row.month, num(row.amount));
+  for (const row of feeRows) {
+    addToSums(feeSums, row.tenant_id, currencyOf(row.tenant_id), row.month, num(row.amount));
+  }
   const goalRowsByTenant = new Map<string, GoalDayRow[]>();
   for (const row of goalRows) {
     const list = goalRowsByTenant.get(row.tenant_id);
@@ -440,7 +519,10 @@ export async function getFinanceDashboardFor(
     else goalRowsByTenant.set(row.tenant_id, [row]);
   }
 
-  /** The window's entries of one house, or of every house when `tenantId` is omitted. */
+  /**
+   * The window's entries of one owner (a house, currencyOwner or
+   * ALL_TENANTS), or of the scope's total (aggregateOwner) when omitted.
+   */
   const inWindow = <T>(
     buckets: Map<string, T[]>,
     window: DateRange | null,
@@ -449,7 +531,7 @@ export async function getFinanceDashboardFor(
   ): T[] =>
     window
       ? monthsOfWindow(window).flatMap((month) =>
-          (buckets.get(bucketKey(tenantId ?? ALL_TENANTS, month)) ?? []).filter((item) =>
+          (buckets.get(bucketKey(tenantId ?? aggregateOwner, month)) ?? []).filter((item) =>
             inRange(dateOf(item), window),
           ),
         )
@@ -459,7 +541,7 @@ export async function getFinanceDashboardFor(
       a.date.localeCompare(b.date),
     );
   const monthSum = (sums: Map<string, number>, month: string | null, tenantId?: string) =>
-    month === null ? null : round2(sums.get(bucketKey(tenantId ?? ALL_TENANTS, month)) ?? 0);
+    month === null ? null : round2(sums.get(bucketKey(tenantId ?? aggregateOwner, month)) ?? 0);
   /** The window's other costs (dated inside it), oldest entry first. */
   const costsIn = (window: DateRange | null, tenantId?: string) =>
     inWindow(costBuckets, window, (row) => row.cost_date, tenantId);
@@ -477,14 +559,22 @@ export async function getFinanceDashboardFor(
     round2(windowDays(window).reduce((total, day) => total + (day.adSpendSuggested ?? 0), 0));
   const feeFor = (month: string | null, tenantId?: string) => monthSum(feeSums, month, tenantId);
   const allocationsOf = (tenantId?: string) =>
-    tenantId === undefined ? allAllocations : (allocationsByTenant.get(tenantId) ?? []);
+    allocationsByOwner.get(tenantId ?? aggregateOwner) ?? [];
+  /** Moeda de um dono de bucket: a da casa, a do currencyOwner ou a do escopo. */
+  const currencyOfOwner = (owner?: string): TenantCurrency => {
+    if (owner === undefined) return currency ?? toTenantCurrency(null);
+    return currencies.find((item) => currencyOwner(item) === owner) ?? currencyOf(owner);
+  };
   const summarizeWindow = (window: DateRange | null, feeMonth: string | null, tenantId?: string) =>
     summarize(
       windowDays(window, tenantId),
       otherCostsFor(window, tenantId),
       today,
       { usage: usageFor(window, tenantId), fee: feeFor(feeMonth, tenantId) },
-      { ggrEstimated: hasPartialGgrEstimate(window, allocationsOf(tenantId)) },
+      {
+        ggrEstimated: hasPartialGgrEstimate(window, allocationsOf(tenantId)),
+        currency: currencyOfOwner(tenantId),
+      },
     );
 
   const rows: DashboardTenantRow[] = tenants.map((tenant) => {
@@ -496,6 +586,7 @@ export async function getFinanceDashboardFor(
     return {
       id: tenant.id,
       nome: tenant.nome,
+      moeda: tenant.moeda,
       current: currentSummary,
       previous: summarizeWindow(previous, feeMonths.previous, tenant.id),
       goals: current
@@ -513,6 +604,12 @@ export async function getFinanceDashboardFor(
     current: summarizeWindow(current, feeMonths.current),
     previous: summarizeWindow(previous, feeMonths.previous),
   };
+  const currencyTotals = currencies.map((item) => ({
+    currency: item,
+    houses: tenants.filter((tenant) => tenant.moeda === item).length,
+    current: summarizeWindow(current, feeMonths.current, currencyOwner(item)),
+    previous: summarizeWindow(previous, feeMonths.previous, currencyOwner(item)),
+  }));
 
   const sinceByTenant = new Map(sinceRows.map((row) => [row.tenant_id, row.since]));
   const betleadsSince = sinceRows.map((row) => row.since).sort()[0] ?? null;
@@ -557,12 +654,15 @@ export async function getFinanceDashboardFor(
   const currentCategories = current ? categoriesFor(current) : {};
   // The waterfall's categories: exactly the scope's other costs that entered
   // totals.current (costRows only hold the scope's houses).
-  const waterfall = waterfallSteps(
-    totals.current,
-    totals.current.betleadsUsage,
-    { ...currentCategories },
-    { sendCostIncomplete: hasMissingSendCost(sendsFor(current)) },
-  );
+  const waterfall =
+    currency === null
+      ? []
+      : waterfallSteps(
+          totals.current,
+          totals.current.betleadsUsage,
+          { ...currentCategories },
+          { sendCostIncomplete: hasMissingSendCost(sendsFor(current)), currency },
+        );
   const previousCategories = previous ? categoriesFor(previous) : null;
   // A category that dropped to zero this window still shows, with its
   // variation: the current window lists the union of both windows' categories.
@@ -578,19 +678,20 @@ export async function getFinanceDashboardFor(
       : undefined;
   const ggrFeePct = rateDay ? rateDay.ggrFeePct : null;
 
-  const costs = tenantIds.length
-    ? costBreakdown(
-        totals.current,
-        totals.previous,
-        currentCategories,
-        previousCategories,
-        ggrFeePct,
-      )
-    : [];
+  const costs =
+    tenantIds.length && currency !== null
+      ? costBreakdown(
+          totals.current,
+          totals.previous,
+          currentCategories,
+          previousCategories,
+          ggrFeePct,
+        )
+      : [];
 
   // Spec §7.3: a manual cost that looks like a Betleads charge is flagged only
   // from the month the house has Betleads data on; before it, it is the only data.
-  const duplicateBetleadsCosts = costsIn(current).filter((row) => {
+  const duplicateBetleadsCosts = costsIn(current, ALL_TENANTS).filter((row) => {
     const since = sinceByTenant.get(row.tenant_id);
     return (
       since !== undefined &&
@@ -602,6 +703,8 @@ export async function getFinanceDashboardFor(
   return {
     scope: data.scope,
     label,
+    currency,
+    currencyTotals,
     range: data.range,
     compareRange: previousRange,
     totals,
@@ -610,7 +713,11 @@ export async function getFinanceDashboardFor(
     tenants: rows,
     betleadsSince,
     duplicateBetleadsCosts,
-    sends: sendLines(sendsFor(current), previous ? sendsFor(previous) : null),
+    // Envios são BRL: somam entre todas as casas, mesmo com moedas diferentes.
+    sends: sendLines(
+      sendsFor(current, ALL_TENANTS),
+      previous ? sendsFor(previous, ALL_TENANTS) : null,
+    ),
     kpis: {
       current: computeKpis(
         totals.current,
@@ -618,6 +725,7 @@ export async function getFinanceDashboardFor(
         sendsFor(current),
         daysOf(current),
         metaSpendFor(current),
+        currency,
       ),
       previous: computeKpis(
         totals.previous,
@@ -625,6 +733,7 @@ export async function getFinanceDashboardFor(
         sendsFor(previous),
         daysOf(previous),
         metaSpendFor(previous),
+        currency,
       ),
     },
     waterfall,
@@ -663,16 +772,19 @@ export const getFinanceDashboard = createServerFn({ method: "POST" })
  */
 export async function listDashboardScopesFor(
   ctx: ServerContext,
-): Promise<{ groups: TenantLite[]; tenants: TenantLite[] }> {
+): Promise<{
+  groups: Array<{ id: string; nome: string }>;
+  tenants: Array<{ id: string; nome: string }>;
+}> {
   await requireSuperAdmin(ctx.userId);
   const [groupsRes, tenants] = await Promise.all([
-    db().from<TenantLite[]>("tenant_groups").select("id,nome"),
+    db().from<Array<{ id: string; nome: string }>>("tenant_groups").select("id,nome"),
     activeRealTenants(),
   ]);
   if (groupsRes.error) throw new Error(groupsRes.error.message);
   return {
     groups: (groupsRes.data ?? []).map((row) => ({ id: row.id, nome: row.nome })).sort(byNome),
-    tenants: tenants.sort(byNome),
+    tenants: tenants.map((tenant) => ({ id: tenant.id, nome: tenant.nome })).sort(byNome),
   };
 }
 

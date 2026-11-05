@@ -20,8 +20,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { expertAccessErrorMessage } from "@/lib/expert-access-message";
-import { brl } from "@/lib/format";
 import { getExpertHome, listExpertLeads } from "@/lib/expert-leads.functions";
 
 export const Route = createFileRoute("/expert/leads")({
@@ -48,6 +48,7 @@ function formatUltimoDeposito(value: string | null) {
 
 function ExpertLeadsPage() {
   const navigate = useNavigate();
+  const { money } = useMoney();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -147,7 +148,7 @@ function ExpertLeadsPage() {
                   </TableCell>
                   <TableCell>{row.telefone ?? "—"}</TableCell>
                   <TableCell>{row.diasSemDepositar ?? "—"}</TableCell>
-                  <TableCell>{brl(row.totalDepositado)}</TableCell>
+                  <TableCell>{money(row.totalDepositado)}</TableCell>
                   <TableCell>{formatUltimoDeposito(row.ultimoDeposito)}</TableCell>
                   <TableCell>{riscoBadge(row.risco)}</TableCell>
                 </TableRow>

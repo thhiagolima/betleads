@@ -121,7 +121,7 @@ describe("day-entry", () => {
     expect(result.summary.cashResult).toBeCloseTo(d.cashResult - 12 - 38);
     const last = result.steps[result.steps.length - 1];
     expect(last.label).toBe("Lucro líquido");
-    expect(last.end).toBeCloseTo(result.summary.cashResult);
+    expect(last.end).toBeCloseTo(result.summary.cashResult!);
     expect(result.steps.find((s) => s.key === "category:Equipe")?.start).toBeDefined();
     expect(result.sendCostIncomplete).toBe(false);
     expect(result.steps.find((s) => s.key === "sends")?.label).toBe("Envios");
@@ -138,7 +138,7 @@ describe("day-entry", () => {
     );
     expect(result.sendCostIncomplete).toBe(true);
     expect(result.steps.find((s) => s.key === "sends")?.label).toBe("Envios (parcial)");
-    expect(result.steps.at(-1)?.end).toBeCloseTo(result.summary.cashResult);
+    expect(result.steps.at(-1)?.end).toBeCloseTo(result.summary.cashResult!);
   });
 
   it("leaveDayPlan blocks leaving while a save is in flight (no discard question)", () => {

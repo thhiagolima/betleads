@@ -29,6 +29,7 @@ import {
   retireLegacyJourney,
   setJourneyExpress,
 } from "@/lib/journeys.functions";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { EXPRESS_JOURNEY_HINT } from "@/lib/journey-express";
 import { ENROLLMENT_STATUS_LABELS } from "@/lib/player-journeys";
 import { JourneyMapCard } from "@/components/journeys/journey-map-card";
@@ -167,8 +168,6 @@ const STATUS_BADGE: Record<Journey["status"], string> = {
   archived: "bg-muted text-muted-foreground",
 };
 
-const brl = (value: number) =>
-  value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 const dateTime = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo",
@@ -180,6 +179,8 @@ const dateTime = (iso: string) =>
 
 export function JourneysHub() {
   const navigate = useNavigate();
+  // Recuperado = depósito da casa, na moeda dela.
+  const { money } = useMoney();
   const queryClient = useQueryClient();
   const list = useServerFn(listJourneys);
   const changeExpress = useServerFn(setJourneyExpress);
@@ -432,7 +433,7 @@ export function JourneysHub() {
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             <KpiCard
               title="Recuperado pelo CRM"
-              value={brl(overview.recovered)}
+              value={money(overview.recovered, { decimals: 0 })}
               detail={ATTRIBUTED_RECOVERY_HINT}
             />
             <KpiCard
@@ -881,6 +882,7 @@ function JourneyRow({
   onExpress: () => void;
   onDelete: () => void;
 }) {
+  const { money } = useMoney();
   const steps = journey.journey_steps
     .filter((step) => step.is_enabled && step.step_type !== "end")
     .sort((a, b) => a.position - b.position);
@@ -947,7 +949,7 @@ function JourneyRow({
         <JourneyMetric
           label="Recuperado pelo CRM"
           hint={ATTRIBUTED_RECOVERY_HINT}
-          value={brl(Number(metrics.recovered ?? 0))}
+          value={money(Number(metrics.recovered ?? 0), { decimals: 0 })}
           accent
         />
       </div>

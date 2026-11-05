@@ -13,6 +13,7 @@ import {
   Clock,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -167,11 +168,6 @@ function sessionChipClass(id: string): string {
   return palette[h % palette.length];
 }
 
-function brl(v: number | null | undefined) {
-  if (v == null || Number.isNaN(Number(v))) return "R$ 0,00";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v));
-}
-
 const TRIGGER_LABEL: Record<string, string> = {
   dinheiro_parado: "Dinheiro parado",
   recuperacao_vip: "Recuperação VIP",
@@ -301,6 +297,8 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
     staleTime: 60_000,
   });
   const leadPlayer = profileData?.player ?? null;
+  // Saldo e depósitos do lead vêm na moeda da casa.
+  const { money } = useMoney();
   const leadTrigger = profileData?.lastTrigger ?? null;
 
   // ===== Desfecho de conversão (botões Converteu / Não converteu) =====
@@ -866,15 +864,15 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                     </div>
                     <div className="flex justify-between gap-2">
                       <dt className="text-muted-foreground">Saldo</dt>
-                      <dd className="font-medium">{brl(leadPlayer.saldo_carteira)}</dd>
+                      <dd className="font-medium">{money(leadPlayer.saldo_carteira)}</dd>
                     </div>
                     <div className="flex justify-between gap-2">
                       <dt className="text-muted-foreground">Depositado</dt>
-                      <dd className="font-medium text-emerald-400">{brl(leadPlayer.total_depositado)}</dd>
+                      <dd className="font-medium text-emerald-400">{money(leadPlayer.total_depositado)}</dd>
                     </div>
                     <div className="flex justify-between gap-2">
                       <dt className="text-muted-foreground">Sacado</dt>
-                      <dd className="font-medium text-rose-400">{brl(leadPlayer.total_sacado)}</dd>
+                      <dd className="font-medium text-rose-400">{money(leadPlayer.total_sacado)}</dd>
                     </div>
                     <div className="flex justify-between gap-2 pt-1 border-t border-border/40">
                       <dt className="text-muted-foreground">Lucro</dt>
@@ -883,7 +881,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                           ? "text-emerald-300"
                           : "text-rose-300"
                       }`}>
-                        {brl(
+                        {money(
                           Number(leadPlayer.total_depositado ?? 0) -
                             Number(leadPlayer.total_sacado ?? 0),
                         )}

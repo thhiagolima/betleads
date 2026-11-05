@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useTenantCurrency } from "@/hooks/use-tenant-currency";
 import { saveCallScript } from "@/lib/calls.functions";
 import { VariablePicker } from "./variable-picker";
 import { FAKE_LEAD_CLIENT, renderScriptClient, VOICE_OPTIONS } from "./shared";
@@ -44,6 +45,7 @@ export function ScriptFormDialog({
 }: Props) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveCallScript);
+  const currency = useTenantCurrency();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [form, setForm] = useState(() => ({
@@ -138,7 +140,7 @@ export function ScriptFormDialog({
     });
   }
 
-  const preview = renderScriptClient(form.content, FAKE_LEAD_CLIENT);
+  const preview = renderScriptClient(form.content, FAKE_LEAD_CLIENT, currency);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -23,13 +23,13 @@ import {
 } from "@/components/ui/table";
 import { formatBrtDateTime } from "@/components/expert/sheet-format";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import {
   exportExpertCreditsCsv,
   listExpertCredits,
   type ExpertCreditRow,
 } from "@/lib/expert-metrics.functions";
 import type { PeriodKey } from "@/lib/expert-period";
-import { brl } from "@/lib/format";
 import { downloadCsv } from "@/components/rendimento/download-csv";
 
 const CREDITS_PAGE_SIZE = 100;
@@ -69,6 +69,7 @@ export function CreditStatement({
 }) {
   const [page, setPage] = useState(0);
   const { data: switcher } = useActiveTenant();
+  const { money } = useMoney();
   const tenantId = switcher?.activeTenantId ?? null;
 
   const listFn = useServerFn(listExpertCredits);
@@ -99,7 +100,7 @@ export function CreditStatement({
         <div>
           <CardTitle>Extrato de créditos</CardTitle>
           <p className="mt-1 text-body text-muted-foreground">
-            Total depositado creditado: <span className="font-medium">{brl(somaValor)}</span>
+            Total depositado creditado: <span className="font-medium">{money(somaValor)}</span>
           </p>
         </div>
         {showExport && (
@@ -138,7 +139,7 @@ export function CreditStatement({
                   <TableRow key={row.depositId}>
                     <TableCell>{formatBrtDateTime(row.depositAt)}</TableCell>
                     <TableCell>{row.leadNome}</TableCell>
-                    <TableCell>{brl(row.valor)}</TableCell>
+                    <TableCell>{money(row.valor)}</TableCell>
                     <TableCell>{VIA_LABEL[row.via]}</TableCell>
                     <TableCell>{row.oferta ?? "—"}</TableCell>
                     <TableCell>{row.clickAt ? formatBrtDateTime(row.clickAt) : "—"}</TableCell>

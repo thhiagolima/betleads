@@ -62,7 +62,11 @@ export type PeriodSummary = {
   movementFee: number;
   /** Other costs dated inside the window (0 when none). */
   otherCosts: number;
-  cashResult: number;
+  /**
+   * Lucro líquido; null quando a casa não é BRL (receita na moeda da casa e
+   * custos Betleads em BRL, sem câmbio). ROI e média diária seguem.
+   */
+  cashResult: number | null;
   roi: number | null;
   costPerRegistration: number | null;
   costPerFtd: number | null;
@@ -162,7 +166,7 @@ export type WaterfallStep = {
 /** One point of the monthly cashResult series (filled by a server function in a later task). */
 export type MonthPoint = {
   month: string; // "YYYY-MM"
-  cashResult: number;
+  cashResult: number | null; // null fora do BRL (ver PeriodSummary.cashResult)
   adSpend: number;
   net: number; // depósitos − saques
   depositAmount: number;
@@ -170,7 +174,7 @@ export type MonthPoint = {
   incomplete: boolean; // pendingDays > 0 or pendingToday
   inProgress: boolean; // the current month
   betleadsMissing: boolean;
-  byTenant: Record<string, number>; // tenantId -> cashResult
+  byTenant: Record<string, number | null>; // tenantId -> cashResult
 };
 
 export type GoalDay = {

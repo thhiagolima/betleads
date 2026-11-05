@@ -7,10 +7,17 @@
 // then reads "R$ X + custo do provedor não cadastrado" and the returns are
 // marked "parcial". The notes about this block (no Betleads data before a
 // date, exempt house priced at provider cost) sit in its muted footer, not
-// in a page footer (spec §3.6).
+// in a page footer (spec §3.6). Envios são sempre BRL; a receita do CRM vem
+// na moeda da casa e, fora do BRL, fica sem retorno (sem câmbio).
 
-import { betleadsMissingNote, formatBRL, formatInt } from "@/components/finance/format";
+import {
+  betleadsMissingNote,
+  formatBRL,
+  formatInt,
+  formatMoneyIn,
+} from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
+import type { TenantCurrency } from "@/lib/currency";
 import type { FinanceKpis, SendLine } from "@/lib/finance/types";
 
 import { formatMultiple } from "./display";
@@ -82,6 +89,7 @@ export function SendsBlock({
   hasPrevious = true,
   exemptHouse,
   betleadsNote,
+  currency = "BRL",
 }: {
   lines: SendLine[];
   kpis: { current: FinanceKpis; previous: FinanceKpis };
@@ -90,6 +98,8 @@ export function SendsBlock({
   exemptHouse: boolean;
   /** sendsBetleadsNote(range.from, betleadsSince). */
   betleadsNote: string | null;
+  /** Moeda da receita do CRM (a das casas do escopo). */
+  currency?: TenantCurrency;
 }) {
   const { current, previous } = kpis;
   const variation = (cur: number | null, prev: number | null, invert = false) => (
@@ -163,7 +173,7 @@ export function SendsBlock({
         attrs={{ "data-send": "direct" }}
         label="Receita direta"
         detail="clique → depósito"
-        value={formatBRL(current.crmDirectRevenue)}
+        value={formatMoneyIn(current.crmDirectRevenue, currency)}
         sub={returnLine(current.crmDirectReturn, current.sendCostIncomplete)}
         variation={variation(current.crmDirectRevenue, previous.crmDirectRevenue)}
       />
@@ -171,7 +181,7 @@ export function SendsBlock({
         attrs={{ "data-send": "influenced" }}
         label="Receita influenciada"
         detail="regra da Central de Resultados"
-        value={formatBRL(current.crmInfluencedRevenue)}
+        value={formatMoneyIn(current.crmInfluencedRevenue, currency)}
         sub={returnLine(current.crmInfluencedReturn, current.sendCostIncomplete)}
         variation={variation(current.crmInfluencedRevenue, previous.crmInfluencedRevenue)}
       />

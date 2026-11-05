@@ -2,12 +2,17 @@
 // "Todas as casas", with Lucro líquido, Margem, ROI, Anúncios, Envios and the profit
 // variation. Sortable by
 // header (desc first, asc on the second click, nulls always last); a row
-// click opens the house's painel.
+// click opens the house's painel. Cada linha na moeda da sua casa (Envios em
+// BRL); casas fora do BRL não têm Lucro líquido/Margem/ROI ("—"). Ordenar por
+// uma coluna em dinheiro da casa agrupa por moeda antes (BRL primeiro): nunca
+// compara um valor em ARS com um em BRL.
 import { useMemo, useState } from "react";
 
 import { FINANCE_TERMS } from "@/components/finance/definitions";
-import { formatBRL, formatPct, formatRatio } from "@/components/finance/format";
+import { formatBRL, formatMoneyIn, formatPct, formatRatio } from "@/components/finance/format";
+import { toTenantCurrency, type TenantCurrency } from "@/lib/currency";
 import { pctChange } from "@/lib/finance/calc";
+import { byCurrency, mixedCurrencyNote } from "@/lib/finance/money";
 import type { PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +25,8 @@ export type TenantProfitRow = {
   margin: number | null;
   /** Envios of the current window. */
   sendCost: number;
+  /** Moeda da casa; ausente = BRL. */
+  moeda?: TenantCurrency;
 };
 
 export type TenantProfitColumn =
@@ -52,7 +59,12 @@ export function sortTenantProfitRows<T extends TenantProfitRow>(
   if (column === "nome") {
     return [...rows].sort((a, b) => sign * a.nome.localeCompare(b.nome, "pt-BR"));
   }
+  const houseMoney = column === "cashResult" || column === "adSpend";
   return [...rows].sort((a, b) => {
+    if (houseMoney) {
+      const byMoeda = byCurrency(toTenantCurrency(a.moeda), toTenantCurrency(b.moeda));
+      if (byMoeda !== 0) return byMoeda;
+    }
     const av = numericValue(a, column);
     const bv = numericValue(b, column);
     if (av === null && bv === null) return 0;
@@ -151,22 +163,36 @@ export function TenantProfitTable({
                   }}
                 >
                   {row.nome}
+                  {row.moeda && row.moeda !== "BRL" && (
+                    <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                      {row.moeda}
+                    </span>
+                  )}
                 </button>
               </td>
-              <td
-                className={cn(
-                  "whitespace-nowrap px-3 py-2 text-right",
-                  row.current.cashResult < 0 && "text-rose-400",
-                )}
-              >
-                {formatBRL(row.current.cashResult)}
-              </td>
+              {row.current.cashResult === null ? (
+                <td
+                  className="whitespace-nowrap px-3 py-2 text-right text-muted-foreground"
+                  title={mixedCurrencyNote(row.moeda)}
+                >
+                  —
+                </td>
+              ) : (
+                <td
+                  className={cn(
+                    "whitespace-nowrap px-3 py-2 text-right",
+                    row.current.cashResult < 0 && "text-rose-400",
+                  )}
+                >
+                  {formatMoneyIn(row.current.cashResult, row.moeda)}
+                </td>
+              )}
               <td className="whitespace-nowrap px-3 py-2 text-right">{formatPct(row.margin)}</td>
               <td className="whitespace-nowrap px-3 py-2 text-right">
                 {formatRatio(row.current.roi)}
               </td>
               <td className="whitespace-nowrap px-3 py-2 text-right">
-                {formatBRL(row.current.adSpend)}
+                {formatMoneyIn(row.current.adSpend, row.moeda)}
               </td>
               <td className="whitespace-nowrap px-3 py-2 text-right">{formatBRL(row.sendCost)}</td>
               {comparing && (

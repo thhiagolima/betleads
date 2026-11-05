@@ -2,6 +2,7 @@
 // montagem da linha do tempo. Os dados vêm de
 // src/lib/expert-lead-sheet.functions.ts.
 
+import { currencySymbol, formatMoney, type TenantCurrency } from "@/lib/currency";
 import { CONTATO_LABEL, type ContatoResultado } from "@/lib/expert-lead-labels";
 import type { LevelSlug } from "@/lib/player-level";
 import type { PlayerSituation } from "@/lib/player-situation";
@@ -75,14 +76,17 @@ const BARE_LINK_RE = /\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\/\S*/g;
 const CPF_FORMATTED_RE = /(?<!\d)\d{3}\.\d{3}\.\d{3}-\d{2}(?!\d)/g;
 const CPF_DIGITS_RE = /(?<!\d)\d{11}(?!\d)/g;
 
-// Mesmo número que `brl()` de template-vars.server.ts produz, sem o "R$".
-const brlNumber = new Intl.NumberFormat("pt-BR", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Mesmo número que template-vars.server.ts produz para o saldo na moeda da
+ * casa (`formatMoney`), sem o símbolo: "1.234,50" (BRL/ARS), "1,234.50" (USD).
+ */
+function moneyNumber(value: number, currency: TenantCurrency): string {
+  // `\s` cobre o espaço não separável que o Intl põe depois do símbolo.
+  return formatMoney(value, currency).replace(currencySymbol(currency), "").replace(/\s/g, "");
 }
 
 /**
@@ -91,11 +95,13 @@ function escapeRegExp(text: string): string {
  * {saldo_atual} e o link pessoal do lead. Troca links por "[link]", e-mails
  * por "[e-mail]", CPFs (formatado ou 11 dígitos seguidos) por "[cpf]" e cada
  * valor de saldo informado — no formato de `template-vars.server.ts`
- * ("R$ 1.234,56", com ou sem "R$") — por "[saldo]". O resto fica intacto.
+ * ("R$ 1.234,56", com ou sem o símbolo) — por "[saldo]". O resto fica intacto.
+ * `currency` é a moeda da casa: o saldo é procurado no formato dela e também
+ * no de BRL (mensagens enviadas antes de a casa ter outra moeda configurada).
  */
 export function maskHouseMessageText(
   text: string | null,
-  options: { saldoValues?: number[] } = {},
+  options: { saldoValues?: number[]; currency?: TenantCurrency } = {},
 ): string | null {
   if (text == null) return null;
   let masked = text
@@ -105,14 +111,20 @@ export function maskHouseMessageText(
     .replace(CPF_FORMATTED_RE, "[cpf]")
     .replace(CPF_DIGITS_RE, "[cpf]");
 
+  const currencies = [...new Set<TenantCurrency>(["BRL", options.currency ?? "BRL"])];
+  // Símbolo mais longo primeiro: "R$" antes de "$" na alternância.
+  const symbols = [...new Set(currencies.map((currency) => currencySymbol(currency)))]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join("|");
   const amounts = new Set(
     (options.saldoValues ?? [])
       .filter((v) => Number.isFinite(v))
-      .map((v) => brlNumber.format(Math.abs(v))),
+      .flatMap((v) => currencies.map((currency) => moneyNumber(Math.abs(v), currency))),
   );
   for (const amount of amounts) {
     const re = new RegExp(
-      String.raw`-?(?:R\$\s*)?-?(?<![\d.,])${escapeRegExp(amount)}(?!\d|[.,]\d)`,
+      String.raw`-?(?:(?:${symbols})\s*)?-?(?<![\d.,])${escapeRegExp(amount)}(?!\d|[.,]\d)`,
       "g",
     );
     masked = masked.replace(re, "[saldo]");

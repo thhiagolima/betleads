@@ -28,8 +28,8 @@ IMPORTANTE — separar HOJE x HISTÓRICO:
 - "total_depositado" / "total_sacado" / "lucro" = histórico acumulado do player.
 - Quando a pergunta for sobre "hoje", o summary e metrics devem refletir os totais de HOJE (use "hoje_totais" do contexto). Nunca misture os dois.
 REGRAS DE NEGÓCIO (já calculadas pelo backend em cada player):
-- classificacao: "vip" (depositou >=R$1000), "lead_quente" (7d seguidos depositando + média >R$200),
-  "lead_frio" (>15d sem login + <R$150), "em_risco" (>5d sem login OU queda de depósitos 30d),
+- classificacao: "vip" (depositou >=1000), "lead_quente" (7d seguidos depositando + média >200),
+  "lead_frio" (>15d sem login + <150), "em_risco" (>5d sem login OU queda de depósitos 30d),
   "alto_potencial" (alta frequência + depósitos crescentes), "neutro".
 - score 0-100: combina frequência, retenção, depósitos, crescimento e consistência.
 - alertas: lista de alertas detectados (vip_inativo, queda_depositos, lead_esfriando, possivel_abandono,
@@ -40,11 +40,13 @@ IMPORTANTE — RESPEITAR o objeto "parsed" do contexto (intent, limit, period, s
 - Se "limit" = N, o summary deve mencionar "top N" / "N players", e NÃO listar mais que N.
 - Se "period" = today/week/month, refira-se ao período correspondente no summary.
 - Se "sort" indicar ordenação (ex.: deposit_amount_desc), explicite isso no "criterio".
-- Se "filters" tiver vip, min_deposit, inactivity_days etc, mencione no "criterio".`;
+- Se "filters" tiver vip, min_deposit, inactivity_days etc, mencione no "criterio".
+MOEDA: todos os valores em dinheiro dos dados estão na moeda da casa ("moeda" no contexto).
+Escreva-os nessa moeda, no formato de "exemplo_moeda" do contexto; nunca converta nem use R$ se a moeda não for BRL.`;
 // Intent "players_with_balance": pergunta sobre banca/saldo. Os players já vêm com
 // saldo_atual (saldo_carteira > 0). NUNCA confunda saldo_atual com total_depositado
 // ou lucro. O summary deve ser: "Encontrei X players com saldo disponível na banca,
-// totalizando R$ Y." e o criterio deve citar "saldo atual da banca (saldo_carteira)".
+// totalizando <valor na moeda da casa>." e o criterio deve citar "saldo atual da banca (saldo_carteira)".
 // (audiência - expert/origem detectado - vem em parsed.audience; quando presente,
 //  os players já foram filtrados por esse expert/origem; cite isso no criterio e
 //  diga "nenhum lead do <expert> ..." quando players=[].)
@@ -434,7 +436,7 @@ async function playersByIds(db: any, ids: string[]) {
   return new Map((data ?? []).map((p: any) => [p.id, p]));
 }
 
-async function fetchByIntent(db: any, parsed: ParsedQuery) {
+async function fetchByIntent(db: any, parsed: ParsedQuery, currency = "BRL") {
   const { intent, limit, period, sort, filters } = parsed;
   const isoToday = periodStartIso("today")!;
   const iso7d = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -483,7 +485,7 @@ async function fetchByIntent(db: any, parsed: ParsedQuery) {
       const verb = table === "deposits" ? "Depositou" : "Sacou";
       return ids.filter((id) => pmap.has(id)).map((id) => {
         const a = agg.get(id)!;
-        const base = mapPlayer(pmap.get(id), `${verb} R$ ${a.sum.toFixed(2)} hoje (${a.count}x)`);
+        const base = mapPlayer(pmap.get(id), `${verb} ${money(a.sum, currency)} hoje (${a.count}x)`);
         if (table === "deposits") {
           return { ...base, depositado_hoje: a.sum, qtd_depositos_hoje: a.count, ultimo_deposito: a.last ?? base.ultimo_deposito };
         }
@@ -569,7 +571,7 @@ async function fetchByIntent(db: any, parsed: ParsedQuery) {
         .sort((a, b) => b.perda - a.perda).slice(0, limit);
       const pmap = await playersByIds(db, ranked.map((r) => r.id));
       return ranked.filter((r) => pmap.has(r.id))
-        .map((r) => mapPlayer(pmap.get(r.id), `Perdeu R$ ${r.perda.toFixed(2)} hoje`));
+        .map((r) => mapPlayer(pmap.get(r.id), `Perdeu ${money(r.perda, currency)} hoje`));
     }
     case "novos_cadastros_7d": {
       const sinceIso = periodIso ?? iso7d;
@@ -641,7 +643,7 @@ async function fetchByIntent(db: any, parsed: ParsedQuery) {
       const ids = [...agg.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([id]) => id);
       const pmap = await playersByIds(db, ids);
       return ids.filter((id) => pmap.has(id)).map((id) =>
-        mapPlayer(pmap.get(id), `Depositou ${(agg.get(id) ?? 0).toFixed(2)} nos últimos 7 dias`));
+        mapPlayer(pmap.get(id), `Depositou ${money(agg.get(id) ?? 0, currency)} nos últimos 7 dias`));
     }
     case "players_with_balance": {
       let q = db.from("players").select(PLAYER_COLS).gt("saldo_carteira", 0);
@@ -652,7 +654,7 @@ async function fetchByIntent(db: any, parsed: ParsedQuery) {
         .limit(limit);
       if (error) throw new Error(`players: ${error.message}`);
       return (data ?? []).map((p: any) =>
-        mapPlayer(p, `Saldo atual ${brl(Number(p.saldo_carteira ?? 0))}`));
+        mapPlayer(p, `Saldo atual ${money(Number(p.saldo_carteira ?? 0), currency)}`));
     }
     default: {
       let q = db.from("players").select(PLAYER_COLS);
@@ -674,11 +676,40 @@ async function fetchByIntent(db: any, parsed: ParsedQuery) {
   }
 }
 
-function brl(n: number) {
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+// Moeda da casa (tenants.moeda). Espelha src/lib/currency.ts, que não dá para
+// importar no Deno: valores da casa no formato convencional do país.
+const CURRENCY_LOCALE: Record<string, string> = {
+  BRL: "pt-BR",
+  ARS: "es-AR",
+  CLP: "es-CL",
+  COP: "es-CO",
+  MXN: "es-MX",
+  PEN: "es-PE",
+  PYG: "es-PY",
+  UYU: "es-UY",
+  USD: "en-US",
+};
+
+function toCurrency(value: unknown): string {
+  const upper = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return CURRENCY_LOCALE[upper] ? upper : "BRL";
 }
 
-function buildFallback(question: string, players: any[], parsed?: ParsedQuery | null) {
+function money(n: number, currency = "BRL") {
+  const code = toCurrency(currency);
+  return (Number.isFinite(n) ? n : 0).toLocaleString(CURRENCY_LOCALE[code], {
+    style: "currency",
+    currency: code,
+  });
+}
+
+function buildFallback(
+  question: string,
+  players: any[],
+  parsed?: ParsedQuery | null,
+  currency = "BRL",
+) {
+  const houseMoney = (n: number) => money(n, currency);
   const aud = parsed?.audience?.matched_expert ?? parsed?.audience?.term ?? null;
   if (aud && players.length === 0) {
     return {
@@ -691,16 +722,16 @@ function buildFallback(question: string, players: any[], parsed?: ParsedQuery | 
     const totalSaldo = players.reduce((s, p) => s + (Number(p.saldo_atual) || 0), 0);
     return {
       summary: players.length
-        ? `Encontrei ${players.length} player(s) com saldo disponível na banca, totalizando ${brl(totalSaldo)}.`
+        ? `Encontrei ${players.length} player(s) com saldo disponível na banca, totalizando ${houseMoney(totalSaldo)}.`
         : `Nenhum player com saldo disponível na banca.`,
       criterio: "Players com saldo_carteira > 0, ordenados do maior saldo para o menor.",
       players,
       insights: players.length
-        ? [{ titulo: "Saldo parado", descricao: `${brl(totalSaldo)} parados em ${players.length} contas.`, tipo: "info" }]
+        ? [{ titulo: "Saldo parado", descricao: `${houseMoney(totalSaldo)} parados em ${players.length} contas.`, tipo: "info" }]
         : [],
       metrics: players.length ? [
         { label: "Players com saldo", valor: String(players.length), tipo: "neutro" },
-        { label: "Saldo total na banca", valor: brl(totalSaldo), tipo: "positivo" },
+        { label: "Saldo total na banca", valor: houseMoney(totalSaldo), tipo: "positivo" },
       ] : [],
     };
   }
@@ -713,9 +744,9 @@ function buildFallback(question: string, players: any[], parsed?: ParsedQuery | 
   return {
     summary: players.length
       ? (hasToday && depHoje > 0
-          ? `${players.length} player(s)${aud ? ` do ${aud}` : ""} depositaram hoje, totalizando ${brl(depHoje)} em ${qtdDepHoje} depósito(s).`
+          ? `${players.length} player(s)${aud ? ` do ${aud}` : ""} depositaram hoje, totalizando ${houseMoney(depHoje)} em ${qtdDepHoje} depósito(s).`
           : hasToday && saqHoje > 0
-            ? `${players.length} player(s)${aud ? ` do ${aud}` : ""} sacaram hoje, totalizando ${brl(saqHoje)}.`
+            ? `${players.length} player(s)${aud ? ` do ${aud}` : ""} sacaram hoje, totalizando ${houseMoney(saqHoje)}.`
             : `Encontrei ${players.length} player(s)${aud ? ` do ${aud}` : ""} relacionado(s) a "${question}".`)
       : `Não encontrei players${aud ? ` do ${aud}` : ""} para "${question}".`,
     criterio: aud
@@ -727,13 +758,13 @@ function buildFallback(question: string, players: any[], parsed?: ParsedQuery | 
       : [],
     metrics: players.length ? (hasToday ? [
       { label: "Players", valor: String(players.length), tipo: "neutro" },
-      { label: "Depositado hoje", valor: brl(depHoje), tipo: "positivo" },
+      { label: "Depositado hoje", valor: houseMoney(depHoje), tipo: "positivo" },
       { label: "Depósitos hoje", valor: String(qtdDepHoje), tipo: "neutro" },
-      { label: "Sacado hoje", valor: brl(saqHoje), tipo: "negativo" },
+      { label: "Sacado hoje", valor: houseMoney(saqHoje), tipo: "negativo" },
     ] : [
       { label: "Players", valor: String(players.length), tipo: "neutro" },
-      { label: "Total depositado", valor: brl(totalDep), tipo: "positivo" },
-      { label: "Total sacado", valor: brl(totalSaq), tipo: "negativo" },
+      { label: "Total depositado", valor: houseMoney(totalDep), tipo: "positivo" },
+      { label: "Total sacado", valor: houseMoney(totalSaq), tipo: "negativo" },
     ]) : [],
   };
 }
@@ -913,6 +944,15 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Moeda da casa, em leitura separada: se falhar (ou a coluna ainda não
+  // existir), segue em BRL em vez de cair no bloqueio fail-closed acima.
+  const { data: currencyRow } = await sb
+    .from("tenants")
+    .select("moeda")
+    .eq("id", tenantId)
+    .maybeSingle();
+  const currency = toCurrency(currencyRow?.moeda);
+
   // Toda leitura passa por `db`, que aplica .eq("tenant_id", tenantId) em cada select.
   const db = tenantScopedReader(sb, tenantId);
   if (!question) {
@@ -941,7 +981,7 @@ Deno.serve(async (req) => {
     parsed = { ...baseParsed, audience: audience ?? null };
     intent = parsed.intent;
     console.log("[ai] parsed:", JSON.stringify(parsed));
-    players = await fetchByIntent(db, parsed);
+    players = await fetchByIntent(db, parsed, currency);
     console.log(`[ai] players encontrados: ${players.length}`);
     players = await enrichPlayers(db, players);
     console.log("[ai] players enriquecidos com classificação/score/alertas");
@@ -964,7 +1004,7 @@ Deno.serve(async (req) => {
   // 1.5) OVERRIDE determinístico: se existe exemplo quase idêntico, use a resposta_ideal
   if (training.override) {
     const ov = training.override;
-    const fb = buildFallback(question, players, parsed);
+    const fb = buildFallback(question, players, parsed, currency);
     const answer = {
       summary: ov.resposta_ideal || fb.summary,
       criterio: fb.criterio || "Resposta a partir de exemplo treinado",
@@ -987,7 +1027,7 @@ Deno.serve(async (req) => {
   // 2) sem chave OpenAI -> fallback direto
   if (!openaiKey) {
     console.warn("[ai] OPENAI_API_KEY ausente, retornando fallback");
-    const answer = buildFallback(question, players, parsed);
+    const answer = buildFallback(question, players, parsed, currency);
     const ins = await sb.from("ai_logs").insert({ tenant_id: tenantId,
       pergunta: question, resposta: JSON.stringify(answer).slice(0, 4000),
       modelo: "fallback", status: "success",
@@ -1014,6 +1054,8 @@ Deno.serve(async (req) => {
       hoje: new Date().toISOString(),
       timezone: "America/Sao_Paulo",
       total_players: players.length,
+      moeda: currency,
+      exemplo_moeda: money(1234.5, currency),
       hoje_totais: { depositado: depHoje, sacado: saqHoje, qtd_depositos: qtdDepHoje },
       historico_totais: { depositado: totalDep, sacado: totalSaq, lucro: totalDep - totalSaq },
       players,
@@ -1050,7 +1092,7 @@ Deno.serve(async (req) => {
     if (!openaiRes.ok) {
       const errText = await openaiRes.text();
       console.error("[ai] OpenAI status", openaiRes.status, errText.slice(0, 500));
-      const answer = buildFallback(question, players, parsed);
+      const answer = buildFallback(question, players, parsed, currency);
       await sb.from("ai_logs").insert({ tenant_id: tenantId,
         pergunta: question, resposta: `OpenAI ${openaiRes.status}: ${errText.slice(0, 1500)}`,
         modelo: "gpt-4o-mini", status: "error",
@@ -1070,13 +1112,13 @@ Deno.serve(async (req) => {
       answer = JSON.parse(raw);
     } catch (e) {
       console.error("[ai] JSON parse falhou:", e, "raw:", raw.slice(0, 500));
-      answer = buildFallback(question, players, parsed);
+      answer = buildFallback(question, players, parsed, currency);
       answer.summary = raw.slice(0, 400) || answer.summary;
     }
 
     // Sempre força os players reais do banco (não confiar em invenções da IA).
     answer.players = players;
-    answer.summary = answer.summary || buildFallback(question, players, parsed).summary;
+    answer.summary = answer.summary || buildFallback(question, players, parsed, currency).summary;
     answer.insights = Array.isArray(answer.insights) ? answer.insights : [];
     answer.metrics = Array.isArray(answer.metrics) ? answer.metrics : [];
 
@@ -1094,7 +1136,7 @@ Deno.serve(async (req) => {
     clearTimeout(timer);
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[ai] exceção OpenAI:", msg);
-    const answer = buildFallback(question, players, parsed);
+    const answer = buildFallback(question, players, parsed, currency);
     await sb.from("ai_logs").insert({ tenant_id: tenantId,
       pergunta: question, resposta: msg, modelo: "gpt-4o-mini", status: "error",
     });

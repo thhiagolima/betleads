@@ -4,12 +4,16 @@
 // the value and one muted meta line: the variation when there is something
 // to compare, else a short reason. The ROI shows the previous calendar
 // month's ROI (roiReference, spec §4.5) as a fixed reference. Relies on a
-// TooltipProvider above it (the dashboard root).
+// TooltipProvider above it (the dashboard root). Fora do BRL não há Lucro
+// líquido (receita na moeda da casa, custos Betleads em BRL): Lucro, Margem
+// e ROI mostram "—" com a nota de câmbio, e Anúncios vem na moeda da casa.
 import type { ReactNode } from "react";
 
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
-import { formatBRL, formatPct, formatRatio } from "@/components/finance/format";
+import { formatMoneyIn, formatPct, formatRatio } from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
+import type { TenantCurrency } from "@/lib/currency";
+import { mixedCurrencyNote } from "@/lib/finance/money";
 import type { DateRange, FinanceKpis, PeriodSummary } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -77,6 +81,7 @@ export function ResultBand({
   roiReference,
   houseCount,
   comparing = true,
+  currency = "BRL",
 }: {
   current: PeriodSummary;
   previous: PeriodSummary;
@@ -86,6 +91,8 @@ export function ResultBand({
   houseCount?: number;
   /** False for "Sem comparação": no variation, and the meta says so. */
   comparing?: boolean;
+  /** Moeda das casas do escopo (todas na mesma). */
+  currency?: TenantCurrency;
 }) {
   const profitLabel =
     houseCount !== undefined && houseCount > 1
@@ -94,7 +101,11 @@ export function ResultBand({
   const hasPrevious = comparing && periodHasData(previous);
   const noCompareText = comparing ? NO_COMPARE_TEXT : COMPARE_OFF_TEXT;
 
-  const profitMeta = hasVariation(current.cashResult, previous.cashResult, hasPrevious) ? (
+  // Sem Lucro líquido: receita e custos Betleads em moedas diferentes.
+  const noProfit = current.cashResult === null;
+  const profitMeta = noProfit ? (
+    <span data-note="mixed-currency">{mixedCurrencyNote(currency)}</span>
+  ) : hasVariation(current.cashResult, previous.cashResult, hasPrevious) ? (
     <Variation
       current={current.cashResult}
       previous={previous.cashResult}
@@ -124,9 +135,15 @@ export function ResultBand({
         main
         label={profitLabel}
         term="cashResult"
-        value={formatBRL(current.cashResult)}
-        valueClassName={signClass(current.cashResult)}
-        tint={current.cashResult < 0 ? "negative" : current.cashResult > 0 ? "positive" : undefined}
+        value={noProfit ? "—" : formatMoneyIn(current.cashResult, currency)}
+        valueClassName={noProfit ? "text-muted-foreground" : signClass(current.cashResult)}
+        tint={
+          current.cashResult === null || current.cashResult === 0
+            ? undefined
+            : current.cashResult < 0
+              ? "negative"
+              : "positive"
+        }
         meta={profitMeta}
       />
       <ResultCard
@@ -137,7 +154,7 @@ export function ResultBand({
         valueClassName={
           kpis.current.margin === null ? "text-muted-foreground" : signClass(kpis.current.margin)
         }
-        meta="lucro ÷ net"
+        meta={noProfit ? "sem lucro líquido" : "lucro ÷ net"}
       />
       <ResultCard
         id="roi"
@@ -146,12 +163,19 @@ export function ResultBand({
         value={current.roi === null ? "—" : formatRatio(current.roi)}
         valueClassName={current.roi === null ? "text-muted-foreground" : undefined}
         meta={
-          current.roi === null
-            ? "Sem anúncios no período"
-            : `mês anterior: ${roiReference.roi === null ? "—" : formatRatio(roiReference.roi)}`
+          noProfit
+            ? "sem lucro líquido"
+            : current.roi === null
+              ? "Sem anúncios no período"
+              : `mês anterior: ${roiReference.roi === null ? "—" : formatRatio(roiReference.roi)}`
         }
       />
-      <ResultCard id="adSpend" label="Anúncios" value={formatBRL(current.adSpend)} meta={adsMeta} />
+      <ResultCard
+        id="adSpend"
+        label="Anúncios"
+        value={formatMoneyIn(current.adSpend, currency)}
+        meta={adsMeta}
+      />
     </div>
   );
 }

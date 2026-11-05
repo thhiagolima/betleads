@@ -1,7 +1,8 @@
 // Área do Expert §8 — leitura do teto mensal de envios no navegador: o
 // cartão "Uso do mês" (/campanhas, início do expert) e o bloqueio do
 // compositor. A checagem que vale é a do servidor (reserva atômica); aqui só
-// explicamos antes do clique.
+// explicamos antes do clique. Teto e consumo são preço de envio cobrado da
+// carteira da casa: sempre BRL (`brl()`), qualquer que seja a moeda da casa.
 
 import { brl } from "@/lib/format";
 

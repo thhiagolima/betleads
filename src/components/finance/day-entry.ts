@@ -4,6 +4,7 @@
 // nos dias vazios" entries and the day's result (sends and other costs of
 // that day taken off its cash result, plus the waterfall).
 import { presetRange, round2, summarize } from "@/lib/finance/calc";
+import type { TenantCurrency } from "@/lib/currency";
 import { hasMissingSendCost, waterfallSteps } from "@/lib/finance/kpis";
 import type { FinanceDay, PeriodSummary, SendUsage, WaterfallStep } from "@/lib/finance/types";
 
@@ -93,12 +94,15 @@ export type DayCost = { valor: number; categoria: string };
 /**
  * The day's Lucro líquido and its waterfall: its sends and other costs taken
  * off. `sendCostIncomplete`: some send of the day has no provider cost
- * registered, so its Envios (and the result) are partial.
+ * registered, so its Envios (and the result) are partial. Fora do BRL
+ * (`currency`) não há Lucro líquido (summary.cashResult null) e a cascata
+ * para antes dos envios (ver waterfallSteps).
  */
 export function dayResult(
   day: FinanceDay,
   sends: SendUsage[] | undefined,
   costs: DayCost[],
+  currency?: TenantCurrency,
 ): {
   summary: PeriodSummary;
   sendCost: number;
@@ -112,12 +116,18 @@ export function dayResult(
     categories[cost.categoria] = round2((categories[cost.categoria] ?? 0) + cost.valor);
   }
   const otherCosts = round2(costs.reduce((total, cost) => total + cost.valor, 0));
-  const summary = summarize([day], otherCosts, undefined, { usage: sendCost, fee: null });
+  const summary = summarize(
+    [day],
+    otherCosts,
+    undefined,
+    { usage: sendCost, fee: null },
+    { currency },
+  );
   return {
     summary,
     sendCost,
     sendCostIncomplete,
-    steps: waterfallSteps(summary, sendCost, categories, { sendCostIncomplete }),
+    steps: waterfallSteps(summary, sendCost, categories, { sendCostIncomplete, currency }),
   };
 }
 

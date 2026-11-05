@@ -381,3 +381,61 @@ describe("payload com a transação em `deposit`/`withdraw` (bravabet365)", () =
     });
   });
 });
+
+describe("casa internacional (Los Hermanos: DDI e moeda no payload)", () => {
+  const ARG_USER = {
+    id: 13,
+    ddi: "54",
+    name: "Ricardo",
+    email: "ricardo@example.com",
+    phone: "3483451193",
+    phone_e164: "543483451193",
+    created_at: "2026-11-04T23:14:06Z",
+  };
+  const depositCreated = {
+    user: ARG_USER,
+    event: "deposit.created",
+    amount: 10000,
+    status: "pending",
+    deposit: { id: 10, type: "transfer", amount: "10000.00", currency: "ARS", status: "pending" },
+    event_id: "14a78221-adfb-4718-a113-4cae1621184c",
+  };
+
+  function setupTenant(moeda: string) {
+    return fakeSupabase((op) => {
+      if (op.table === "tenants" && op.op === "select") return { data: { crm_model: null, moeda } };
+      if (op.table === "webhook_logs" && op.op === "insert") return { data: { id: "log-1" } };
+      if (op.table === "players" && op.op === "select") return { data: null };
+      if (op.table === "players" && op.op === "insert") return { data: { id: "player-1" } };
+      if (op.table === "financial_webhook_attempts" && op.op === "insert") {
+        return { data: { id: "attempt-1" } };
+      }
+      return undefined;
+    });
+  }
+
+  it("grava o telefone com o DDI do país, não como número brasileiro", async () => {
+    const { sb, ops } = setupTenant("ARS");
+    await processWebhookEvent(sb, TENANT, "cadastro", { user: ARG_USER, event: "user.registered" });
+    const insert = ops.find((o) => o.table === "players" && o.op === "insert");
+    expect(insert?.payload).toMatchObject({ telefone: "+543483451193" });
+  });
+
+  it("não marca divergência quando a moeda do payload é a da casa", async () => {
+    const { sb, ops } = setupTenant("ARS");
+    await processWebhookEvent(sb, TENANT, "deposito-pendente", depositCreated);
+    const last = ops.filter((o) => o.table === "webhook_logs" && o.op === "update").at(-1);
+    expect(last?.payload?.status).toBe("processado");
+    expect(last?.payload?.payload).toBeUndefined();
+  });
+
+  it("marca no log quando a casa manda outra moeda que a configurada", async () => {
+    const { sb, ops } = setupTenant("BRL");
+    await processWebhookEvent(sb, TENANT, "deposito-pendente", depositCreated);
+    const last = ops.filter((o) => o.table === "webhook_logs" && o.op === "update").at(-1);
+    expect(last?.payload?.status).toBe("processado");
+    expect((last?.payload?.payload as Record<string, unknown>)._processing).toEqual({
+      currency_mismatch: { payload: "ARS", tenant: "BRL" },
+    });
+  });
+});

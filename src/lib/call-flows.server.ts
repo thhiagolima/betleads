@@ -6,10 +6,7 @@
 // - checkPlayerExitConditions: sai do fluxo em tempo real (login/deposit/etc.)
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import {
-  renderCallScript,
-  type LeadLike,
-} from "./calls.server";
+import { renderCallScript, type LeadLike } from "./calls.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { logCallHistoryInsertError } from "./voice-history-log";
 import { sendSmsInternal } from "./sms.functions";
@@ -227,7 +224,8 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     vip: player?.vip,
     risco: player?.risco,
   };
-  const renderedText = renderCallScript(scriptContent, leadLike);
+  const { currency } = await loadHouseLinks(progress.tenant_id);
+  const renderedText = renderCallScript(scriptContent, leadLike, currency);
   // 2. telefone
   const rawPhone = progress.phone_e164 || player?.telefone || "";
   if (!rawPhone) {
@@ -326,7 +324,9 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
     provider: "infobip",
     provider_call_id: result.providerCallId ?? (result.idempotencyKey || null),
     provider_response: {
-      ...((result.body && typeof result.body === "object" && !Array.isArray(result.body)) ? result.body : {}),
+      ...(result.body && typeof result.body === "object" && !Array.isArray(result.body)
+        ? result.body
+        : {}),
       correlation_id: result.idempotencyKey,
       cml: { type: "say", text: content.text, language: content.language },
     } as any,

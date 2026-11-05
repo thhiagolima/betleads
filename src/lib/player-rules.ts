@@ -1,3 +1,4 @@
+import { DEFAULT_CURRENCY, formatMoney, type TenantCurrency } from "@/lib/currency";
 import { normalizeBrazilianPhone } from "@/lib/phone-normalization";
 // Regras de negócio compartilhadas para classificação, scores e alertas.
 // Puro TS, sem dependências — usado no frontend (Alertas, Dashboard, PlayerCard).
@@ -258,7 +259,12 @@ function clamp01(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-export function detectAlerts(p: PlayerLike): Alerta[] {
+/**
+ * `currency` é a moeda da casa: só muda como os valores aparecem no texto
+ * (os limites, como VIP a partir de 1000, seguem os mesmos números).
+ */
+export function detectAlerts(p: PlayerLike, currency: TenantCurrency = DEFAULT_CURRENCY): Alerta[] {
+  const money = (n: number) => formatHouseMoney(n, currency);
   const out: Alerta[] = [];
   const dep = Number(p.total_depositado ?? 0);
   const saq = Number(p.total_sacado ?? 0);
@@ -283,7 +289,7 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
         Number.isFinite(diasLogin)
           ? `VIP sem login há ${Math.floor(diasLogin)} dias.`
           : "VIP sem nenhum login registrado."
-      } Total depositado: ${formatBRL(dep)}.`,
+      } Total depositado: ${money(dep)}.`,
       impacto:
         "VIPs concentram a maior parte da receita. Cada dia sem contato aumenta a chance de migração para a concorrência.",
       acaoRecomendada: "whatsapp",
@@ -311,7 +317,7 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
       tipo: "queda_depositos",
       titulo: "Receita em queda — recuperar agora",
       prioridade: isVip ? "critico" : "alto",
-      motivo: `Depositou apenas ${formatBRL(dep30)} nos últimos 30 dias, contra ${formatBRL(dep3060)} nos 30 dias anteriores (queda de mais de 50%).`,
+      motivo: `Depositou apenas ${money(dep30)} nos últimos 30 dias, contra ${money(dep3060)} nos 30 dias anteriores (queda de mais de 50%).`,
       impacto:
         "Queda dessa magnitude costuma indicar desengajamento, problema com a plataforma ou migração para a concorrência.",
       acaoRecomendada: "whatsapp",
@@ -326,7 +332,7 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
         tipo: "queda_depositos",
         titulo: "Receita em queda — recuperar agora",
         prioridade: isVip ? "critico" : "alto",
-        motivo: `Depositou apenas ${formatBRL(dep7)} nos últimos 7 dias, contra ${formatBRL(dep714)} nos 7 dias anteriores (queda de mais de 50%).`,
+        motivo: `Depositou apenas ${money(dep7)} nos últimos 7 dias, contra ${money(dep714)} nos 7 dias anteriores (queda de mais de 50%).`,
         impacto:
           "Queda recente costuma indicar desengajamento, problema com a plataforma ou migração para a concorrência.",
         acaoRecomendada: "whatsapp",
@@ -355,7 +361,7 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
       tipo: "proximo_vip",
       titulo: "Quase VIP — oportunidade de upgrade",
       prioridade: "medio",
-      motivo: `Já depositou ${formatBRL(dep)}. Faltam apenas ${formatBRL(1000 - dep)} para atingir o status VIP.`,
+      motivo: `Já depositou ${money(dep)}. Faltam apenas ${money(1000 - dep)} para atingir o status VIP.`,
       impacto:
         "Player a um passo de virar VIP — converter agora aumenta retenção e LTV de forma significativa.",
       acaoRecomendada: "bonus",
@@ -369,7 +375,7 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
       tipo: "alto_potencial",
       titulo: "Alto potencial — acelerar agora",
       prioridade: "medio",
-      motivo: `${logins30} logins nos últimos 30 dias e crescimento de depósito (${formatBRL(dep30)} vs ${formatBRL(dep3060)}).`,
+      motivo: `${logins30} logins nos últimos 30 dias e crescimento de depósito (${money(dep30)} vs ${money(dep3060)}).`,
       impacto:
         "Player em curva ascendente. Investir em acompanhamento agora aumenta a chance dele virar VIP.",
       acaoRecomendada: "campanha",
@@ -437,7 +443,7 @@ export function detectAlerts(p: PlayerLike): Alerta[] {
       tipo: "saldo_parado",
       titulo: "Dinheiro parado — oportunidade",
       prioridade: prio,
-      motivo: `${formatBRL(saldo)} parado em conta há ${Math.floor(diasJogo)} dias sem jogar.`,
+      motivo: `${money(saldo)} parado em conta há ${Math.floor(diasJogo)} dias sem jogar.`,
       impacto:
         "Saldo parado costuma virar pedido de saque. Reengajar agora preserva esse valor dentro da operação.",
       acaoRecomendada: "whatsapp",
@@ -548,12 +554,9 @@ export function classificacaoPrioridade(c: Classificacao): Prioridade {
   return "baixo";
 }
 
-function formatBRL(n: number) {
-  return (n ?? 0).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    maximumFractionDigits: 0,
-  });
+/** Valor da casa sem centavos, na moeda dela. */
+function formatHouseMoney(n: number, currency: TenantCurrency) {
+  return formatMoney(n ?? 0, currency, { decimals: 0 });
 }
 
 export function scoreColor(score: number): string {
@@ -570,11 +573,16 @@ export function riskColor(score: number): string {
 }
 
 /** Gera uma mensagem de WhatsApp pré-pronta para o tipo de alerta. */
-export function whatsappMessageFor(a: Alerta, p: PlayerLike): string {
+export function whatsappMessageFor(
+  a: Alerta,
+  p: PlayerLike,
+  currency: TenantCurrency = DEFAULT_CURRENCY,
+): string {
+  const money = (n: number) => formatHouseMoney(n, currency);
   const nome = (p.nome ?? "").split(" ")[0] || "tudo bem";
   const base = `Oi ${nome}! Tudo certo? `;
   const saldo = Number(p.saldo_carteira ?? 0);
-  const saldoTxt = saldo > 0 ? ` Vi aqui que você tem ${formatBRL(saldo)} em saldo esperando.` : "";
+  const saldoTxt = saldo > 0 ? ` Vi aqui que você tem ${money(saldo)} em saldo esperando.` : "";
   switch (a.tipo) {
     case "abandono_vip":
     case "vip_sem_atividade":
@@ -619,7 +627,7 @@ export function whatsappMessageFor(a: Alerta, p: PlayerLike): string {
     case "saldo_parado":
       return (
         base +
-        `Vi que tem ${formatBRL(saldo)} na sua conta te esperando. Posso te mostrar os jogos que estão pagando bem agora pra você aproveitar?`
+        `Vi que tem ${money(saldo)} na sua conta te esperando. Posso te mostrar os jogos que estão pagando bem agora pra você aproveitar?`
       );
     case "login_sem_deposito":
       return (
@@ -636,17 +644,21 @@ export function whatsappMessageFor(a: Alerta, p: PlayerLike): string {
   }
 }
 
-export function buildWhatsAppLink(p: PlayerLike, a: Alerta): string | null {
+export function buildWhatsAppLink(
+  p: PlayerLike,
+  a: Alerta,
+  currency: TenantCurrency = DEFAULT_CURRENCY,
+): string | null {
   // wa.me needs the country code: "11999998888" would be read as +1.
   const phone = normalizeBrazilianPhone(p.telefone);
   if (!phone) return null;
   const digits = phone.slice(1);
-  const msg = encodeURIComponent(whatsappMessageFor(a, p));
+  const msg = encodeURIComponent(whatsappMessageFor(a, p, currency));
   return `https://wa.me/${digits}?text=${msg}`;
 }
 
 /**
- * Estimativa de receita potencialmente recuperável (faixa min–max em BRL).
+ * Estimativa de receita potencialmente recuperável (faixa min–max na moeda da casa).
  * Considera ticket médio, frequência anterior, histórico recente e tipo de player.
  */
 export function recoveryPotential(p: PlayerLike): { min: number; max: number } {
@@ -748,6 +760,8 @@ export function computeAlertsByPlayer(args: {
   withdrawals: RawWithdrawalRow[];
   followups: RawFollowupRow[];
   recentFollowupHours?: number;
+  /** Moeda da casa, para os valores no texto dos alertas. */
+  currency?: TenantCurrency;
 }): Map<string, Alerta[]> {
   const recentMs = (args.recentFollowupHours ?? 48) * 3600 * 1000;
   const now = Date.now();
@@ -858,7 +872,9 @@ export function computeAlertsByPlayer(args: {
       horario_pico: horarioPico,
     };
 
-    const alertas = detectAlerts(enriched).filter((a) => !recentFollowup.has(`${p.id}:${a.tipo}`));
+    const alertas = detectAlerts(enriched, args.currency).filter(
+      (a) => !recentFollowup.has(`${p.id}:${a.tipo}`),
+    );
     if (alertas.length) out.set(p.id, alertas);
   }
   return out;

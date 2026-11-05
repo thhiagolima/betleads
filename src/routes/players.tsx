@@ -21,7 +21,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { brl, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import {
   Search,
   Crown,
@@ -386,6 +387,7 @@ function PlayersPage() {
   const [dateOpen, setDateOpen] = useState(false);
   const pageSize = 50;
   const qc = useQueryClient();
+  const { currency, money } = useMoney();
   const [waDialog, setWaDialog] = useState<{
     player: WhatsAppDialogPlayer;
     alerta?: Alerta;
@@ -837,7 +839,7 @@ function PlayersPage() {
   // Esse é o único caso que ainda baixa muitas linhas — mas só dispara quando
   // esses chips específicos são clicados.
   const { data: localAlertData } = useQuery({
-    queryKey: ["players-local-alerts", filter, search],
+    queryKey: ["players-local-alerts", filter, search, currency],
     enabled: isLocalAlertFilter,
     refetchInterval: isLocalAlertFilter ? 30_000 : false,
     staleTime: 15_000,
@@ -888,6 +890,7 @@ function PlayersPage() {
         sessions: (sessRes.data ?? []) as RawSessionRow[],
         followups: (fupRes.data ?? []) as RawFollowupRow[],
         recentFollowupHours: 120,
+        currency,
       });
       const tipo = filter as AlertaTipo;
       const s = search.toLowerCase();
@@ -912,7 +915,7 @@ function PlayersPage() {
   // os depósitos/saques/sessions/followups dos IDs visíveis na página.
   const visiblePlayerIds = useMemo(() => (data ?? []).map((p) => p.id), [data]);
   const { data: alertsByPlayerServerSide } = useQuery({
-    queryKey: ["players-alerts-page", visiblePlayerIds.join(",")],
+    queryKey: ["players-alerts-page", visiblePlayerIds.join(","), currency],
     enabled: isAlertFilter && !isLocalAlertFilter && visiblePlayerIds.length > 0,
     staleTime: 15_000,
     queryFn: async () => {
@@ -947,6 +950,7 @@ function PlayersPage() {
         withdrawals: (wdRes.data ?? []) as RawWithdrawalRow[],
         sessions: (sessRes.data ?? []) as RawSessionRow[],
         followups: (fupRes.data ?? []) as RawFollowupRow[],
+        currency,
       });
     },
   });
@@ -1097,6 +1101,7 @@ function PlayersPage() {
       const csv = playersCsv(
         rows,
         gamification?.settings?.thresholds ?? DEFAULT_PLAYER_GAMIFICATION.thresholds,
+        currency,
       );
       const blob = new Blob(["﻿" + csv], {
         type: "text/csv;charset=utf-8;",
@@ -1593,7 +1598,7 @@ function PlayersPage() {
           value={(gamification?.totals.depositors ?? 0).toLocaleString("pt-BR")}
           detail={depositorsShare}
         />
-        <KpiCard title="Depositado no total" value={brl(gamification?.totals.deposited ?? 0)} />
+        <KpiCard title="Depositado no total" value={money(gamification?.totals.deposited ?? 0)} />
         <KpiCard
           title="VIPs esfriando"
           value={(gamification?.totals.stoppedVipCount ?? 0).toLocaleString("pt-BR")}
@@ -1919,7 +1924,7 @@ function PlayersPage() {
                             {depositsCount.toLocaleString("pt-BR")}
                           </TableCell>
                           <TableCell className="text-right font-medium tabular-nums">
-                            {brl(p.total_depositado)}
+                            {money(p.total_depositado)}
                           </TableCell>
                           <TableCell className="text-label text-muted-foreground">
                             {timeAgo(p.ultimo_deposito ?? p.ftd_em)}
@@ -2441,7 +2446,11 @@ function PlayersPage() {
             waMensagem
               ? waMensagem
               : waDialog.alerta
-                ? whatsappMessageFor(waDialog.alerta, waDialog.player satisfies PlayerLike)
+                ? whatsappMessageFor(
+                    waDialog.alerta,
+                    waDialog.player satisfies PlayerLike,
+                    currency,
+                  )
                 : nextPrecallCopy({
                     fullName: waDialog.player.nome,
                     brand: tenantBrand ?? "",
@@ -2509,6 +2518,7 @@ function PlayerCardContent({
   situation: PlayerSituation;
   awaiting: boolean;
 }) {
+  const { money } = useMoney();
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2">
@@ -2520,7 +2530,7 @@ function PlayerCardContent({
       <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-meta text-muted-foreground">
         <SituationText situation={situation} />
         <span aria-hidden="true">·</span>
-        <span className="tabular-nums text-foreground/90">{brl(player.total_depositado)}</span>
+        <span className="tabular-nums text-foreground/90">{money(player.total_depositado)}</span>
         <span aria-hidden="true">·</span>
         <span>último depósito {timeAgo(player.ultimo_deposito ?? player.ftd_em)}</span>
       </p>

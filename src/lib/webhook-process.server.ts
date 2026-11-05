@@ -1,8 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { attributeFromLastFirstPartyClick } from "./conversion-attribution.server";
 import { lookupExpertName, type SupabaseLike } from "./expert-lookup.server";
+import { toTenantCurrency } from "./currency";
 import { bindExternalListDispatches } from "./external-list-binding.server";
 import { enrollPlayerOnEvent, eventEntryTriggers } from "./journey-scanner.server";
+import { phoneWithCountryCode } from "./phone-normalization";
 
 export function getServiceClient(): SupabaseClient | null {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
@@ -104,10 +106,11 @@ export async function processWebhookEvent(
     // são ignorados dentro do CRM Expert.
     const { data: tenantRow } = await sb
       .from("tenants")
-      .select("crm_model")
+      .select("crm_model,moeda")
       .eq("id", tenantId)
       .maybeSingle();
     const tenantCrmModel = (tenantRow?.crm_model as string | null) ?? null;
+    const tenantCurrency = toTenantCurrency((tenantRow as { moeda?: string | null } | null)?.moeda);
     const isExpertTenant = tenantCrmModel === "CRM_EXPERT";
     const tracking = asRecord(data.tracking ?? (userEnvelope ? payload.tracking : undefined));
     const signupAttribution = asRecord(data.signupAttribution ?? data.signup_attribution);
@@ -153,7 +156,9 @@ export async function processWebhookEvent(
         asRecord(data.user).email,
         asRecord(data.player).email,
       ) ?? null;
-    const telefone =
+    // Casas internacionais mandam o número local em `phone` e o país em
+    // `ddi`/`phone_e164`: sem o DDI o trigger gravaria o número como brasileiro.
+    const telefone = phoneWithCountryCode(
       firstString(
         data.phone,
         data.telefone,
@@ -162,7 +167,24 @@ export async function processWebhookEvent(
         asRecord(data.profile).phone,
         asRecord(data.user).phone,
         asRecord(data.player).phone,
-      ) ?? null;
+      ),
+      data.ddi ?? asRecord(data.user).ddi,
+      data.phone_e164 ?? asRecord(data.user).phone_e164,
+    );
+    // Moeda da transação, quando a casa informa. Os valores são gravados como
+    // vieram; só se marca no log quando difere da moeda configurada na casa.
+    const payloadCurrency = firstString(
+      envelopeTx.currency,
+      asRecord(payload.deposit).currency,
+      asRecord(payload.withdraw).currency,
+      asRecord(payload.withdrawal).currency,
+      data.currency,
+      payload.currency,
+    )?.toUpperCase();
+    const currencyMismatch =
+      payloadCurrency && payloadCurrency !== tenantCurrency
+        ? { currency_mismatch: { payload: payloadCurrency, tenant: tenantCurrency } }
+        : undefined;
     const origem =
       firstString(
         tracking.landing_page,
@@ -476,7 +498,7 @@ export async function processWebhookEvent(
         const currency =
           (data.currency as string | undefined) ??
           (payload.currency as string | undefined) ??
-          "BRL";
+          tenantCurrency;
         const paidAtRaw =
           (data.paid_at as string | undefined) ?? (payload.paid_at as string | undefined) ?? now;
         const paidAt = (() => {
@@ -1004,7 +1026,7 @@ export async function processWebhookEvent(
       return Response.json({ ok: true, evento, ignored: true, reason: "sem_player" });
     }
 
-    await markLog("processado");
+    await markLog("processado", currencyMismatch);
 
     // ENV-09: enroll the player now in journeys this event qualifies for,
     // instead of waiting for the next scan cycle. Runs after the ledger and

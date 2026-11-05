@@ -14,8 +14,8 @@ import {
 } from "lucide-react";
 
 import { HomeCard } from "@/components/home/home-cards";
+import { useMoney } from "@/hooks/use-tenant-currency";
 import type { ExpertTimelineItem, ExpertTimelineKind } from "@/lib/expert-lead-sheet";
-import { brl } from "@/lib/format";
 
 import { formatBrtDateTime } from "./sheet-format";
 
@@ -32,6 +32,7 @@ const KIND_ICON: Record<ExpertTimelineKind, LucideIcon> = {
 };
 
 export function LeadTimeline({ items }: { items: ExpertTimelineItem[] }) {
+  const { money } = useMoney();
   return (
     <HomeCard className="p-4 sm:p-5">
       <h2 className="text-section">Linha do tempo</h2>
@@ -52,7 +53,7 @@ export function LeadTimeline({ items }: { items: ExpertTimelineItem[] }) {
                     <p className="text-body font-medium">{item.titulo}</p>
                     {item.valor != null && (
                       <span className="text-body font-semibold tabular-nums">
-                        {brl(item.valor)}
+                        {money(item.valor)}
                       </span>
                     )}
                   </div>
