@@ -30,6 +30,7 @@ import {
   isAutoStartSuppressed,
   nextAutoStartSuppression,
   pickHelpTarget,
+  screenTourKey,
   shouldAutoStart,
   startAutoStartSuppression,
   tourFor,
@@ -39,7 +40,6 @@ import {
 import type { HelpRole, HelpScreen, TourStep } from "@/help/types";
 import {
   AUTO_TOURS_OFF_KEY,
-  tourKey,
   type HelpProgressMap,
   type HelpProgressStatus,
 } from "@/lib/help-progress";
@@ -242,9 +242,8 @@ export function HelpProvider({ children }: { children: ReactNode }) {
 
   // --- Tours ---
   const runSteps = useCallback(
-    (route: string, tourTab: string | null, steps: TourStep[]) => {
+    (key: string, steps: TourStep[]) => {
       if (steps.length === 0) return;
-      const key = tourKey(route, tourTab);
       void loadTourRunner().then(({ runTour, stopActiveTour }) => {
         runTour(steps, {
           onFinish: (result) => writeProgress(key, result),
@@ -264,7 +263,8 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       const { tourTab, steps } = tourFor(currentScreen, tab === undefined ? currentTab : tab);
       setPanelOpen(false);
       // Wait for the panel (if open) to close so its overlay isn't in the way.
-      window.setTimeout(() => runSteps(currentScreen.route, tourTab, steps), PANEL_CLOSE_MS);
+      const key = screenTourKey(currentScreen, tourTab);
+      window.setTimeout(() => runSteps(key, steps), PANEL_CLOSE_MS);
     },
     [currentScreen, currentTab, runSteps],
   );
@@ -300,7 +300,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!currentScreen || !progressReady) return;
     const { tourTab, steps } = tourFor(currentScreen, currentTab);
-    const key = tourKey(currentScreen.route, tourTab);
+    const key = screenTourKey(currentScreen, tourTab);
     if (autoChecked.current.has(key)) return;
     if (isAutoStartSuppressed(suppression.current, urlTarget)) {
       autoChecked.current.add(key);
@@ -323,7 +323,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         }),
         hasSteps: steps.length > 0,
       });
-      if (ok) runSteps(currentScreen.route, tourTab, steps);
+      if (ok) runSteps(key, steps);
     }, AUTO_START_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [
@@ -363,6 +363,10 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const openElsewhere = useCallback(
     (entry: SearchEntry) => {
       if (!entry.route) return;
+      // Leaving "Sobre o CRM" for a real screen: drop it first — when the
+      // destination is the URL already showing, nothing changes location and
+      // the shell article (with the focus still pending) would stay.
+      if (entry.route.startsWith("/")) setShellOverride(null);
       if (!entry.route.startsWith("/")) {
         setShellOverride({ route: entry.route, tab: entry.tab ?? null });
       } else {

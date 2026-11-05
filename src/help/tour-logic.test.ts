@@ -2,6 +2,9 @@
 // tour-runner.ts and isn't unit-tested here (no jsdom in this repo).
 import { describe, expect, it } from "vitest";
 import type { HelpScreen } from "./types";
+import { tourKey } from "@/lib/help-progress";
+import { HELP_SCREEN_LOADERS } from "./registry";
+import { effectiveTab } from "./resolve";
 import {
   AUTO_START_SUPPRESS_PENDING_MS,
   effectiveOverlayForAutoStart,
@@ -11,6 +14,7 @@ import {
   pickHelpTarget,
   pickVisible,
   sameHelpTarget,
+  screenTourKey,
   shouldAutoStart,
   startAutoStartSuppression,
   tourFor,
@@ -204,5 +208,32 @@ describe("auto-start suppression after a highlight", () => {
     expect(nextAutoStartSuppression(s, origin, t0 + AUTO_START_SUPPRESS_PENDING_MS + 1)).toBeNull();
     expect(nextAutoStartSuppression(null, dest, t0)).toBeNull();
     expect(isAutoStartSuppressed(null, dest)).toBe(false);
+  });
+});
+
+describe("screenTourKey", () => {
+  it("both journey editor routes resolve to the same tour progress key", async () => {
+    const nova = (await HELP_SCREEN_LOADERS["/jornadas/nova"]()).default;
+    const edit = (await HELP_SCREEN_LOADERS["/jornadas/$journeyId"]()).default;
+    expect(edit.route).toBe("/jornadas/$journeyId");
+    const novaKey = screenTourKey(nova, tourFor(nova, null).tourTab);
+    expect(novaKey).toBe("tour:/jornadas/nova");
+    expect(screenTourKey(edit, tourFor(edit, null).tourTab)).toBe(novaKey);
+  });
+
+  it("keeps every other screen's key byte-identical to tourKey(route, tab)", async () => {
+    const casa = (await HELP_SCREEN_LOADERS["/configuracoes/casa"]()).default;
+    expect(screenTourKey(casa, "email")).toBe("tour:/configuracoes/casa#email");
+    expect(screenTourKey(casa, tourFor(casa, effectiveTab(casa, null)).tourTab)).toBe(
+      "tour:/configuracoes/casa#casa",
+    );
+    for (const [key, load] of Object.entries(HELP_SCREEN_LOADERS)) {
+      if (key === "/jornadas/$journeyId") continue;
+      const screen = (await load()).default;
+      for (const tab of Object.keys(screen.tours)) {
+        const tourTab = tab === "default" ? null : tab;
+        expect(screenTourKey(screen, tourTab)).toBe(tourKey(screen.route, tourTab));
+      }
+    }
   });
 });

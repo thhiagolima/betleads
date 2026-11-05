@@ -587,4 +587,10 @@ export default screen;
  * HelpProvider only shows an article whose `route` equals the resolved
  * registry key, so the edit route needs its own `route` (registry.ts). Same
  * `id`, so search indexes the article once (search.ts dedupes by id). */
-export const editScreen: HelpScreen = { ...screen, route: "/jornadas/$journeyId" };
+export const editScreen: HelpScreen = {
+  ...screen,
+  route: "/jornadas/$journeyId",
+  // One tour progress for both routes: the first save of a new journey and
+  // "Duplicar" land on /jornadas/$journeyId, and the tour must not start again.
+  tourRoute: screen.route,
+};

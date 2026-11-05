@@ -1,7 +1,7 @@
 // Pure tour-engine logic (brief, Task 3). No DOM here: the driver.js wrapper
 // and anything that touches `document` lives in tour-runner.ts, which is
 // only ever loaded via `import()` from a HelpProvider (Task 4).
-import { AUTO_TOURS_OFF_KEY, type HelpProgressMap } from "@/lib/help-progress";
+import { AUTO_TOURS_OFF_KEY, tourKey, type HelpProgressMap } from "@/lib/help-progress";
 import type { HelpScreen, TourStep } from "./types";
 
 /** Which tour of `screen` applies to `tab`: the tab's own, else "default".
@@ -15,6 +15,14 @@ export function tourFor(
 ): { tourTab: string | null; steps: TourStep[] } {
   if (tab && screen.tours[tab]) return { tourTab: tab, steps: screen.tours[tab] };
   return { tourTab: null, steps: screen.tours.default ?? [] };
+}
+
+/** The `help_progress` key of `screen`'s tour for `tourTab` (from
+ * `tourFor`): `tourKey(route, tab)`, using `screen.tourRoute` when the
+ * article shares another route's progress. Every other screen keeps exactly
+ * the key it always had (`tourKey(screen.route, tab)`). */
+export function screenTourKey(screen: HelpScreen, tourTab: string | null): string {
+  return tourKey(screen.tourRoute ?? screen.route, tourTab);
 }
 
 export type ShouldAutoStartInput = {

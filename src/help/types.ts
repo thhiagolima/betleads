@@ -70,6 +70,12 @@ export type HelpScreen = {
    * is tab-keyed (no "default"), or the landing URL would find no tour —
    * enforced by -coverage.test.ts. Resolved by `effectiveTab` (resolve.ts). */
   defaultTab?: string;
+  /** The route whose tour progress this screen shares, when one article is
+   * registered under two routes (the journey editor: /jornadas/$journeyId
+   * shares "/jornadas/nova"'s, so saving a new journey — which navigates to
+   * its id — doesn't auto-start the same tour again). Omitted: `route`.
+   * Resolved by `screenTourKey` (tour-logic.ts). */
+  tourRoute?: string;
   /** Glossary term ids (glossary.ts) used by this screen, beyond any
    * `<Term id>` already found in its own component source. */
   terms?: string[];
