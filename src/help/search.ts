@@ -1,6 +1,7 @@
 // Pure search over the help panel's content (brief, Task 4). No DOM, no
 // React: the panel builds the index with `buildSearchIndex` over every
 // loaded article (spec §4.4) and filters it with `searchHelp`.
+import type { Guide } from "./guides";
 import type { GlossaryTerm, HelpRole, HelpScreen } from "./types";
 
 export type SearchEntry = {
@@ -89,13 +90,23 @@ function screenEntries(screen: HelpScreen, role: HelpRole): SearchEntry[] {
   return entries;
 }
 
+/** A guide's title, step titles and substeps, as one searchable entry
+ * (brief, Task 6). Selecting it expands that guide in the panel — guides
+ * with a locked `requiresRole` are still indexed, same as they're still
+ * listed (just marked "só admin"). */
+function guideEntry(guide: Guide): SearchEntry {
+  const text = guide.steps.flatMap((step) => [step.title, ...step.substeps]).join(" ");
+  return { kind: "guide", title: guide.title, text, guideId: guide.id };
+}
+
 /** Every article the role sees (title/purpose, section titles/intros, the
- * items the role can see, states), plus every glossary term. Duplicate
- * routes are indexed once. (Guides join the index in Task 6.) */
+ * items the role can see, states), every guide, plus every glossary term.
+ * Duplicate routes are indexed once. */
 export function buildSearchIndex(
   screens: HelpScreen[],
   role: HelpRole,
   glossary: GlossaryTerm[],
+  guides: Guide[] = [],
 ): SearchEntry[] {
   const entries: SearchEntry[] = [];
   const seen = new Set<string>();
@@ -103,6 +114,9 @@ export function buildSearchIndex(
     if (seen.has(screen.route) || !screen.roles.includes(role)) continue;
     seen.add(screen.route);
     entries.push(...screenEntries(screen, role));
+  }
+  for (const guide of guides) {
+    entries.push(guideEntry(guide));
   }
   for (const term of glossary) {
     entries.push({

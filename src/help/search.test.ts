@@ -7,6 +7,7 @@ import {
   STATES_SECTION_ID,
   type SearchEntry,
 } from "./search";
+import type { Guide } from "./guides";
 import type { HelpScreen } from "./types";
 
 describe("searchHelp", () => {
@@ -164,6 +165,29 @@ describe("buildSearchIndex", () => {
 
   it("works with no screens", () => {
     expect(buildSearchIndex([], "admin", [])).toEqual([]);
+  });
+
+  it("indexes a guide's title, step titles and substeps", () => {
+    const guide: Guide = {
+      id: "primeiro-email",
+      title: "Enviar o primeiro e-mail",
+      requiresRole: "admin",
+      steps: [
+        {
+          id: "verify",
+          title: "Verifique o domínio",
+          route: "/configuracoes/casa",
+          tab: "email",
+          substeps: ["Copiar os registros DNS"],
+          signal: "emailDomainVerified",
+        },
+      ],
+    };
+    const idx = buildSearchIndex([], "gestor", [], [guide]);
+    expect(idx).toEqual([
+      { kind: "guide", title: "Enviar o primeiro e-mail", text: "Verifique o domínio Copiar os registros DNS", guideId: "primeiro-email" },
+    ]);
+    expect(searchHelp(idx, "registros dns")[0]).toMatchObject({ guideId: "primeiro-email" });
   });
 
   it("a gestor on /campanhas finds the Configuração da casa items, current screen first", () => {

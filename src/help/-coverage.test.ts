@@ -17,6 +17,7 @@ import {
 } from "./coverage-scan";
 import { ANCHORS_PENDING_ARTICLE, EXCLUDED_ROUTES, PENDING_ROUTES } from "./coverage-config";
 import { GLOSSARY } from "./glossary";
+import { GUIDES } from "./guides";
 import { HELP_SCREEN_LOADERS } from "./registry";
 import type { HelpScreen } from "./types";
 
@@ -64,6 +65,11 @@ function citedAnchors(screens: HelpScreen[]): Set<string> {
     }
     for (const steps of Object.values(screen.tours)) {
       for (const step of steps) cited.add(step.anchor);
+    }
+  }
+  for (const guide of GUIDES) {
+    for (const step of guide.steps) {
+      if (step.anchor) cited.add(step.anchor);
     }
   }
   return cited;
@@ -123,6 +129,15 @@ describe("help coverage", () => {
             `âncora do tour "${screen.id}#${tab}" sem tourAnchor() em src/: ${step.anchor}`,
           ).toBe(true);
         }
+      }
+    }
+    for (const guide of GUIDES) {
+      for (const step of guide.steps) {
+        if (!step.anchor) continue;
+        expect(
+          declared.has(step.anchor),
+          `âncora citada pelo guia "${guide.id}" sem tourAnchor() em src/: ${step.anchor}`,
+        ).toBe(true);
       }
     }
   });

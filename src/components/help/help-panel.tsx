@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { GLOSSARY } from "@/help/glossary";
+import { GUIDES } from "@/help/guides";
 import { loadAllHelpScreens } from "@/help/registry";
 import {
   buildSearchIndex,
@@ -321,6 +322,10 @@ export type HelpPanelProps = {
   /** A search result from another screen: navigate there (the provider then
    * sends a `focus` with that `route`). */
   onOpenElsewhere: (entry: SearchEntry) => void;
+  /** A search result of kind "guide": expand it in `guidesSlot` (the
+   * provider owns that slot's state, since it also owns the signals query
+   * and the "go to step" navigation). */
+  onOpenGuide?: (guideId: string) => void;
   guidesSlot?: ReactNode;
 };
 
@@ -366,7 +371,8 @@ export function HelpPanel(props: HelpPanelProps) {
 
   const currentRoute = screen?.route ?? null;
   const index = useMemo(
-    () => buildSearchIndex([...(screen ? [screen] : []), ...(allScreens ?? [])], role, GLOSSARY),
+    () =>
+      buildSearchIndex([...(screen ? [screen] : []), ...(allScreens ?? [])], role, GLOSSARY, GUIDES),
     [screen, allScreens, role],
   );
   const results = useMemo(
@@ -434,6 +440,8 @@ export function HelpPanel(props: HelpPanelProps) {
     } else if (entry.kind === "item" && entry.sectionId) {
       setArticleOpen(true);
       setScrollTarget({ domId: sectionDomId(entry.sectionId), nonce: Date.now() });
+    } else if (entry.kind === "guide" && entry.guideId) {
+      props.onOpenGuide?.(entry.guideId);
     }
   };
 

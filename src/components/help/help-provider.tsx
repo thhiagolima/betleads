@@ -21,6 +21,7 @@ import {
 import { toast } from "sonner";
 
 import { useShellNav } from "@/components/shell/use-shell-nav";
+import { GUIDES, type GuideStep } from "@/help/guides";
 import { HELP_SCREEN_LOADERS } from "@/help/registry";
 import { resolveHelpScreen } from "@/help/resolve";
 import type { SearchEntry } from "@/help/search";
@@ -33,8 +34,10 @@ import {
   type HelpProgressStatus,
 } from "@/lib/help-progress";
 import { getHelpProgress, setHelpProgress } from "@/lib/help-progress.functions";
+import { getGuideSignals } from "@/lib/help-guides.functions";
 import type { ShellRole } from "@/lib/navigation";
 import type { HelpPanelFocus } from "./help-panel";
+import { GuideList, type GuideListFocus } from "./guide-list";
 
 const HelpPanel = lazy(() => import("./help-panel").then((m) => ({ default: m.HelpPanel })));
 
@@ -105,6 +108,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const fetchProgress = useServerFn(getHelpProgress);
   const saveProgress = useServerFn(setHelpProgress);
+  const fetchGuideSignals = useServerFn(getGuideSignals);
   const { role: shellRole } = useShellNav();
   const role = helpRoleFor(shellRole);
 
@@ -117,6 +121,16 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const progress: HelpProgressMap | null = progressQuery.isError
     ? null
     : (progressQuery.data?.progress ?? null);
+
+  // Guides' progress counts (Task 6): failure or "not loaded yet" both mean
+  // "render the guides with no counts" (brief, Step 3).
+  const guideSignalsQuery = useQuery({
+    queryKey: ["help-guide-signals"],
+    queryFn: () => fetchGuideSignals(),
+    retry: 1,
+    staleTime: 60_000,
+  });
+  const guideSignals = guideSignalsQuery.isError ? null : (guideSignalsQuery.data?.signals ?? null);
 
   // --- Location: pathname + hash (tabs live in the hash; PageTabs navigate
   // through the router, but a plain `hashchange` is also honoured). ---
@@ -276,6 +290,35 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     }, PANEL_CLOSE_MS);
   }, []);
 
+  // A guide step's "Ir para esta etapa" (Task 6): go to its route/tab, close
+  // the panel, then highlight its anchor once the screen has loaded — same
+  // close-then-highlight timing as `showAnchor`, plus the navigation a guide
+  // step may need (it can point at a different screen than the current one).
+  const goToGuideStep = useCallback(
+    (step: GuideStep) => {
+      setPanelOpen(false);
+      const href = step.tab ? `${step.route}#${step.tab}` : step.route;
+      void navigate({ href }).then(() => {
+        if (!step.anchor) return;
+        window.setTimeout(() => {
+          void loadTourRunner().then(({ highlightAnchor }) => {
+            if (!highlightAnchor(step.anchor as string)) {
+              toast("Este elemento não está visível agora");
+            }
+          });
+        }, PANEL_CLOSE_MS);
+      });
+    },
+    [navigate],
+  );
+
+  // A guide search result (Task 6): expand that guide in the GuideList
+  // below, instead of navigating anywhere.
+  const [guideFocus, setGuideFocus] = useState<GuideListFocus | null>(null);
+  const openGuide = useCallback((guideId: string) => {
+    setGuideFocus({ guideId, nonce: Date.now() });
+  }, []);
+
   const setScreenOverride = useCallback((route: string | null, tab?: string | null) => {
     setOverride(route ? { route, tab: tab ?? null } : null);
   }, []);
@@ -302,6 +345,16 @@ export function HelpProvider({ children }: { children: ReactNode }) {
             onStartTour={() => startTour()}
             onShowAnchor={showAnchor}
             onOpenElsewhere={openElsewhere}
+            onOpenGuide={openGuide}
+            guidesSlot={
+              <GuideList
+                guides={GUIDES}
+                role={role}
+                signals={guideSignals}
+                onGoToStep={goToGuideStep}
+                focus={guideFocus}
+              />
+            }
           />
         </Suspense>
       ) : null}

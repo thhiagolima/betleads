@@ -16,6 +16,7 @@ import {
 } from "@/lib/tenant-access.server";
 import {
   buildQuickLinkUrl,
+  computeHasVerifiedSender,
   computeSetupChecklist,
   normalizeSiteUrl,
   planQuickLinksSave,
@@ -250,7 +251,7 @@ async function fetchQuickLinks(tenantId: string): Promise<QuickLinkRow[]> {
   return (data ?? []) as QuickLinkRow[];
 }
 
-type SenderRow = {
+export type SenderRow = {
   id: string;
   from_name: string | null;
   from_email: string;
@@ -260,7 +261,7 @@ type SenderRow = {
   tenant_id: string;
 };
 
-async function fetchSenders(tenantId: string): Promise<SenderRow[]> {
+export async function fetchSenders(tenantId: string): Promise<SenderRow[]> {
   const { data, error } = await supabaseAdmin
     .from("email_senders")
     .select("id,from_name,from_email,reply_to,domain_id,is_default,tenant_id")
@@ -407,9 +408,7 @@ export const getHouseSetupStatus = createServerFn({ method: "GET" })
     const verifiedEmailDomainIds = new Set(
       emailDomains.filter((d) => d.status === "verified").map((d) => d.id),
     );
-    const hasVerifiedSender = senderRows.some(
-      (s) => s.domain_id !== null && verifiedEmailDomainIds.has(s.domain_id),
-    );
+    const hasVerifiedSender = computeHasVerifiedSender(senderRows, verifiedEmailDomainIds);
 
     const checklist = computeSetupChecklist({
       siteUrl: tenant.site_url,

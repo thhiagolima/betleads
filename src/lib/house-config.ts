@@ -364,6 +364,17 @@ function statusesState(statuses: DomainStatus[]): SetupItemState {
   return "todo";
 }
 
+/** A tenant has a usable verified sender when at least one of its e-mail
+ * senders points at a domain that is currently verified. Shared by
+ * `getHouseSetupStatus` (house-config.functions.ts) and `getGuideSignals`
+ * (help-guides.functions.ts) so the rule is defined once. */
+export function computeHasVerifiedSender(
+  senders: { domain_id: string | null }[],
+  verifiedEmailDomainIds: Set<string>,
+): boolean {
+  return senders.some((s) => s.domain_id !== null && verifiedEmailDomainIds.has(s.domain_id));
+}
+
 export function computeSetupChecklist(input: {
   siteUrl: string | null;
   shortenerStatuses: DomainStatus[];
