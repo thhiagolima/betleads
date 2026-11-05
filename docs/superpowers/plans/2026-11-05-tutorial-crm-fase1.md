@@ -39,7 +39,7 @@
 - **Início automático:** acontece só na primeira visita de cada usuário a cada tela ou aba, para **todos os usuários**, inclusive os antigos.
   - Não acontece se houver um diálogo aberto ou se o usuário tiver ligado "Não mostrar tours automaticamente".
   - Fica desligado quando `help_progress` não pode ser lido.
-- **Migração:** `supabase/migrations/20261202100000_help_progress.sql`.
+- **Migração:** `supabase/migrations/20261203100000_help_progress.sql`.
   - **Não aplicar em produção** sem o ok explícito do usuário.
   - Antes de fazer o commit, confira se a numeração ainda está livre em `origin/main`.
 - **Carregamento:** os artigos são carregados sob demanda (`import()` por tela). O painel não entra no bundle inicial.
@@ -58,7 +58,7 @@
 ### Task 1: Tabela `help_progress` e server functions
 
 **Files:**
-- Create: `supabase/migrations/20261202100000_help_progress.sql`
+- Create: `supabase/migrations/20261203100000_help_progress.sql`
 - Modify: `src/integrations/supabase/types.ts` (adicionar `help_progress` em `Tables`, no mesmo formato das outras)
 - Create: `src/lib/help-progress.ts` (puro), `src/lib/help-progress.functions.ts`
 - Test: `src/lib/help-progress.test.ts`
@@ -524,4 +524,4 @@ expect(computeGuideView(email, { ...none, emailCampaignSent: true }).doneCount).
   - O painel abre, a busca acha "dominio", e os guias mostram o progresso da casa demo.
   - Com a migração **não** aplicada no ambiente, nada começa sozinho e o painel funciona.
 - [ ] **Step 4: Commit** `docs(ajuda): regra de manutenção do tutorial`.
-- [ ] **Step 5:** Avisar o usuário de que a migração `20261202100000_help_progress.sql` precisa ser aplicada em produção e **pedir autorização**. Sem ela, os tours não começam sozinhos.
+- [ ] **Step 5:** Avisar o usuário de que a migração `20261203100000_help_progress.sql` precisa ser aplicada em produção e **pedir autorização**. Sem ela, os tours não começam sozinhos.

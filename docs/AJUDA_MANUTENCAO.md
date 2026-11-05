@@ -88,8 +88,8 @@ Rodar na casa demo, no desktop e no celular, antes de considerar uma rodada do t
 - [ ] "Pular tour" encerra o tour e ele não volta a iniciar sozinho depois.
 - [ ] Ligar "Não mostrar tours automaticamente" desliga o início automático em **todas** as telas, não só na atual.
 - [ ] O painel de ajuda abre, a busca encontra "dominio", e os guias mostram o progresso real da casa demo.
-- [ ] Com a migração `20261202100000_help_progress.sql` **não aplicada** no ambiente: nenhum tour inicia sozinho (falha ao ler `help_progress` desliga o início automático) e o painel de ajuda continua funcionando normalmente (artigo, busca, guias).
+- [ ] Com a migração `20261203100000_help_progress.sql` **não aplicada** no ambiente: nenhum tour inicia sozinho (falha ao ler `help_progress` desliga o início automático) e o painel de ajuda continua funcionando normalmente (artigo, busca, guias).
 
 ## Migração pendente
 
-A migração `supabase/migrations/20261202100000_help_progress.sql` ainda não foi aplicada em produção. Sem ela, o início automático dos tours fica desligado para todo mundo (por design — ver regra "Início automático" em `constraints.md`), mas o painel de ajuda funciona normalmente. Não aplique essa migração sem autorização explícita.
+A migração `supabase/migrations/20261203100000_help_progress.sql` ainda não foi aplicada em produção. Sem ela, o início automático dos tours fica desligado para todo mundo (por design — ver regra "Início automático" em `constraints.md`), mas o painel de ajuda funciona normalmente. Não aplique essa migração sem autorização explícita.
