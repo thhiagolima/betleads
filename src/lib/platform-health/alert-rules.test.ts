@@ -189,7 +189,7 @@ describe("queueAlerts", () => {
 });
 
 describe("providerAlerts", () => {
-  it("open breaker with no_balance reason on sms is critical and names Short Brasil", () => {
+  it("open breaker with no_balance reason on sms is critical with the exact Short Brasil message", () => {
     const breakers: BreakerRow[] = [
       { channel: "sms", state: "open", reason: "no_balance", first_opened_at: hoursAgo(1) },
     ];
@@ -197,7 +197,19 @@ describe("providerAlerts", () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0].severity).toBe("critical");
     expect(alerts[0].key).toBe("provider:breaker:sms");
-    expect(alerts[0].message).toContain("Short Brasil");
+    expect(alerts[0].message).toBe("Short Brasil sem saldo: envio de SMS suspenso");
+  });
+
+  it("breaker open/half_open with a reason other than auth/no_balance is a warning", () => {
+    const breakers: BreakerRow[] = [
+      { channel: "email", state: "half_open", reason: "timeout", first_opened_at: hoursAgo(2) },
+    ];
+    const alerts = providerAlerts({ breakers, rateStates: [], shortioRuns: [] }, NOW);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].severity).toBe("warning");
+    expect(alerts[0].key).toBe("provider:breaker:email");
+    expect(alerts[0].since).toBe(hoursAgo(2));
+    expect(alerts[0].message).toBe("Infobip: envio de e-mail suspenso pelo disjuntor (timeout)");
   });
 
   it("backoff_until in the future with a provider error is a warning", () => {

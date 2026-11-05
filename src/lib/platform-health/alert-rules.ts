@@ -302,6 +302,18 @@ function providerLabel(channel: string): string {
   return channel === "sms" ? "Short Brasil" : "Infobip";
 }
 
+/** Readable channel label for breaker messages, e.g. "Short Brasil sem saldo: envio de SMS suspenso". */
+const CHANNEL_LABELS: Record<string, string> = {
+  sms: "SMS",
+  email: "e-mail",
+  voice: "voz",
+  call: "voz",
+};
+
+function channelLabel(channel: string): string {
+  return CHANNEL_LABELS[channel] ?? channel;
+}
+
 export function providerAlerts(
   input: { breakers: BreakerRow[]; rateStates: RateStateRow[]; shortioRuns: ShortioRunRow[] },
   now: Date,
@@ -309,19 +321,25 @@ export function providerAlerts(
   const alerts: PlatformAlert[] = [];
 
   for (const breaker of input.breakers) {
-    if (
-      breaker.state === "open" &&
-      (breaker.reason === "auth" || breaker.reason === "no_balance")
-    ) {
+    if (breaker.state === "open" || breaker.state === "half_open") {
       const provider = providerLabel(breaker.channel);
-      const message =
-        breaker.reason === "no_balance"
-          ? `${provider} sem saldo: envio de ${breaker.channel} suspenso`
-          : `${provider} recusando credencial: envio de ${breaker.channel} suspenso`;
+      const channel = channelLabel(breaker.channel);
+      let message: string;
+      let severity: AlertSeverity;
+      if (breaker.reason === "no_balance") {
+        severity = "critical";
+        message = `${provider} sem saldo: envio de ${channel} suspenso`;
+      } else if (breaker.reason === "auth") {
+        severity = "critical";
+        message = `${provider} recusando credencial: envio de ${channel} suspenso`;
+      } else {
+        severity = "warning";
+        message = `${provider}: envio de ${channel} suspenso pelo disjuntor (${breaker.reason ?? "erro do provedor"})`;
+      }
       alerts.push({
         key: `provider:breaker:${breaker.channel}`,
         kind: "provider",
-        severity: "critical",
+        severity,
         message,
         tenantId: null,
         since: breaker.first_opened_at,
