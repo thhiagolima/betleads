@@ -39,16 +39,33 @@ export type ShouldAutoStartInput = {
   hasSteps: boolean;
 };
 
+export type AutoStartDecision = "start" | "never" | "wait";
+
+/** The auto-start verdict for one tour key on this visit:
+ * - "never": a permanent reason — the tour was already done/skipped, the
+ *   user turned auto-tours off, or there are no steps. The caller marks the
+ *   key checked for the visit.
+ * - "wait": a transient reason — progress not loaded yet, a dialog open, an
+ *   overlay (e.g. the onboarding status still loading) or the help panel
+ *   covering the screen. The caller must NOT mark the key checked, so it
+ *   retries once the condition clears.
+ * - "start": first visit, nothing in the way.
+ * Unknown progress is checked first (nothing permanent can be known
+ * without it); permanent reasons win over transient ones. */
+export function autoStartDecision(input: ShouldAutoStartInput): AutoStartDecision {
+  if (input.progress === null) return "wait";
+  if (!input.hasSteps) return "never";
+  if (input.progress[AUTO_TOURS_OFF_KEY] === "off") return "never";
+  if (input.progress[input.key] !== undefined) return "never";
+  if (input.dialogOpen || input.overlayActive) return "wait";
+  return "start";
+}
+
 /** Whether a tour should start on its own, on first visit — see
- * constraints.md "Início automático". */
+ * constraints.md "Início automático". Same as `autoStartDecision(...) ===
+ * "start"`. */
 export function shouldAutoStart(input: ShouldAutoStartInput): boolean {
-  if (input.progress === null) return false;
-  if (input.dialogOpen) return false;
-  if (input.overlayActive) return false;
-  if (!input.hasSteps) return false;
-  if (input.progress[AUTO_TOURS_OFF_KEY] === "off") return false;
-  if (input.progress[input.key] !== undefined) return false;
-  return true;
+  return autoStartDecision(input) === "start";
 }
 
 /**

@@ -2,11 +2,12 @@
 // tour-runner.ts and isn't unit-tested here (no jsdom in this repo).
 import { describe, expect, it } from "vitest";
 import type { HelpScreen } from "./types";
-import { tourKey } from "@/lib/help-progress";
+import { AUTO_TOURS_OFF_KEY, tourKey } from "@/lib/help-progress";
 import { HELP_SCREEN_LOADERS } from "./registry";
 import { effectiveTab } from "./resolve";
 import {
   AUTO_START_SUPPRESS_PENDING_MS,
+  autoStartDecision,
   effectiveOverlayForAutoStart,
   filterAvailableSteps,
   isAutoStartSuppressed,
@@ -20,6 +21,52 @@ import {
   tourFor,
   tourResultFromReason,
 } from "./tour-logic";
+
+describe("autoStartDecision", () => {
+  const base = {
+    key: "tour:/campanhas",
+    progress: {} as Record<string, string>,
+    dialogOpen: false,
+    overlayActive: false,
+    hasSteps: true,
+  };
+  type In = Parameters<typeof autoStartDecision>[0];
+  const decide = (over: Partial<In>) => autoStartDecision({ ...base, ...over } as In);
+
+  it('"start" on a first visit with nothing in the way', () => {
+    expect(decide({})).toBe("start");
+  });
+
+  it('"never" for permanent reasons: done, skipped, auto-tours off, no steps', () => {
+    expect(decide({ progress: { "tour:/campanhas": "done" } })).toBe("never");
+    expect(decide({ progress: { "tour:/campanhas": "skipped" } })).toBe("never");
+    expect(decide({ progress: { [AUTO_TOURS_OFF_KEY]: "off" } })).toBe("never");
+    expect(decide({ hasSteps: false })).toBe("never");
+  });
+
+  it('"wait" for transient reasons: progress not loaded, dialog open, overlay/panel active', () => {
+    expect(decide({ progress: null })).toBe("wait");
+    expect(decide({ dialogOpen: true })).toBe("wait");
+    expect(decide({ overlayActive: true })).toBe("wait");
+  });
+
+  it("a permanent reason wins over a transient one", () => {
+    expect(decide({ dialogOpen: true, progress: { "tour:/campanhas": "done" } })).toBe("never");
+    expect(decide({ overlayActive: true, hasSteps: false })).toBe("never");
+  });
+
+  it("shouldAutoStart is exactly autoStartDecision === \"start\"", () => {
+    const cases: Partial<In>[] = [
+      {},
+      { progress: null },
+      { dialogOpen: true },
+      { overlayActive: true },
+      { hasSteps: false },
+      { progress: { "tour:/campanhas": "done" } },
+    ];
+    for (const c of cases) expect(shouldAutoStart({ ...base, ...c } as In)).toBe(decide(c) === "start");
+  });
+});
 
 describe("shouldAutoStart", () => {
   const base = {

@@ -26,12 +26,12 @@ import { HELP_SCREEN_LOADERS } from "@/help/registry";
 import { effectiveTab, resolveHelpScreen } from "@/help/resolve";
 import type { SearchEntry } from "@/help/search";
 import {
+  autoStartDecision,
   effectiveOverlayForAutoStart,
   isAutoStartSuppressed,
   nextAutoStartSuppression,
   pickHelpTarget,
   screenTourKey,
-  shouldAutoStart,
   startAutoStartSuppression,
   tourFor,
   type AutoStartSuppression,
@@ -60,6 +60,9 @@ export const HELP_PROGRESS_QUERY_KEY = ["help-progress"] as const;
 
 /** Delay between a screen's article loading and the auto-start check. */
 const AUTO_START_DELAY_MS = 600;
+/** While auto-start is blocked by something transient (an open dialog,
+ * which no effect dependency tracks), how often it checks again. */
+const AUTO_START_RETRY_MS = 1000;
 /** Lets the Sheet's close animation finish before highlighting the page. */
 const PANEL_CLOSE_MS = 350;
 
@@ -306,13 +309,19 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       autoChecked.current.add(key);
       return;
     }
-    const timer = window.setTimeout(() => {
-      autoChecked.current.add(key);
-      if (isAutoStartSuppressed(suppression.current, urlTarget)) return;
+    // The key is only marked checked on a final verdict ("start"/"never").
+    // On "wait" (a transient blocker) it stays unchecked: overlay/panel
+    // changes re-run this effect, and an open dialog (not a dep) is polled.
+    let timer = 0;
+    const check = () => {
+      if (isAutoStartSuppressed(suppression.current, urlTarget)) {
+        autoChecked.current.add(key);
+        return;
+      }
       const latest = queryClient.getQueryData<{ progress: HelpProgressMap }>(
         HELP_PROGRESS_QUERY_KEY,
       );
-      const ok = shouldAutoStart({
+      const decision = autoStartDecision({
         key,
         progress: latest?.progress ?? null,
         dialogOpen: isDialogOpen(),
@@ -323,8 +332,14 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         }),
         hasSteps: steps.length > 0,
       });
-      if (ok) runSteps(key, steps);
-    }, AUTO_START_DELAY_MS);
+      if (decision === "wait") {
+        timer = window.setTimeout(check, AUTO_START_RETRY_MS);
+        return;
+      }
+      autoChecked.current.add(key);
+      if (decision === "start") runSteps(key, steps);
+    };
+    timer = window.setTimeout(check, AUTO_START_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [
     currentScreen,
