@@ -14,6 +14,7 @@ import { useSidebarCollapsed } from "@/components/shell/sidebar-collapse";
 import { useShellNav } from "@/components/shell/use-shell-nav";
 import { TenantStatusGate } from "@/components/tenant-status-gate";
 import { useGlobalRealtimeStatus } from "@/hooks/use-realtime-invalidate";
+import { tourAnchor } from "@/help/anchor";
 import { resolveRouteMeta, shellContentState } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,7 @@ function RealtimeIndicator() {
     <span
       role="status"
       aria-label={`Tempo real: ${meta.label}`}
+      {...tourAnchor("shell.header.indicador-tempo-real")}
       className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-border px-3 text-xs text-foreground/80"
     >
       <span className={cn("size-1.5 rounded-full", meta.dot)} aria-hidden="true" />
@@ -74,11 +76,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             type="button"
             onClick={toggle}
             aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
+            {...tourAnchor("shell.header.collapse")}
             className="hidden size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:flex"
           >
             <ToggleIcon className="size-[18px]" strokeWidth={1.75} aria-hidden="true" />
           </button>
-          <nav aria-label="Você está em" className="flex min-w-0 items-center gap-2 text-[13.5px]">
+          <nav
+            aria-label="Você está em"
+            {...tourAnchor("shell.header.trilha")}
+            className="flex min-w-0 items-center gap-2 text-[13.5px]"
+          >
             <span className="hidden shrink-0 text-muted-foreground md:inline">{meta.section}</span>
             <ChevronRight
               className="hidden size-3.5 shrink-0 text-muted-foreground md:block"

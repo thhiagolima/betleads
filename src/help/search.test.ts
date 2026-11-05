@@ -57,10 +57,14 @@ describe("searchHelp", () => {
 });
 
 describe("canOpenRoute", () => {
-  it("accepts plain paths, rejects param routes and virtual screens", () => {
+  it("accepts plain paths, rejects param routes and the onboarding virtual screen", () => {
     expect(canOpenRoute("/configuracoes/casa")).toBe(true);
     expect(canOpenRoute("/jornadas/$journeyId")).toBe(false);
     expect(canOpenRoute("onboarding")).toBe(false);
+  });
+
+  it("accepts the shell virtual screen (ruling R4: opens in-panel, no navigation needed)", () => {
+    expect(canOpenRoute("shell")).toBe(true);
   });
 });
 

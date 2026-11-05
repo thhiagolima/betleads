@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useActiveGroup } from "@/hooks/use-active-group";
 import { useActiveTenant, type TenantOption } from "@/hooks/use-active-tenant";
+import { tourAnchor } from "@/help/anchor";
 import { isGroupPath, tenantSwitcherMode } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +87,7 @@ export function ActiveTenantSwitcher({ compact = false }: { compact?: boolean })
       <div
         className="flex h-9 min-w-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3 text-[13px]"
         aria-label={onGroupRoute ? `Grupo: ${currentLabel}` : `Casa: ${currentLabel}`}
+        {...tourAnchor("shell.header.tenant-switcher")}
       >
         {label}
       </div>
@@ -119,6 +121,7 @@ export function ActiveTenantSwitcher({ compact = false }: { compact?: boolean })
                 ? `Trocar de grupo — atual: ${currentLabel}`
                 : `Trocar de casa — atual: ${currentLabel}`
             }
+            {...tourAnchor("shell.header.tenant-switcher")}
             className="flex h-9 min-w-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3 text-[13px] outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring"
           >
             {label}

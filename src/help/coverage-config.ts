@@ -54,9 +54,10 @@ export const EXCLUDED_ROUTES: string[] = [
  * every phase-1 route — Tasks 9-15 remove each one as its article ships.
  */
 export const PENDING_ROUTES: string[] = [
-  // --- Fase 1 (shell/onboarding infra ships in Task 2; these 9 screens'
-  // articles ship in Tasks 9-15) ---
-  "/webhooks",
+  // --- Fase 1: "/webhooks" has an article (Task 15), but only the "links"
+  // tab/section — "plataforma" and "meta" are still pending, per tab. ---
+  "/webhooks#plataforma",
+  "/webhooks#meta",
 
   // --- Fase 2 ---
   "/",
@@ -108,9 +109,7 @@ export const VIRTUAL_SCREENS = ["onboarding", "shell"] as const;
 /**
  * Anchors (ids passed to the `tourAnchor` helper) that exist in the code but aren't cited
  * by any article yet — Task 7 populates articles for the touched screens
- * and shrinks this list. Starts empty.
+ * and shrinks this list. Starts empty; Task 15's shell article cites
+ * "shell.header.help" (Task 4), so this stays empty again.
  */
-export const ANCHORS_PENDING_ARTICLE: string[] = [
-  // The header "?" (HelpButton, Task 4); the shell article ships later.
-  "shell.header.help",
-];
+export const ANCHORS_PENDING_ARTICLE: string[] = [];

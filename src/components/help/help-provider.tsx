@@ -152,6 +152,19 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     [override, pathname, hash],
   );
 
+  // "Sobre o CRM" (ruling R4) overrides the screen without navigating
+  // anywhere, so a real navigation afterwards — unlike the onboarding
+  // wizard's own override, which it clears itself based on wizard state —
+  // has nothing else to drop it. A real navigation while it's active clears
+  // it, so the panel goes back to showing the new page's own article.
+  const lastPathname = useRef(pathname);
+  useEffect(() => {
+    if (lastPathname.current !== pathname) {
+      lastPathname.current = pathname;
+      setOverride((prev) => (prev?.route === "shell" ? null : prev));
+    }
+  }, [pathname]);
+
   // --- Article loading ---
   const [screen, setScreen] = useState<HelpScreen | null>(null);
   const targetRoute = target?.route ?? null;
@@ -272,18 +285,47 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [currentScreen, currentTab, progressReady, overlayActive, panelOpen, override, queryClient, runSteps]);
 
+  const setScreenOverride = useCallback((route: string | null, tab?: string | null) => {
+    setOverride((prev) => {
+      const next = route ? { route, tab: tab ?? null } : null;
+      // Defense in depth: bail out when nothing actually changed, so a
+      // caller that re-applies the same override every render (or every
+      // effect run) doesn't force a new object identity — and therefore a
+      // re-render of every consumer of `target`/`currentScreen` — for
+      // nothing.
+      if (prev === next) return prev;
+      if (prev === null || next === null) return next;
+      if (prev.route === next.route && prev.tab === next.tab) return prev;
+      return next;
+    });
+  }, []);
+
   // A search result on another screen: go there (with its tab) and keep the
-  // panel open on that section once the article loads.
+  // panel open on that section once the article loads. A virtual screen
+  // (today just "shell", ruling R4 — "onboarding" is never offered by
+  // search, see search.ts' canOpenRoute) has no route to navigate to: it is
+  // shown in-panel via `setScreenOverride` instead.
   const navigate = useNavigate();
   const openElsewhere = useCallback(
     (entry: SearchEntry) => {
       if (!entry.route) return;
-      const href = entry.tab ? `${entry.route}#${entry.tab}` : entry.route;
-      void navigate({ href });
+      if (!entry.route.startsWith("/")) {
+        setScreenOverride(entry.route, entry.tab ?? null);
+      } else {
+        const href = entry.tab ? `${entry.route}#${entry.tab}` : entry.route;
+        void navigate({ href });
+      }
       setFocus({ target: entry.sectionId, nonce: Date.now(), route: entry.route });
     },
-    [navigate],
+    [navigate, setScreenOverride],
   );
+
+  // "Sobre o CRM" (ruling R4): same mechanism as a cross-screen search
+  // result landing on "shell", but triggered directly from the panel's own
+  // button instead of a search pick.
+  const openShellArticle = useCallback(() => {
+    openElsewhere({ kind: "item", title: "", text: "", route: "shell", sectionId: "cabecalho" });
+  }, [openElsewhere]);
 
   const showAnchor = useCallback((anchor: string) => {
     setPanelOpen(false);
@@ -323,21 +365,6 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     setGuideFocus({ guideId, nonce: Date.now() });
   }, []);
 
-  const setScreenOverride = useCallback((route: string | null, tab?: string | null) => {
-    setOverride((prev) => {
-      const next = route ? { route, tab: tab ?? null } : null;
-      // Defense in depth: bail out when nothing actually changed, so a
-      // caller that re-applies the same override every render (or every
-      // effect run) doesn't force a new object identity — and therefore a
-      // re-render of every consumer of `target`/`currentScreen` — for
-      // nothing.
-      if (prev === next) return prev;
-      if (prev === null || next === null) return next;
-      if (prev.route === next.route && prev.tab === next.tab) return prev;
-      return next;
-    });
-  }, []);
-
   const value = useMemo<HelpContextValue>(
     () => ({ openPanel, startTour, setOverlayActive, setScreenOverride, progress }),
     [openPanel, startTour, setScreenOverride, progress],
@@ -360,6 +387,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
             onStartTour={() => startTour()}
             onShowAnchor={showAnchor}
             onOpenElsewhere={openElsewhere}
+            onOpenShellArticle={openShellArticle}
             onOpenGuide={openGuide}
             guidesSlot={
               <GuideList

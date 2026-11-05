@@ -20,7 +20,9 @@ export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpSc
   "/jornadas/nova": () => import("./screens/jornada-editor"),
   "/jornadas/$journeyId": () => import("./screens/jornada-editor"),
   "/jornadas/$journeyId/relatorio": () => import("./screens/jornada-relatorio"),
+  "/webhooks": () => import("./screens/webhooks"),
   onboarding: () => import("./screens/onboarding"),
+  shell: () => import("./screens/shell"),
 };
 
 let allScreens: Promise<HelpScreen[]> | null = null;

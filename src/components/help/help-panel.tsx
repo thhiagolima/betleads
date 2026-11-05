@@ -59,6 +59,9 @@ export type HelpPanelViewProps = {
   onToggleArticle: () => void;
   onShowAnchor: (anchor: string) => void;
   onAutoToursOffChange: (off: boolean) => void;
+  /** Opens the "shell" virtual article ("Sobre o CRM", ruling R4): the
+   * header, sidebar, mobile nav and banners, below "Nesta tela". */
+  onOpenShellArticle: () => void;
 };
 
 function Heading({ children }: { children: ReactNode }) {
@@ -261,6 +264,13 @@ export function HelpPanelView(props: HelpPanelViewProps) {
                 CRM todo.
               </p>
             )}
+            <button
+              type="button"
+              onClick={props.onOpenShellArticle}
+              className="mt-3 text-[13px] font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Sobre o CRM
+            </button>
           </section>
 
           <section aria-label="Guias passo a passo">
@@ -322,6 +332,9 @@ export type HelpPanelProps = {
   /** A search result from another screen: navigate there (the provider then
    * sends a `focus` with that `route`). */
   onOpenElsewhere: (entry: SearchEntry) => void;
+  /** "Sobre o CRM" (ruling R4): opens the "shell" virtual article in this
+   * same panel, without navigating anywhere. */
+  onOpenShellArticle: () => void;
   /** A search result of kind "guide": expand it in `guidesSlot` (the
    * provider owns that slot's state, since it also owns the signals query
    * and the "go to step" navigation). */
@@ -486,6 +499,7 @@ export function HelpPanel(props: HelpPanelProps) {
             onToggleArticle={toggleArticle}
             onShowAnchor={props.onShowAnchor}
             onAutoToursOffChange={props.onAutoToursOffChange}
+            onOpenShellArticle={props.onOpenShellArticle}
           />
         </div>
       </SheetContent>

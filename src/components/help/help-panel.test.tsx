@@ -46,6 +46,7 @@ function render(overrides: Partial<HelpPanelViewProps> = {}) {
     onToggleArticle: noop,
     onShowAnchor: noop,
     onAutoToursOffChange: noop,
+    onOpenShellArticle: noop,
     ...overrides,
   };
   return renderToStaticMarkup(<HelpPanelView {...props} />);
@@ -108,5 +109,10 @@ describe("HelpPanelView", () => {
   it("opens the highlighted glossary term", () => {
     const html = render({ highlightTermId: "ggr" });
     expect(html).toMatch(/<details[^>]*id="help-term-ggr"[^>]*open/);
+  });
+
+  it('shows "Sobre o CRM" below "Nesta tela", with or without a screen (ruling R4)', () => {
+    expect(render()).toContain("Sobre o CRM");
+    expect(render({ screen: null })).toContain("Sobre o CRM");
   });
 });

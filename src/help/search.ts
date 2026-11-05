@@ -52,9 +52,13 @@ export function searchHelp(
 }
 
 /** Whether a search result on another screen can take you there: a real
- * path without params ("/jornadas/$journeyId" needs an id we don't have)
- * and not a virtual screen ("onboarding", "shell"). */
+ * path without params ("/jornadas/$journeyId" needs an id we don't have),
+ * or the "shell" virtual screen (ruling R4) — it opens in the panel without
+ * any navigation, so it's always safe to offer. "onboarding" stays
+ * excluded: it's tied to the wizard overlay, not a screen you can jump to
+ * from search. */
 export function canOpenRoute(route: string): boolean {
+  if (route === "shell") return true;
   return route.startsWith("/") && !route.includes("$");
 }
 
