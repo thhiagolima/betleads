@@ -46,6 +46,14 @@ async function loadAllScreens(): Promise<HelpScreen[]> {
   return screens;
 }
 
+function declaredAnchors(): Set<string> {
+  const declared = new Set<string>();
+  for (const file of sourceFiles) {
+    for (const id of extractTourAnchorCalls(fs.readFileSync(file, "utf8"))) declared.add(id);
+  }
+  return declared;
+}
+
 function citedAnchors(screens: HelpScreen[]): Set<string> {
   const cited = new Set<string>(ANCHORS_PENDING_ARTICLE);
   for (const screen of screens) {
@@ -96,10 +104,7 @@ describe("help coverage", () => {
   });
 
   it('toda âncora citada em artigo/tour/guia existe como tourAnchor("…") em src/', async () => {
-    const declared = new Set<string>();
-    for (const file of sourceFiles) {
-      for (const id of extractTourAnchorCalls(fs.readFileSync(file, "utf8"))) declared.add(id);
-    }
+    const declared = declaredAnchors();
     const screens = await loadAllScreens();
     for (const screen of screens) {
       for (const section of screen.sections) {
@@ -123,10 +128,7 @@ describe("help coverage", () => {
   });
 
   it('todo tourAnchor("…") em src/ é citado por algum artigo', async () => {
-    const declared = new Set<string>();
-    for (const file of sourceFiles) {
-      for (const id of extractTourAnchorCalls(fs.readFileSync(file, "utf8"))) declared.add(id);
-    }
+    const declared = declaredAnchors();
     const screens = await loadAllScreens();
     const cited = citedAnchors(screens);
     for (const id of declared) {
@@ -179,5 +181,21 @@ describe("help coverage", () => {
   it("GLOSSARY não tem ids duplicados", () => {
     const ids = GLOSSARY.map((term) => term.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("toda entrada de EXCLUDED_ROUTES e PENDING_ROUTES é uma rota real de ROUTE_META", () => {
+    const routeKeys = new Set(Object.keys(ROUTE_META));
+    for (const route of EXCLUDED_ROUTES) {
+      expect(routeKeys.has(route), `EXCLUDED_ROUTES tem rota inexistente em ROUTE_META: ${route}`).toBe(
+        true,
+      );
+    }
+    for (const pending of PENDING_ROUTES) {
+      const route = pending.split("#")[0];
+      expect(
+        routeKeys.has(route),
+        `PENDING_ROUTES tem rota inexistente em ROUTE_META: ${pending}`,
+      ).toBe(true);
+    }
   });
 });

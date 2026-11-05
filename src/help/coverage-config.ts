@@ -9,7 +9,13 @@
  * routes (confirmed by reading each route file's `beforeLoad`/component —
  * an unconditional `redirect`/`<Navigate>`), non-UI endpoints (the MCP
  * OAuth `.well-known` metadata), and the explicit list from the spec
- * (`/whatsapp`, `/alertas`, `/u/$token`, `/mcp/autorizar`).
+ * (`/whatsapp`, `/alertas`, `/mcp/autorizar`).
+ *
+ * Every entry here must be an actual `ROUTE_META` key (enforced by
+ * -coverage.test.ts) — `/u/$token`, the public unsubscribe page the spec
+ * also names (§5), isn't one yet (no `ROUTE_META` entry exists for it, even
+ * though the route file does), so it's deliberately left out until that
+ * entry is added; see the task 2 report for the open finding.
  */
 export const EXCLUDED_ROUTES: string[] = [
   // Super admin.
@@ -19,10 +25,6 @@ export const EXCLUDED_ROUTES: string[] = [
   "/whatsapp",
   "/alertas",
   "/mcp/autorizar",
-  // Public, logged-out unsubscribe page — no tour, no panel (spec §5). Not
-  // currently a ROUTE_META key (see "Observação" in the task 2 report);
-  // listed here so it's excluded the day it's added.
-  "/u/$token",
   // Redirect-only (unconditional `redirect`/`<Navigate>` in the route file,
   // nothing else rendered).
   "/relatorios/conversao", // -> /resultados
