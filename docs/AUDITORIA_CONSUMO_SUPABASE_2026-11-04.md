@@ -196,3 +196,65 @@ Cada índice extra também custa em todo INSERT/UPDATE e no WAL.
 | Mesma consulta com `x.idempotency_key = s.idempotency_key::uuid` (guardado por regex) | **28.338** | **177 ms** |
 | `SELECT tracked_links … ORDER BY last_synced_at, created_at` (amostra de 5 min) | ~56 mil por chamada | 97 ms |
 | `sweep_dead_lead_revivals` (amostra de 5 min) | ~340 mil por chamada | 850 ms |
+
+---
+
+## 7. Status em 05/11/2026
+
+### 7.1 Aplicado em produção
+
+| Fase | O que entrou | Commit | Migration | Aplicada |
+| --- | --- | --- | --- | --- |
+| P0 | Join do CRM em uuid; dias sem atividade pulados; CRM de hoje a cada 15 min e de ontem às 00h10 BRT; sync do Short.io a cada 5 min; retenção de 3 dias do `cron.job_run_details`; snapshots sem `payload` | `f28685e`, `f12cdec` | `20261129100000_supabase_consumo_p0` | 04/11 20h07 BRT |
+| P1 | Retenção noturna (`purge_operational_history`, 02h50 BRT); varreduras de jornada com trava (5 e 15 min); índices `link_dispatches(tracked_link_id)` e `financial_webhook_attempts(webhook_log_id)`; BRIN nos logs; 5 índices removidos; RPC `shortio_sync_recent_links` | `0e4a1dc` | `20261130100000_supabase_consumo_p1` | 04/11 21h10 BRT (índices com `CONCURRENTLY` antes) |
+| Limpeza do acúmulo | 1,94 milhão de snapshots apagados e 734 mil `payload` zerados; −100.681 `webhook_logs`; −135 mil `dispatcher_runs`; −32,6 mil `link_tracking_sync_runs` | — | — | 04/11 21h15–22h21 BRT |
+| `VACUUM FULL` | `link_click_snapshots`, job único do pg_cron (removido depois) | — | — | 05/11 04h00 BRT, 38 s |
+
+Decisões de retenção (04/11): `webhook_logs` 30 dias; `events` **não mexer** (lido pelo dashboard e pela timeline do player); `financial_webhook_attempts.raw_payload` zerado após 30 dias; `dispatcher_runs` 14 dias; `link_tracking_sync_runs` 7 dias; `journey_events` 90 dias.
+
+### 7.2 Resultados medidos
+
+| Indicador | Antes | Depois |
+| --- | --- | --- |
+| Tamanho do banco | 15 GB (16,2 GB no dia) | **9,1 GB** (disco usado 38%) |
+| `link_click_snapshots` | 6,5 GB, ~120 mil linhas/dia de ~2 KB | **176 MB**, linhas novas sem `payload` |
+| Rodada do CRM | 34–47 s a cada 10 min (2 dias × 13 casas) | **7,6 s** a cada 15 min (1 dia); ontem 1×/dia |
+| Escolha de links recentes do sync | 317 mil buffers por chamada | **8,8 mil** (23 ms) |
+| CPU da VM (métricas `node_cpu_seconds_total`) | — | média **24,7%** desde 15/10; ~15% às 07h30 de 05/11 |
+
+O "Compute 97%" do painel do Supabase é o **pico** de cada intervalo do gráfico, não o uso contínuo. A medição direta da VM (2 núcleos) dá a média acima, com iowait de 0,5% e load average de ~0,5.
+
+Pendente de medição: 48–72 h de CPU por hora (Reports → Database) para decidir a volta ao Medium.
+
+---
+
+## 8. Incidente de 04–05/11: webhooks atrasados (não causado pelo banco)
+
+- **Casas:** Betgreen, PixPGF (Sorte Alta) e PixReals, as três da mesma plataforma (envelope `deliveryId`/`eventId`/`occurredAt`).
+- **Janela:** atraso crescente de ~16h BRT de 04/11 até ~07h BRT de 05/11, com pico de ~7h24 às 03h BRT. Normalizou com a plataforma entregando 7.972 webhooks na hora das 06h.
+- **Gatilho provável:** pico da Betgreen às 15h–16h BRT, com ~5× o volume normal de eventos (~10× saques, ~8× cadastros e logins). Depois do pico, a plataforma entregou só ~400–550 webhooks por hora até ~03h.
+- **Do nosso lado:** handler completo (`webhook_logs.created_at` → `webhook_event_receipts.completed_at`) com mediana de ~0,85 s e p90 de 1,3–2,5 s, estável. Única piora às 14h BRT, com p90 de 7,5 s. O banco ficou ocioso e o processo do app abaixo do limite (CPU 2% na VPS).
+- **Prova independente do horário dos eventos:** o cookie `_fbp` (época em ms, gravada pelo navegador do jogador) confirma que os PIX entregues às 22h24 BRT foram feitos às ~18h50 BRT.
+- **Lições:** (1) falta alerta de atraso de webhooks por casa; (2) cada webhook faz ~18 chamadas sequenciais à API, e reduzir isso para uma RPC deixa a resposta mais rápida e menos sujeita a a plataforma desacelerar o envio (item R1 abaixo).
+
+---
+
+## 9. Próxima fase: reduzir requisições à API (P2)
+
+**Por quê:** ~39 milhões de requisições PostgREST em 33 dias (~1,2 milhão por dia, `set_config` do `service_role` no `pg_stat_statements`). Cada requisição custa CPU (rede, JWT, `set_config`, transação, JSON) e gera uma linha no log do gateway. O **Log Ingestion** está em 46 GB no período, contra 20 GB inclusos (~1,2–1,6 GB/dia); a cobrança começa no início de 2027. A configuração de log do Postgres já é enxuta (`log_statement=ddl`, sem log de duração), então o volume vem do gateway.
+
+| # | Origem (33 dias) | Requisições | % | Ação | Redução estimada |
+| --- | --- | --- | --- | --- | --- |
+| — | Sync do Short.io | ~7,6 milhões | ~20% | Feito no P0/P1 (5 min, sem payload, RPC) | −80% dessa parte |
+| **R1** | **Webhooks**: ~18 chamadas sequenciais por webhook × 456 mil webhooks | ~8 milhões (estimado) | ~20% | Processar cada webhook numa RPC única no banco, com o mesmo resultado | −90% dessa parte; resposta de ~0,9 s para ~0,1 s (estimado) |
+| R2 | Dispatcher de jornadas: leituras por item (`tenants` ~2,5 mi, `players` ~3 mi, `channel_consents` ~1,4 mi, `journey_steps`/`journeys`/`journey_enrollments` ~1 mi cada) | ~12 milhões | ~32% | Cache em memória de 60 s para casa, jornada e passos; leitura em lote de players, inscrições e consentimentos por lote | −50% a −70% dessa parte |
+| R3 | Resto (telas, campanhas, cobrança) | ~11 milhões | ~28% | Caso a caso | pequena |
+
+Estimativa total: **−50% a −60% das requisições** (e do log do gateway), com queda proporcional nos picos de CPU.
+
+**Outros itens da fase:**
+- **Alerta de atraso de webhooks** por casa (por exemplo, acima de 15 min entre `occurredAt` e o recebimento).
+- **Compute Large → Medium:** decidir com 2–3 dias de CPU por hora depois de P0/P1, de preferência também depois de R1/R2, conferindo o cache hit.
+- **Disco provisionado:** reduzir no painel, se for permitido.
+- **`events`** (981 MB, ~46 MB/dia): avaliar apagar só o `metadata` após 90 dias, depois de revisar as funções do dashboard que leem a tabela.
+- **Telas de 3–6 s:** lista de players com `count` exato e estatísticas de histórico de SMS (`history.functions.ts`).
