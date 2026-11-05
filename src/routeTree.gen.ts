@@ -97,6 +97,9 @@ import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/pu
 import { Route as ApiPublicHooksWhatsappResumeRouteImport } from './routes/api/public/hooks/whatsapp-resume'
 import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/meta-sync/tick'
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
+import { Route as ApiPublicPushLoaderDotjsRouteImport } from './routes/api/public/push/loader[.]js'
+import { Route as ApiPublicPushSubscribeRouteImport } from './routes/api/public/push/subscribe'
+import { Route as ApiPublicPushWorkerDotjsRouteImport } from './routes/api/public/push/worker[.]js'
 import { Route as ApiPublicShortioSyncRouteImport } from './routes/api/public/shortio/sync'
 import { Route as ApiPublicTenantDomainsVerifyRouteImport } from './routes/api/public/tenant-domains/verify'
 import { Route as ApiPublicUpperWebhookRouteImport } from './routes/api/public/upper/webhook'
@@ -570,6 +573,23 @@ const ApiPublicPrecallDispatchRoute =
     path: '/api/public/precall/dispatch',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicPushLoaderDotjsRoute =
+  ApiPublicPushLoaderDotjsRouteImport.update({
+    id: '/api/public/push/loader.js',
+    path: '/api/public/push/loader.js',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicPushSubscribeRoute = ApiPublicPushSubscribeRouteImport.update({
+  id: '/api/public/push/subscribe',
+  path: '/api/public/push/subscribe',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicPushWorkerDotjsRoute =
+  ApiPublicPushWorkerDotjsRouteImport.update({
+    id: '/api/public/push/worker.js',
+    path: '/api/public/push/worker.js',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicShortioSyncRoute = ApiPublicShortioSyncRouteImport.update({
   id: '/api/public/shortio/sync',
   path: '/api/public/shortio/sync',
@@ -723,6 +743,9 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
+  '/api/public/push/loader.js': typeof ApiPublicPushLoaderDotjsRoute
+  '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
+  '/api/public/push/worker.js': typeof ApiPublicPushWorkerDotjsRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
@@ -824,6 +847,9 @@ export interface FileRoutesByTo {
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
+  '/api/public/push/loader.js': typeof ApiPublicPushLoaderDotjsRoute
+  '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
+  '/api/public/push/worker.js': typeof ApiPublicPushWorkerDotjsRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
@@ -926,6 +952,9 @@ export interface FileRoutesById {
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
+  '/api/public/push/loader.js': typeof ApiPublicPushLoaderDotjsRoute
+  '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
+  '/api/public/push/worker.js': typeof ApiPublicPushWorkerDotjsRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
@@ -1029,6 +1058,9 @@ export interface FileRouteTypes {
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
+    | '/api/public/push/loader.js'
+    | '/api/public/push/subscribe'
+    | '/api/public/push/worker.js'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
     | '/api/public/upper/webhook'
@@ -1130,6 +1162,9 @@ export interface FileRouteTypes {
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
+    | '/api/public/push/loader.js'
+    | '/api/public/push/subscribe'
+    | '/api/public/push/worker.js'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
     | '/api/public/upper/webhook'
@@ -1231,6 +1266,9 @@ export interface FileRouteTypes {
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
+    | '/api/public/push/loader.js'
+    | '/api/public/push/subscribe'
+    | '/api/public/push/worker.js'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
     | '/api/public/upper/webhook'
@@ -1315,6 +1353,9 @@ export interface RootRouteChildren {
   ApiPublicHooksWhatsappResumeRoute: typeof ApiPublicHooksWhatsappResumeRoute
   ApiPublicMetaSyncTickRoute: typeof ApiPublicMetaSyncTickRoute
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
+  ApiPublicPushLoaderDotjsRoute: typeof ApiPublicPushLoaderDotjsRoute
+  ApiPublicPushSubscribeRoute: typeof ApiPublicPushSubscribeRoute
+  ApiPublicPushWorkerDotjsRoute: typeof ApiPublicPushWorkerDotjsRoute
   ApiPublicShortioSyncRoute: typeof ApiPublicShortioSyncRoute
   ApiPublicTenantDomainsVerifyRoute: typeof ApiPublicTenantDomainsVerifyRoute
   ApiPublicUpperWebhookRoute: typeof ApiPublicUpperWebhookRoute
@@ -1946,6 +1987,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicPrecallDispatchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/push/loader.js': {
+      id: '/api/public/push/loader.js'
+      path: '/api/public/push/loader.js'
+      fullPath: '/api/public/push/loader.js'
+      preLoaderRoute: typeof ApiPublicPushLoaderDotjsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/push/subscribe': {
+      id: '/api/public/push/subscribe'
+      path: '/api/public/push/subscribe'
+      fullPath: '/api/public/push/subscribe'
+      preLoaderRoute: typeof ApiPublicPushSubscribeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/push/worker.js': {
+      id: '/api/public/push/worker.js'
+      path: '/api/public/push/worker.js'
+      fullPath: '/api/public/push/worker.js'
+      preLoaderRoute: typeof ApiPublicPushWorkerDotjsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/shortio/sync': {
       id: '/api/public/shortio/sync'
       path: '/api/public/shortio/sync'
@@ -2250,6 +2312,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksWhatsappResumeRoute: ApiPublicHooksWhatsappResumeRoute,
   ApiPublicMetaSyncTickRoute: ApiPublicMetaSyncTickRoute,
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
+  ApiPublicPushLoaderDotjsRoute: ApiPublicPushLoaderDotjsRoute,
+  ApiPublicPushSubscribeRoute: ApiPublicPushSubscribeRoute,
+  ApiPublicPushWorkerDotjsRoute: ApiPublicPushWorkerDotjsRoute,
   ApiPublicShortioSyncRoute: ApiPublicShortioSyncRoute,
   ApiPublicTenantDomainsVerifyRoute: ApiPublicTenantDomainsVerifyRoute,
   ApiPublicUpperWebhookRoute: ApiPublicUpperWebhookRoute,
