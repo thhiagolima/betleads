@@ -5,7 +5,6 @@ import { z } from "zod";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { selectAllPages } from "@/lib/pagination";
-import { listDemoTenantIds } from "@/lib/tenant-access.server";
 
 import { assertSuperAdmin } from "./billing-health.server";
 import { loadMonthData } from "./billing-month-data.server";
@@ -70,9 +69,16 @@ export type GeneralFinance = {
   houses: GeneralFinanceHouse[];
 };
 
+const TRUNCATED_MESSAGE = "Histórico de faturas grande demais para calcular o Financeiro geral.";
+
 type TenantBillingStateRow = { tenant_id: string; access_state: string };
-type OpenInvoiceRow = { tenant_id: string; amount_cents: number | string; due_date: string };
-type PaidAtRow = { tenant_id: string; paid_at: string };
+type OpenInvoiceRow = {
+  id: string;
+  tenant_id: string;
+  amount_cents: number | string;
+  due_date: string;
+};
+type PaidAtRow = { id: string; tenant_id: string; paid_at: string };
 
 export async function adminGeneralFinanceFor(
   ctx: { userId: string },
@@ -86,10 +92,6 @@ export async function adminGeneralFinanceFor(
   const totals = sumMonthRows(monthRows);
 
   const sb = looseDb(supabaseAdmin);
-  // `monthData.tenants` (and therefore `monthRows`) already excludes demo tenants
-  // (loadMonthData's own filter); this set is only needed to scrub the *other* reads below
-  // (tenant_billing, open invoices, paid-at), which aren't scoped to that tenant list.
-  const demoSet = new Set(await listDemoTenantIds());
 
   const [tbPaged, openInvPaged, paidAtPaged] = await Promise.all([
     selectAllPages<TenantBillingStateRow>(
@@ -98,31 +100,33 @@ export async function adminGeneralFinanceFor(
       "tenant_id",
     ),
     selectAllPages<OpenInvoiceRow>("general_finance_open_invoices", () =>
-      sb.from("billing_invoices").select("tenant_id,amount_cents,due_date").eq("status", "open"),
+      sb.from("billing_invoices").select("id,tenant_id,amount_cents,due_date").eq("status", "open"),
     ),
     selectAllPages<PaidAtRow>("general_finance_paid_at", () =>
-      sb.from("billing_invoices").select("tenant_id,paid_at").eq("status", "paid"),
+      sb.from("billing_invoices").select("id,tenant_id,paid_at").eq("status", "paid"),
     ),
   ]);
   for (const res of [tbPaged, openInvPaged, paidAtPaged]) {
     if (res.error) throw new Error(res.error.message);
   }
+  // Controller ruling: a result silently capped by selectAllPages' MAX_PAGES ceiling would make
+  // every bucket/debtor/firstPaidAt computed below wrong without any error — fail loudly instead
+  // of returning a plausible-looking but partial report.
+  if (tbPaged.truncated || openInvPaged.truncated || paidAtPaged.truncated) {
+    throw new Error(TRUNCATED_MESSAGE);
+  }
 
   const accessStateByTenant = new Map(
-    tbPaged.data
-      .filter((r) => !demoSet.has(r.tenant_id))
-      .map((r) => [r.tenant_id, r.access_state] as const),
+    tbPaged.data.map((r) => [r.tenant_id, r.access_state] as const),
   );
   const openInvoiceByTenant = new Map(
-    openInvPaged.data
-      .filter((r) => !demoSet.has(r.tenant_id))
-      .map(
-        (r) => [r.tenant_id, { amountCents: Number(r.amount_cents), dueDate: r.due_date }] as const,
-      ),
+    openInvPaged.data.map(
+      (r) => [r.tenant_id, { amountCents: Number(r.amount_cents), dueDate: r.due_date }] as const,
+    ),
   );
   const firstPaidAtByTenant = new Map<string, string>();
   for (const row of paidAtPaged.data) {
-    if (demoSet.has(row.tenant_id) || !row.paid_at) continue;
+    if (!row.paid_at) continue;
     const current = firstPaidAtByTenant.get(row.tenant_id);
     if (!current || row.paid_at < current) firstPaidAtByTenant.set(row.tenant_id, row.paid_at);
   }

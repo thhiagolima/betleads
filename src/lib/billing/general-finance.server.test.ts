@@ -12,6 +12,29 @@ vi.mock("@/lib/tenant-access.server", () => ({
   listDemoTenantIds: vi.fn(async () => [] as string[]),
 }));
 
+// Lets one test force a specific selectAllPages label to report `truncated: true` (fix round
+// 1, item 2) without actually materializing 100,000+ rows; every other label passes straight
+// through to the real implementation, so the >1000-row paging test below still exercises the
+// real keyset paging.
+const paginationMock = vi.hoisted(() => ({ truncateLabel: null as string | null }));
+vi.mock("@/lib/pagination", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/pagination")>();
+  return {
+    ...actual,
+    selectAllPages: (
+      label: string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches selectAllPages' own loose `build` type.
+      build: () => any,
+      keyColumn?: string,
+    ) => {
+      if (label === paginationMock.truncateLabel) {
+        return Promise.resolve({ data: [], error: null, truncated: true });
+      }
+      return actual.selectAllPages(label, build, keyColumn);
+    },
+  };
+});
+
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 
 import { adminGeneralFinanceFor } from "./general-finance.server";
@@ -35,6 +58,7 @@ beforeEach(() => {
   fake.admin
     .rows("billing_plans")
     .push({ code: "crm_unico", price_cents: 400000, exempt_all: false });
+  paginationMock.truncateLabel = null;
 });
 
 afterEach(() => {
@@ -174,5 +198,51 @@ describe("adminGeneralFinanceFor", () => {
 
     const result = await adminGeneralFinanceFor(ctxFor(SUPER_ADMIN), { month: "2026-11" });
     expect(result.houses.map((h) => h.tenantId)).toEqual([LOW_MARGIN, HIGH_MARGIN, NO_REVENUE]);
+  });
+
+  // Fix round 1, item 1: the paid-invoices read must select `id` (selectAllPages keysets on
+  // it) — with 1001 rows, the house's earliest paid_at only shows up once the second page is
+  // actually fetched.
+  it("finds the earliest paid_at from the second page of a >1000-row paid-invoices read", async () => {
+    fake.admin
+      .rows("tenants")
+      .push({ id: TENANT, nome: "Casa Grande", slug: "casa-grande", plano: "crm_unico" });
+    fake.admin.rows("tenant_billing").push({ tenant_id: TENANT, access_state: "ok" });
+    const invoices = fake.admin.rows("billing_invoices");
+    for (let i = 0; i < 1000; i += 1) {
+      invoices.push({
+        id: `inv-${String(i).padStart(5, "0")}`,
+        tenant_id: TENANT,
+        status: "paid",
+        paid_amount_cents: 100,
+        paid_at: "2026-01-15T12:00:00Z",
+      });
+    }
+    // Sorts after the first 1000 rows by id, so selectAllPages only reaches it on page 2 — and
+    // it carries the earliest paid_at, proving the second page was actually read.
+    invoices.push({
+      id: "inv-01000",
+      tenant_id: TENANT,
+      status: "paid",
+      paid_amount_cents: 400000,
+      paid_at: "2026-01-01T12:00:00Z",
+    });
+
+    const result = await adminGeneralFinanceFor(ctxFor(SUPER_ADMIN), { month: "2026-01" });
+    expect(result.states.movements.newPaying).toContain("Casa Grande");
+  });
+
+  // Fix round 1, item 2 (controller ruling): a truncated paged read must fail loudly instead of
+  // silently computing buckets/debtors/firstPaidAt from a partial set.
+  it("throws a clear pt-BR error when a paged read is truncated, instead of computing from a partial set", async () => {
+    paginationMock.truncateLabel = "general_finance_open_invoices";
+    fake.admin
+      .rows("tenants")
+      .push({ id: TENANT, nome: "Casa Paga", slug: "casa-paga", plano: "crm_unico" });
+    fake.admin.rows("tenant_billing").push({ tenant_id: TENANT, access_state: "ok" });
+
+    await expect(adminGeneralFinanceFor(ctxFor(SUPER_ADMIN), { month: "2026-11" })).rejects.toThrow(
+      "Histórico de faturas grande demais para calcular o Financeiro geral.",
+    );
   });
 });
