@@ -76,12 +76,22 @@ async function channelsDefaultedTo(accountId: string): Promise<ProviderChannel[]
   return CHANNELS.filter((channel) => defaults[channel] === accountId);
 }
 
-/** Nenhuma casa pode usar `accountId` nos canais que estão saindo da conta. */
+/** Nenhuma casa pode usar `accountId` nos canais que estão saindo da conta, e
+ * a conta não pode ser hoje a padrão de nenhum desses canais (senão toda
+ * casa sem override naquele canal ficaria sem conta). */
 async function assertNoHouseUsesRemovedChannels(
   accountId: string,
   removedChannels: ProviderChannel[],
 ) {
   if (!removedChannels.length) return;
+  const defaultedRemoved = (await channelsDefaultedTo(accountId)).filter((c) =>
+    removedChannels.includes(c),
+  );
+  if (defaultedRemoved.length) {
+    throw new Error(
+      `Esta conta é a padrão de ${PROVIDER_CHANNEL_LABEL[defaultedRemoved[0]]}. Escolha outra padrão antes.`,
+    );
+  }
   const { data: inUse, error } = await db()
     .from("tenant_channel_providers")
     .select("tenant_id, channel")
@@ -905,6 +915,17 @@ export async function adminDeleteProviderAccountFor(
       "Um ou mais apps de web push de casas usam esta conta. Mude essas casas de conta antes de excluir.",
     );
   }
+
+  // tenant_domains.provider_account_id não tem ON DELETE: domínios já
+  // removidos (removed_at preenchido) não bloqueiam a exclusão (checagem
+  // acima já cobre os ativos), mas precisam soltar a referência antes do
+  // DELETE para não quebrar a FK.
+  const { error: clearRemovedDomainsError } = await db()
+    .from("tenant_domains")
+    .update({ provider_account_id: null })
+    .eq("provider_account_id", data.id)
+    .not("removed_at", "is", null);
+  if (clearRemovedDomainsError) throw new Error(clearRemovedDomainsError.message);
 
   const { error: deleteError } = await db().from("provider_accounts").delete().eq("id", data.id);
   if (deleteError) throw new Error(deleteError.message);

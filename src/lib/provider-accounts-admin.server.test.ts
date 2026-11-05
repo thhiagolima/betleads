@@ -209,7 +209,7 @@ describe("provider accounts admin", () => {
       id: DEFAULT_INFOBIP_ACCOUNT_ID,
       provider: "infobip",
       label: "Infobip (ambiente)",
-      channels: ["email"],
+      channels: ["email", "voice"],
       config: { base_url: "https://attempted.test" },
       credentials: { api_key: "attempted-key" },
     });
@@ -218,7 +218,7 @@ describe("provider accounts admin", () => {
     const after = fake.db.rows("provider_accounts").find((r) => r.id === DEFAULT_INFOBIP_ACCOUNT_ID)!;
     expect(after).toMatchObject({
       label: "Infobip (ambiente)",
-      channels: ["email"],
+      channels: ["email", "voice"],
       credentials_source: "env",
       credentials_encrypted: null,
       config: {},
@@ -231,6 +231,19 @@ describe("provider accounts admin", () => {
   });
 
   it("refuses to remove a channel from an env account that a house still uses", async () => {
+    // Troca a padrão de voz para outra conta primeiro, para que o bloqueio
+    // seja o de "casa em uso" (não o de "é a padrão").
+    const otherVoice = await create(
+      {
+        provider: "infobip",
+        label: "Infobip Betleads Voz",
+        channels: ["voice"],
+        config: { base_url: "https://voz.api.infobip.test", voice_from: "5511300000000" },
+        credentials: { api_key: "k" },
+      },
+      "e0e0e0e0-0000-4000-8000-000000000000",
+    );
+    await adminSetPlatformDefaultFor(ADMIN, { channel: "voice", accountId: otherVoice });
     fake.db
       .rows("tenant_channel_providers")
       .push({ tenant_id: TENANT, channel: "voice", provider_account_id: DEFAULT_INFOBIP_ACCOUNT_ID });
@@ -242,6 +255,20 @@ describe("provider accounts admin", () => {
         channels: ["email"],
       }),
     ).rejects.toThrow(/Há casas usando esta conta/);
+  });
+
+  it("refuses to remove a channel an env account is the default of, even with no house override", async () => {
+    // Sem linha em platform_channel_defaults, a conta env Infobip é a
+    // padrão hoje de e-mail e voz (fallback); nenhuma casa usa a conta, mas
+    // removê-la do canal ainda deixaria todo mundo sem padrão nesse canal.
+    await expect(
+      save({
+        id: DEFAULT_INFOBIP_ACCOUNT_ID,
+        provider: "infobip",
+        label: "Infobip (ambiente)",
+        channels: ["voice"],
+      }),
+    ).rejects.toThrow("Esta conta é a padrão de E-mail. Escolha outra padrão antes.");
   });
 
   it("editing keeps credentials left blank and refuses to drop a channel a house still uses", async () => {
@@ -290,6 +317,30 @@ describe("provider accounts admin", () => {
         config: { base_url: "https://own.api.infobip.test" },
       }),
     ).rejects.toThrow(/Há casas usando esta conta/);
+  });
+
+  it("refuses to drop a channel a db account is the chosen platform default of, with no house override", async () => {
+    const id = await create(
+      {
+        provider: "infobip",
+        label: "Infobip Betleads",
+        channels: ["email", "voice"],
+        config: { base_url: "https://nova.api.infobip.test", voice_from: "5511300000000" },
+        credentials: { api_key: "k" },
+      },
+      "d0d0d0d0-0000-4000-8000-000000000000",
+    );
+    await adminSetPlatformDefaultFor(ADMIN, { channel: "email", accountId: id });
+
+    await expect(
+      save({
+        id,
+        provider: "infobip",
+        label: "Infobip Betleads",
+        channels: ["voice"],
+        config: { base_url: "https://nova.api.infobip.test", voice_from: "5511300000000" },
+      }),
+    ).rejects.toThrow("Esta conta é a padrão de E-mail. Escolha outra padrão antes.");
   });
 
   describe("a house's account per channel", () => {
@@ -774,6 +825,34 @@ describe("provider accounts admin", () => {
       await expect(adminDeleteProviderAccountFor(ADMIN, { id })).rejects.toThrow(
         /domínios de e-mail/,
       );
+    });
+
+    it("deletes an account referenced only by an already-removed domain, clearing its provider_account_id", async () => {
+      const id = await create(
+        {
+          provider: "infobip",
+          label: "Infobip Casa Um",
+          channels: ["email"],
+          config: { base_url: "https://own.api.infobip.test" },
+          credentials: { api_key: "k" },
+        },
+        "a1a1a1a1-2222-4333-8444-555555555555",
+      );
+      fake.db.rows("tenant_domains").push({
+        id: "dom-removed",
+        tenant_id: TENANT,
+        kind: "email",
+        hostname: "old.casa.bet",
+        removed_at: "2026-10-01T00:00:00Z",
+        provider_account_id: id,
+      });
+
+      await adminDeleteProviderAccountFor(ADMIN, { id });
+
+      expect(fake.db.rows("provider_accounts").find((r) => r.id === id)).toBeUndefined();
+      expect(fake.db.rows("tenant_domains").find((r) => r.id === "dom-removed")).toMatchObject({
+        provider_account_id: null,
+      });
     });
 
     it("never deletes an account with a live webpush app", async () => {
