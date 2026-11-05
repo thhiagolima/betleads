@@ -1,7 +1,9 @@
 // Defaults and labels for per-house channel state (client-safe: no server
 // imports). Design: docs/superpowers/specs/
 // 2026-11-05-contas-padrao-canais-por-casa-design.md.
-import { PROVIDER_CHANNEL_LABEL, type ProviderChannelName } from "./provider-accounts.shared";
+import { z } from "zod";
+import { dbUuid } from "./zod-helpers";
+import { PROVIDER_CHANNEL_LABEL, PROVIDER_CHANNELS, type ProviderChannelName } from "./provider-accounts.shared";
 
 /** Client-safe alias of provider-accounts.server's ProviderChannel. */
 export type ProviderChannel = ProviderChannelName;
@@ -24,3 +26,17 @@ export const STEP_TYPE_CHANNEL: Partial<Record<string, ProviderChannel>> = {
   email: "email",
   voice: "voice",
 };
+
+// ---------------------------------------------------------------------------
+// Admin: ligar/desligar canal da casa (Task 5).
+
+export const setTenantChannelInput = z.object({
+  tenantId: dbUuid(),
+  channel: z.enum(PROVIDER_CHANNELS),
+  enabled: z.boolean(),
+});
+
+export const tenantChannelImpactInput = z.object({
+  tenantId: dbUuid(),
+  channel: z.enum(PROVIDER_CHANNELS),
+});
