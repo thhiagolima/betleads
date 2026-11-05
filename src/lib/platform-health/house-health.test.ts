@@ -204,6 +204,7 @@ describe("sortHouses", () => {
         conversionPts: null,
         recoveredPct: null,
       },
+      worstDelta: worstValue,
     };
   }
 
@@ -217,5 +218,41 @@ describe("sortHouses", () => {
     const sorted = sortHouses([green, noHistory, yellow, redLess, redWorse]);
 
     expect(sorted).toEqual([redWorse, redLess, yellow, green, noHistory]);
+  });
+
+  it("ranks by the delta of metrics that passed their volume gate, not a gated-out one (fix round 1)", () => {
+    // House A: only registrations counts (base 100/week, -70%, red) — no other
+    // metric has enough base volume to be evaluated.
+    const houseA = summarizeHouse(
+      makeInput(Array(4).fill({ registrations: 100, ftds: 0, recovered: 0 }), {
+        registrations: 30,
+        ftds: 0,
+        recovered: 0,
+      }),
+      WINDOWS,
+    ) as HouseHealthRow;
+
+    // House B: registrations counts too (base 100/week, -55%, red — a smaller
+    // drop than House A's). It also has a recovered crash (-99%), but its base
+    // (100/week) is below minBaseRecovered (500), so that metric is gated out
+    // and must NOT be used for ranking, even though -99 is far worse than
+    // anything in House A.
+    const houseB = summarizeHouse(
+      makeInput(Array(4).fill({ registrations: 100, ftds: 0, recovered: 100 }), {
+        registrations: 45,
+        ftds: 0,
+        recovered: 1,
+      }),
+      WINDOWS,
+    ) as HouseHealthRow;
+
+    expect(houseA.level).toBe("red");
+    expect(houseB.level).toBe("red");
+    expect(houseA.worstDelta).toBeCloseTo(-70, 5);
+    expect(houseB.worstDelta).toBeCloseTo(-55, 5);
+    // The gated-out metric is still reported in `deltas` for the UI...
+    expect(houseB.deltas.recoveredPct).toBeLessThan(-90);
+    // ...but sortHouses must not rank House B ahead of House A because of it.
+    expect(sortHouses([houseB, houseA])).toEqual([houseA, houseB]);
   });
 });

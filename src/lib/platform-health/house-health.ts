@@ -29,6 +29,8 @@ export type HouseHealthRow = {
     conversionPts: number | null;
     recoveredPct: number | null;
   };
+  /** Smallest delta among the metrics that passed their volume gate (§5.3); null when none did. */
+  worstDelta: number | null;
 };
 
 export type HealthWindows = {
@@ -202,6 +204,7 @@ export function summarizeHouse(
       current,
       base,
       deltas: { registrationsPct: null, ftdsPct: null, conversionPts: null, recoveredPct: null },
+      worstDelta: null,
     };
   }
 
@@ -248,6 +251,7 @@ export function summarizeHouse(
 
   let level: HealthLevel = "green";
   let reason: string | null = null;
+  let worstDelta: number | null = null;
   if (metrics.length > 0) {
     const worst = metrics.reduce((best, m) => {
       if (LEVEL_RANK[m.level] > LEVEL_RANK[best.level]) return m;
@@ -256,6 +260,7 @@ export function summarizeHouse(
     });
     level = worst.level;
     reason = level === "green" ? null : worst.message();
+    worstDelta = Math.min(...metrics.map((m) => m.value));
   }
 
   return {
@@ -267,21 +272,25 @@ export function summarizeHouse(
     current,
     base,
     deltas: { registrationsPct, ftdsPct, conversionPts, recoveredPct },
+    worstDelta,
   };
 }
 
 const GROUP_RANK: Record<HealthLevel, number> = { red: 0, yellow: 1, green: 2, no_history: 3 };
 
-function worstDelta(row: HouseHealthRow): number {
-  const values = Object.values(row.deltas).filter((v): v is number => v !== null);
-  return values.length > 0 ? Math.min(...values) : Infinity;
-}
-
-/** Red, then yellow, then green, then no_history; within a group, the worst drop first. */
+/**
+ * Red, then yellow, then green, then no_history; within a group, the worst
+ * drop first — using `worstDelta` (only the metrics that passed their volume
+ * gate), not the raw `deltas`, since a gated-out metric "não vale" (brief:
+ * "menor delta entre as métricas que valem"). Rows with no counted metric
+ * (worstDelta null) sort last within their group.
+ */
 export function sortHouses(rows: HouseHealthRow[]): HouseHealthRow[] {
   return [...rows].sort((a, b) => {
     if (GROUP_RANK[a.level] !== GROUP_RANK[b.level])
       return GROUP_RANK[a.level] - GROUP_RANK[b.level];
-    return worstDelta(a) - worstDelta(b);
+    const aw = a.worstDelta ?? Infinity;
+    const bw = b.worstDelta ?? Infinity;
+    return aw - bw;
   });
 }
