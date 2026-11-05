@@ -111,6 +111,7 @@ import { Route as ApiPublicInfobipVoiceCmlRouteImport } from './routes/api/publi
 import { Route as ApiPublicInfobipVoiceEventsRouteImport } from './routes/api/public/infobip/voice/events'
 import { Route as ApiPublicInfobipVoiceReconcileRouteImport } from './routes/api/public/infobip/voice/reconcile'
 import { Route as ApiPublicWebhookTokenEventoRouteImport } from './routes/api/public/webhook.$token.$evento'
+import { Route as ApiPublicPushCCampaignIdKeyRouteImport } from './routes/api/public/push/c.$campaignId.$key'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -653,6 +654,12 @@ const ApiPublicWebhookTokenEventoRoute =
     path: '/api/public/webhook/$token/$evento',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicPushCCampaignIdKeyRoute =
+  ApiPublicPushCCampaignIdKeyRouteImport.update({
+    id: '/api/public/push/c/$campaignId/$key',
+    path: '/api/public/push/c/$campaignId/$key',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -757,6 +764,7 @@ export interface FileRoutesByFullPath {
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
+  '/api/public/push/c/$campaignId/$key': typeof ApiPublicPushCCampaignIdKeyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -861,6 +869,7 @@ export interface FileRoutesByTo {
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
+  '/api/public/push/c/$campaignId/$key': typeof ApiPublicPushCCampaignIdKeyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -966,6 +975,7 @@ export interface FileRoutesById {
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
+  '/api/public/push/c/$campaignId/$key': typeof ApiPublicPushCCampaignIdKeyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -1072,6 +1082,7 @@ export interface FileRouteTypes {
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
     | '/api/public/webhook/$token/$evento'
+    | '/api/public/push/c/$campaignId/$key'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -1176,6 +1187,7 @@ export interface FileRouteTypes {
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
     | '/api/public/webhook/$token/$evento'
+    | '/api/public/push/c/$campaignId/$key'
   id:
     | '__root__'
     | '/'
@@ -1280,6 +1292,7 @@ export interface FileRouteTypes {
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
     | '/api/public/webhook/$token/$evento'
+    | '/api/public/push/c/$campaignId/$key'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1367,6 +1380,7 @@ export interface RootRouteChildren {
   ApiPublicInfobipVoiceEventsRoute: typeof ApiPublicInfobipVoiceEventsRoute
   ApiPublicInfobipVoiceReconcileRoute: typeof ApiPublicInfobipVoiceReconcileRoute
   ApiPublicWebhookTokenEventoRoute: typeof ApiPublicWebhookTokenEventoRoute
+  ApiPublicPushCCampaignIdKeyRoute: typeof ApiPublicPushCCampaignIdKeyRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -2085,6 +2099,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicWebhookTokenEventoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/push/c/$campaignId/$key': {
+      id: '/api/public/push/c/$campaignId/$key'
+      path: '/api/public/push/c/$campaignId/$key'
+      fullPath: '/api/public/push/c/$campaignId/$key'
+      preLoaderRoute: typeof ApiPublicPushCCampaignIdKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -2326,6 +2347,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicInfobipVoiceEventsRoute: ApiPublicInfobipVoiceEventsRoute,
   ApiPublicInfobipVoiceReconcileRoute: ApiPublicInfobipVoiceReconcileRoute,
   ApiPublicWebhookTokenEventoRoute: ApiPublicWebhookTokenEventoRoute,
+  ApiPublicPushCCampaignIdKeyRoute: ApiPublicPushCCampaignIdKeyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
