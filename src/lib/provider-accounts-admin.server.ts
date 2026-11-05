@@ -13,6 +13,7 @@ import {
   DEFAULT_INFOBIP_ACCOUNT_ID,
   DEFAULT_ONESIGNAL_ACCOUNT_ID,
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+  ENV_ACCOUNT_IDS,
   envInfobipAccount,
   envOneSignalAccount,
   envShortBrasilAccount,
@@ -26,23 +27,110 @@ import {
 import { decryptProviderCredentials, encryptProviderCredentials } from "@/lib/secret-box.server";
 import { requireBrazilianPhone } from "@/lib/phone-normalization";
 import {
+  deleteProviderAccountInput,
+  PROVIDER_CHANNEL_LABEL,
+  PROVIDER_CHANNELS,
   PROVIDER_LABEL,
   saveProviderAccountInput,
+  setPlatformDefaultInput,
   setProviderAccountStatusInput,
   setTenantChannelProviderInput,
   SUPPORTED_CHANNELS,
   testProviderAccountInput,
 } from "@/lib/provider-accounts.shared";
+import { DEFAULT_ENABLED_CHANNELS } from "@/lib/tenant-channels.shared";
 
 type AdminContext = { userId: string };
 
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-const PLATFORM_ACCOUNT_IDS = new Set([
-  DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
-  DEFAULT_INFOBIP_ACCOUNT_ID,
-  DEFAULT_ONESIGNAL_ACCOUNT_ID,
-]);
+/** Os 4 canais, na mesma ordem usada nas telas. */
+const CHANNELS: ProviderChannel[] = [...PROVIDER_CHANNELS];
+
+/** Conta env de cada canal — padrão de hoje quando não há linha em
+ * platform_channel_defaults (mesmo fallback de provider-accounts.server). */
+const ENV_DEFAULT_ACCOUNT_ID: Record<ProviderChannel, string> = {
+  sms: DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+  email: DEFAULT_INFOBIP_ACCOUNT_ID,
+  voice: DEFAULT_INFOBIP_ACCOUNT_ID,
+  webpush: DEFAULT_ONESIGNAL_ACCOUNT_ID,
+};
+
+/** A padrão de cada canal hoje: a escolhida em platform_channel_defaults, ou
+ * a conta env quando não há linha. */
+async function currentDefaults(): Promise<Record<ProviderChannel, string>> {
+  const { data, error } = await db()
+    .from("platform_channel_defaults")
+    .select("channel, provider_account_id");
+  if (error) throw new Error(error.message);
+  const defaults = { ...ENV_DEFAULT_ACCOUNT_ID };
+  for (const row of (data ?? []) as Array<{ channel: ProviderChannel; provider_account_id: string }>) {
+    defaults[row.channel] = row.provider_account_id;
+  }
+  return defaults;
+}
+
+/** Canais dos quais `accountId` é hoje a padrão. */
+async function channelsDefaultedTo(accountId: string): Promise<ProviderChannel[]> {
+  const defaults = await currentDefaults();
+  return CHANNELS.filter((channel) => defaults[channel] === accountId);
+}
+
+/** Nenhuma casa pode usar `accountId` nos canais que estão saindo da conta. */
+async function assertNoHouseUsesRemovedChannels(
+  accountId: string,
+  removedChannels: ProviderChannel[],
+) {
+  if (!removedChannels.length) return;
+  const { data: inUse, error } = await db()
+    .from("tenant_channel_providers")
+    .select("tenant_id, channel")
+    .eq("provider_account_id", accountId)
+    .in("channel", removedChannels);
+  if (error) throw new Error(error.message);
+  if ((inUse ?? []).length) {
+    throw new Error("Há casas usando esta conta nos canais removidos. Mude essas casas de conta antes.");
+  }
+}
+
+/** Move os domínios de e-mail (ativos) das casas dadas para a conta corrente
+ * de cada um (mesma conta Infobip que a casa tem hoje) — usado ao trocar a
+ * conta de uma casa e ao trocar a padrão de e-mail (nesse caso, as casas sem
+ * conta própria). */
+async function moveEmailDomains(
+  tenantIds: string[],
+): Promise<Array<{ tenantId: string; hostname: string; status: string; error: string | null }>> {
+  if (!tenantIds.length) return [];
+  const { data: domains, error: domainsError } = await db()
+    .from("tenant_domains")
+    .select("id, tenant_id, hostname")
+    .in("tenant_id", tenantIds)
+    .eq("kind", "email")
+    .is("removed_at", null);
+  if (domainsError) throw new Error(domainsError.message);
+  const { refreshTenantDomain } = await import("@/lib/tenant-domains.server");
+  const results: Array<{ tenantId: string; hostname: string; status: string; error: string | null }> =
+    [];
+  for (const domain of (domains ?? []) as Array<{ id: string; tenant_id: string; hostname: string }>) {
+    try {
+      const refreshed = await refreshTenantDomain(domain.id, { requestVerify: true });
+      results.push({
+        tenantId: domain.tenant_id,
+        hostname: refreshed.hostname,
+        status: refreshed.status,
+        error: refreshed.last_error,
+      });
+    } catch (error) {
+      results.push({
+        tenantId: domain.tenant_id,
+        hostname: domain.hostname,
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return results;
+}
 
 /** Credential fields per provider (the only keys ever stored). */
 const CREDENTIAL_KEYS = {
@@ -77,13 +165,16 @@ export type ProviderAccountView = {
   label: string;
   channels: ProviderChannel[];
   status: "active" | "disabled";
-  /** The two env-backed platform accounts: read-only here. */
-  platformDefault: boolean;
+  /** Conta com credentials_source='env': credenciais do ambiente, editável só no nome e nos canais. */
+  envAccount: boolean;
+  /** Canais dos quais esta conta é hoje a padrão escolhida. */
+  defaultFor: ProviderChannel[];
   configured: boolean;
   config: Record<string, string>;
   /** Masked last characters of each stored credential ("••••abcd"). */
   credentialHints: Record<string, string>;
-  /** Houses on this account, per channel. */
+  /** Houses on this account, per channel (inclui, nos canais de defaultFor,
+   * as casas sem conta própria no canal e com o canal ligado). */
   houses: Record<ProviderChannel, number>;
 };
 
@@ -92,6 +183,8 @@ export type TenantProvidersView = {
   nome: string;
   /** null = the platform account. */
   accounts: Record<ProviderChannel, string | null>;
+  /** Canais ligados para a casa (padrão quando não há linha em tenant_channels). */
+  channels: Record<ProviderChannel, boolean>;
 };
 
 function hint(value: string): string {
@@ -109,8 +202,9 @@ function stringConfig(config: Record<string, unknown> | null): Record<string, st
 async function accountView(
   row: AccountRow,
   houses: Record<ProviderChannel, number>,
+  defaultFor: ProviderChannel[],
 ): Promise<ProviderAccountView> {
-  const platformDefault = PLATFORM_ACCOUNT_IDS.has(row.id);
+  const envAccount = ENV_ACCOUNT_IDS.has(row.id);
   let credentialHints: Record<string, string> = {};
   let configured = false;
   if (row.credentials_source === "env") {
@@ -162,9 +256,10 @@ async function accountView(
     label: row.label,
     channels: row.channels ?? [],
     status: row.status,
-    platformDefault,
+    envAccount,
+    defaultFor,
     configured,
-    config: platformDefault ? {} : stringConfig(row.config),
+    config: envAccount ? {} : stringConfig(row.config),
     credentialHints,
     houses,
   };
@@ -175,17 +270,26 @@ async function accountView(
 
 export async function adminListProviderAccountsFor(context: AdminContext) {
   await assertSuperAdmin(context.userId);
-  const [accounts, assignments, tenants] = await Promise.all([
-    db()
-      .from("provider_accounts")
-      .select(
-        "id, provider, label, channels, credentials_source, credentials_encrypted, config, status, created_at",
-      )
-      .order("created_at", { ascending: true }),
-    db().from("tenant_channel_providers").select("tenant_id, channel, provider_account_id"),
-    db().from("tenants").select("id, nome").order("nome"),
-  ]);
-  for (const result of [accounts, assignments, tenants]) {
+  const [accounts, assignments, tenants, tenantChannels, verifiedEmailDomains, defaults] =
+    await Promise.all([
+      db()
+        .from("provider_accounts")
+        .select(
+          "id, provider, label, channels, credentials_source, credentials_encrypted, config, status, created_at",
+        )
+        .order("created_at", { ascending: true }),
+      db().from("tenant_channel_providers").select("tenant_id, channel, provider_account_id"),
+      db().from("tenants").select("id, nome").order("nome"),
+      db().from("tenant_channels").select("tenant_id, channel, enabled"),
+      db()
+        .from("tenant_domains")
+        .select("tenant_id")
+        .eq("kind", "email")
+        .eq("status", "verified")
+        .is("removed_at", null),
+      currentDefaults(),
+    ]);
+  for (const result of [accounts, assignments, tenants, tenantChannels, verifiedEmailDomains]) {
     if (result.error) throw new Error(result.error.message);
   }
   const rows = (accounts.data ?? []) as AccountRow[];
@@ -194,12 +298,8 @@ export async function adminListProviderAccountsFor(context: AdminContext) {
     channel: ProviderChannel;
     provider_account_id: string;
   }>;
+  const tenantRows = (tenants.data ?? []) as Array<{ id: string; nome: string }>;
 
-  const housesOf = (accountId: string) => {
-    const counts = { sms: 0, email: 0, voice: 0, webpush: 0 } as Record<ProviderChannel, number>;
-    for (const link of links) if (link.provider_account_id === accountId) counts[link.channel]++;
-    return counts;
-  };
   const byTenant = new Map<string, Record<ProviderChannel, string | null>>();
   for (const link of links) {
     const current =
@@ -208,15 +308,58 @@ export async function adminListProviderAccountsFor(context: AdminContext) {
     byTenant.set(link.tenant_id, current);
   }
 
+  const channelEnabled = new Map<string, boolean>();
+  for (const row of (tenantChannels.data ?? []) as Array<{
+    tenant_id: string;
+    channel: ProviderChannel;
+    enabled: boolean;
+  }>) {
+    channelEnabled.set(`${row.tenant_id}:${row.channel}`, row.enabled);
+  }
+  const channelsOf = (tenantId: string): Record<ProviderChannel, boolean> => {
+    const out = {} as Record<ProviderChannel, boolean>;
+    for (const channel of CHANNELS) {
+      out[channel] = channelEnabled.get(`${tenantId}:${channel}`) ?? DEFAULT_ENABLED_CHANNELS[channel];
+    }
+    return out;
+  };
+
+  const housesOf = (accountId: string, defaultFor: ProviderChannel[]) => {
+    const counts = { sms: 0, email: 0, voice: 0, webpush: 0 } as Record<ProviderChannel, number>;
+    for (const link of links) if (link.provider_account_id === accountId) counts[link.channel]++;
+    for (const channel of defaultFor) {
+      for (const tenant of tenantRows) {
+        if (byTenant.get(tenant.id)?.[channel]) continue;
+        if (channelsOf(tenant.id)[channel]) counts[channel]++;
+      }
+    }
+    return counts;
+  };
+
+  const tenantsWithoutEmailOverride = new Set(
+    tenantRows.map((t) => t.id).filter((id) => !byTenant.get(id)?.email),
+  );
+  const verifiedEmailDomainsOnDefault = ((verifiedEmailDomains.data ?? []) as Array<{
+    tenant_id: string;
+  }>).filter((row) => tenantsWithoutEmailOverride.has(row.tenant_id)).length;
+
   return {
-    accounts: await Promise.all(rows.map((row) => accountView(row, housesOf(row.id)))),
-    tenants: ((tenants.data ?? []) as Array<{ id: string; nome: string }>).map(
+    accounts: await Promise.all(
+      rows.map((row) => {
+        const defaultFor = CHANNELS.filter((channel) => defaults[channel] === row.id);
+        return accountView(row, housesOf(row.id, defaultFor), defaultFor);
+      }),
+    ),
+    tenants: tenantRows.map(
       (tenant): TenantProvidersView => ({
         id: tenant.id,
         nome: tenant.nome,
         accounts: byTenant.get(tenant.id) ?? { sms: null, email: null, voice: null, webpush: null },
+        channels: channelsOf(tenant.id),
       }),
     ),
+    defaults,
+    verifiedEmailDomainsOnDefault,
   };
 }
 
@@ -241,9 +384,6 @@ export async function adminSaveProviderAccountFor(
   data: z.infer<typeof saveProviderAccountInput>,
 ) {
   await assertSuperAdmin(context.userId);
-  if (data.id && PLATFORM_ACCOUNT_IDS.has(data.id)) {
-    throw new Error("As contas padrão da plataforma são configuradas pelas variáveis de ambiente.");
-  }
   const supported = SUPPORTED_CHANNELS[data.provider];
   const channels = [...new Set(data.channels)];
   const unsupported = channels.filter((c) => !supported.includes(c));
@@ -253,6 +393,39 @@ export async function adminSaveProviderAccountFor(
         ? "A Short Brasil só atende SMS."
         : `${PROVIDER_LABEL[data.provider]} não atende ${unsupported.join(", ")}.`,
     );
+  }
+
+  // Conta env (credentials_source='env'): só o nome e os canais são
+  // editáveis; credenciais e config continuam vindo das variáveis de
+  // ambiente, intocados.
+  if (data.id && ENV_ACCOUNT_IDS.has(data.id)) {
+    const { data: row, error } = await db()
+      .from("provider_accounts")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("Conta de provedor não encontrada.");
+    const before = row as AccountRow;
+    if (before.provider !== data.provider) {
+      throw new Error("Não é possível trocar o provedor de uma conta existente.");
+    }
+    const removed = (before.channels ?? []).filter((c) => !channels.includes(c));
+    await assertNoHouseUsesRemovedChannels(data.id, removed);
+
+    const { error: updateError } = await db()
+      .from("provider_accounts")
+      .update({ label: data.label, channels, updated_at: new Date().toISOString() })
+      .eq("id", data.id);
+    if (updateError) throw new Error(updateError.message);
+    invalidateProviderAccountsCache();
+    await auditAdminAction({
+      actorUserId: context.userId,
+      action: "provider_account.update",
+      before: { provider: before.provider, label: before.label, channels: before.channels },
+      after: { id: data.id, provider: data.provider, label: data.label, channels },
+    });
+    return { id: data.id };
   }
 
   const config: Record<string, string> = {};
@@ -291,19 +464,7 @@ export async function adminSaveProviderAccountFor(
     }
     // A channel still used by a house cannot be removed from the account.
     const removed = (before.channels ?? []).filter((c) => !channels.includes(c));
-    if (removed.length) {
-      const { data: inUse, error: inUseError } = await db()
-        .from("tenant_channel_providers")
-        .select("tenant_id, channel")
-        .eq("provider_account_id", data.id)
-        .in("channel", removed);
-      if (inUseError) throw new Error(inUseError.message);
-      if ((inUse ?? []).length) {
-        throw new Error(
-          "Há casas usando esta conta nos canais removidos. Mude essas casas de conta antes.",
-        );
-      }
-    }
+    await assertNoHouseUsesRemovedChannels(data.id, removed);
     if (before.credentials_encrypted) {
       stored = await decryptProviderCredentials(before.credentials_encrypted);
     }
@@ -380,8 +541,13 @@ export async function adminSetProviderAccountStatusFor(
   data: z.infer<typeof setProviderAccountStatusInput>,
 ) {
   await assertSuperAdmin(context.userId);
-  if (PLATFORM_ACCOUNT_IDS.has(data.id)) {
-    throw new Error("As contas padrão da plataforma não podem ser desativadas.");
+  if (data.status === "disabled") {
+    const [defaultedChannel] = await channelsDefaultedTo(data.id);
+    if (defaultedChannel) {
+      throw new Error(
+        `Esta conta é a padrão de ${PROVIDER_CHANNEL_LABEL[defaultedChannel]}. Escolha outra padrão antes.`,
+      );
+    }
   }
   const { data: row, error } = await db()
     .from("provider_accounts")
@@ -513,8 +679,9 @@ export async function adminSetTenantChannelProviderFor(
   data: z.infer<typeof setTenantChannelProviderInput>,
 ): Promise<SetTenantChannelProviderResult> {
   await assertSuperAdmin(context.userId);
-  const accountId =
-    data.accountId && !PLATFORM_ACCOUNT_IDS.has(data.accountId) ? data.accountId : null;
+  // accountId: null é o único jeito de "usar a padrão"; uma conta env
+  // escolhida explicitamente é só mais uma conta (upsert de override).
+  const accountId = data.accountId;
 
   const { data: current, error: currentError } = await db()
     .from("tenant_channel_providers")
@@ -571,32 +738,181 @@ export async function adminSetTenantChannelProviderFor(
 
   // E-mail domains live in an Infobip account: move them now so the house
   // sees the new DNS records right away (they go back to pending).
-  const emailDomains: SetTenantChannelProviderResult["emailDomains"] = [];
+  const emailDomains =
+    data.channel === "email"
+      ? (await moveEmailDomains([data.tenantId])).map(({ hostname, status, error }) => ({
+          hostname,
+          status,
+          error,
+        }))
+      : [];
+  return { emailDomains };
+}
+
+// ---------------------------------------------------------------------------
+// The platform default per channel
+
+export async function adminSetPlatformDefaultFor(
+  context: AdminContext,
+  data: z.infer<typeof setPlatformDefaultInput>,
+): Promise<{
+  emailDomains: Array<{
+    tenantId: string;
+    tenantNome: string;
+    hostname: string;
+    status: string;
+    error: string | null;
+  }>;
+}> {
+  await assertSuperAdmin(context.userId);
+
+  const { data: row, error } = await db()
+    .from("provider_accounts")
+    .select("id, provider, channels, status")
+    .eq("id", data.accountId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const account = row as Pick<AccountRow, "id" | "provider" | "channels" | "status"> | null;
+  if (!account) throw new Error("Conta de provedor não encontrada.");
+  if (account.status !== "active") throw new Error("Esta conta está desativada.");
+  if (
+    !(account.channels ?? []).includes(data.channel) ||
+    !SUPPORTED_CHANNELS[account.provider].includes(data.channel)
+  ) {
+    throw new Error("Esta conta não atende este canal.");
+  }
+
+  const defaults = await currentDefaults();
+  const before = defaults[data.channel];
+  if (before === data.accountId) return { emailDomains: [] };
+
+  const { error: upsertError } = await db()
+    .from("platform_channel_defaults")
+    .upsert(
+      {
+        channel: data.channel,
+        provider_account_id: data.accountId,
+        updated_by: context.userId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "channel" },
+    );
+  if (upsertError) throw new Error(upsertError.message);
+  // Invalida o cache ANTES de mover os domínios: o resolver já deve ver a
+  // nova padrão enquanto os domínios de e-mail ainda estão sendo trocados.
+  invalidateProviderAccountsCache();
+
+  await auditAdminAction({
+    actorUserId: context.userId,
+    action: "provider_account.set_default",
+    before: { channel: data.channel, provider_account_id: before },
+    after: { channel: data.channel, provider_account_id: data.accountId },
+  });
+
+  let emailDomains: Array<{
+    tenantId: string;
+    tenantNome: string;
+    hostname: string;
+    status: string;
+    error: string | null;
+  }> = [];
   if (data.channel === "email") {
-    const { data: domains, error: domainsError } = await db()
-      .from("tenant_domains")
-      .select("id, hostname")
-      .eq("tenant_id", data.tenantId)
-      .eq("kind", "email")
-      .is("removed_at", null);
-    if (domainsError) throw new Error(domainsError.message);
-    const { refreshTenantDomain } = await import("@/lib/tenant-domains.server");
-    for (const domain of (domains ?? []) as Array<{ id: string; hostname: string }>) {
-      try {
-        const refreshed = await refreshTenantDomain(domain.id, { requestVerify: true });
-        emailDomains.push({
-          hostname: refreshed.hostname,
-          status: refreshed.status,
-          error: refreshed.last_error,
-        });
-      } catch (error) {
-        emailDomains.push({
-          hostname: domain.hostname,
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
+    const { data: overrideRows, error: overrideError } = await db()
+      .from("tenant_channel_providers")
+      .select("tenant_id")
+      .eq("channel", "email");
+    if (overrideError) throw new Error(overrideError.message);
+    const overridden = new Set(
+      ((overrideRows ?? []) as Array<{ tenant_id: string }>).map((r) => r.tenant_id),
+    );
+    const { data: tenantRows, error: tenantsError } = await db().from("tenants").select("id, nome");
+    if (tenantsError) throw new Error(tenantsError.message);
+    const targets = ((tenantRows ?? []) as Array<{ id: string; nome: string }>).filter(
+      (t) => !overridden.has(t.id),
+    );
+    const tenantNomeById = new Map(targets.map((t) => [t.id, t.nome]));
+    const moved = await moveEmailDomains(targets.map((t) => t.id));
+    emailDomains = moved.map((m) => ({
+      tenantId: m.tenantId,
+      tenantNome: tenantNomeById.get(m.tenantId) ?? "",
+      hostname: m.hostname,
+      status: m.status,
+      error: m.error,
+    }));
   }
   return { emailDomains };
+}
+
+// ---------------------------------------------------------------------------
+// Delete
+
+export async function adminDeleteProviderAccountFor(
+  context: AdminContext,
+  data: z.infer<typeof deleteProviderAccountInput>,
+): Promise<void> {
+  await assertSuperAdmin(context.userId);
+  if (ENV_ACCOUNT_IDS.has(data.id)) {
+    throw new Error("Contas do ambiente não podem ser excluídas.");
+  }
+
+  const { data: row, error } = await db()
+    .from("provider_accounts")
+    .select("id, provider, label, channels")
+    .eq("id", data.id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const account = row as Pick<AccountRow, "id" | "provider" | "label" | "channels"> | null;
+  if (!account) throw new Error("Conta de provedor não encontrada.");
+
+  const defaultedChannels = await channelsDefaultedTo(data.id);
+  if (defaultedChannels.length) {
+    throw new Error(
+      `Esta conta é a padrão de ${defaultedChannels.map((c) => PROVIDER_CHANNEL_LABEL[c]).join(", ")}. Escolha outra padrão antes de excluir.`,
+    );
+  }
+
+  const { data: inUse, error: inUseError } = await db()
+    .from("tenant_channel_providers")
+    .select("tenant_id")
+    .eq("provider_account_id", data.id)
+    .limit(1);
+  if (inUseError) throw new Error(inUseError.message);
+  if ((inUse ?? []).length) {
+    throw new Error("Uma ou mais casas usam esta conta em algum canal. Mude essas casas de conta antes de excluir.");
+  }
+
+  const { data: domainsInUse, error: domainsError } = await db()
+    .from("tenant_domains")
+    .select("id")
+    .eq("provider_account_id", data.id)
+    .is("removed_at", null)
+    .limit(1);
+  if (domainsError) throw new Error(domainsError.message);
+  if ((domainsInUse ?? []).length) {
+    throw new Error(
+      "Um ou mais domínios de e-mail de casas usam esta conta. Mude essas casas de conta antes de excluir.",
+    );
+  }
+
+  const { data: appsInUse, error: appsError } = await db()
+    .from("tenant_webpush_apps")
+    .select("id")
+    .eq("provider_account_id", data.id)
+    .limit(1);
+  if (appsError) throw new Error(appsError.message);
+  if ((appsInUse ?? []).length) {
+    throw new Error(
+      "Um ou mais apps de web push de casas usam esta conta. Mude essas casas de conta antes de excluir.",
+    );
+  }
+
+  const { error: deleteError } = await db().from("provider_accounts").delete().eq("id", data.id);
+  if (deleteError) throw new Error(deleteError.message);
+  invalidateProviderAccountsCache();
+
+  await auditAdminAction({
+    actorUserId: context.userId,
+    action: "provider_account.delete",
+    before: { provider: account.provider, label: account.label, channels: account.channels },
+  });
 }

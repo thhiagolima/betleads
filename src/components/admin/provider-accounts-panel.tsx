@@ -253,7 +253,7 @@ function AccountsCard({
                     <div className="font-medium">{account.label}</div>
                     <div className="text-meta text-muted-foreground">
                       {PROVIDER_LABEL[account.provider]}
-                      {account.platformDefault ? " · padrão da plataforma" : ""}
+                      {account.envAccount ? " · padrão da plataforma" : ""}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -277,7 +277,7 @@ function AccountsCard({
                     )}
                   </TableCell>
                   <TableCell className="text-meta">
-                    {account.platformDefault ? "todas sem conta própria" : houses || "—"}
+                    {account.envAccount ? "todas sem conta própria" : houses || "—"}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col items-start gap-1">
@@ -297,7 +297,7 @@ function AccountsCard({
                       >
                         <Plug className="h-4 w-4" /> Testar
                       </Button>
-                      {!account.platformDefault && (
+                      {!account.envAccount && (
                         <>
                           <Button variant="outline" size="sm" onClick={() => onEdit(account)}>
                             <Pencil className="h-4 w-4" /> Editar
@@ -523,7 +523,7 @@ function TenantProvidersCard({
     for (const channel of PROVIDER_CHANNELS) {
       out[channel] = accounts.filter(
         (a) =>
-          !a.platformDefault &&
+          !a.envAccount &&
           a.status === "active" &&
           a.channels.includes(channel) &&
           SUPPORTED_CHANNELS[a.provider].includes(channel),

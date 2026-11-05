@@ -22,8 +22,10 @@ vi.mock("@/lib/tenant-domains.server", () => ({
 }));
 
 import {
+  adminDeleteProviderAccountFor,
   adminListProviderAccountsFor,
   adminSaveProviderAccountFor,
+  adminSetPlatformDefaultFor,
   adminSetProviderAccountStatusFor,
   adminSetTenantChannelProviderFor,
   adminTestProviderAccountFor,
@@ -33,6 +35,7 @@ import {
   DEFAULT_INFOBIP_ACCOUNT_ID,
   DEFAULT_ONESIGNAL_ACCOUNT_ID,
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+  resolveOneSignalAccount,
 } from "./provider-accounts.server";
 import { saveProviderAccountInput } from "./provider-accounts.shared";
 import { decryptProviderCredentials, encryptProviderCredentials } from "./secret-box.server";
@@ -151,6 +154,7 @@ describe("provider accounts admin", () => {
         id: TENANT,
         nome: "Casa Um",
         accounts: { sms: null, email: null, voice: null, webpush: null },
+        channels: { sms: true, email: true, voice: true, webpush: false },
       },
     ]);
   });
@@ -169,7 +173,7 @@ describe("provider accounts admin", () => {
     });
   });
 
-  it("rejects unsupported channels, missing credentials and edits of the platform accounts", async () => {
+  it("rejects unsupported channels and missing credentials", async () => {
     await expect(
       save({
         provider: "short_brasil",
@@ -195,22 +199,49 @@ describe("provider accounts admin", () => {
         credentials: { api_key: "k" },
       }),
     ).rejects.toThrow(/número de origem/);
+  });
+
+  it("an env account's save only changes label and channels; credentials and credentials_source stay intact", async () => {
+    const before = fake.db.rows("provider_accounts").find((r) => r.id === DEFAULT_INFOBIP_ACCOUNT_ID)!;
+    expect(before.credentials_source).toBe("env");
+
+    const { id } = await save({
+      id: DEFAULT_INFOBIP_ACCOUNT_ID,
+      provider: "infobip",
+      label: "Infobip (ambiente)",
+      channels: ["email"],
+      config: { base_url: "https://attempted.test" },
+      credentials: { api_key: "attempted-key" },
+    });
+    expect(id).toBe(DEFAULT_INFOBIP_ACCOUNT_ID);
+
+    const after = fake.db.rows("provider_accounts").find((r) => r.id === DEFAULT_INFOBIP_ACCOUNT_ID)!;
+    expect(after).toMatchObject({
+      label: "Infobip (ambiente)",
+      channels: ["email"],
+      credentials_source: "env",
+      credentials_encrypted: null,
+      config: {},
+    });
+
+    const listing = await adminListProviderAccountsFor(ADMIN);
+    const view = listing.accounts.find((a) => a.id === DEFAULT_INFOBIP_ACCOUNT_ID)!;
+    expect(view.envAccount).toBe(true);
+    expect(JSON.stringify(view)).not.toContain("attempted-key");
+  });
+
+  it("refuses to remove a channel from an env account that a house still uses", async () => {
+    fake.db
+      .rows("tenant_channel_providers")
+      .push({ tenant_id: TENANT, channel: "voice", provider_account_id: DEFAULT_INFOBIP_ACCOUNT_ID });
     await expect(
       save({
         id: DEFAULT_INFOBIP_ACCOUNT_ID,
         provider: "infobip",
-        label: "x",
+        label: "Infobip (ambiente)",
         channels: ["email"],
-        config: { base_url: "https://a.test" },
-        credentials: { api_key: "k" },
       }),
-    ).rejects.toThrow(/variáveis de ambiente/);
-    await expect(
-      adminSetProviderAccountStatusFor(ADMIN, {
-        id: DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
-        status: "disabled",
-      }),
-    ).rejects.toThrow(/não podem ser desativadas/);
+    ).rejects.toThrow(/Há casas usando esta conta/);
   });
 
   it("editing keeps credentials left blank and refuses to drop a channel a house still uses", async () => {
@@ -328,7 +359,7 @@ describe("provider accounts admin", () => {
       });
     });
 
-    it("back to the platform account (null or its id) removes the row", async () => {
+    it("null (the only way back to the platform default) removes the row", async () => {
       await ownInfobip();
       fake.db
         .rows("tenant_channel_providers")
@@ -337,10 +368,31 @@ describe("provider accounts admin", () => {
       await adminSetTenantChannelProviderFor(ADMIN, {
         tenantId: TENANT,
         channel: "email",
-        accountId: DEFAULT_INFOBIP_ACCOUNT_ID,
+        accountId: null,
       });
 
       expect(fake.db.rows("tenant_channel_providers")).toEqual([]);
+    });
+
+    it("an env account chosen explicitly is just another account (no longer normalized to null)", async () => {
+      fake.db
+        .rows("tenant_channel_providers")
+        .push({ tenant_id: TENANT, channel: "email", provider_account_id: OWN });
+      await ownInfobip();
+
+      await adminSetTenantChannelProviderFor(ADMIN, {
+        tenantId: TENANT,
+        channel: "email",
+        accountId: DEFAULT_INFOBIP_ACCOUNT_ID,
+      });
+
+      expect(fake.db.rows("tenant_channel_providers")).toEqual([
+        expect.objectContaining({
+          tenant_id: TENANT,
+          channel: "email",
+          provider_account_id: DEFAULT_INFOBIP_ACCOUNT_ID,
+        }),
+      ]);
     });
 
     it("refuses a disabled account and a channel the account does not serve", async () => {
@@ -408,22 +460,23 @@ describe("provider accounts admin", () => {
       ).rejects.toThrow(/chave da organização/);
     });
 
-    it("refuses to edit or disable the platform default", async () => {
-      await expect(
-        save({
-          id: DEFAULT_ONESIGNAL_ACCOUNT_ID,
-          provider: "onesignal",
-          label: "x",
-          channels: ["webpush"],
-          credentials: { org_api_key: "k" },
-        }),
-      ).rejects.toThrow(/variáveis de ambiente/);
+    it("edits an env account's label (credentials stay in the env); cannot disable it while it is the default", async () => {
+      await save({
+        id: DEFAULT_ONESIGNAL_ACCOUNT_ID,
+        provider: "onesignal",
+        label: "OneSignal (ambiente)",
+        channels: ["webpush"],
+        credentials: { org_api_key: "attempted" },
+      });
+      const row = fake.db.rows("provider_accounts").find((r) => r.id === DEFAULT_ONESIGNAL_ACCOUNT_ID)!;
+      expect(row).toMatchObject({ label: "OneSignal (ambiente)", credentials_source: "env" });
+
       await expect(
         adminSetProviderAccountStatusFor(ADMIN, {
           id: DEFAULT_ONESIGNAL_ACCOUNT_ID,
           status: "disabled",
         }),
-      ).rejects.toThrow(/não podem ser desativadas/);
+      ).rejects.toThrow(/Esta conta é a padrão de Web push/);
     });
 
     it("assigns a house's webpush channel to its own account", async () => {
@@ -512,6 +565,236 @@ describe("provider accounts admin", () => {
         expect(result.ok).toBe(false);
         expect(fetchMock).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  describe("platform default per channel", () => {
+    it("sets a chosen db account as the default; audits before/after; invalidates the cache", async () => {
+      const id = await create(
+        {
+          provider: "onesignal",
+          label: "OneSignal Betleads",
+          channels: ["webpush"],
+          credentials: { org_api_key: "org-key-nova" },
+        },
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      );
+
+      const result = await adminSetPlatformDefaultFor(ADMIN, { channel: "webpush", accountId: id });
+
+      expect(result.emailDomains).toEqual([]);
+      const listing = await adminListProviderAccountsFor(ADMIN);
+      expect(listing.defaults.webpush).toBe(id);
+      expect(audit.calls.at(-1)).toMatchObject({
+        action: "provider_account.set_default",
+        before: { channel: "webpush", provider_account_id: DEFAULT_ONESIGNAL_ACCOUNT_ID },
+        after: { channel: "webpush", provider_account_id: id },
+      });
+
+      const account = await resolveOneSignalAccount(TENANT);
+      expect(account.id).toBe(id);
+      expect(account.orgApiKey).toBe("org-key-nova");
+    });
+
+    it("refuses a disabled account or one that does not serve the channel", async () => {
+      const disabled = await create(
+        {
+          provider: "onesignal",
+          label: "OneSignal desativada",
+          channels: ["webpush"],
+          credentials: { org_api_key: "k" },
+        },
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      );
+      fake.db.rows("provider_accounts").find((r) => r.id === disabled)!.status = "disabled";
+      await expect(
+        adminSetPlatformDefaultFor(ADMIN, { channel: "webpush", accountId: disabled }),
+      ).rejects.toThrow(/Esta conta está desativada\./);
+
+      await expect(
+        adminSetPlatformDefaultFor(ADMIN, { channel: "voice", accountId: DEFAULT_SHORT_BRASIL_ACCOUNT_ID }),
+      ).rejects.toThrow(/Esta conta não atende este canal\./);
+    });
+
+    it("switching the e-mail default moves domains of houses without their own account only", async () => {
+      const HOUSE_A = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+      const HOUSE_B = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+      fake.db.rows("tenants").push({ id: HOUSE_A, nome: "Casa A" }, { id: HOUSE_B, nome: "Casa B" });
+      fake.db.rows("tenant_domains").push(
+        { id: "da", tenant_id: HOUSE_A, kind: "email", hostname: "mail.a.bet", removed_at: null },
+        { id: "db", tenant_id: HOUSE_B, kind: "email", hostname: "mail.b.bet", removed_at: null },
+      );
+      const ownAccount = await create(
+        {
+          provider: "infobip",
+          label: "Infobip Casa B",
+          channels: ["email"],
+          config: { base_url: "https://b.api.infobip.test" },
+          credentials: { api_key: "k-b" },
+        },
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      );
+      fake.db
+        .rows("tenant_channel_providers")
+        .push({ tenant_id: HOUSE_B, channel: "email", provider_account_id: ownAccount });
+
+      const newDefault = await create(
+        {
+          provider: "infobip",
+          label: "Infobip Betleads",
+          channels: ["email"],
+          config: { base_url: "https://nova.api.infobip.test" },
+          credentials: { api_key: "k-nova" },
+        },
+        "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      );
+      domains.refreshTenantDomain.mockResolvedValue({
+        hostname: "mail.a.bet",
+        status: "pending",
+        last_error: null,
+      });
+
+      const result = await adminSetPlatformDefaultFor(ADMIN, { channel: "email", accountId: newDefault });
+
+      expect(domains.refreshTenantDomain).toHaveBeenCalledTimes(1);
+      expect(domains.refreshTenantDomain).toHaveBeenCalledWith("da", { requestVerify: true });
+      expect(result.emailDomains).toEqual([
+        { tenantId: HOUSE_A, tenantNome: "Casa A", hostname: "mail.a.bet", status: "pending", error: null },
+      ]);
+    });
+
+    it("cannot disable an account while it is the default of some channel", async () => {
+      await expect(
+        adminSetProviderAccountStatusFor(ADMIN, { id: DEFAULT_SHORT_BRASIL_ACCOUNT_ID, status: "disabled" }),
+      ).rejects.toThrow("Esta conta é a padrão de SMS. Escolha outra padrão antes.");
+    });
+
+    it("an env account can be disabled once it is no longer the default", async () => {
+      const id = await create(
+        {
+          provider: "onesignal",
+          label: "OneSignal Betleads",
+          channels: ["webpush"],
+          credentials: { org_api_key: "k" },
+        },
+        "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa",
+      );
+      await adminSetPlatformDefaultFor(ADMIN, { channel: "webpush", accountId: id });
+
+      await adminSetProviderAccountStatusFor(ADMIN, {
+        id: DEFAULT_ONESIGNAL_ACCOUNT_ID,
+        status: "disabled",
+      });
+
+      expect(
+        fake.db.rows("provider_accounts").find((r) => r.id === DEFAULT_ONESIGNAL_ACCOUNT_ID)!.status,
+      ).toBe("disabled");
+    });
+  });
+
+  describe("delete", () => {
+    it("deletes a free account; audits provider_account.delete", async () => {
+      const id = await create(
+        {
+          provider: "onesignal",
+          label: "OneSignal livre",
+          channels: ["webpush"],
+          credentials: { org_api_key: "k" },
+        },
+        "11111111-2222-4333-8444-555555555555",
+      );
+
+      await adminDeleteProviderAccountFor(ADMIN, { id });
+
+      expect(fake.db.rows("provider_accounts").find((r) => r.id === id)).toBeUndefined();
+      expect(audit.calls.at(-1)).toMatchObject({ action: "provider_account.delete" });
+    });
+
+    it("never deletes an env account", async () => {
+      await expect(
+        adminDeleteProviderAccountFor(ADMIN, { id: DEFAULT_SHORT_BRASIL_ACCOUNT_ID }),
+      ).rejects.toThrow("Contas do ambiente não podem ser excluídas.");
+    });
+
+    it("never deletes the default of a channel", async () => {
+      const id = await create(
+        {
+          provider: "onesignal",
+          label: "OneSignal padrão",
+          channels: ["webpush"],
+          credentials: { org_api_key: "k" },
+        },
+        "66666666-2222-4333-8444-555555555555",
+      );
+      await adminSetPlatformDefaultFor(ADMIN, { channel: "webpush", accountId: id });
+
+      await expect(adminDeleteProviderAccountFor(ADMIN, { id })).rejects.toThrow(/é a padrão de/);
+    });
+
+    it("never deletes an account a house uses in tenant_channel_providers", async () => {
+      const id = await create(
+        {
+          provider: "infobip",
+          label: "Infobip Casa Um",
+          channels: ["email"],
+          config: { base_url: "https://own.api.infobip.test" },
+          credentials: { api_key: "k" },
+        },
+        "77777777-2222-4333-8444-555555555555",
+      );
+      fake.db
+        .rows("tenant_channel_providers")
+        .push({ tenant_id: TENANT, channel: "email", provider_account_id: id });
+
+      await expect(adminDeleteProviderAccountFor(ADMIN, { id })).rejects.toThrow(
+        /Uma ou mais casas usam esta conta/,
+      );
+    });
+
+    it("never deletes an account with a live e-mail domain", async () => {
+      const id = await create(
+        {
+          provider: "infobip",
+          label: "Infobip Casa Um",
+          channels: ["email"],
+          config: { base_url: "https://own.api.infobip.test" },
+          credentials: { api_key: "k" },
+        },
+        "88888888-2222-4333-8444-555555555555",
+      );
+      fake.db.rows("tenant_domains").push({
+        id: "dom-1",
+        tenant_id: TENANT,
+        kind: "email",
+        hostname: "mail.casa.bet",
+        removed_at: null,
+        provider_account_id: id,
+      });
+
+      await expect(adminDeleteProviderAccountFor(ADMIN, { id })).rejects.toThrow(
+        /domínios de e-mail/,
+      );
+    });
+
+    it("never deletes an account with a live webpush app", async () => {
+      const id = await create(
+        {
+          provider: "onesignal",
+          label: "OneSignal Casa Um",
+          channels: ["webpush"],
+          credentials: { org_api_key: "k" },
+        },
+        "99999999-2222-4333-8444-555555555555",
+      );
+      fake.db.rows("tenant_webpush_apps").push({
+        id: "app-1",
+        tenant_id: TENANT,
+        provider_account_id: id,
+      });
+
+      await expect(adminDeleteProviderAccountFor(ADMIN, { id })).rejects.toThrow(
+        /apps de web push/,
+      );
     });
   });
 });

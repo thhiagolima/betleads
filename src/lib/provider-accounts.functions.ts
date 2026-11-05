@@ -3,7 +3,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
+  deleteProviderAccountInput,
   saveProviderAccountInput,
+  setPlatformDefaultInput,
   setProviderAccountStatusInput,
   setTenantChannelProviderInput,
   testProviderAccountInput,
@@ -46,4 +48,20 @@ export const adminSetTenantChannelProvider = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { adminSetTenantChannelProviderFor } = await import("./provider-accounts-admin.server");
     return adminSetTenantChannelProviderFor(context, data);
+  });
+
+export const adminSetPlatformDefault = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => setPlatformDefaultInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const { adminSetPlatformDefaultFor } = await import("./provider-accounts-admin.server");
+    return adminSetPlatformDefaultFor(context, data);
+  });
+
+export const adminDeleteProviderAccount = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => deleteProviderAccountInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const { adminDeleteProviderAccountFor } = await import("./provider-accounts-admin.server");
+    return adminDeleteProviderAccountFor(context, data);
   });
