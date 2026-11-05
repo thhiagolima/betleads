@@ -63,6 +63,12 @@ describe("GUIDES", () => {
     expect(campaignStep.substeps).toEqual(["Mandar um envio de teste antes"]);
   });
 
+  it("primeiro-email's publish step warns that the Editor Rápido saves a draft", () => {
+    const guide = GUIDES.find((g) => g.id === "primeiro-email")!;
+    const step = guide.steps.find((s) => s.id === "published-email-template")!;
+    expect(step.substeps.join(" ")).toMatch(/Editor Rápido salva como rascunho/);
+  });
+
   it("primeira-jornada has the saved/active/entries steps with the right substeps", () => {
     const jornada = GUIDES.find((g) => g.id === "primeira-jornada")!;
     expect(jornada.steps.map((s) => s.signal)).toEqual([

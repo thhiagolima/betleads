@@ -228,7 +228,8 @@ const screen: HelpScreen = {
           anchor: "email.rapido.salvar",
           label: "Salvar template",
           what: "Grava o template com o HTML montado a partir dos campos preenchidos.",
-          notes: 'Erro possível: "Dê um nome para o template" (campo Nome do template vazio).',
+          notes:
+            'Erro possível: "Dê um nome para o template" (campo Nome do template vazio). O template salvo aqui fica como "rascunho": as jornadas já podem usá-lo, mas uma campanha só envia template publicado, e ele não conta para a etapa "Publique um template de e-mail" do guia. Para publicar, clique em "Editar" no cartão, escolha "Publicado" em Status e salve.',
         },
       ],
     },
@@ -259,9 +260,9 @@ const screen: HelpScreen = {
         {
           anchor: "email.avancado.status",
           label: "Status (Rascunho / Publicado / Arquivado)",
-          what: "Define a situação do template. No Editor Avançado, só um template Publicado fica disponível para uso em campanhas e jornadas; Rascunho e Arquivado ficam visíveis na lista, mas fora de uso.",
+          what: "Define a situação do template. Só um template Publicado pode ser agendado ou enviado numa campanha; um Rascunho ainda pode ser usado nas jornadas; um Arquivado fica visível na lista, mas fora de uso.",
           notes:
-            "Exceção: um template criado pelo Editor Rápido já sai disponível para uso mesmo mostrando o selo \"rascunho\" no cartão — o Editor Rápido não tem este seletor de Status. Use \"Pausar\" no menu \"…\" do cartão para tirá-lo de uso de verdade.",
+            'O Editor Rápido não tem este seletor: o template salvo por lá fica como "rascunho". As jornadas já podem usar esse rascunho, mas agendar ou enviar uma campanha com ele dá erro ("Apenas templates publicados podem ser agendados." / "O template desta campanha não está publicado."), e ele não conta para a etapa "Publique um template de e-mail" do guia. Para publicar, abra o template em "Editar", escolha "Publicado" aqui e salve. Use "Pausar" no menu "…" do cartão para tirá-lo de uso de verdade.',
         },
         {
           anchor: "email.avancado.rastreio",

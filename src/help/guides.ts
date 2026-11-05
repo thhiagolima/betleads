@@ -141,7 +141,9 @@ export const GUIDES: Guide[] = [
         route: "/email",
         tab: "templates",
         anchor: "email.templates.novo",
-        substeps: [],
+        substeps: [
+          'No Editor Avançado, escolha "Publicado" em Status antes de salvar (o Editor Rápido salva como rascunho, que não conta aqui)',
+        ],
         signal: "publishedEmailTemplate",
       },
       {
