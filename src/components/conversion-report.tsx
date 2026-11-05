@@ -95,7 +95,9 @@ function BackLink({ sourceType }: { sourceType: "campaign" | "journey" }) {
       variant="outline"
       size="sm"
       asChild
-      {...(sourceType === "campaign" ? tourAnchor("campanha-relatorio.voltar") : {})}
+      {...(sourceType === "campaign"
+        ? tourAnchor("campanha-relatorio.voltar")
+        : tourAnchor("jornada-relatorio.voltar"))}
     >
       {sourceType === "campaign" ? (
         <Link to="/campanhas">Voltar para Campanhas</Link>
@@ -891,7 +893,12 @@ function JourneyReport({
         actions={
           <>
             {journeyId ? (
-              <Button variant="outline" size="sm" asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                {...tourAnchor("jornada-relatorio.editar")}
+              >
                 <Link to="/jornadas/$journeyId" params={{ journeyId }}>
                   <Pencil className="mr-1.5 size-4" aria-hidden="true" />
                   Editar jornada
@@ -1116,6 +1123,7 @@ function JourneyReport({
               variant="outline"
               disabled={drilldownLoading}
               onClick={onLoadDrilldown}
+              {...tourAnchor("jornada-relatorio.carregar-jogadores")}
             >
               {drilldownLoading ? "Carregando…" : "Carregar jogadores"}
             </Button>

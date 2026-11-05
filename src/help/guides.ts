@@ -161,7 +161,8 @@ export const GUIDES: Guide[] = [
       {
         id: "journey-saved",
         title: "Salve a jornada",
-        route: "/automacoes",
+        route: "/jornadas/nova",
+        anchor: "jornada.rodape.salvar",
         substeps: ["gatilho", "público e reentrada", "etapas", "saída", "limites"],
         signal: "journeySaved",
       },

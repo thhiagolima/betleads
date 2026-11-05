@@ -175,4 +175,18 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "Quando o mesmo jogador cumpre o gatilho de duas jornadas ao mesmo tempo, só a de maior prioridade envia; a outra fica pausada até a primeira liberar o jogador.",
   },
+
+  // --- Editor e relatório de jornada (Task 14) ---
+  {
+    id: "familia-de-jornadas",
+    term: "Família",
+    short:
+      "Um grupo de jornadas que nunca devem rodar juntas para o mesmo jogador — por exemplo, as jornadas de cada nível de gamificação. Jornadas sem família não competem por família, só por gatilho e prioridade.",
+  },
+  {
+    id: "prioridade-de-jornada",
+    term: "Prioridade",
+    short:
+      "Um número de 1 a 100 que decide quem vence quando duas jornadas disputam o mesmo jogador no mesmo canal: o menor número vence.",
+  },
 ];
