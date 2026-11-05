@@ -25,7 +25,7 @@ import { GUIDES, type GuideStep } from "@/help/guides";
 import { HELP_SCREEN_LOADERS } from "@/help/registry";
 import { resolveHelpScreen } from "@/help/resolve";
 import type { SearchEntry } from "@/help/search";
-import { shouldAutoStart } from "@/help/tour-logic";
+import { effectiveOverlayForAutoStart, shouldAutoStart } from "@/help/tour-logic";
 import type { HelpRole, HelpScreen, TourStep } from "@/help/types";
 import {
   AUTO_TOURS_OFF_KEY,
@@ -260,13 +260,17 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         key,
         progress: latest?.progress ?? null,
         dialogOpen: isDialogOpen(),
-        overlayActive: overlayActive || panelOpen,
+        overlayActive: effectiveOverlayForAutoStart({
+          overlayActive,
+          panelOpen,
+          isOverrideScreen: override !== null,
+        }),
         hasSteps: steps.length > 0,
       });
       if (ok) runSteps(currentScreen.route, tourTab, steps);
     }, AUTO_START_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [currentScreen, currentTab, progressReady, overlayActive, panelOpen, queryClient, runSteps]);
+  }, [currentScreen, currentTab, progressReady, overlayActive, panelOpen, override, queryClient, runSteps]);
 
   // A search result on another screen: go there (with its tab) and keep the
   // panel open on that section once the article loads.

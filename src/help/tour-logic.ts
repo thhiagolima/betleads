@@ -30,6 +30,25 @@ export function shouldAutoStart(input: ShouldAutoStartInput): boolean {
   return true;
 }
 
+/**
+ * What `overlayActive` to feed `shouldAutoStart` for the screen currently
+ * showing. `setOverlayActive(true)` (onboarding-gate.tsx) is meant to stop
+ * the *screen underneath* from auto-starting its tour while the overlay
+ * covers it — but when the screen currently resolved is the override target
+ * itself (the overlay's own content, via `setScreenOverride`), that overlay
+ * flag must not block ITS tour too, or the wizard's own per-step tour could
+ * never auto-start. The help panel being open still blocks either way.
+ */
+export function effectiveOverlayForAutoStart(input: {
+  overlayActive: boolean;
+  panelOpen: boolean;
+  isOverrideScreen: boolean;
+}): boolean {
+  if (input.panelOpen) return true;
+  if (input.isOverrideScreen) return false;
+  return input.overlayActive;
+}
+
 /** Returns the first candidate that passes `isVisible`, or `null` if none
  * does. */
 export function pickVisible<T>(candidates: T[], isVisible: (candidate: T) => boolean): T | null {

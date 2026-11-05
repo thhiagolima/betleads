@@ -29,6 +29,17 @@ vi.mock("@/components/onboarding/house-setup-wizard", () => ({
   HouseSetupWizard: () => <div>assistente-de-configuracao</div>,
 }));
 
+const helpMock = {
+  openPanel: vi.fn(),
+  startTour: vi.fn(),
+  setOverlayActive: vi.fn(),
+  setScreenOverride: vi.fn(),
+  progress: null,
+};
+vi.mock("@/components/help/help-provider", () => ({
+  useHelp: () => helpMock,
+}));
+
 import { OnboardingGate } from "./onboarding-gate";
 
 function billing(over: Record<string, unknown> = {}) {
@@ -58,12 +69,27 @@ describe("OnboardingGate", () => {
     setupState.isLoading = false;
     setupState.isError = false;
     setupQueryOptions.length = 0;
+    helpMock.setOverlayActive.mockClear();
+    helpMock.setScreenOverride.mockClear();
   });
 
   it("shows the wizard for a house that has not finished setup", () => {
     const html = render();
     expect(html).toContain("assistente-de-configuracao");
     expect(setupQueryOptions.at(-1)?.enabled).toBe(true);
+  });
+
+  it("activates the help overlay and overrides the screen to 'onboarding' when the wizard shows", () => {
+    render();
+    expect(helpMock.setOverlayActive).toHaveBeenCalledWith(true);
+    expect(helpMock.setScreenOverride).toHaveBeenCalledWith("onboarding", "casa");
+  });
+
+  it("deactivates the help overlay and clears the override when the wizard doesn't show", () => {
+    accessState.data = { blocked: false, tenant: null, billing: billing() };
+    render();
+    expect(helpMock.setOverlayActive).toHaveBeenCalledWith(false);
+    expect(helpMock.setScreenOverride).toHaveBeenCalledWith(null);
   });
 
   it("skips the wizard (and the setup query) for a house locked for the monthly fee", () => {
