@@ -9,6 +9,16 @@ export type TermOpenEvent =
   | { type: "hover-leave" }
   | { type: "pointerdown"; pointerType: "mouse" | "touch" | "pen" };
 
+/** Whether a click on the trigger should be left to Radix's own toggle.
+ * A keyboard activation (Enter/Space) fires a click with `detail === 0`
+ * and no pointerdown: Radix toggles it. A pointer click (`detail >= 1`) was
+ * already decided by the pointerdown via `nextTermOpen`, so Radix's toggle
+ * is blocked. Decided per event — no flag that a pointerdown without a
+ * click (drag off, pointercancel, touch scroll) could leave stuck. */
+export function clickLetsRadixToggle(detail: number): boolean {
+  return detail === 0;
+}
+
 export function nextTermOpen(open: boolean, event: TermOpenEvent): boolean {
   switch (event.type) {
     case "hover-enter":

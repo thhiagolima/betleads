@@ -12,6 +12,7 @@ import {
   filterAvailableSteps,
   isAutoStartSuppressed,
   nextAutoStartSuppression,
+  nextReadinessClock,
   pickHelpTarget,
   pickVisible,
   sameHelpTarget,
@@ -316,5 +317,29 @@ describe("tourReadiness", () => {
 
   it('a tour with no steps is "giveup"', () => {
     expect(at({ totalSteps: 0, availableSteps: 0, firstAvailable: false })).toBe("giveup");
+  });
+});
+
+describe("nextReadinessClock", () => {
+  it('starts on the first "start" and keeps that origin while it stays "start"', () => {
+    expect(nextReadinessClock(null, "start", 5000)).toBe(5000);
+    expect(nextReadinessClock(5000, "start", 9000)).toBe(5000);
+  });
+
+  it('is dropped on "wait" and "never", so blocked time never counts against the deadline', () => {
+    expect(nextReadinessClock(5000, "wait", 9000)).toBeNull();
+    expect(nextReadinessClock(null, "wait", 9000)).toBeNull();
+    expect(nextReadinessClock(5000, "never", 9000)).toBeNull();
+  });
+
+  it("a long onboarding wait followed by start gets the full readiness window", () => {
+    let clock: number | null = null;
+    clock = nextReadinessClock(clock, "wait", 0); // wizard showing
+    clock = nextReadinessClock(clock, "wait", 60_000);
+    clock = nextReadinessClock(clock, "start", 61_000); // wizard closed
+    expect(clock).toBe(61_000);
+    expect(
+      tourReadiness({ totalSteps: 6, availableSteps: 1, firstAvailable: false, elapsedMs: 62_000 - clock! }),
+    ).toBe("wait");
   });
 });

@@ -132,6 +132,21 @@ export function tourReadiness(input: {
   return availableSteps >= 1 ? "start" : "giveup";
 }
 
+/** The readiness clock (`tourReadiness`' `elapsedMs` origin) after one
+ * auto-start check: it starts the first time the decision is "start" and
+ * is dropped whenever the decision goes back to "wait" (wizard, dialog,
+ * panel) or "never" — time spent blocked must not count against the
+ * deadline, or a tour shown right after the onboarding wizard would give up
+ * or start truncated. */
+export function nextReadinessClock(
+  startedAt: number | null,
+  decision: AutoStartDecision,
+  now: number,
+): number | null {
+  if (decision !== "start") return null;
+  return startedAt ?? now;
+}
+
 /** Maps driver.js's own `DestroyReason` to the tour's result: "done" only
  * when the user clicked "Concluir" on the last step (driver.js's "done"
  * reason); anything else — closing early, Escape, clicking the overlay, the

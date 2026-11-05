@@ -11,7 +11,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { GLOSSARY } from "@/help/glossary";
 import { useHelp } from "./help-provider";
-import { nextTermOpen } from "./term-open";
+import { clickLetsRadixToggle, nextTermOpen } from "./term-open";
 
 /** Gap (ms) before a hover-leave actually closes the popover, cancelled if
  * the pointer re-enters the trigger or the content first — avoids flicker
@@ -31,15 +31,6 @@ export function Term({ id, children }: { id: string; children: ReactNode }) {
   const { openPanel } = useHelp();
   const entry = GLOSSARY.find((candidate) => candidate.id === id);
   const closeTimer = useRef<number | null>(null);
-  // Set in handlePointerDown, read (and cleared) in handleClick: tells the
-  // click that immediately follows a pointerdown (mouse/touch) that
-  // handlePointerDown already decided the open state via nextTermOpen, so
-  // Radix's own trigger click handler (`context.onOpenToggle`, composed
-  // after ours — see @radix-ui/react-popover) must be blocked. A click with
-  // no preceding pointerdown is keyboard activation (Enter/Space), which
-  // has no pointerdown at all — that one is left alone so Radix's default
-  // toggle keeps working for keyboard users.
-  const pointerHandledRef = useRef(false);
 
   const clearCloseTimer = () => {
     if (closeTimer.current !== null) {
@@ -67,12 +58,14 @@ export function Term({ id, children }: { id: string; children: ReactNode }) {
     const pointerType = event.pointerType === "touch" || event.pointerType === "pen"
       ? event.pointerType
       : "mouse";
-    pointerHandledRef.current = true;
     setOpen((current) => nextTermOpen(current, { type: "pointerdown", pointerType }));
   };
+  // A pointer click was already decided by handlePointerDown, so Radix's
+  // own trigger toggle (`context.onOpenToggle`, composed after ours — see
+  // @radix-ui/react-popover) is blocked; a keyboard click (Enter/Space,
+  // `detail === 0`) is left to Radix (clickLetsRadixToggle).
   const handleClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
-    if (!pointerHandledRef.current) return; // keyboard activation: let Radix toggle
-    pointerHandledRef.current = false;
+    if (clickLetsRadixToggle(event.detail)) return;
     event.preventDefault();
   };
 

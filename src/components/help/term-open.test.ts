@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { nextTermOpen } from "./term-open";
+import { clickLetsRadixToggle, nextTermOpen } from "./term-open";
+
+describe("clickLetsRadixToggle", () => {
+  it("teclado (Enter/Espaço, detail 0) deixa o Radix alternar; clique de ponteiro (detail >= 1) não", () => {
+    expect(clickLetsRadixToggle(0)).toBe(true);
+    expect(clickLetsRadixToggle(1)).toBe(false);
+    expect(clickLetsRadixToggle(2)).toBe(false);
+  });
+});
 
 describe("nextTermOpen", () => {
   it("mouse: hover-enter abre, e o clique seguinte mantém aberto (não fecha)", () => {

@@ -34,6 +34,7 @@ import {
   pickHelpTarget,
   screenTourKey,
   startAutoStartSuppression,
+  nextReadinessClock,
   tourReadiness,
   tourFor,
   type AutoStartSuppression,
@@ -246,9 +247,19 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   );
 
   // --- Tours ---
+  // Auto-start is evaluated once per tour key per visit of a route.
+  const autoChecked = useRef(new Set<string>());
+  // When each tour key's auto-start first got a "start" decision (reset on
+  // any "wait"): the clock for `tourReadiness`' deadline — see
+  // `nextReadinessClock`.
+  const autoFirstSeen = useRef(new Map<string, number>());
+
   const runSteps = useCallback(
     (key: string, steps: TourStep[]) => {
       if (steps.length === 0) return;
+      // A tour running (manual or auto) settles this visit's auto-start, so
+      // a pending auto-start can't restart it from step 1.
+      autoChecked.current.add(key);
       void loadTourRunner().then(({ runTour, stopActiveTour }) => {
         runTour(steps, {
           onFinish: (result) => writeProgress(key, result),
@@ -274,11 +285,6 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     [currentScreen, currentTab, runSteps],
   );
 
-  // Auto-start is evaluated once per tour key per visit of a route.
-  const autoChecked = useRef(new Set<string>());
-  // When each tour key was first considered on this visit: the clock for
-  // `tourReadiness`' deadline (the screen's data may still be loading).
-  const autoFirstSeen = useRef(new Map<string, number>());
 
   // A highlight ("mostrar na tela", a guide's "Ir para esta etapa") on a
   // screen: that visit's auto-start must not replace it (tour-logic.ts).
@@ -318,14 +324,18 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     // The key is only marked checked on a final verdict ("start"/"never").
     // On "wait" (a transient blocker) it stays unchecked: overlay/panel
     // changes re-run this effect, and an open dialog (not a dep) is polled.
-    if (!autoFirstSeen.current.has(key)) autoFirstSeen.current.set(key, Date.now());
     let timer = 0;
     let cancelled = false;
     const retry = () => {
       if (!cancelled) timer = window.setTimeout(check, AUTO_START_RETRY_MS);
     };
+    const setClock = (decision: "start" | "never" | "wait") => {
+      const next = nextReadinessClock(autoFirstSeen.current.get(key) ?? null, decision, Date.now());
+      if (next === null) autoFirstSeen.current.delete(key);
+      else autoFirstSeen.current.set(key, next);
+    };
     const check = () => {
-      if (cancelled) return;
+      if (cancelled || autoChecked.current.has(key)) return;
       if (isAutoStartSuppressed(suppression.current, urlTarget)) {
         autoChecked.current.add(key);
         return;
@@ -333,10 +343,11 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       const latest = queryClient.getQueryData<{ progress: HelpProgressMap }>(
         HELP_PROGRESS_QUERY_KEY,
       );
+      const dialogOpen = isDialogOpen();
       const decision = autoStartDecision({
         key,
         progress: latest?.progress ?? null,
-        dialogOpen: isDialogOpen(),
+        dialogOpen,
         overlayActive: effectiveOverlayForAutoStart({
           overlayActive,
           panelOpen,
@@ -344,8 +355,11 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         }),
         hasSteps: steps.length > 0,
       });
+      setClock(decision);
       if (decision === "wait") {
-        retry();
+        // Only an open dialog needs polling: overlay/panel/progress changes
+        // already re-run this effect through its deps.
+        if (dialogOpen) retry();
         return;
       }
       if (decision === "never") {
