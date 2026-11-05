@@ -15,6 +15,7 @@ import {
   cancelWebpushCampaign,
   countWebpushAudience,
   listWebpushCampaigns,
+  resumeWebpushCampaign,
   scheduleWebpushCampaign,
   type WebpushAudience,
   type WebpushCampaignsDb,
@@ -92,4 +93,21 @@ export const cancelWebpushCampaignFn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
     return cancelWebpushCampaign(campaignsDb, { tenantId, id: data.id });
+  });
+
+const resumeWebpushCampaignInput = z.object({ id: dbUuid() });
+
+/**
+ * Resumes a push campaign paused for lack of balance, once the house has
+ * topped up. Controller ruling: same guard order as `scheduleWebpushCampaignFn`
+ * (operate, then demo) — resuming re-activates a send, it is not a read.
+ */
+export const resumeWebpushCampaignFn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => resumeWebpushCampaignInput.parse(input))
+  .handler(async ({ data, context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    await assertTenantCanOperate(tenantId);
+    await assertTenantNotDemoForSend(tenantId);
+    return resumeWebpushCampaign(campaignsDb, { tenantId, id: data.id });
   });

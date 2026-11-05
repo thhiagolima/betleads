@@ -32,6 +32,11 @@ vi.mock("@/lib/campaign-drafts.functions", () => ({
   deleteCampaignDraft: vi.fn(),
   listCampaignDrafts: vi.fn(),
 }));
+vi.mock("@/lib/webpush/campaigns.functions", () => ({
+  cancelWebpushCampaignFn: vi.fn(),
+  listWebpushCampaignsFn: vi.fn(),
+  resumeWebpushCampaignFn: vi.fn(),
+}));
 
 import { CampaignRow, type Campaign } from "./campaigns-hub";
 import { expertCampaignToRow } from "@/lib/expert-campaign-rows";

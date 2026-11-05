@@ -290,11 +290,22 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
 export const getCampaignReportDetails = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((value: unknown) => campaignDetailsSchema.parse(value))
-  .handler(async ({ data, context }) => {
-    const tenantId = await resolveOperationalTenantId(context.supabase);
-    const db = context.supabase as any;
+  .handler(async ({ data, context }) => getCampaignReportDetailsFor(context, data));
 
-    const [smsResult, emailResult, voiceResult, dispatchResult] = await Promise.all([
+/**
+ * Pure body of `getCampaignReportDetails`, extracted so it can be unit tested
+ * against `createFakeDb()` (the compiled server fn is replaced by a stub
+ * outside the TanStack Start server, same reason `getMarketingOverviewFor`
+ * exists in marketing.functions.ts).
+ */
+export async function getCampaignReportDetailsFor(
+  context: { supabase: unknown },
+  data: { campaignId: string; limit: number },
+) {
+  const db = context.supabase as any;
+  const tenantId = await resolveOperationalTenantId(db);
+
+  const [smsResult, emailResult, voiceResult, webpushResult, dispatchResult] = await Promise.all([
       db
         .from("sms_campaigns")
         .select(
@@ -320,6 +331,14 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
         .eq("id", data.campaignId)
         .maybeSingle(),
       db
+        .from("webpush_campaigns")
+        .select(
+          "id,name,title,body,status,target_count,sent_count,failed_count,scheduled_at,created_at,updated_at",
+        )
+        .eq("tenant_id", tenantId)
+        .eq("id", data.campaignId)
+        .maybeSingle(),
+      db
         .from("link_dispatches")
         .select(
           "id,tracked_link_id,tracking_token,idempotency_key,recipient_player_id,send_status,delivery_status,sent_at,delivered_at,created_at,updated_at,message_log_id,channel",
@@ -331,12 +350,18 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
         .limit(Math.min(data.limit * 4, 2000)),
     ]);
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
-    const sourceError = [smsResult.error, emailResult.error, voiceResult.error].find(Boolean);
+    const sourceError = [
+      smsResult.error,
+      emailResult.error,
+      voiceResult.error,
+      webpushResult.error,
+    ].find(Boolean);
     if (sourceError) throw new Error(sourceError.message);
 
     const sms = smsResult.data;
     const email = emailResult.data;
     const voice = voiceResult.data;
+    const webpush = webpushResult.data;
     const [voiceHistoryResult, voicePlayerResult, voiceScriptResult, voiceAssetResult] = voice
       ? await Promise.all([
           db
@@ -449,7 +474,24 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
               audience: 1,
               lastError: null,
             }
-          : null;
+          : webpush
+            ? {
+                channel: "webpush" as const,
+                name: webpush.name,
+                content: webpush.title ? `${webpush.title} — ${webpush.body}` : webpush.body,
+                route: "Web Push",
+                status: webpush.status,
+                total: Number(webpush.target_count ?? 0),
+                sent: Number(webpush.sent_count ?? 0),
+                deduplicated: 0,
+                failed: Number(webpush.failed_count ?? 0),
+                scheduledAt: webpush.scheduled_at,
+                createdAt: webpush.created_at,
+                finishedAt: webpush.updated_at,
+                audience: Number(webpush.target_count ?? 0),
+                lastError: null,
+              }
+            : null;
 
     const voiceDetails = voice
       ? {
@@ -688,8 +730,8 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
           groups[reason] = (groups[reason] ?? 0) + 1;
           return groups;
         }, {}),
-    };
-  });
+  };
+}
 
 export const exportCampaignRecipientsCsv = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

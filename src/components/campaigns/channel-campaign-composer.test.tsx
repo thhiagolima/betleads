@@ -58,6 +58,11 @@ vi.mock("@/lib/email.functions", () => ({
 vi.mock("@/lib/billing/billing.functions", () => ({ getBillingPrices: vi.fn() }));
 vi.mock("@/lib/journey-voice-assets.functions", () => ({ listJourneyVoiceAssets: vi.fn() }));
 vi.mock("@/lib/sms-audiences.functions", () => ({ resolveCampaignAudience: vi.fn() }));
+vi.mock("@/lib/webpush/webpush.functions", () => ({ getWebpushIntegrationFn: vi.fn() }));
+vi.mock("@/lib/webpush/campaigns.functions", () => ({
+  countWebpushAudienceFn: vi.fn(),
+  scheduleWebpushCampaignFn: vi.fn(),
+}));
 vi.mock("@/lib/sms-templates.functions", () => ({ listSmsTemplates: vi.fn() }));
 vi.mock("@/lib/sms.functions", () => ({
   previewSmsCampaignRecipients: vi.fn(),

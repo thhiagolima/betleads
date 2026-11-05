@@ -1,6 +1,7 @@
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Bell,
   Crown,
   Dice5,
   Gem,
@@ -83,13 +84,14 @@ export const LEVEL_IDENTITY: Record<LevelSlug, IdentityTone> = {
   },
 };
 
-export type ChannelKind = "sms" | "email" | "voice" | "whatsapp";
+export type ChannelKind = "sms" | "email" | "voice" | "whatsapp" | "webpush";
 
 export const CHANNEL_LABEL: Record<ChannelKind, string> = {
   sms: "SMS",
   email: "E-mail",
   voice: "Voz",
   whatsapp: "WhatsApp",
+  webpush: "Web Push",
 };
 
 // E-mail is pink because violet already means Black VIP and bonus.
@@ -122,6 +124,13 @@ export const CHANNEL_IDENTITY: Record<ChannelKind, IdentityTone> = {
     dot: "bg-green-400",
     soft: "bg-green-500/15",
   },
+  webpush: {
+    icon: Bell,
+    text: "text-fuchsia-300",
+    border: "border-fuchsia-400/40",
+    dot: "bg-fuchsia-400",
+    soft: "bg-fuchsia-500/15",
+  },
 };
 
 /** Channel keys used around the app ("call"/"ligacao" are voice). */
@@ -132,6 +141,8 @@ export function channelKind(channel: string | null | undefined): ChannelKind | n
   if (["voice", "voz", "call", "calls", "ligacao", "ligacoes", "ligação"].includes(value))
     return "voice";
   if (value === "whatsapp") return "whatsapp";
+  if (value === "webpush" || value === "web_push" || value === "web-push" || value === "web push")
+    return "webpush";
   return null;
 }
 

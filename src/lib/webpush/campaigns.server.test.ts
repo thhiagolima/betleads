@@ -18,6 +18,7 @@ import {
   cancelWebpushCampaign,
   countWebpushAudience,
   listWebpushCampaigns,
+  resumeWebpushCampaign,
   scheduleWebpushCampaign,
 } from "./campaigns.server";
 
@@ -320,5 +321,55 @@ describe("cancelWebpushCampaign", () => {
     await expect(
       cancelWebpushCampaign(fake.db.client, { tenantId: OTHER_TENANT, id: "c1" }),
     ).rejects.toThrow(/não pode mais ser cancelada/);
+  });
+});
+
+describe("resumeWebpushCampaign", () => {
+  function seedCampaign(status: string) {
+    fake.db.rows("webpush_campaigns").push({
+      id: "c1",
+      tenant_id: TENANT,
+      name: "Campanha",
+      status,
+      scheduled_at: "2026-11-01T00:00:00.000Z",
+      target_count: 10,
+      sent_count: 3,
+      failed_count: 0,
+      created_at: "2026-11-05T00:00:00.000Z",
+    });
+  }
+
+  it("retoma uma campanha pausada: volta para agendada com scheduled_at = agora", async () => {
+    seedCampaign("pausada");
+    const before = Date.now();
+    const result = await resumeWebpushCampaign(fake.db.client, { tenantId: TENANT, id: "c1" });
+    expect(result.ok).toBe(true);
+    const row = fake.db.rows("webpush_campaigns")[0] as Record<string, unknown>;
+    expect(row.status).toBe("agendada");
+    expect(new Date(row.scheduled_at as string).getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("recusa retomar uma campanha agendada (não está pausada)", async () => {
+    seedCampaign("agendada");
+    await expect(
+      resumeWebpushCampaign(fake.db.client, { tenantId: TENANT, id: "c1" }),
+    ).rejects.toThrow(/não pode ser retomada/);
+  });
+
+  it("recusa retomar uma campanha já enviada", async () => {
+    seedCampaign("enviado");
+    await expect(
+      resumeWebpushCampaign(fake.db.client, { tenantId: TENANT, id: "c1" }),
+    ).rejects.toThrow(/não pode ser retomada/);
+  });
+
+  it("recusa retomar uma campanha de outra casa", async () => {
+    seedCampaign("pausada");
+    await expect(
+      resumeWebpushCampaign(fake.db.client, { tenantId: OTHER_TENANT, id: "c1" }),
+    ).rejects.toThrow(/não pode ser retomada/);
+    expect((fake.db.rows("webpush_campaigns")[0] as Record<string, unknown>).status).toBe(
+      "pausada",
+    );
   });
 });

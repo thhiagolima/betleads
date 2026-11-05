@@ -1,4 +1,4 @@
-export type ChannelOperation = "sms" | "email" | "voice";
+export type ChannelOperation = "sms" | "email" | "voice" | "webpush";
 
 export type ChannelOperationState = {
   label: string;
@@ -13,12 +13,14 @@ const SETTINGS_DESTINATION: Record<ChannelOperation, string> = {
   sms: "/sms#configuracoes",
   email: "/email#smtp",
   voice: "/ligacoes#configuracoes",
+  webpush: "/web-push#configuracoes",
 };
 
 const HISTORY_DESTINATION: Record<ChannelOperation, string> = {
   sms: "/sms#historico",
   email: "/email#historico",
   voice: "/ligacoes#historico",
+  webpush: "/campanhas",
 };
 
 /** Reason shown for a cancelled, failed or paused campaign (null for any other status). */

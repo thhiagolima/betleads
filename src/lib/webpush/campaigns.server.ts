@@ -323,3 +323,42 @@ export async function cancelWebpushCampaign(
   }
   return { ok: true };
 }
+
+/**
+ * Resumes a push campaign paused for lack of balance — only `pausada` →
+ * `agendada`, `scheduled_at` reset to now so the next claim
+ * (`claim_due_webpush_campaigns`) picks it back up. The dispatcher resumes
+ * any open batch on its own (`processWebpushCampaignTick`'s `listOpenBatches`
+ * check runs first); this just un-pauses the campaign row. Same conditional
+ * update pattern as `cancelWebpushCampaign` (read current status, then update
+ * guarded by that same status so a concurrent writer can't double-apply it).
+ */
+export async function resumeWebpushCampaign(
+  db: WebpushCampaignsDb,
+  input: { tenantId: string; id: string },
+): Promise<{ ok: true }> {
+  const { data: current, error: readError } = await db
+    .from("webpush_campaigns")
+    .select("id,status")
+    .eq("id", input.id)
+    .eq("tenant_id", input.tenantId)
+    .maybeSingle();
+  if (readError) throw new Error(readError.message);
+  const previousStatus = (current as { status?: string } | null)?.status;
+  if (previousStatus !== "pausada") {
+    throw new Error("Campanha não pode ser retomada");
+  }
+
+  const { data: updated, error } = await db
+    .from("webpush_campaigns")
+    .update({ status: "agendada", scheduled_at: new Date().toISOString(), last_error: null })
+    .eq("id", input.id)
+    .eq("tenant_id", input.tenantId)
+    .eq("status", previousStatus)
+    .select("id");
+  if (error) throw new Error(error.message);
+  if (!updated || (updated as unknown[]).length === 0) {
+    throw new Error("Campanha não pode ser retomada");
+  }
+  return { ok: true };
+}

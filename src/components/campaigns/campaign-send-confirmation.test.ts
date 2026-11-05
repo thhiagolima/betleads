@@ -121,4 +121,25 @@ describe("send button label", () => {
       "Enviar para 1.200 jogadores",
     );
   });
+
+  it("states subscribers and the estimated cost for web push", () => {
+    expect(
+      campaignSendLabel({ channel: "webpush", when: "now", recipients: 1200, cost: 12 }),
+    ).toBe(`Enviar para 1.200 inscritos · custo estimado ${brl(12)}`);
+    expect(
+      campaignSendLabel({ channel: "webpush", when: "schedule", recipients: 1, cost: 0.01 }),
+    ).toBe(`Agendar para 1 inscrito · custo estimado ${brl(0.01)}`);
+  });
+
+  it("states 'isento' for an exempt house's web push, without a price", () => {
+    expect(
+      campaignSendLabel({
+        channel: "webpush",
+        when: "now",
+        recipients: 500,
+        cost: 0,
+        webpushExempt: true,
+      }),
+    ).toBe("Enviar para 500 inscritos · isento");
+  });
 });

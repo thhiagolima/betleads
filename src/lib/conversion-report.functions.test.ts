@@ -2,8 +2,17 @@
 // cost: averageBilledSegments's math, and selectAllPages actually paging
 // past PostgREST's 1000-row cap (the bug that silently undercounted cost
 // for campaigns with over 1000 accepted SMS).
-import { describe, expect, it } from "vitest";
-import { averageBilledSegments, selectAllPages } from "./conversion-report.functions";
+import { describe, expect, it, vi } from "vitest";
+import { createFakeDb } from "@/lib/sms-bulk.test-support";
+import {
+  averageBilledSegments,
+  getCampaignReportDetailsFor,
+  selectAllPages,
+} from "./conversion-report.functions";
+
+vi.mock("@/lib/tenant-access.server", () => ({
+  resolveOperationalTenantId: vi.fn(async () => "t1"),
+}));
 
 describe("averageBilledSegments", () => {
   it("counts a null billed_units as 1 segment", () => {
@@ -76,5 +85,39 @@ describe("selectAllPages", () => {
 
     expect(result.data).toHaveLength(1);
     expect(result.truncated).toBe(false);
+  });
+});
+
+describe("getCampaignReportDetailsFor", () => {
+  it("devolve channel: webpush e os contadores de uma campanha de push", async () => {
+    const fake = createFakeDb();
+    fake.rows("webpush_campaigns").push({
+      id: "wp-1",
+      tenant_id: "t1",
+      name: "Campanha push",
+      title: "Bônus liberado",
+      body: "Clique para ver o bônus",
+      status: "enviado",
+      target_count: 500,
+      sent_count: 480,
+      failed_count: 20,
+      scheduled_at: "2026-11-05T10:00:00.000Z",
+      created_at: "2026-11-05T09:00:00.000Z",
+      updated_at: "2026-11-05T10:05:00.000Z",
+    });
+
+    const result = await getCampaignReportDetailsFor(
+      { supabase: fake.client },
+      { campaignId: "wp-1", limit: 500 },
+    );
+
+    expect(result.campaign).toMatchObject({
+      channel: "webpush",
+      name: "Campanha push",
+      status: "enviado",
+      total: 500,
+      sent: 480,
+      failed: 20,
+    });
   });
 });
