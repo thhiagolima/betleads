@@ -487,7 +487,9 @@ export async function getCampaignReportDetailsFor(
                 failed: Number(webpush.failed_count ?? 0),
                 scheduledAt: webpush.scheduled_at,
                 createdAt: webpush.created_at,
-                finishedAt: webpush.updated_at,
+                finishedAt: ["enviado", "falhou", "cancelada"].includes(webpush.status)
+                  ? webpush.updated_at
+                  : null,
                 audience: Number(webpush.target_count ?? 0),
                 lastError: null,
               }

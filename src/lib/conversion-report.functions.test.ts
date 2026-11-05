@@ -119,5 +119,33 @@ describe("getCampaignReportDetailsFor", () => {
       sent: 480,
       failed: 20,
     });
+    // Terminal status: finishedAt is the row's updated_at.
+    expect(result.campaign?.finishedAt).toBe("2026-11-05T10:05:00.000Z");
+  });
+
+  it("finishedAt é null para uma campanha de push ainda em andamento", async () => {
+    const fake = createFakeDb();
+    fake.rows("webpush_campaigns").push({
+      id: "wp-2",
+      tenant_id: "t1",
+      name: "Campanha em andamento",
+      title: "Bônus liberado",
+      body: "Clique para ver o bônus",
+      status: "enviando",
+      target_count: 500,
+      sent_count: 100,
+      failed_count: 0,
+      scheduled_at: "2026-11-05T10:00:00.000Z",
+      created_at: "2026-11-05T09:00:00.000Z",
+      updated_at: "2026-11-05T10:05:00.000Z",
+    });
+
+    const result = await getCampaignReportDetailsFor(
+      { supabase: fake.client },
+      { campaignId: "wp-2", limit: 500 },
+    );
+
+    expect(result.campaign).toMatchObject({ channel: "webpush", status: "enviando" });
+    expect(result.campaign?.finishedAt).toBeNull();
   });
 });

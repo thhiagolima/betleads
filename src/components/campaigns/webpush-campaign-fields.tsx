@@ -14,8 +14,58 @@ import {
 import { brl, num } from "@/lib/format";
 import type { SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
 import type { WebpushAudienceCount } from "@/lib/webpush/campaigns.server";
+import { validateCampaignContent } from "@/lib/webpush/shared";
 
 export type WebpushAudienceKind = "todos" | "filtro";
+
+export type WebpushScheduleInput = {
+  name: string;
+  title: string;
+  body: string;
+  url: string;
+  imageUrl: string | null;
+  audience: { kind: "todos" } | { kind: "filtro"; criteria: unknown };
+  scheduledAt: string | null;
+};
+
+/**
+ * Builds `scheduleWebpushCampaignFn`'s payload from the composer's form
+ * state — extracted so the exact shape sent to the server (content
+ * validated/trimmed the same way the server does, `criteria` passed through
+ * unchanged for "filtro", `{ kind: "todos" }` with no `criteria` key for
+ * "todos") is unit-testable without driving the composer's full submit flow.
+ * Throws the same pt-BR `Error` as `validateCampaignContent` when the
+ * title/body/url/image don't pass.
+ */
+export function buildWebpushScheduleInput(input: {
+  name: string;
+  title: string;
+  body: string;
+  url: string;
+  imageUrl: string;
+  audienceKind: WebpushAudienceKind;
+  audienceCriteria: SmsAudienceCriteria | null;
+  scheduledAt: string | null;
+}): WebpushScheduleInput {
+  const content = validateCampaignContent({
+    title: input.title,
+    body: input.body,
+    url: input.url,
+    imageUrl: input.imageUrl || null,
+  });
+  return {
+    name: input.name,
+    title: content.title,
+    body: content.body,
+    url: content.url,
+    imageUrl: content.imageUrl,
+    audience:
+      input.audienceKind === "todos"
+        ? { kind: "todos" }
+        : { kind: "filtro", criteria: input.audienceCriteria ?? {} },
+    scheduledAt: input.scheduledAt,
+  };
+}
 
 /** Same shape the composer builds from `SYSTEM_SMS_AUDIENCES` + saved audiences. */
 export type WebpushAudienceOption = {

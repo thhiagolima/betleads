@@ -123,6 +123,7 @@ import {
 } from "./campaign-send-confirmation";
 import {
   WebpushCampaignFields,
+  buildWebpushScheduleInput,
   type WebpushAudienceKind,
 } from "./webpush-campaign-fields";
 import { getWebpushIntegrationFn } from "@/lib/webpush/webpush.functions";
@@ -496,6 +497,18 @@ export function ChannelCampaignComposer({
     idempotencyKey.current = crypto.randomUUID();
   }, [open, initialChannel, initialDraftId, initialAudienceId]);
 
+  // The hub's `?newChannel=webpush` link (or a stale `initialChannel` prop)
+  // can seed `channel` with "webpush" before the integration's enabled state
+  // is known, or for a house/expert where it's disabled or never comes
+  // available (expert: `webpushAvailable` is house-only, so it's always
+  // false for them). Clamp back to the default channel as soon as that's
+  // certain — the tab itself is already filtered out of the SegmentedFilter,
+  // but the channel state must not silently stay on a tab nobody can select.
+  useEffect(() => {
+    if (!open || channel !== "webpush") return;
+    if (isExpert || (webpushIntegration.isSuccess && !webpushAvailable)) setChannel("sms");
+  }, [open, channel, isExpert, webpushIntegration.isSuccess, webpushAvailable]);
+
   useEffect(() => {
     const draft = draftQuery.data as CampaignDraft | undefined;
     if (!open || !draft || hydratedDraftId.current === draft.id) return;
@@ -868,6 +881,12 @@ export function ChannelCampaignComposer({
 
   const submit = useMutation({
     mutationFn: async (confirmedCount?: number) => {
+      // Defense in depth: the tab and the fields are already gated on
+      // `webpushAvailable`, but a click racing the clamp effect (or a stale
+      // `channel` captured just before the integration query settles) must
+      // not reach `scheduleWebpushCampaignFn`.
+      if (channel === "webpush" && !webpushAvailable)
+        throw new Error("Web Push não está disponível para esta casa.");
       if (!name.trim()) throw new Error("Informe o nome da campanha.");
       // The audience changed after the typed confirmation: ask again for the new count.
       if (requiresTypedConfirmation(sendableRecipients) && confirmedCount !== sendableRecipients)
@@ -895,26 +914,17 @@ export function ChannelCampaignComposer({
       const scheduleAt = when === "schedule" ? (fromBrtInput(scheduledAt) ?? undefined) : undefined;
 
       if (channel === "webpush") {
-        const content = validateCampaignContent({
+        const payload = buildWebpushScheduleInput({
+          name,
           title: webpushTitle,
           body: webpushBody,
           url: webpushUrl,
-          imageUrl: webpushImageUrl || null,
+          imageUrl: webpushImageUrl,
+          audienceKind: webpushAudienceKind,
+          audienceCriteria,
+          scheduledAt: scheduleAt ?? null,
         });
-        const completed = await scheduleWebpushCampaign({
-          data: {
-            name,
-            title: content.title,
-            body: content.body,
-            url: content.url,
-            imageUrl: content.imageUrl,
-            audience:
-              webpushAudienceKind === "todos"
-                ? { kind: "todos" }
-                : { kind: "filtro", criteria: audienceCriteria ?? {} },
-            scheduledAt: scheduleAt ?? null,
-          },
-        });
+        const completed = await scheduleWebpushCampaign({ data: payload });
         // No draft (controller ruling): nothing to submit here.
         submitted.current = true;
         return completed;
@@ -1656,7 +1666,7 @@ export function ChannelCampaignComposer({
                   )}
                 </div>
               )}
-              {channel === "webpush" && (
+              {channel === "webpush" && webpushAvailable && (
                 <WebpushCampaignFields
                   title={webpushTitle}
                   onTitleChange={setWebpushTitle}
