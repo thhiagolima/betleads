@@ -18,7 +18,8 @@ export type PlatformAlert = {
   message: string;
   tenantId: string | null;
   since: string | null;
-  href: string;
+  /** Screen that fixes it; null when there is no useful screen (row is not clickable). */
+  href: string | null;
 };
 
 export type JobHealthRow = {
@@ -37,9 +38,11 @@ export type WebhookStats = {
   tenantId: string;
   name: string;
   lastEventAt: string | null;
-  /** Estimated from the last ≤200 events of the past 7 days (see Task 3). */
+  /** Estimated from the last ≤200 events of the past 7 days (see `estimateEventsPerDay`). */
   eventsPerDay: number;
   errors24h: number;
+  /** The house has cadastros in the health table (current or base window). */
+  hasMovement: boolean;
 };
 
 export type QueueMetricRow = {
@@ -73,11 +76,12 @@ export type RunwayRow = { tenant_id: string; tenant_name: string; runway_hours: 
  * Expected period (seconds) between starts, for jobs confirmed (05/11
  * snapshot, 48 h, every hour had a row) to run on every tick. A job missing
  * here never gets a "sem rodar" alert (e.g. `sms_campaign_dispatch`, which
- * only writes a row when it claims a campaign).
+ * only writes a row when it claims a campaign). `billing-cycle` and
+ * `billing-reconcile` are left out on purpose: `checkBillingHealth` already
+ * reports their staleness (billing alerts), so listing them here would
+ * duplicate the alert.
  */
 export const JOB_EXPECTED_PERIOD_S: Record<string, number> = {
-  "billing-cycle": 3600,
-  "billing-reconcile": 300,
   dashboard_metrics_refresh: 300,
   email_tick: 60,
   journey_dispatch: 60,
@@ -107,6 +111,8 @@ export const ALERT_THRESHOLDS = {
   webhookWarningEventsPerDay: 20,
   webhookErrorRate: 0.05,
   webhookErrorRateMinEventsPerDay: 50,
+  /** A house with movement in the table and no webhook for this many days is critical. */
+  webhookDeadAfterDays: 7,
   queueCriticalAgeS: 1800,
   queueWarningAgeS: 600,
   queueErrorShare: 0.2,
@@ -121,6 +127,14 @@ export const ALERT_THRESHOLDS = {
 
 function jobLabel(job: string): string {
   return JOB_LABELS[job] ?? job;
+}
+
+/** "~N min" up to 60 min, else "~1,2 h" (one decimal, pt-BR). */
+function formatCadence(avgIntervalHours: number): string {
+  const minutes = Math.ceil(avgIntervalHours * 60);
+  if (minutes <= 60) return `~${minutes} min`;
+  const hours = Math.round(avgIntervalHours * 10) / 10;
+  return `~${hours.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} h`;
 }
 
 function formatDurationFromSeconds(seconds: number): string {
@@ -199,10 +213,32 @@ export function jobAlerts(rows: JobHealthRow[], now: Date): PlatformAlert[] {
 export function webhookAlerts(stats: WebhookStats[], now: Date): PlatformAlert[] {
   const alerts: PlatformAlert[] = [];
   for (const stat of stats) {
+    const silenceHours = stat.lastEventAt
+      ? (now.getTime() - new Date(stat.lastEventAt).getTime()) / 3_600_000
+      : Infinity;
+
+    // A house that stopped sending for good drops out of the 7-day rate
+    // sample (rate 0), so the cadence rule below can't see it any more.
+    // `lastEventAt` null (never had a webhook) is left out on purpose: a
+    // house fed by another integration would be a permanent false alarm.
+    if (
+      stat.hasMovement &&
+      stat.lastEventAt !== null &&
+      silenceHours > ALERT_THRESHOLDS.webhookDeadAfterDays * 24
+    ) {
+      alerts.push({
+        key: `webhook:${stat.tenantId}:silence`,
+        kind: "webhook",
+        severity: "critical",
+        message: `${stat.name} sem webhook há mais de ${ALERT_THRESHOLDS.webhookDeadAfterDays} dias`,
+        tenantId: stat.tenantId,
+        since: stat.lastEventAt,
+        href: "/webhooks",
+      });
+      continue;
+    }
+
     if (stat.eventsPerDay >= ALERT_THRESHOLDS.webhookWarningEventsPerDay) {
-      const silenceHours = stat.lastEventAt
-        ? (now.getTime() - new Date(stat.lastEventAt).getTime()) / 3_600_000
-        : Infinity;
       const avgIntervalHours = 24 / stat.eventsPerDay;
       const thresholdHours = Math.max(
         ALERT_THRESHOLDS.webhookSilenceMinHours,
@@ -213,12 +249,11 @@ export function webhookAlerts(stats: WebhookStats[], now: Date): PlatformAlert[]
           stat.eventsPerDay >= ALERT_THRESHOLDS.webhookCriticalEventsPerDay
             ? "critical"
             : "warning";
-        const normalMinutes = Math.ceil((avgIntervalHours * 60) / 1);
         alerts.push({
           key: `webhook:${stat.tenantId}:silence`,
           kind: "webhook",
           severity,
-          message: `${stat.name} sem webhook há ${formatDurationFromSeconds(silenceHours * 3600)} (normal: a cada ~${normalMinutes} min)`,
+          message: `${stat.name} sem webhook há ${formatDurationFromSeconds(silenceHours * 3600)} (normal: a cada ${formatCadence(avgIntervalHours)})`,
           tenantId: stat.tenantId,
           since: stat.lastEventAt,
           href: "/webhooks",
@@ -244,35 +279,41 @@ export function webhookAlerts(stats: WebhookStats[], now: Date): PlatformAlert[]
   return alerts;
 }
 
-export function queueAlerts(rows: QueueMetricRow[], names: Map<string, string>): PlatformAlert[] {
+/**
+ * Per house × channel queue alerts. `names` is the loader's house set
+ * (non-demo, non-canceled): a row for any other tenant is skipped, so a demo
+ * house never alerts and a raw uuid is never printed. `paused` (paused /
+ * priority-paused enrollments) does not gate anything: it says nothing about
+ * the house's balance — zero balance has its own alert (`zeroBalanceAlerts`).
+ */
+export function queueAlerts(
+  rows: QueueMetricRow[],
+  names: Map<string, string>,
+  now: Date,
+): PlatformAlert[] {
   const alerts: PlatformAlert[] = [];
   for (const row of rows) {
-    if (row.paused > 0) continue;
-
-    const houseName = names.get(row.tenant_id) ?? row.tenant_id;
+    const houseName = names.get(row.tenant_id);
+    if (houseName === undefined) continue;
     const key = `queue:${row.tenant_id}:${row.channel}`;
+    const channel = channelLabel(row.channel);
 
     if (row.oldest_ready_age_seconds !== null && row.ready > 0) {
-      if (row.oldest_ready_age_seconds > ALERT_THRESHOLDS.queueCriticalAgeS) {
+      const ageS = row.oldest_ready_age_seconds;
+      const severity: AlertSeverity | null =
+        ageS > ALERT_THRESHOLDS.queueCriticalAgeS
+          ? "critical"
+          : ageS > ALERT_THRESHOLDS.queueWarningAgeS
+            ? "warning"
+            : null;
+      if (severity) {
         alerts.push({
           key,
           kind: "queue",
-          severity: "critical",
-          message: `${houseName}: fila de ${row.channel} com item parado há ${formatDurationFromSeconds(row.oldest_ready_age_seconds)}`,
+          severity,
+          message: `${houseName}: fila de ${channel} com item parado há ${formatDurationFromSeconds(ageS)}`,
           tenantId: row.tenant_id,
-          since: null,
-          href: "/admin#canais",
-        });
-        continue;
-      }
-      if (row.oldest_ready_age_seconds > ALERT_THRESHOLDS.queueWarningAgeS) {
-        alerts.push({
-          key,
-          kind: "queue",
-          severity: "warning",
-          message: `${houseName}: fila de ${row.channel} com item parado há ${formatDurationFromSeconds(row.oldest_ready_age_seconds)}`,
-          tenantId: row.tenant_id,
-          since: null,
+          since: new Date(now.getTime() - ageS * 1000).toISOString(),
           href: "/admin#canais",
         });
         continue;
@@ -287,7 +328,7 @@ export function queueAlerts(rows: QueueMetricRow[], names: Map<string, string>):
           key,
           kind: "queue",
           severity: "warning",
-          message: `${houseName}: fila de ${row.channel} com ${Math.round(errorShare * 100)}% de erro nos últimos 15 min`,
+          message: `${houseName}: fila de ${channel} com ${Math.round(errorShare * 100)}% de erro nos últimos 15 min`,
           tenantId: row.tenant_id,
           since: null,
           href: "/admin#canais",
@@ -298,20 +339,29 @@ export function queueAlerts(rows: QueueMetricRow[], names: Map<string, string>):
   return alerts;
 }
 
-function providerLabel(channel: string): string {
-  return channel === "sms" ? "Short Brasil" : "Infobip";
-}
-
-/** Readable channel label for breaker messages, e.g. "Short Brasil sem saldo: envio de SMS suspenso". */
+/** Readable channel label, e.g. "Short Brasil sem saldo: envio de SMS suspenso". */
 const CHANNEL_LABELS: Record<string, string> = {
   sms: "SMS",
   email: "e-mail",
   voice: "voz",
   call: "voz",
+  wait: "jornada (espera)",
 };
 
 function channelLabel(channel: string): string {
   return CHANNEL_LABELS[channel] ?? channel;
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  sms: "Short Brasil",
+  email: "Infobip",
+  voice: "Infobip",
+  call: "Infobip",
+};
+
+/** Provider behind a channel; an unknown channel is named by its channel label. */
+function providerLabel(channel: string): string {
+  return PROVIDER_LABELS[channel] ?? channelLabel(channel);
 }
 
 export function providerAlerts(
@@ -356,7 +406,7 @@ export function providerAlerts(
         key: `provider:rate:${rateState.channel}`,
         kind: "provider",
         severity: "warning",
-        message: `${provider}: erro no envio de ${rateState.channel} (${rateState.last_provider_error}), em espera (backoff)`,
+        message: `${provider}: erro no envio de ${channelLabel(rateState.channel)} (${rateState.last_provider_error}), em espera (backoff)`,
         tenantId: null,
         since: null,
         href: "/admin#canais",
@@ -394,29 +444,41 @@ export function runwayAlerts(rows: RunwayRow[]): PlatformAlert[] {
   for (const row of rows) {
     const hours = Number(row.runway_hours);
     if (!Number.isFinite(hours)) continue;
-    if (hours < ALERT_THRESHOLDS.runwayUrgentHours) {
-      alerts.push({
-        key: `runway:${row.tenant_id}`,
-        kind: "runway",
-        severity: "critical",
-        message: `${row.tenant_name}: saldo dura menos de ${Math.round(hours)} h no ritmo atual de consumo`,
-        tenantId: row.tenant_id,
-        since: null,
-        href: "/admin#saldo",
-      });
-    } else if (hours < ALERT_THRESHOLDS.runwayAlertHours) {
-      alerts.push({
-        key: `runway:${row.tenant_id}`,
-        kind: "runway",
-        severity: "warning",
-        message: `${row.tenant_name}: saldo dura menos de ${Math.round(hours)} h no ritmo atual de consumo`,
-        tenantId: row.tenant_id,
-        since: null,
-        href: "/admin#saldo",
-      });
-    }
+    const severity: AlertSeverity | null =
+      hours < ALERT_THRESHOLDS.runwayUrgentHours
+        ? "critical"
+        : hours < ALERT_THRESHOLDS.runwayAlertHours
+          ? "warning"
+          : null;
+    if (!severity) continue;
+    // "menos de N h" must stay true: round up, never "menos de 0 h".
+    const shownHours = Math.max(1, Math.ceil(hours));
+    alerts.push({
+      key: `runway:${row.tenant_id}`,
+      kind: "runway",
+      severity,
+      message: `${row.tenant_name}: saldo dura menos de ${shownHours} h no ritmo atual de consumo`,
+      tenantId: row.tenant_id,
+      since: null,
+      href: "/admin#saldo",
+    });
   }
   return alerts;
+}
+
+/** Non-exempt houses whose wallet balance is ≤ 0: SMS/voice sends are stopped. */
+export function zeroBalanceAlerts(
+  houses: Array<{ tenantId: string; name: string }>,
+): PlatformAlert[] {
+  return houses.map((house) => ({
+    key: `runway:${house.tenantId}:zero`,
+    kind: "runway",
+    severity: "critical",
+    message: `${house.name}: saldo zerado — envios parados`,
+    tenantId: house.tenantId,
+    since: null,
+    href: "/admin#saldo",
+  }));
 }
 
 export function billingAlerts(report: BillingHealthReport): PlatformAlert[] {
@@ -431,6 +493,21 @@ export function billingAlerts(report: BillingHealthReport): PlatformAlert[] {
   }));
 }
 
+/**
+ * Where a failed source is fixed. Sources with no useful screen (tenants,
+ * finance, activity, webhooks) are absent: their alert row is not clickable.
+ */
+const SOURCE_HREFS: Record<string, string> = {
+  observability_job_health: "/admin#canais",
+  observability_queue_metrics: "/admin#canais",
+  provider_circuit_breakers: "/admin#canais",
+  dispatch_rate_state: "/admin#canais",
+  shortio_sync_runs: "/admin#canais",
+  billing_health: "/admin#faturamento",
+  billing_runway_alert_candidates: "/admin#saldo",
+  tenant_wallets: "/admin#saldo",
+};
+
 export function sourceFailureAlert(source: string): PlatformAlert {
   return {
     key: `source:${source}`,
@@ -439,7 +516,7 @@ export function sourceFailureAlert(source: string): PlatformAlert {
     message: `Não foi possível verificar ${source}`,
     tenantId: null,
     since: null,
-    href: "/admin",
+    href: SOURCE_HREFS[source] ?? null,
   };
 }
 

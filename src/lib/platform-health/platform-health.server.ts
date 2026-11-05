@@ -9,17 +9,20 @@
 //
 // Every source is read through `fromSource`: on error or timeout it logs,
 // adds a `sourceFailureAlert(name)` to the result and falls back to an empty
-// value, so one bad source never breaks the whole panel.
+// value, so one bad source never breaks the whole panel. A fallback that
+// would read as real data is flagged instead: `housesUnavailable` (no house
+// table when `finance_days`/`tenants` failed) and `recoveryUnavailable`
+// (recovery unknown when `finance_activity_days` failed).
+//
+// Every per-house source is limited to the loader's house set (non-demo,
+// non-canceled) before the rules run.
 
 import { DEFAULT_CURRENCY } from "@/lib/currency";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { assertSuperAdmin, checkBillingHealth } from "@/lib/billing/billing-health.server";
+import { presetRange } from "@/lib/finance/calc";
 import type { ActivityDayRow, FinanceDayRow } from "@/lib/finance/finance-data.server";
-import {
-  fetchActivityDays,
-  fetchFinanceDays,
-  todaySaoPaulo,
-} from "@/lib/finance/finance-data.server";
+import { fetchActivityDays, fetchFinanceDays } from "@/lib/finance/finance-data.server";
 
 import {
   billingAlerts,
@@ -30,6 +33,7 @@ import {
   sortAlerts,
   sourceFailureAlert,
   webhookAlerts,
+  zeroBalanceAlerts,
   type BreakerRow,
   type JobHealthRow,
   type PlatformAlert,
@@ -60,6 +64,10 @@ export type PlatformHealth = {
   alerts: PlatformAlert[];
   houses: HouseHealthRow[];
   quietHouses: Array<{ tenantId: string; name: string }>;
+  /** `finance_days` (or `tenants`) failed: `houses`/`quietHouses` are empty, not "sem movimento". */
+  housesUnavailable: boolean;
+  /** `finance_activity_days` failed: recovery is unknown (deltas null, cells "—"). */
+  recoveryUnavailable: boolean;
 };
 
 type HouseTenantRow = {
@@ -72,13 +80,20 @@ type HouseTenantRow = {
 
 const CACHE_MS = 60_000;
 let cache: { at: number; value: PlatformHealth } | null = null;
+/** Cold load in progress: concurrent non-fresh callers share it (one fan-out). */
+let inflight: Promise<PlatformHealth> | null = null;
 
 /** Test hook: forget the cached result so the next call fetches fresh. */
 export function __resetPlatformHealthCacheForTests(): void {
   cache = null;
+  inflight = null;
 }
 
 const DEFAULT_TIMEOUT_MS = 8000;
+
+const WEBHOOK_SAMPLE_DAYS = 7;
+const WEBHOOK_SAMPLE_LIMIT = 200;
+const WEBHOOK_STATS_CONCURRENCY = 4;
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -90,21 +105,26 @@ function errorText(error: unknown): string {
 
 /**
  * The last ≤200 `webhook_logs.created_at` of the past 7 days (newest first)
- * estimate a house's daily event rate: `n / 7` while under the 200-row
- * sample, else `200 / (newest − oldest in days)` (a 7-day exact count is too
- * slow for the biggest houses — see Step 0 of the brief).
+ * estimate a house's daily event rate. Under the 200-row sample: `n` over the
+ * days from the start of the 7-day window up to the last event (floored at
+ * 1 h), so a house that went silent keeps its pre-silence rate instead of
+ * diluting it with the silence. A full sample: `200 / (newest − oldest in
+ * days)` (a 7-day exact count is too slow for the biggest houses).
  */
 export function estimateEventsPerDay(createdAtDesc: string[], now: Date): number {
-  void now;
   const n = createdAtDesc.length;
   if (n === 0) return 0;
-  if (n < 200) return n / 7;
   const newest = new Date(createdAtDesc[0]).getTime();
+  if (n < WEBHOOK_SAMPLE_LIMIT) {
+    const windowStart = now.getTime() - WEBHOOK_SAMPLE_DAYS * 86_400_000;
+    const activeDays = Math.max((newest - windowStart) / 86_400_000, 1 / 24);
+    return n / activeDays;
+  }
   const oldest = new Date(createdAtDesc[n - 1]).getTime();
   // Guard against a zero (or negative, out-of-order) span: floor it to one
   // minute so the estimate stays a large-but-finite number instead of Infinity.
   const spanDays = Math.max((newest - oldest) / 86_400_000, 1 / 1440);
-  return 200 / spanDays;
+  return WEBHOOK_SAMPLE_LIMIT / spanDays;
 }
 
 async function runLimited<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>) {
@@ -169,47 +189,96 @@ async function fetchRunwayCandidates(): Promise<RunwayRow[]> {
   return (data ?? []) as RunwayRow[];
 }
 
-const WEBHOOK_SAMPLE_DAYS = 7;
-const WEBHOOK_SAMPLE_LIMIT = 200;
-const WEBHOOK_STATS_CONCURRENCY = 4;
+/**
+ * Houses (of the given set) whose wallet balance is ≤ 0 and that are not
+ * exempt (`billing_tenant_exempt`, the same check the no-balance e-mail
+ * uses; called only for the few zero-balance houses).
+ */
+async function fetchZeroBalanceHouses(
+  houses: HouseTenantRow[],
+): Promise<Array<{ tenantId: string; name: string }>> {
+  if (houses.length === 0) return [];
+  const names = new Map(houses.map((house) => [house.id, house.nome]));
+  const { data, error } = await db()
+    .from("tenant_wallets")
+    .select("tenant_id,balance")
+    .in("tenant_id", [...names.keys()])
+    .lte("balance", 0);
+  if (error) throw new Error(errorText(error));
+  const zeroIds = ((data ?? []) as Array<{ tenant_id: string; balance: number | string }>)
+    .filter((row) => names.has(row.tenant_id) && Number(row.balance) <= 0)
+    .map((row) => row.tenant_id);
+  const exempt = await Promise.all(
+    zeroIds.map(async (tenantId) => {
+      const res = await db().rpc("billing_tenant_exempt", { _tenant: tenantId });
+      if (res.error) throw new Error(errorText(res.error));
+      return res.data === true;
+    }),
+  );
+  return zeroIds
+    .filter((_, i) => !exempt[i])
+    .map((tenantId) => ({ tenantId, name: names.get(tenantId) as string }));
+}
+
+type HouseWebhookStats = Omit<WebhookStats, "hasMovement">;
 
 /**
  * Per house: the last ≤200 `webhook_logs` of the past 7 days (index-only
- * scan) and the 24 h `status = 'erro'` count (exact head count, served by
+ * scan), the latest event with no date bound (limit 1, index-only — so a
+ * house silent for more than 7 days still has a `lastEventAt`) and the 24 h
+ * `status = 'erro'` count (exact head count, served by
  * `webhook_logs_tenant_status_created_idx`) — see `estimateEventsPerDay`.
+ * A house whose reads fail is reported through `onHouseFailure` and left
+ * out; the other houses keep their stats.
  */
-async function fetchWebhookStats(houses: HouseTenantRow[], now: Date): Promise<WebhookStats[]> {
+async function fetchWebhookStats(
+  houses: HouseTenantRow[],
+  now: Date,
+  onHouseFailure: (house: HouseTenantRow, error: unknown) => void,
+): Promise<HouseWebhookStats[]> {
   const sevenDaysAgo = new Date(now.getTime() - WEBHOOK_SAMPLE_DAYS * 86_400_000).toISOString();
   const since24h = new Date(now.getTime() - 24 * 60 * 60_000).toISOString();
-  const stats: WebhookStats[] = [];
+  const stats: HouseWebhookStats[] = [];
   await runLimited(houses, WEBHOOK_STATS_CONCURRENCY, async (house) => {
-    const [events, errors] = await Promise.all([
-      db()
-        .from("webhook_logs")
-        .select("created_at")
-        .eq("tenant_id", house.id)
-        .gte("created_at", sevenDaysAgo)
-        .order("created_at", { ascending: false })
-        .limit(WEBHOOK_SAMPLE_LIMIT),
-      db()
-        .from("webhook_logs")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", house.id)
-        .eq("status", "erro")
-        .gte("created_at", since24h),
-    ]);
-    if (events.error) throw new Error(errorText(events.error));
-    if (errors.error) throw new Error(errorText(errors.error));
-    const createdAtDesc = ((events.data ?? []) as Array<{ created_at: string }>).map(
-      (r) => r.created_at,
-    );
-    stats.push({
-      tenantId: house.id,
-      name: house.nome,
-      lastEventAt: createdAtDesc[0] ?? null,
-      eventsPerDay: estimateEventsPerDay(createdAtDesc, now),
-      errors24h: errors.count ?? 0,
-    });
+    try {
+      const [events, latest, errors] = await Promise.all([
+        db()
+          .from("webhook_logs")
+          .select("created_at")
+          .eq("tenant_id", house.id)
+          .gte("created_at", sevenDaysAgo)
+          .order("created_at", { ascending: false })
+          .limit(WEBHOOK_SAMPLE_LIMIT),
+        db()
+          .from("webhook_logs")
+          .select("created_at")
+          .eq("tenant_id", house.id)
+          .order("created_at", { ascending: false })
+          .limit(1),
+        db()
+          .from("webhook_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", house.id)
+          .eq("status", "erro")
+          .gte("created_at", since24h),
+      ]);
+      if (events.error) throw new Error(errorText(events.error));
+      if (latest.error) throw new Error(errorText(latest.error));
+      if (errors.error) throw new Error(errorText(errors.error));
+      const createdAtDesc = ((events.data ?? []) as Array<{ created_at: string }>).map(
+        (r) => r.created_at,
+      );
+      const latestRow = ((latest.data ?? []) as Array<{ created_at: string }>)[0];
+      stats.push({
+        tenantId: house.id,
+        name: house.nome,
+        lastEventAt: latestRow?.created_at ?? createdAtDesc[0] ?? null,
+        eventsPerDay: estimateEventsPerDay(createdAtDesc, now),
+        errors24h: errors.count ?? 0,
+      });
+    } catch (error) {
+      onHouseFailure(house, error);
+    }
   });
   return stats;
 }
@@ -250,10 +319,11 @@ function buildHouseDays(financeRows: FinanceDayRow[], activityRows: ActivityDayR
 
 /**
  * Full "Saúde" panel for the super admin: per-house health rows and sorted
- * platform alerts. `opts.now` drives every time-sensitive comparison
- * (job/queue/provider/billing alerts); the 60 s result cache always uses the
- * real wall clock so tests calling twice in the same tick observe it.
- * `opts.fresh` bypasses the cache.
+ * platform alerts. `opts.now` drives every time-sensitive comparison (the
+ * São Paulo day of the windows, job/queue/provider/webhook/billing alerts);
+ * the 60 s result cache always uses the real wall clock so tests calling
+ * twice in the same tick observe it. `opts.fresh` bypasses the cache.
+ * Concurrent cold (non-fresh) calls share one in-flight load.
  */
 export async function adminPlatformHealthFor(
   ctx: { userId: string },
@@ -261,14 +331,31 @@ export async function adminPlatformHealthFor(
 ): Promise<PlatformHealth> {
   await assertSuperAdmin(ctx.userId);
 
-  const nowMs = Date.now();
-  if (cache && !opts.fresh && nowMs - cache.at < CACHE_MS) {
-    return cache.value;
+  if (!opts.fresh) {
+    if (cache && Date.now() - cache.at < CACHE_MS) return cache.value;
+    if (inflight) return inflight;
   }
 
-  const now = opts.now ?? new Date();
-  const windows = healthWindows(todaySaoPaulo());
+  const load = loadPlatformHealth(opts.now ?? new Date());
+  if (opts.fresh) return load;
+  inflight = load;
+  try {
+    return await load;
+  } finally {
+    if (inflight === load) inflight = null;
+  }
+}
+
+async function loadPlatformHealth(now: Date): Promise<PlatformHealth> {
+  const windows = healthWindows(presetRange("today", now).from);
   const alerts: PlatformAlert[] = [];
+  const failed = new Set<string>();
+
+  function reportFailure(name: string, error: unknown) {
+    console.error(`[platform-health] source failed: ${name}`, { error: errorText(error) });
+    failed.add(name);
+    alerts.push(sourceFailureAlert(name));
+  }
 
   async function fromSource<T>(
     name: string,
@@ -283,8 +370,7 @@ export async function adminPlatformHealthFor(
       });
       return await Promise.race([promise, timeout]);
     } catch (error) {
-      console.error(`[platform-health] source failed: ${name}`, { error: errorText(error) });
-      alerts.push(sourceFailureAlert(name));
+      reportFailure(name, error);
       return fallback;
     } finally {
       if (timer) clearTimeout(timer);
@@ -293,6 +379,8 @@ export async function adminPlatformHealthFor(
 
   const houseTenants = await fromSource<HouseTenantRow[]>("tenants", fetchHouseTenants(), []);
   const tenantIds = houseTenants.map((house) => house.id);
+  const houseIds = new Set(tenantIds);
+  const houseNames = new Map(houseTenants.map((house) => [house.id, house.nome]));
   const range = { from: windows.base.from, to: windows.current.to };
 
   const [
@@ -306,6 +394,7 @@ export async function adminPlatformHealthFor(
     runwayRows,
     billingReport,
     webhookStats,
+    zeroBalanceHouses,
   ] = await Promise.all([
     fromSource<FinanceDayRow[]>("finance_days", fetchFinanceDays(tenantIds, range), []),
     fromSource<ActivityDayRow[]>("finance_activity_days", fetchActivityDays(tenantIds, range), []),
@@ -329,30 +418,46 @@ export async function adminPlatformHealthFor(
       windowHours: 24,
       findings: [],
     }),
-    fromSource<WebhookStats[]>("webhook_logs", fetchWebhookStats(houseTenants, now), []),
+    fromSource<HouseWebhookStats[]>(
+      "webhook_logs",
+      fetchWebhookStats(houseTenants, now, (house, error) =>
+        reportFailure(`webhook_logs:${house.nome}`, error),
+      ),
+      [],
+    ),
+    fromSource("tenant_wallets", fetchZeroBalanceHouses(houseTenants), []),
   ]);
 
-  const financeByTenant = groupByTenant(financeRows);
-  const activityByTenant = groupByTenant(activityRows);
+  const housesUnavailable = failed.has("tenants") || failed.has("finance_days");
+  const recoveryUnavailable = failed.has("finance_activity_days");
 
   const houseRows: HouseHealthRow[] = [];
   const quietHouses: Array<{ tenantId: string; name: string }> = [];
-  for (const house of houseTenants) {
-    const input: HouseHealthInput = {
-      tenantId: house.id,
-      name: house.nome,
-      moeda: house.moeda ?? DEFAULT_CURRENCY,
-      days: buildHouseDays(
-        financeByTenant.get(house.id) ?? [],
-        activityByTenant.get(house.id) ?? [],
-      ),
-    };
-    const row = summarizeHouse(input, windows);
-    if (row === null) quietHouses.push({ tenantId: house.id, name: house.nome });
-    else houseRows.push(row);
+  if (!housesUnavailable) {
+    const financeByTenant = groupByTenant(financeRows);
+    const activityByTenant = groupByTenant(activityRows);
+    for (const house of houseTenants) {
+      const input: HouseHealthInput = {
+        tenantId: house.id,
+        name: house.nome,
+        moeda: house.moeda ?? DEFAULT_CURRENCY,
+        days: buildHouseDays(
+          financeByTenant.get(house.id) ?? [],
+          activityByTenant.get(house.id) ?? [],
+        ),
+      };
+      const row = summarizeHouse(input, windows, { recoveryUnavailable });
+      if (row === null) quietHouses.push({ tenantId: house.id, name: house.nome });
+      else houseRows.push(row);
+    }
   }
 
-  const houseNames = new Map(houseTenants.map((house) => [house.id, house.nome]));
+  // "Movement in the table" = cadastros in the current or base window.
+  const housesWithMovement = new Set(
+    houseRows
+      .filter((row) => row.current.registrations > 0 || row.base.registrations > 0)
+      .map((row) => row.tenantId),
+  );
 
   const result: PlatformHealth = {
     checkedAt: now.toISOString(),
@@ -360,14 +465,26 @@ export async function adminPlatformHealthFor(
     alerts: sortAlerts([
       ...alerts,
       ...jobAlerts(jobRows, now),
-      ...webhookAlerts(webhookStats, now),
-      ...queueAlerts(queueRows, houseNames),
+      ...webhookAlerts(
+        webhookStats
+          .filter((stat) => houseIds.has(stat.tenantId))
+          .map((stat) => ({ ...stat, hasMovement: housesWithMovement.has(stat.tenantId) })),
+        now,
+      ),
+      ...queueAlerts(
+        queueRows.filter((row) => houseIds.has(row.tenant_id)),
+        houseNames,
+        now,
+      ),
       ...providerAlerts({ breakers: breakerRows, rateStates: rateRows, shortioRuns }, now),
-      ...runwayAlerts(runwayRows),
+      ...runwayAlerts(runwayRows.filter((row) => houseIds.has(row.tenant_id))),
+      ...zeroBalanceAlerts(zeroBalanceHouses),
       ...billingAlerts(billingReport),
     ]),
     houses: sortHouses(houseRows),
     quietHouses,
+    housesUnavailable,
+    recoveryUnavailable,
   };
 
   cache = { at: Date.now(), value: result };

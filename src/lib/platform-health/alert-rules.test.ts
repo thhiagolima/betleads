@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BillingHealthReport } from "@/lib/billing/billing-health.server";
 import {
+  JOB_EXPECTED_PERIOD_S,
   type BreakerRow,
   type JobHealthRow,
   type PlatformAlert,
@@ -17,6 +18,7 @@ import {
   sortAlerts,
   sourceFailureAlert,
   webhookAlerts,
+  zeroBalanceAlerts,
 } from "./alert-rules";
 
 const NOW = new Date("2026-11-05T12:00:00Z");
@@ -93,6 +95,35 @@ describe("jobAlerts", () => {
     expect(alerts).toHaveLength(0);
   });
 
+  it("all runs of the last hour partial is a warning (allPartial)", () => {
+    const rows = [
+      baseJobRow({ job: "journey_dispatch", runs_last_hour: 12, partial_last_hour: 12 }),
+    ];
+    const alerts = jobAlerts(rows, NOW);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].severity).toBe("warning");
+    expect(alerts[0].message).toBe(
+      "Robô journey_dispatch: todas as execuções da última hora ficaram parciais",
+    );
+  });
+
+  it("some but not all runs partial has no alert", () => {
+    const rows = [
+      baseJobRow({ job: "journey_dispatch", runs_last_hour: 12, partial_last_hour: 11 }),
+    ];
+    expect(jobAlerts(rows, NOW)).toHaveLength(0);
+  });
+
+  it("billing-cycle / billing-reconcile late never alert here (checkBillingHealth covers them)", () => {
+    const rows = [
+      baseJobRow({ job: "billing-cycle", seconds_since_last_start: 99 * 3600 }),
+      baseJobRow({ job: "billing-reconcile", seconds_since_last_start: 99 * 3600 }),
+    ];
+    expect(JOB_EXPECTED_PERIOD_S["billing-cycle"]).toBeUndefined();
+    expect(JOB_EXPECTED_PERIOD_S["billing-reconcile"]).toBeUndefined();
+    expect(jobAlerts(rows, NOW)).toHaveLength(0);
+  });
+
   it("unknown job late never alerts", () => {
     const rows = [
       baseJobRow({
@@ -113,6 +144,7 @@ function baseWebhookStat(overrides: Partial<WebhookStats>): WebhookStats {
     lastEventAt: minutesAgo(5),
     eventsPerDay: 1000,
     errors24h: 0,
+    hasMovement: true,
     ...overrides,
   };
 }
@@ -136,6 +168,40 @@ describe("webhookAlerts", () => {
     const stats = [baseWebhookStat({ eventsPerDay: 10, lastEventAt: hoursAgo(14), errors24h: 0 })];
     const alerts = webhookAlerts(stats, NOW);
     expect(alerts).toHaveLength(0);
+  });
+
+  it("cadence above 60 min reads in hours (20/day -> ~1,2 h)", () => {
+    const stats = [baseWebhookStat({ eventsPerDay: 20, lastEventAt: hoursAgo(8) })];
+    const alerts = webhookAlerts(stats, NOW);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].severity).toBe("warning");
+    expect(alerts[0].message).toBe("ForrandoBet sem webhook há 8 h (normal: a cada ~1,2 h)");
+  });
+
+  it("cadence under 60 min reads in minutes (1000/day -> ~2 min)", () => {
+    const stats = [baseWebhookStat({ lastEventAt: hoursAgo(3) })];
+    expect(webhookAlerts(stats, NOW)[0].message).toBe(
+      "ForrandoBet sem webhook há 3 h (normal: a cada ~2 min)",
+    );
+  });
+
+  it("silent more than 7 days with movement in the table is critical even at rate 0", () => {
+    const stats = [baseWebhookStat({ eventsPerDay: 0, lastEventAt: hoursAgo(8 * 24) })];
+    const alerts = webhookAlerts(stats, NOW);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      key: "webhook:t1:silence",
+      severity: "critical",
+      message: "ForrandoBet sem webhook há mais de 7 dias",
+      since: hoursAgo(8 * 24),
+    });
+  });
+
+  it("silent more than 7 days without movement in the table has no alert", () => {
+    const stats = [
+      baseWebhookStat({ eventsPerDay: 0, lastEventAt: hoursAgo(8 * 24), hasMovement: false }),
+    ];
+    expect(webhookAlerts(stats, NOW)).toHaveLength(0);
   });
 
   it("eventsPerDay 200 with errors24h 20 is a warning on the :errors key", () => {
@@ -165,23 +231,40 @@ function baseQueueRow(overrides: Partial<QueueMetricRow>): QueueMetricRow {
 describe("queueAlerts", () => {
   const names = new Map([["t1", "ForrandoBet"]]);
 
-  it("age 2000s, ready 5, no pause is critical", () => {
+  it("age 2000s, ready 5 is critical, since = now - oldest age, channel label in the message", () => {
     const rows = [baseQueueRow({ oldest_ready_age_seconds: 2000, ready: 5 })];
-    const alerts = queueAlerts(rows, names);
+    const alerts = queueAlerts(rows, names, NOW);
     expect(alerts).toHaveLength(1);
     expect(alerts[0].severity).toBe("critical");
     expect(alerts[0].key).toBe("queue:t1:sms");
+    expect(alerts[0].since).toBe(new Date(NOW.getTime() - 2000 * 1000).toISOString());
+    expect(alerts[0].message).toBe("ForrandoBet: fila de SMS com item parado há 33 min");
   });
 
-  it("paused queue never alerts even if old", () => {
+  it("paused enrollments (paused/priority-paused) do not silence an old ready item", () => {
     const rows = [baseQueueRow({ oldest_ready_age_seconds: 2000, ready: 5, paused: 3 })];
-    const alerts = queueAlerts(rows, names);
-    expect(alerts).toHaveLength(0);
+    const alerts = queueAlerts(rows, names, NOW);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].severity).toBe("critical");
+  });
+
+  it("channel wait reads as 'jornada (espera)'", () => {
+    const rows = [baseQueueRow({ channel: "wait", oldest_ready_age_seconds: 700, ready: 1 })];
+    expect(queueAlerts(rows, names, NOW)[0].message).toBe(
+      "ForrandoBet: fila de jornada (espera) com item parado há 12 min",
+    );
+  });
+
+  it("a row whose house is not in the name map is skipped (never prints a uuid)", () => {
+    const rows = [
+      baseQueueRow({ tenant_id: "unknown-uuid", oldest_ready_age_seconds: 2000, ready: 5 }),
+    ];
+    expect(queueAlerts(rows, names, NOW)).toHaveLength(0);
   });
 
   it("15 min: 30 sent, 10 errors is a warning (25% error share, 40 attempts)", () => {
     const rows = [baseQueueRow({ sent_15m: 30, errors_15m: 10 })];
-    const alerts = queueAlerts(rows, names);
+    const alerts = queueAlerts(rows, names, NOW);
     expect(alerts).toHaveLength(1);
     expect(alerts[0].severity).toBe("warning");
     expect(alerts[0].key).toBe("queue:t1:sms");
@@ -224,6 +307,23 @@ describe("providerAlerts", () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0].severity).toBe("warning");
     expect(alerts[0].key).toBe("provider:rate:email");
+    expect(alerts[0].message).toBe(
+      "Infobip: erro no envio de e-mail (timeout), em espera (backoff)",
+    );
+  });
+
+  it("an unknown channel is named by its channel label, not Infobip", () => {
+    const rateStates: RateStateRow[] = [
+      {
+        channel: "whatsapp",
+        last_provider_error: "500",
+        backoff_until: new Date(NOW.getTime() + 60_000).toISOString(),
+      },
+    ];
+    const alerts = providerAlerts({ breakers: [], rateStates, shortioRuns: [] }, NOW);
+    expect(alerts[0].message).toBe(
+      "whatsapp: erro no envio de whatsapp (500), em espera (backoff)",
+    );
   });
 
   it("6 Short.io runs with 600 claimed / 150 rate_limited (25%) is a warning", () => {
@@ -265,10 +365,37 @@ describe("runwayAlerts", () => {
     expect(alerts[0].severity).toBe("warning");
   });
 
+  it("rounds hours up with a 1 h minimum (0.2 h -> 1 h, 5.1 h -> 6 h)", () => {
+    const rows: RunwayRow[] = [
+      { tenant_id: "t1", tenant_name: "A", runway_hours: 0.2 },
+      { tenant_id: "t2", tenant_name: "B", runway_hours: 5.1 },
+    ];
+    const alerts = runwayAlerts(rows);
+    expect(alerts[0].message).toBe("A: saldo dura menos de 1 h no ritmo atual de consumo");
+    expect(alerts[1].message).toBe("B: saldo dura menos de 6 h no ritmo atual de consumo");
+  });
+
   it("30h has no alert", () => {
     const rows: RunwayRow[] = [{ tenant_id: "t1", tenant_name: "ForrandoBet", runway_hours: 30 }];
     const alerts = runwayAlerts(rows);
     expect(alerts).toHaveLength(0);
+  });
+});
+
+describe("zeroBalanceAlerts", () => {
+  it("each house becomes a critical 'saldo zerado' alert on runway:<id>:zero", () => {
+    const alerts = zeroBalanceAlerts([{ tenantId: "t1", name: "ForrandoBet" }]);
+    expect(alerts).toEqual([
+      {
+        key: "runway:t1:zero",
+        kind: "runway",
+        severity: "critical",
+        message: "ForrandoBet: saldo zerado — envios parados",
+        tenantId: "t1",
+        since: null,
+        href: "/admin#saldo",
+      },
+    ]);
   });
 });
 
@@ -302,11 +429,27 @@ describe("billingAlerts", () => {
 
 describe("sourceFailureAlert", () => {
   it("builds a warning alert naming the source", () => {
-    const alert = sourceFailureAlert("webhook");
+    const alert = sourceFailureAlert("webhook_logs");
     expect(alert.severity).toBe("warning");
     expect(alert.kind).toBe("source");
-    expect(alert.key).toBe("source:webhook");
-    expect(alert.message).toContain("webhook");
+    expect(alert.key).toBe("source:webhook_logs");
+    expect(alert.message).toContain("webhook_logs");
+  });
+
+  it("links each source to the screen that fixes it, or nowhere", () => {
+    expect(sourceFailureAlert("observability_job_health").href).toBe("/admin#canais");
+    expect(sourceFailureAlert("observability_queue_metrics").href).toBe("/admin#canais");
+    expect(sourceFailureAlert("provider_circuit_breakers").href).toBe("/admin#canais");
+    expect(sourceFailureAlert("dispatch_rate_state").href).toBe("/admin#canais");
+    expect(sourceFailureAlert("shortio_sync_runs").href).toBe("/admin#canais");
+    expect(sourceFailureAlert("billing_health").href).toBe("/admin#faturamento");
+    expect(sourceFailureAlert("billing_runway_alert_candidates").href).toBe("/admin#saldo");
+    expect(sourceFailureAlert("tenant_wallets").href).toBe("/admin#saldo");
+    expect(sourceFailureAlert("finance_days").href).toBeNull();
+    expect(sourceFailureAlert("finance_activity_days").href).toBeNull();
+    expect(sourceFailureAlert("webhook_logs").href).toBeNull();
+    expect(sourceFailureAlert("webhook_logs:Casa A").href).toBeNull();
+    expect(sourceFailureAlert("tenants").href).toBeNull();
   });
 });
 
