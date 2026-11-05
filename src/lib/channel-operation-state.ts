@@ -13,7 +13,7 @@ const SETTINGS_DESTINATION: Record<ChannelOperation, string> = {
   sms: "/sms#configuracoes",
   email: "/email#smtp",
   voice: "/ligacoes#configuracoes",
-  webpush: "/web-push#configuracoes",
+  webpush: "/webhooks#webpush",
 };
 
 const HISTORY_DESTINATION: Record<ChannelOperation, string> = {
@@ -205,8 +205,9 @@ export function getChannelOperationState(
         channel === "voice"
           ? "A ligação sai quando o limite de contato permitir."
           : "Revise os limites do canal antes de retomar.",
-      actionLabel: channel === "sms" ? "Ver saldo" : "Ver configurações",
-      actionTo: channel === "sms" ? "/plano-e-creditos" : SETTINGS_DESTINATION[channel],
+      actionLabel: channel === "sms" || channel === "webpush" ? "Ver saldo" : "Ver configurações",
+      actionTo:
+        channel === "sms" || channel === "webpush" ? "/plano-e-creditos" : SETTINGS_DESTINATION[channel],
       tone: "border-warning/30 bg-warning/10 text-warning",
     };
   }

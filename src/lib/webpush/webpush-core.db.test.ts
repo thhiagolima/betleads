@@ -1,5 +1,5 @@
 // Web push (OneSignal) — Task 1: PGlite test for
-// supabase/migrations/20261202100000_webpush_core.sql: core tables, the
+// supabase/migrations/20261210100000_webpush_core.sql: core tables, the
 // claim/batch RPCs, the link_dispatches channel check and the rate limit
 // seed. Uses the full migrated database (every migration in
 // supabase/migrations applied) so the real FKs/checks/triggers are exercised.

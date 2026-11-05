@@ -322,6 +322,35 @@ describe("cancelWebpushCampaign", () => {
       cancelWebpushCampaign(fake.db.client, { tenantId: OTHER_TENANT, id: "c1" }),
     ).rejects.toThrow(/não pode mais ser cancelada/);
   });
+
+  it("recusa cancelar enquanto há um lote 'enviado' (ainda não liquidado): dinheiro reservado ficaria preso", async () => {
+    seedCampaign("pausada");
+    fake.db.rows("webpush_dispatch_batches").push({
+      id: "batch-1",
+      tenant_id: TENANT,
+      campaign_id: "c1",
+      app_id: "app-1",
+      status: "enviado",
+    });
+
+    await expect(
+      cancelWebpushCampaign(fake.db.client, { tenantId: TENANT, id: "c1" }),
+    ).rejects.toThrow(/Há um envio aguardando cobrança/);
+    expect((fake.db.rows("webpush_campaigns")[0] as Record<string, unknown>).status).toBe(
+      "pausada",
+    );
+  });
+
+  it("permite cancelar quando os lotes existentes já estão 'concluido' ou 'falhou' (nenhum 'enviado')", async () => {
+    seedCampaign("pausada");
+    fake.db.rows("webpush_dispatch_batches").push(
+      { id: "batch-1", tenant_id: TENANT, campaign_id: "c1", app_id: "app-1", status: "concluido" },
+      { id: "batch-2", tenant_id: TENANT, campaign_id: "c1", app_id: "app-1", status: "falhou" },
+    );
+
+    const result = await cancelWebpushCampaign(fake.db.client, { tenantId: TENANT, id: "c1" });
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe("resumeWebpushCampaign", () => {

@@ -1,5 +1,5 @@
 // Web push (OneSignal) — Task 11 fix round 1: PGlite test for
-// supabase/migrations/20261202100300_webpush_dispatch_batches.sql — the
+// supabase/migrations/20261210100300_webpush_dispatch_batches.sql — the
 // table's constraints and cascades. Uses the full migrated database (every
 // migration applied) so the real FKs/checks are exercised.
 import type { PGlite } from "@electric-sql/pglite";

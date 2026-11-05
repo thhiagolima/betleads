@@ -6,6 +6,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { publicAppBaseUrl } from "@/lib/click-tracking.server";
 import { buildLoaderScript } from "@/lib/webpush/loader-script";
 
 const JS_HEADERS = {
@@ -23,10 +24,6 @@ const NO_STORE_HEADERS = {
 } as const;
 
 const INACTIVE_SCRIPT = "/* betleads: web push inativo */";
-
-function apiBase(): string {
-  return (process.env.PUBLIC_APP_URL ?? "https://betleads.io").replace(/\/$/, "");
-}
 
 type SettingsRow = {
   tenant_id: string;
@@ -65,7 +62,7 @@ async function buildLoaderResponse(token: string): Promise<Response> {
 
   const script = buildLoaderScript({
     token,
-    apiBase: apiBase(),
+    apiBase: publicAppBaseUrl(),
     apps: apps.map((app) => ({ origin: app.origin, appId: app.onesignal_app_id })),
     prompt: {
       promptText: settings.prompt_text,

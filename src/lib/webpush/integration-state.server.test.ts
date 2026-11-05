@@ -227,6 +227,92 @@ describe("Task 7: web push integration state", () => {
         sendWebpushTest(db.client, { tenantId: TENANT, subscriptionRowId: "nope" }),
       ).rejects.toThrow("Inscrição não encontrada");
     });
+
+    it.each(["desativado", "legado"])(
+      "refuses the test for a '%s' app before calling OneSignal",
+      async (status) => {
+        const app = pushApp({ status });
+        db.rows("push_subscriptions").push({
+          id: "sub-row-1",
+          tenant_id: TENANT,
+          app_id: app.id,
+          subscription_id: "onesignal-sub-1",
+          status: "ativa",
+          player_id: null,
+        });
+
+        await expect(
+          sendWebpushTest(db.client, { tenantId: TENANT, subscriptionRowId: "sub-row-1" }),
+        ).rejects.toThrow("Este domínio não está ativo");
+
+        expect(onesignal.sendOneSignalPush).not.toHaveBeenCalled();
+      },
+    );
+
+    it("never demotes an already-'ativo' app on a successful re-verification test", async () => {
+      const app = pushApp({
+        status: "ativo",
+        api_key_encrypted: await encryptProviderCredentials({ apiKey: "plain-key-123" }),
+      });
+      db.rows("push_subscriptions").push({
+        id: "sub-row-1",
+        tenant_id: TENANT,
+        app_id: app.id,
+        subscription_id: "onesignal-sub-1",
+        status: "ativa",
+        player_id: null,
+      });
+      onesignal.sendOneSignalPush.mockResolvedValue({
+        ok: true,
+        notificationId: "notif-1",
+        invalidSubscriptionIds: [],
+      });
+
+      const result = await sendWebpushTest(db.client, {
+        tenantId: TENANT,
+        subscriptionRowId: "sub-row-1",
+      });
+
+      expect(result.ok).toBe(true);
+      const stored = db.rows("tenant_webpush_apps").find((r) => r.id === app.id)!;
+      expect(stored.status).toBe("ativo");
+      expect(stored.test_sent_at).not.toBeNull();
+    });
+
+    it("treats ok:true with every subscription invalid as a failed test: no test_sent_at, no promotion, Portuguese error", async () => {
+      const app = pushApp({
+        status: "instalando",
+        api_key_encrypted: await encryptProviderCredentials({ apiKey: "plain-key-123" }),
+      });
+      db.rows("push_subscriptions").push({
+        id: "sub-row-1",
+        tenant_id: TENANT,
+        app_id: app.id,
+        subscription_id: "onesignal-sub-1",
+        status: "ativa",
+        player_id: null,
+      });
+      onesignal.sendOneSignalPush.mockResolvedValue({
+        ok: true,
+        notificationId: "notif-1",
+        invalidSubscriptionIds: ["onesignal-sub-1"],
+      });
+
+      const result = await sendWebpushTest(db.client, {
+        tenantId: TENANT,
+        subscriptionRowId: "sub-row-1",
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        temporary: false,
+        status: 200,
+        error: "A inscrição não está mais ativa",
+      });
+      const stored = db.rows("tenant_webpush_apps").find((r) => r.id === app.id)!;
+      expect(stored.test_sent_at).toBeNull();
+      expect(stored.status).toBe("instalando");
+    });
   });
 
   describe("saveWebpushPrompt", () => {

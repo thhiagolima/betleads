@@ -484,13 +484,18 @@ export async function sendWebpushTest(
 
   const { data: appData, error: appErr } = await db
     .from("tenant_webpush_apps")
-    .select("id,origin")
+    .select("id,origin,status")
     .eq("id", subscription.app_id)
     .eq("tenant_id", input.tenantId)
     .maybeSingle();
   if (appErr) throw new Error(appErr.message);
   if (!appData) throw new Error("Inscrição não encontrada");
-  const app = appData as { id: string; origin: string };
+  const app = appData as { id: string; origin: string; status: string };
+  // A deactivated or superseded app has no business sending a test push —
+  // refuse before ever calling OneSignal.
+  if (app.status === "desativado" || app.status === "legado") {
+    throw new Error("Este domínio não está ativo");
+  }
 
   const { appId, apiKey } = await loadAppCredentials(db, app.id);
   const idempotencyKey = await deterministicUuid(`webpush-test:${subscription.id}:${Date.now()}`);
@@ -505,11 +510,21 @@ export async function sendWebpushTest(
     idempotencyKey,
   });
 
+  // OneSignal can answer 200 ok and still refuse every id it was given
+  // (errors.invalid_player_ids covering the one subscription we sent, or the
+  // "All included players are not subscribed" array form) — that is not a
+  // successful test: no test_sent_at, no promotion, and a message that tells
+  // the house its subscription has gone stale rather than claiming success.
+  if (result.ok && result.invalidSubscriptionIds.length > 0) {
+    return { ok: false, temporary: false, status: 200, error: "A inscrição não está mais ativa" };
+  }
+
   if (result.ok) {
-    const { error: updateErr } = await db
-      .from("tenant_webpush_apps")
-      .update({ test_sent_at: new Date().toISOString(), status: "ativo" })
-      .eq("id", app.id);
+    // Promote only an app still being set up (`instalando`); an already-`ativo`
+    // app keeps its status untouched — this is a re-verification, not a re-activation.
+    const patch: Record<string, unknown> = { test_sent_at: new Date().toISOString() };
+    if (app.status === "instalando") patch.status = "ativo";
+    const { error: updateErr } = await db.from("tenant_webpush_apps").update(patch).eq("id", app.id);
     if (updateErr) throw new Error(updateErr.message);
   }
 

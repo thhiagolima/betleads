@@ -9,7 +9,7 @@
 //      SAME key returns the old reservation as `idempotent: true` and
 //      charges nothing new. A design that refunds and then re-reserves with
 //      the same key on retry (the bug this migration's sibling,
-//      20261202100300_webpush_dispatch_batches.sql, fixes) sends the retried
+//      20261210100300_webpush_dispatch_batches.sql, fixes) sends the retried
 //      batch for free.
 //   2. wallet_refund refunds only the NEWEST usage_reservation row for a
 //      given reference_id (`order by created_at desc limit 1`) — a second,

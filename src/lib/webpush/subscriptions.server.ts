@@ -45,6 +45,18 @@ type ExistingSubscriptionRow = {
 
 const INSTALLABLE_STATUSES = new Set(["instalando", "ativo"]);
 
+// OneSignal subscription ids are UUIDs. The public loader runs on pages we don't
+// control; a tampered or buggy caller can send junk (empty string, "undefined",
+// a number stringified, garbage over 64 chars) that must never reach a write.
+const SUBSCRIPTION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_SUBSCRIPTION_ID_LENGTH = 64;
+const MAX_USER_AGENT_LENGTH = 512;
+
+function isValidSubscriptionId(value: string): boolean {
+  return value.length <= MAX_SUBSCRIPTION_ID_LENGTH && SUBSCRIPTION_ID_PATTERN.test(value);
+}
+
 /**
  * Validates the token → tenant, the origin → app (must be `instalando` or
  * `ativo`), records `script_seen_at` on first contact, and — when a
@@ -92,9 +104,11 @@ export async function recordSubscription(
   }
 
   if (!input.subscriptionId) return { status: 200, clickKey: null };
+  if (!isValidSubscriptionId(input.subscriptionId)) return { status: 400 };
 
   const linkedPlayerId = await resolvePlayerId(db, tenantId, input.playerId);
   const status = input.optedIn ? "ativa" : "inativa";
+  const userAgent = input.userAgent ? input.userAgent.slice(0, MAX_USER_AGENT_LENGTH) : input.userAgent;
 
   const { data: existingData, error: existingErr } = await db
     .from("push_subscriptions")
@@ -108,14 +122,14 @@ export async function recordSubscription(
     ? await updateExistingSubscription(
         db,
         existingData as ExistingSubscriptionRow,
-        { status, userAgent: input.userAgent, nowIso, linkedPlayerId },
+        { status, userAgent, nowIso, linkedPlayerId },
       )
     : await insertOrRelinkSubscription(db, {
         tenantId,
         appId: app.id,
         subscriptionId: input.subscriptionId,
         status,
-        userAgent: input.userAgent,
+        userAgent,
         nowIso,
         linkedPlayerId,
       });

@@ -11,7 +11,7 @@ const TOKEN = "tok-1";
 
 function seed() {
   // Mirrors the real `UNIQUE (app_id, subscription_id)` constraint on
-  // push_subscriptions (20261202100000_webpush_core.sql) so the conflict
+  // push_subscriptions (20261210100000_webpush_core.sql) so the conflict
   // path can be exercised deterministically below.
   const db = createFakeDb({ unique: { push_subscriptions: [["app_id", "subscription_id"]] } });
   db.rows("tenant_webpush_settings").push({
@@ -47,7 +47,7 @@ function baseInput(overrides: Partial<Parameters<typeof recordSubscription>[1]> 
   return {
     token: TOKEN,
     origin: "https://casa.example",
-    subscriptionId: "sub-1",
+    subscriptionId: "aaaaaaaa-0000-4000-8000-000000000001",
     optedIn: true,
     playerId: null,
     userAgent: "ua-1",
@@ -138,6 +138,7 @@ describe("recordSubscription", () => {
 
   it("falls back to updating the row when a concurrent report wins the insert race (23505)", async () => {
     const db = seed();
+    const RACE_SUBSCRIPTION_ID = "aaaaaaaa-0000-4000-8000-0000000000ff";
     let selectCalls = 0;
     const realFrom = db.client.from;
     const wrappedDb = {
@@ -157,7 +158,7 @@ describe("recordSubscription", () => {
               id: "race-row",
               tenant_id: TENANT,
               app_id: "app-ativo",
-              subscription_id: "sub-race",
+              subscription_id: RACE_SUBSCRIPTION_ID,
               click_key: "race-click-key",
               status: "ativa",
               user_agent: "other-ua",
@@ -176,13 +177,15 @@ describe("recordSubscription", () => {
 
     const result = await recordSubscription(
       wrappedDb as any,
-      baseInput({ subscriptionId: "sub-race" }),
+      baseInput({ subscriptionId: RACE_SUBSCRIPTION_ID }),
     );
 
     expect(result.status).toBe(200);
     if (result.status === 200) expect(result.clickKey).toBe("race-click-key");
 
-    const subs = db.rows("push_subscriptions").filter((r) => r.subscription_id === "sub-race");
+    const subs = db
+      .rows("push_subscriptions")
+      .filter((r) => r.subscription_id === RACE_SUBSCRIPTION_ID);
     expect(subs).toHaveLength(1); // no duplicate row from the losing insert
     expect(subs[0].first_seen_at).toBe("2020-01-01T00:00:00.000Z"); // preserved
     expect(subs[0].last_seen_at).not.toBe("2020-01-01T00:00:00.000Z"); // updated
@@ -202,6 +205,28 @@ describe("recordSubscription", () => {
     const subs = db.rows("push_subscriptions");
     expect(subs).toHaveLength(1);
     expect(subs[0].status).toBe("inativa");
+  });
+
+  it.each([
+    ["the literal 'undefined'", "undefined"],
+    ["a non-UUID slug", "sub-1"],
+    ["a bare number", "12345"],
+    ["a UUID-shaped string over 64 chars", "aaaaaaaa-0000-4000-8000-000000000001".padEnd(65, "a")],
+  ])("rejects a junk subscriptionId (%s) with 400 and no write", async (_label, subscriptionId) => {
+    const db = seed();
+    const result = await recordSubscription(db.client as any, baseInput({ subscriptionId }));
+    expect(result.status).toBe(400);
+    expect(db.rows("push_subscriptions")).toHaveLength(0);
+  });
+
+  it("truncates a user_agent over 512 chars before writing it", async () => {
+    const db = seed();
+    const longUa = "x".repeat(600);
+    const result = await recordSubscription(db.client as any, baseInput({ userAgent: longUa }));
+    expect(result.status).toBe(200);
+    const subs = db.rows("push_subscriptions");
+    expect(subs).toHaveLength(1);
+    expect((subs[0].user_agent as string).length).toBe(512);
   });
 
   it("without a subscriptionId only records script_seen_at on the app", async () => {

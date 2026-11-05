@@ -1,5 +1,5 @@
 // Web push (OneSignal) — Task 3: ids de jogadores no público resolvido. SQL
-// tests for supabase/migrations/20261202100200_audience_player_ids.sql.
+// tests for supabase/migrations/20261210100200_audience_player_ids.sql.
 //
 // Reaplica o mesmo stub de 20261126100000_expert_campaigns.sql (igual a
 // expert-campaigns.db.test.ts) e aplica por cima a migração desta task.
@@ -18,7 +18,7 @@ const MIGRATIONS = [
   "supabase/migrations/20261024100000_billing_wallet_settle.sql",
 ];
 const EXPERT_MIGRATION = readMigration("supabase/migrations/20261126100000_expert_campaigns.sql");
-const AUDIENCE_MIGRATION = readMigration("supabase/migrations/20261202100200_audience_player_ids.sql");
+const AUDIENCE_MIGRATION = readMigration("supabase/migrations/20261210100200_audience_player_ids.sql");
 
 const STUBS = `
 create function public.set_updated_at() returns trigger language plpgsql as $$
@@ -189,6 +189,19 @@ describe("resolve_sms_audience_v2: playerIds opcional", () => {
     const result = await resolve(tenant, { activity: { deposit: "yes" } });
 
     expect("playerIds" in result).toBe(false);
+  });
+
+  it("includePlayerIds=true com zero jogadores casados devolve playerIds como array vazio (não omite a chave)", async () => {
+    const tenant = await freshTenant();
+    await addPlayer(tenant, { total_depositado: 0, ftd_em: null }); // não bate o critério abaixo
+
+    const result = await resolve(tenant, {
+      activity: { deposit: "yes" },
+      includePlayerIds: true,
+    });
+
+    expect(result.playerIds).toEqual([]);
+    expect(result.total).toBe(0);
   });
 
   it("includePlayerIds=false explícito também não inclui a chave", async () => {

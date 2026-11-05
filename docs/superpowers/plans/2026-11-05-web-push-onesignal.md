@@ -22,7 +22,7 @@
 - Trava de rajada: por app, (enviados nos últimos 15 min + lote) ≤ 5 × inscrições ativas da app.
 - Tags OneSignal: uma única tag `blk` = `push_subscriptions.click_key`.
 - Novas tabelas: RLS ligado, sem policy (só `service_role`); server fns checam acesso e usam `supabaseAdmin`.
-- Migrações novas começam em `20261202100000` (a maior em main é `20261201100100`).
+- Migrações novas começam em `20261210100000` (a maior em main é `20261201100100`).
 - Casa demo: nada sai (guards `assertTenantNotDemo` / `assertTenantNotDemoForSend`, claim pula `is_demo_tenant`).
 - Textos de UI em pt-BR. Envs novas: `ONESIGNAL_ORG_API_KEY`, `ONESIGNAL_ORG_ID` (só para o caminho automático).
 - Verificação final de cada task: `npm run typecheck` e os testes da task; ao fim, `npm run lint`, `npm test`, `npm run build` (o build pega vazamento de `*.server` para o cliente).
@@ -39,9 +39,9 @@
 
 ## File Structure
 
-- `supabase/migrations/20261202100000_webpush_core.sql` — tabelas, RPCs de claim/lote, `link_dispatches.channel`, rate limit, cron.
-- `supabase/migrations/20261202100100_webpush_billing_item.sql` — item `webpush` no catálogo e na carteira.
-- `supabase/migrations/20261202100200_audience_player_ids.sql` — `playerIds` opcional no RPC de público.
+- `supabase/migrations/20261210100000_webpush_core.sql` — tabelas, RPCs de claim/lote, `link_dispatches.channel`, rate limit, cron.
+- `supabase/migrations/20261210100100_webpush_billing_item.sql` — item `webpush` no catálogo e na carteira.
+- `supabase/migrations/20261210100200_audience_player_ids.sql` — `playerIds` opcional no RPC de público.
 - `src/lib/webpush/onesignal.server.ts` — cliente HTTP da OneSignal.
 - `src/lib/webpush/shared.ts` — puro, sem `.server`: `normalizeOrigin`, `WORKER_FILE_CONTENT`, `WORKER_PATH`, validações de texto, `PromptConfig`.
 - `src/lib/webpush/worker-check.server.ts` — verificação do arquivo no site da casa.
@@ -61,7 +61,7 @@
 ### Task 1: Esquema base do web push
 
 **Files:**
-- Create: `supabase/migrations/20261202100000_webpush_core.sql`
+- Create: `supabase/migrations/20261210100000_webpush_core.sql`
 - Test: `src/lib/webpush/webpush-core.db.test.ts`
 
 **Interfaces:**
@@ -95,7 +95,7 @@
 ### Task 2: Item de cobrança `webpush`
 
 **Files:**
-- Create: `supabase/migrations/20261202100100_webpush_billing_item.sql`
+- Create: `supabase/migrations/20261210100100_webpush_billing_item.sql`
 - Modify: `src/lib/format.ts:42-56`, `src/lib/billing/pricing.server.ts:5,7`, `src/lib/billing/billing.functions.ts:61`, `src/lib/admin.functions.ts:179,219`, `src/lib/billing/wallet.server.ts:27`, `src/lib/finance/types.ts:100`, `src/lib/finance/finance-data.server.ts:324`, `src/lib/finance/kpis.ts:15`, `src/routes/admin.tsx:1086-1088`
 - Test: `src/lib/billing/webpush-billing-item.db.test.ts`
 
@@ -117,7 +117,7 @@
 ### Task 3: Público com ids de jogadores
 
 **Files:**
-- Create: `supabase/migrations/20261202100200_audience_player_ids.sql`
+- Create: `supabase/migrations/20261210100200_audience_player_ids.sql`
 - Modify: `src/lib/sms-audience-selection.server.ts:258` (`resolveAudienceForTenant`), `rpcAudience`
 - Test: `src/lib/sms-audience-selection.server.test.ts` (existente, acrescentar casos) e `src/lib/webpush/audience-player-ids.db.test.ts`
 

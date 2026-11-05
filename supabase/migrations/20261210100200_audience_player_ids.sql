@@ -167,14 +167,15 @@ email_list as (
 ),
 matched_count as (select count(*)::int value from matched),
 -- Ids de jogadores do público: só calculado (e só exposto) quando a chamada
--- pede explicitamente (`includePlayerIds=true`), hoje o público do push.
+-- pede explicitamente (`includePlayerIds=true`), hoje o público do push. O
+-- filtro fica dentro do FROM (não num CASE em torno do agregado) para que o
+-- SMS, que nunca manda a flag, não pague o custo de agregar `matched` aqui:
+-- com a flag ausente/false a CTE filtra para zero linhas e jsonb_agg devolve
+-- null sem percorrer `matched`.
 player_ids as (
-  select case
-    when coalesce((_criteria->>'includePlayerIds')::boolean,false)
-      then coalesce(jsonb_agg(id),'[]'::jsonb)
-    else null
-  end value
+  select jsonb_agg(id) value
   from matched
+  where coalesce((_criteria->>'includePlayerIds')::boolean,false)
 )
 select jsonb_build_object(
   'phones',pl.value,
@@ -195,7 +196,9 @@ select jsonb_build_object(
   'settings',jsonb_build_object(
     'thresholds',jsonb_build_object('bronze',s.bronze,'silver',s.silver,'gold',s.gold,'diamond',s.diamond,'black',s.black),
     'cooling',s.cooling,'sleeping',s.sleeping)
-) || case when pi.value is not null then jsonb_build_object('playerIds',pi.value) else '{}'::jsonb end
+) || case when coalesce((_criteria->>'includePlayerIds')::boolean,false)
+  then jsonb_build_object('playerIds', coalesce(pi.value,'[]'::jsonb))
+  else '{}'::jsonb end
 from guard g cross join settings s cross join params pr cross join scope sc cross join counts c
   cross join phone_list pl cross join email_list el cross join matched_count mc cross join player_ids pi
 where g.ok;

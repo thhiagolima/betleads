@@ -1,5 +1,5 @@
 // Task 2 (web push / OneSignal) — SQL test for
-// supabase/migrations/20261202100100_webpush_billing_item.sql: adds the
+// supabase/migrations/20261210100100_webpush_billing_item.sql: adds the
 // `webpush` billing item (R$ 0,01, provider_unit_cost 0) to
 // billing_price_book/tenant_price_overrides (Task 2 pricing migration) and
 // recreates wallet_reserve/wallet_summary (Task 3 wallet migration) to
@@ -25,7 +25,7 @@ const WALLET_ALERTS_MIGRATION = readMigration(
   "supabase/migrations/20261024100100_billing_wallet_alerts.sql",
 );
 const WEBPUSH_BILLING_MIGRATION = readMigration(
-  "supabase/migrations/20261202100100_webpush_billing_item.sql",
+  "supabase/migrations/20261210100100_webpush_billing_item.sql",
 );
 
 let db: PGlite;

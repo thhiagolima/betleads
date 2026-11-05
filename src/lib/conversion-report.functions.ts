@@ -330,7 +330,12 @@ export async function getCampaignReportDetailsFor(
         .eq("tenant_id", tenantId)
         .eq("id", data.campaignId)
         .maybeSingle(),
-      db
+      // webpush_campaigns has no `authenticated` grant (service_role only, like every
+      // other Task 1 webpush table) — the caller's authenticated client always gets a
+      // permission-denied error here. Read it with supabaseAdmin instead, scoped by the
+      // already-resolved tenantId so this stays tenant-safe, and never let a failure here
+      // (RLS edge case, table outage) take down the SMS/e-mail/voice report below.
+      supabaseAdmin
         .from("webpush_campaigns")
         .select(
           "id,name,title,body,status,target_count,sent_count,failed_count,scheduled_at,created_at,updated_at",
@@ -350,18 +355,21 @@ export async function getCampaignReportDetailsFor(
         .limit(Math.min(data.limit * 4, 2000)),
     ]);
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
-    const sourceError = [
-      smsResult.error,
-      emailResult.error,
-      voiceResult.error,
-      webpushResult.error,
-    ].find(Boolean);
+    const sourceError = [smsResult.error, emailResult.error, voiceResult.error].find(Boolean);
     if (sourceError) throw new Error(sourceError.message);
+    // A webpush lookup failure (RLS edge case, table outage) must not break the report
+    // for the other channels: treat it as "no webpush campaign found" instead of throwing.
+    if (webpushResult.error) {
+      console.error("getCampaignReportDetailsFor: webpush_campaigns lookup failed", {
+        campaignId: data.campaignId,
+        error: webpushResult.error.message,
+      });
+    }
 
     const sms = smsResult.data;
     const email = emailResult.data;
     const voice = voiceResult.data;
-    const webpush = webpushResult.data;
+    const webpush = webpushResult.error ? null : webpushResult.data;
     const [voiceHistoryResult, voicePlayerResult, voiceScriptResult, voiceAssetResult] = voice
       ? await Promise.all([
           db

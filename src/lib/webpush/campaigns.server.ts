@@ -310,9 +310,26 @@ export async function cancelWebpushCampaign(
     throw new Error("Campanha não pode mais ser cancelada");
   }
 
+  // A batch in 'enviado' was accepted by OneSignal but not yet settled
+  // (charged/refunded) — cancelling now would strand that money reservation.
+  // Refuse until the dispatcher's next tick settles it (or the house tops up
+  // and resumes).
+  const { data: unsettledBatches, error: unsettledError } = await db
+    .from("webpush_dispatch_batches")
+    .select("id")
+    .eq("campaign_id", input.id)
+    .eq("status", "enviado")
+    .limit(1);
+  if (unsettledError) throw new Error(unsettledError.message);
+  if (unsettledBatches && (unsettledBatches as unknown[]).length > 0) {
+    throw new Error(
+      "Há um envio aguardando cobrança; recarregue o saldo e retome a campanha",
+    );
+  }
+
   const { data: updated, error } = await db
     .from("webpush_campaigns")
-    .update({ status: "cancelada" })
+    .update({ status: "cancelada", updated_at: new Date().toISOString() })
     .eq("id", input.id)
     .eq("tenant_id", input.tenantId)
     .eq("status", previousStatus)
@@ -351,7 +368,12 @@ export async function resumeWebpushCampaign(
 
   const { data: updated, error } = await db
     .from("webpush_campaigns")
-    .update({ status: "agendada", scheduled_at: new Date().toISOString(), last_error: null })
+    .update({
+      status: "agendada",
+      scheduled_at: new Date().toISOString(),
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", input.id)
     .eq("tenant_id", input.tenantId)
     .eq("status", previousStatus)

@@ -5,7 +5,7 @@
 // supersedes the original brief's steps 3-7): every OneSignal call for one
 // (campaign, app) slice of a dispatch page is first persisted as a
 // `webpush_dispatch_batches` row (migration
-// 20261202100300_webpush_dispatch_batches.sql) BEFORE any money moves, and
+// 20261210100300_webpush_dispatch_batches.sql) BEFORE any money moves, and
 // every later step resumes that exact row by id. This matters because the
 // real wallet RPCs (20261022100100_billing_wallet.sql) have two properties
 // the original design (deriving its wallet key from "the current page")
@@ -460,7 +460,9 @@ async function returnWithTotals(
  * `advanceBatch` on a later loop iteration, which may itself stop the tick
  * (temporary send failure, insufficient balance) — in which case the lock is
  * released and the campaign stays `enviando` (or becomes `pausada`), to be
- * resumed by the next scheduled tick.
+ * resumed by the next scheduled tick. Hitting `opts.deadline` releases the
+ * lock the same way (status `enviando`) instead of leaving it held until the
+ * claim RPC's stale-lock reclaim.
  */
 export async function processWebpushCampaignTick(
   campaignRow: WebpushCampaignRow,
@@ -472,6 +474,7 @@ export async function processWebpushCampaignTick(
 
   for (;;) {
     if (deps.now().getTime() >= opts.deadline) {
+      await deps.updateCampaign(c, { status: "enviando", locked_at: null, locked_by: null });
       return returnWithTotals(c.id, deps, "enviando");
     }
 
@@ -488,6 +491,7 @@ export async function processWebpushCampaignTick(
           last_error: WEBPUSH_CAMPAIGN_NO_BALANCE_MESSAGE,
           locked_at: null,
           locked_by: null,
+          updated_at: deps.now().toISOString(),
         });
         return returnWithTotals(c.id, deps, "pausada");
       }
@@ -497,6 +501,7 @@ export async function processWebpushCampaignTick(
           last_error: WEBPUSH_SETTLEMENT_NO_BALANCE_MESSAGE,
           locked_at: null,
           locked_by: null,
+          updated_at: deps.now().toISOString(),
         });
         return returnWithTotals(c.id, deps, "pausada");
       }
@@ -534,6 +539,7 @@ export async function processWebpushCampaignTick(
         failed_count: totals.failed,
         locked_at: null,
         locked_by: null,
+        updated_at: deps.now().toISOString(),
       });
       return { status: finalStatus, sent: totals.sent, failed: totals.failed };
     }
@@ -842,7 +848,9 @@ export type RunScheduledWebpushCampaignsResult = {
  * one with `processWebpushCampaignTick` inside a single shared per-run time
  * budget (the cron runs once a minute). A campaign that throws mid-tick is
  * put back to `enviando` with the lock released so the next run retries it;
- * one still running past the budget just has its lock released untouched.
+ * one that hits the shared deadline (here, or inside
+ * `processWebpushCampaignTick` itself) also has its lock released the same
+ * way, so it never stalls until the stale-lock reclaim.
  */
 export async function runScheduledWebpushCampaigns({
   limit = 10,

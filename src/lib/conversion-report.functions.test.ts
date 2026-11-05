@@ -14,6 +14,17 @@ vi.mock("@/lib/tenant-access.server", () => ({
   resolveOperationalTenantId: vi.fn(async () => "t1"),
 }));
 
+// webpush_campaigns is service_role only (no `authenticated` grant): the report reads it
+// with supabaseAdmin, not the caller's client. Mock client.server with its own fake db so
+// tests can seed/break that table independently of the caller client (`fake.client` below).
+const adminFake = vi.hoisted(() => ({ db: null as unknown as ReturnType<typeof createFakeDb> }));
+
+vi.mock("@/integrations/supabase/client.server", async () => {
+  const { createFakeDb } = await import("@/lib/sms-bulk.test-support");
+  adminFake.db = createFakeDb();
+  return { supabaseAdmin: adminFake.db.client };
+});
+
 describe("averageBilledSegments", () => {
   it("counts a null billed_units as 1 segment", () => {
     expect(averageBilledSegments([{ billed_units: null }])).toBe(1);
@@ -91,7 +102,8 @@ describe("selectAllPages", () => {
 describe("getCampaignReportDetailsFor", () => {
   it("devolve channel: webpush e os contadores de uma campanha de push", async () => {
     const fake = createFakeDb();
-    fake.rows("webpush_campaigns").push({
+    adminFake.db.reset();
+    adminFake.db.rows("webpush_campaigns").push({
       id: "wp-1",
       tenant_id: "t1",
       name: "Campanha push",
@@ -125,7 +137,8 @@ describe("getCampaignReportDetailsFor", () => {
 
   it("finishedAt é null para uma campanha de push ainda em andamento", async () => {
     const fake = createFakeDb();
-    fake.rows("webpush_campaigns").push({
+    adminFake.db.reset();
+    adminFake.db.rows("webpush_campaigns").push({
       id: "wp-2",
       tenant_id: "t1",
       name: "Campanha em andamento",
@@ -147,5 +160,38 @@ describe("getCampaignReportDetailsFor", () => {
 
     expect(result.campaign).toMatchObject({ channel: "webpush", status: "enviando" });
     expect(result.campaign?.finishedAt).toBeNull();
+  });
+
+  it("uma falha na consulta a webpush_campaigns não derruba o relatório de uma campanha SMS", async () => {
+    // webpush_campaigns is read with supabaseAdmin alongside the SMS/e-mail/voice lookups
+    // (Promise.all). A permission-denied (or any other) error on that one lookup must not
+    // throw for the other channels — this pins that isolation.
+    const fake = createFakeDb();
+    fake.rows("sms_campaigns").push({
+      id: "sms-1",
+      tenant_id: "t1",
+      name: "Campanha SMS",
+      content: "Olá",
+      route: "short",
+      status: "enviado",
+      total_count: 10,
+      sent_count: 9,
+      deduplicated_count: 0,
+      failed_count: 1,
+      scheduled_at: "2026-11-05T10:00:00.000Z",
+      created_at: "2026-11-05T09:00:00.000Z",
+      updated_at: "2026-11-05T10:05:00.000Z",
+      recipients: [],
+      last_error: null,
+    });
+    adminFake.db.reset();
+    adminFake.db.failNext("webpush_campaigns", "select", "permission denied for table webpush_campaigns");
+
+    const result = await getCampaignReportDetailsFor(
+      { supabase: fake.client },
+      { campaignId: "sms-1", limit: 500 },
+    );
+
+    expect(result.campaign).toMatchObject({ channel: "sms", name: "Campanha SMS", status: "enviado" });
   });
 });

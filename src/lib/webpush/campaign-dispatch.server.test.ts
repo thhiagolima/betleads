@@ -411,6 +411,25 @@ describe("processWebpushCampaignTick", () => {
     expect(lastPatch(state.patches)).toMatchObject({ status: "enviando" });
   });
 
+  it("hitting the shared deadline releases the lock (status 'enviando', locked_at/locked_by null) instead of stalling it", async () => {
+    // Final review finding: the deadline branch used to `return` before any
+    // updateCampaign call, leaving locked_at/locked_by set — the campaign then
+    // sat unclaimable for ~5 min (claim_due_webpush_campaigns's stale-lock
+    // window) instead of being retried on the very next cron tick.
+    const { state, deps } = world();
+    state.subs = Array.from({ length: 10 }, (_, i) => sub(i + 1));
+    state.clock = 2_000_000; // already past the deadline below
+    const r = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
+
+    expect(state.sendCalls).toHaveLength(0);
+    expect(r.status).toBe("enviando");
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "enviando",
+      locked_at: null,
+      locked_by: null,
+    });
+  });
+
   describe("Review Focus: cursor never skips a denied app's rows in a multi-app page", () => {
     it("app A sent, app B's burst denied → cursor unchanged this tick; a later tick (B's burst clear) sends BOTH again, since no batch exists yet for either", async () => {
       const { state, deps } = world({
