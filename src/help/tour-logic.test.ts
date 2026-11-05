@@ -18,7 +18,9 @@ import {
   screenTourKey,
   shouldAutoStart,
   startAutoStartSuppression,
+  TOUR_READY_DEADLINE_MS,
   tourFor,
+  tourReadiness,
   tourResultFromReason,
 } from "./tour-logic";
 
@@ -282,5 +284,37 @@ describe("screenTourKey", () => {
         expect(screenTourKey(screen, tourTab)).toBe(tourKey(screen.route, tourTab));
       }
     }
+  });
+});
+
+describe("tourReadiness", () => {
+  const at = (over: Partial<Parameters<typeof tourReadiness>[0]>) =>
+    tourReadiness({ totalSteps: 6, availableSteps: 6, firstAvailable: true, elapsedMs: 1000, ...over });
+
+  it('"start" once the first anchor is visible and at least min(3, total) steps are available', () => {
+    expect(at({})).toBe("start");
+    expect(at({ availableSteps: 3 })).toBe("start");
+    expect(at({ totalSteps: 2, availableSteps: 2 })).toBe("start");
+    expect(at({ totalSteps: 1, availableSteps: 1 })).toBe("start");
+  });
+
+  it('"wait" while the screen is still rendering its anchors, before the deadline', () => {
+    expect(at({ availableSteps: 0, firstAvailable: false })).toBe("wait");
+    expect(at({ availableSteps: 2 })).toBe("wait");
+    expect(at({ availableSteps: 5, firstAvailable: false })).toBe("wait");
+    expect(at({ availableSteps: 2, elapsedMs: TOUR_READY_DEADLINE_MS - 1 })).toBe("wait");
+  });
+
+  it("after the deadline, starts with whatever is visible, or gives up when nothing is", () => {
+    expect(at({ availableSteps: 1, firstAvailable: false, elapsedMs: TOUR_READY_DEADLINE_MS })).toBe(
+      "start",
+    );
+    expect(at({ availableSteps: 0, firstAvailable: false, elapsedMs: TOUR_READY_DEADLINE_MS })).toBe(
+      "giveup",
+    );
+  });
+
+  it('a tour with no steps is "giveup"', () => {
+    expect(at({ totalSteps: 0, availableSteps: 0, firstAvailable: false })).toBe("giveup");
   });
 });

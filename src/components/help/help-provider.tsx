@@ -28,11 +28,13 @@ import type { SearchEntry } from "@/help/search";
 import {
   autoStartDecision,
   effectiveOverlayForAutoStart,
+  filterAvailableSteps,
   isAutoStartSuppressed,
   nextAutoStartSuppression,
   pickHelpTarget,
   screenTourKey,
   startAutoStartSuppression,
+  tourReadiness,
   tourFor,
   type AutoStartSuppression,
   type HelpTarget,
@@ -274,6 +276,9 @@ export function HelpProvider({ children }: { children: ReactNode }) {
 
   // Auto-start is evaluated once per tour key per visit of a route.
   const autoChecked = useRef(new Set<string>());
+  // When each tour key was first considered on this visit: the clock for
+  // `tourReadiness`' deadline (the screen's data may still be loading).
+  const autoFirstSeen = useRef(new Map<string, number>());
 
   // A highlight ("mostrar na tela", a guide's "Ir para esta etapa") on a
   // screen: that visit's auto-start must not replace it (tour-logic.ts).
@@ -294,6 +299,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   // Any running tour/highlight stops when the route changes.
   useEffect(() => {
     autoChecked.current.clear();
+    autoFirstSeen.current.clear();
     return () => {
       void tourRunner?.then(({ stopActiveTour }) => stopActiveTour());
     };
@@ -312,8 +318,14 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     // The key is only marked checked on a final verdict ("start"/"never").
     // On "wait" (a transient blocker) it stays unchecked: overlay/panel
     // changes re-run this effect, and an open dialog (not a dep) is polled.
+    if (!autoFirstSeen.current.has(key)) autoFirstSeen.current.set(key, Date.now());
     let timer = 0;
+    let cancelled = false;
+    const retry = () => {
+      if (!cancelled) timer = window.setTimeout(check, AUTO_START_RETRY_MS);
+    };
     const check = () => {
+      if (cancelled) return;
       if (isAutoStartSuppressed(suppression.current, urlTarget)) {
         autoChecked.current.add(key);
         return;
@@ -333,14 +345,39 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         hasSteps: steps.length > 0,
       });
       if (decision === "wait") {
-        timer = window.setTimeout(check, AUTO_START_RETRY_MS);
+        retry();
         return;
       }
-      autoChecked.current.add(key);
-      if (decision === "start") runSteps(key, steps);
+      if (decision === "never") {
+        autoChecked.current.add(key);
+        return;
+      }
+      // "start": only once the screen has rendered enough of the tour's
+      // anchors (its data may still be loading) — see `tourReadiness`.
+      void loadTourRunner().then(({ findVisibleAnchor }) => {
+        if (cancelled || autoChecked.current.has(key)) return;
+        const available = filterAvailableSteps(steps, findVisibleAnchor);
+        const readiness = tourReadiness({
+          totalSteps: steps.length,
+          availableSteps: available.length,
+          firstAvailable: !!steps[0] && findVisibleAnchor(steps[0].anchor) !== null,
+          elapsedMs: Date.now() - (autoFirstSeen.current.get(key) ?? Date.now()),
+        });
+        if (readiness === "wait") {
+          retry();
+          return;
+        }
+        // "giveup" marks the key for this visit only (no progress written),
+        // so the next visit tries again.
+        autoChecked.current.add(key);
+        if (readiness === "start") runSteps(key, steps);
+      });
     };
     timer = window.setTimeout(check, AUTO_START_DELAY_MS);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [
     currentScreen,
     currentTab,

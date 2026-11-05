@@ -106,6 +106,32 @@ export function filterAvailableSteps(
   return steps.filter((step) => findVisible(step.anchor) !== null);
 }
 
+/** How long (since the screen's article loaded on this visit) auto-start
+ * waits for the screen's data to render the tour's anchors. */
+export const TOUR_READY_DEADLINE_MS = 15_000;
+
+/** Whether a first-visit tour can start now, given how many of its steps
+ * currently have a visible anchor. Screens render their anchors as their
+ * data arrives, so a tour checked too early would show nothing (runTour
+ * drops steps without a visible target):
+ * - "start" once the first step's anchor is visible and at least
+ *   min(3, total) steps are available;
+ * - "wait" (retry shortly) before that, until `TOUR_READY_DEADLINE_MS`;
+ * - after the deadline: "start" with whatever is visible (≥1), else
+ *   "giveup" — without recording progress, so the next visit tries again. */
+export function tourReadiness(input: {
+  totalSteps: number;
+  availableSteps: number;
+  firstAvailable: boolean;
+  elapsedMs: number;
+}): "start" | "wait" | "giveup" {
+  const { totalSteps, availableSteps, firstAvailable, elapsedMs } = input;
+  if (totalSteps === 0) return "giveup";
+  if (firstAvailable && availableSteps >= Math.min(3, totalSteps)) return "start";
+  if (elapsedMs < TOUR_READY_DEADLINE_MS) return "wait";
+  return availableSteps >= 1 ? "start" : "giveup";
+}
+
 /** Maps driver.js's own `DestroyReason` to the tour's result: "done" only
  * when the user clicked "Concluir" on the last step (driver.js's "done"
  * reason); anything else — closing early, Escape, clicking the overlay, the

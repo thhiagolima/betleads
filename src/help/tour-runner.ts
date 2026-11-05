@@ -64,10 +64,12 @@ const SKIP_TOUR_CLASS = "tour-skip-btn";
 
 /** Runs a guided tour over `steps`, skipping any step whose anchor isn't
  * currently visible (constraints.md "Tour"). Does nothing if that leaves no
- * steps at all. */
-export function runTour(steps: TourStep[], opts: RunTourOptions): void {
+ * steps at all — and then `onFinish` is never called, so no "done"/
+ * "skipped" is recorded for a tour that never showed. Returns whether the
+ * tour actually started. */
+export function runTour(steps: TourStep[], opts: RunTourOptions): boolean {
   const available = filterAvailableSteps(steps, findVisibleAnchor);
-  if (available.length === 0) return;
+  if (available.length === 0) return false;
   stopActiveTour();
   let silenced = false;
 
@@ -127,4 +129,5 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): void {
     },
   };
   instance.drive();
+  return true;
 }
