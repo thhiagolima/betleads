@@ -8,6 +8,10 @@
 // send path. `db` is always `supabaseAdmin` in production; tests pass
 // `createFakeDb().client`.
 import { decryptProviderCredentials, encryptProviderCredentials } from "@/lib/secret-box.server";
+import {
+  oneSignalAccountById,
+  resolveOneSignalAccount,
+} from "@/lib/provider-accounts.server";
 import { normalizeOrigin, validatePromptConfig, WORKER_PATH, type PromptConfig } from "@/lib/webpush/shared";
 import {
   createOneSignalApp,
@@ -111,11 +115,26 @@ export async function activateWebpushOrigin(
 
   let onesignalAppId: string;
   let apiKey: string;
+  // Which OneSignal account created this app (null for a manually-created
+  // one): only new activations pick up a house's account — switching a
+  // house's account later never moves apps already created.
+  let providerAccountId: string | null = null;
   if (input.mode === "api") {
+    const account = await resolveOneSignalAccount(input.tenantId);
+    providerAccountId = account.id;
     const siteName = await fetchTenantName(db, input.tenantId);
-    const created = await createOneSignalApp({ siteName, origin });
+    const created = await createOneSignalApp({
+      siteName,
+      origin,
+      credentials: { orgApiKey: account.orgApiKey, orgId: account.orgId },
+    });
     onesignalAppId = created.appId;
-    apiKey = (await createOneSignalAppKey(onesignalAppId)).apiKey;
+    apiKey = (
+      await createOneSignalAppKey(onesignalAppId, {
+        orgApiKey: account.orgApiKey,
+        orgId: account.orgId,
+      })
+    ).apiKey;
   } else {
     onesignalAppId = input.appId;
     apiKey = input.apiKey;
@@ -132,6 +151,7 @@ export async function activateWebpushOrigin(
       api_key_encrypted: apiKeyEncrypted,
       created_via: input.mode,
       status: "instalando",
+      provider_account_id: providerAccountId,
     })
     .select(
       "id,tenant_id,origin,onesignal_app_id,status,created_via,worker_verified_at,script_seen_at,player_linked_at,test_sent_at",
@@ -399,13 +419,34 @@ export async function saveWebpushPrompt(
   if (validated.iconUrl && validated.iconUrl !== previousIconUrl) {
     const { data: appRows, error: appsErr } = await db
       .from("tenant_webpush_apps")
-      .select("id,onesignal_app_id,status,created_via")
+      .select("id,onesignal_app_id,status,created_via,provider_account_id")
       .eq("tenant_id", input.tenantId)
       .eq("created_via", "api")
       .in("status", ["instalando", "ativo"]);
     if (appsErr) throw new Error(appsErr.message);
-    for (const row of (appRows ?? []) as Array<{ onesignal_app_id: string }>) {
-      await updateOneSignalAppIcon(row.onesignal_app_id, validated.iconUrl);
+    for (const row of (appRows ?? []) as Array<{
+      onesignal_app_id: string;
+      provider_account_id: string | null;
+    }>) {
+      // Each app uses the account that created it (null = the default
+      // account); an account that's since been disabled/removed must not
+      // block the other apps' icon update.
+      let account: { orgApiKey: string; orgId: string };
+      try {
+        account = await oneSignalAccountById(row.provider_account_id);
+      } catch (error) {
+        console.error("[webpush] conta OneSignal indisponível para atualizar o ícone do app", {
+          tenantId: input.tenantId,
+          onesignalAppId: row.onesignal_app_id,
+          providerAccountId: row.provider_account_id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+      await updateOneSignalAppIcon(row.onesignal_app_id, validated.iconUrl, {
+        orgApiKey: account.orgApiKey,
+        orgId: account.orgId,
+      });
     }
   }
 

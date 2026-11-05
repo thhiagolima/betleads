@@ -5,18 +5,14 @@ const ONESIGNAL_BASE_URL = "https://api.onesignal.com";
 const ONESIGNAL_USAGE_HEADER = "Betleads | Partner Integration";
 const TIMEOUT_MS = 20_000;
 
+/** Organization-level credentials (not a per-app key): one of the
+ * platform's OneSignal accounts (src/lib/provider-accounts.server.ts). */
+export type OneSignalOrgCredentials = { orgApiKey: string; orgId?: string };
+
 function assertConfigured(value: string | undefined): string {
   const trimmed = value?.trim();
   if (!trimmed) throw new Error("OneSignal não configurado");
   return trimmed;
-}
-
-function orgApiKey(): string {
-  return assertConfigured(process.env.ONESIGNAL_ORG_API_KEY);
-}
-
-function orgId(): string | undefined {
-  return process.env.ONESIGNAL_ORG_ID?.trim() || undefined;
 }
 
 function commonHeaders(apiKey: string): Record<string, string> {
@@ -36,15 +32,16 @@ export async function createOneSignalApp(input: {
   siteName: string;
   origin: string;
   iconUrl?: string | null;
+  credentials: OneSignalOrgCredentials;
 }): Promise<{ appId: string }> {
-  const apiKey = orgApiKey();
+  const apiKey = assertConfigured(input.credentials.orgApiKey);
 
   const body: Record<string, unknown> = {
     site_name: input.siteName,
     chrome_web_origin: input.origin,
   };
   if (input.iconUrl) body.chrome_web_default_notification_icon = input.iconUrl;
-  const org = orgId();
+  const org = input.credentials.orgId?.trim();
   if (org) body.organization_id = org;
 
   const response = await fetch(`${ONESIGNAL_BASE_URL}/apps`, {
@@ -58,8 +55,11 @@ export async function createOneSignalApp(input: {
   return { appId: String(json.id ?? "") };
 }
 
-export async function createOneSignalAppKey(appId: string): Promise<{ apiKey: string }> {
-  const orgKey = orgApiKey();
+export async function createOneSignalAppKey(
+  appId: string,
+  credentials: OneSignalOrgCredentials,
+): Promise<{ apiKey: string }> {
+  const orgKey = assertConfigured(credentials.orgApiKey);
 
   const response = await fetch(`${ONESIGNAL_BASE_URL}/apps/${appId}/auth/tokens`, {
     method: "POST",
@@ -73,9 +73,13 @@ export async function createOneSignalAppKey(appId: string): Promise<{ apiKey: st
   return { apiKey };
 }
 
-export async function updateOneSignalAppIcon(appId: string, iconUrl: string): Promise<void> {
-  const apiKey = process.env.ONESIGNAL_ORG_API_KEY?.trim();
-  // Manual path (no org key configured): nothing to do.
+export async function updateOneSignalAppIcon(
+  appId: string,
+  iconUrl: string,
+  credentials: OneSignalOrgCredentials,
+): Promise<void> {
+  const apiKey = credentials.orgApiKey?.trim();
+  // Manual path (no org key for this app's account): nothing to do.
   if (!apiKey) return;
 
   await fetch(`${ONESIGNAL_BASE_URL}/apps/${appId}`, {

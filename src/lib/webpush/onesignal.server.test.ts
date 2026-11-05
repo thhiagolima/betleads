@@ -3,11 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const realFetch = globalThis.fetch;
 const ORIGINAL_ENV = { ...process.env };
+const ORG_CREDENTIALS = { orgApiKey: "org-test-key", orgId: "org-test-id" };
 
 beforeEach(() => {
   process.env = { ...ORIGINAL_ENV };
-  process.env.ONESIGNAL_ORG_API_KEY = "org-test-key";
-  process.env.ONESIGNAL_ORG_ID = "org-test-id";
 });
 
 afterEach(() => {
@@ -160,20 +159,21 @@ describe("deterministicUuid", () => {
 });
 
 describe("createOneSignalApp", () => {
-  const input = { siteName: "Casa X", origin: "https://x.com" };
+  const input = { siteName: "Casa X", origin: "https://x.com", credentials: ORG_CREDENTIALS };
 
-  it("throws 'OneSignal não configurado' without ONESIGNAL_ORG_API_KEY", async () => {
-    delete process.env.ONESIGNAL_ORG_API_KEY;
+  it("throws 'OneSignal não configurado' with an empty orgApiKey", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const { createOneSignalApp } = await import("./onesignal.server");
 
-    await expect(createOneSignalApp(input)).rejects.toThrow("OneSignal não configurado");
+    await expect(
+      createOneSignalApp({ ...input, credentials: { orgApiKey: "" } }),
+    ).rejects.toThrow("OneSignal não configurado");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("POSTs to /apps with the org key and returns the appId", async () => {
+  it("POSTs to /apps with the org key from the given credentials and returns the appId", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { id: "app-123" }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
@@ -205,13 +205,12 @@ describe("createOneSignalApp", () => {
     expect(body.chrome_web_default_notification_icon).toBe("https://x.com/icon.png");
   });
 
-  it("omits organization_id when ONESIGNAL_ORG_ID is not set", async () => {
-    delete process.env.ONESIGNAL_ORG_ID;
+  it("omits organization_id when the credentials have no orgId", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { id: "app-123" }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const { createOneSignalApp } = await import("./onesignal.server");
-    await createOneSignalApp(input);
+    await createOneSignalApp({ ...input, credentials: { orgApiKey: "org-test-key" } });
 
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const body = JSON.parse(init.body as string);
@@ -220,14 +219,15 @@ describe("createOneSignalApp", () => {
 });
 
 describe("createOneSignalAppKey", () => {
-  it("throws 'OneSignal não configurado' without ONESIGNAL_ORG_API_KEY", async () => {
-    delete process.env.ONESIGNAL_ORG_API_KEY;
+  it("throws 'OneSignal não configurado' with an empty orgApiKey", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const { createOneSignalAppKey } = await import("./onesignal.server");
 
-    await expect(createOneSignalAppKey("app-1")).rejects.toThrow("OneSignal não configurado");
+    await expect(createOneSignalAppKey("app-1", { orgApiKey: "" })).rejects.toThrow(
+      "OneSignal não configurado",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -236,7 +236,7 @@ describe("createOneSignalAppKey", () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const { createOneSignalAppKey } = await import("./onesignal.server");
-    const result = await createOneSignalAppKey("app-1");
+    const result = await createOneSignalAppKey("app-1", ORG_CREDENTIALS);
 
     expect(result).toEqual({ apiKey: "key-abc" });
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -252,7 +252,7 @@ describe("createOneSignalAppKey", () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const { createOneSignalAppKey } = await import("./onesignal.server");
-    const result = await createOneSignalAppKey("app-1");
+    const result = await createOneSignalAppKey("app-1", ORG_CREDENTIALS);
 
     expect(result).toEqual({ apiKey: "key-def" });
   });
@@ -262,19 +262,19 @@ describe("createOneSignalAppKey", () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const { createOneSignalAppKey } = await import("./onesignal.server");
-    const result = await createOneSignalAppKey("app-1");
+    const result = await createOneSignalAppKey("app-1", ORG_CREDENTIALS);
 
     expect(result).toEqual({ apiKey: "key-ghi" });
   });
 });
 
 describe("updateOneSignalAppIcon", () => {
-  it("PUTs to /apps/{appId} with the org key", async () => {
+  it("PUTs to /apps/{appId} with the given credentials' org key", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, {}));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const { updateOneSignalAppIcon } = await import("./onesignal.server");
-    await updateOneSignalAppIcon("app-1", "https://x.com/icon.png");
+    await updateOneSignalAppIcon("app-1", "https://x.com/icon.png", ORG_CREDENTIALS);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -286,13 +286,14 @@ describe("updateOneSignalAppIcon", () => {
     expect(body.chrome_web_default_notification_icon).toBe("https://x.com/icon.png");
   });
 
-  it("does nothing (no fetch call) when ONESIGNAL_ORG_API_KEY is absent (manual path)", async () => {
-    delete process.env.ONESIGNAL_ORG_API_KEY;
+  it("does nothing (no fetch call) when the credentials have no orgApiKey (manual path)", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const { updateOneSignalAppIcon } = await import("./onesignal.server");
-    await expect(updateOneSignalAppIcon("app-1", "https://x.com/icon.png")).resolves.toBeUndefined();
+    await expect(
+      updateOneSignalAppIcon("app-1", "https://x.com/icon.png", { orgApiKey: "" }),
+    ).resolves.toBeUndefined();
 
     expect(fetchMock).not.toHaveBeenCalled();
   });

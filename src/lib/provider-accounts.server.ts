@@ -15,11 +15,13 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { decryptProviderCredentials } from "./secret-box.server";
 
-export type ProviderChannel = "sms" | "email" | "voice";
+export type ProviderChannel = "sms" | "email" | "voice" | "webpush";
 
-/** ids fixos das contas semeadas em 20261108100000_provider_accounts.sql. */
+/** ids fixos das contas semeadas em 20261108100000_provider_accounts.sql e
+ * 20261210100400_webpush_provider_accounts.sql. */
 export const DEFAULT_SHORT_BRASIL_ACCOUNT_ID = "00000000-0000-4000-a000-00000000a001";
 export const DEFAULT_INFOBIP_ACCOUNT_ID = "00000000-0000-4000-a000-00000000a002";
+export const DEFAULT_ONESIGNAL_ACCOUNT_ID = "00000000-0000-4000-a000-00000000a003";
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -55,6 +57,24 @@ export type ProviderAccount = ShortBrasilAccount | InfobipAccount;
 
 /** Contas que enviam SMS: Short Brasil ou Infobip. */
 export type SmsAccount = ShortBrasilAccount | InfobipAccount;
+
+export type OneSignalAccount = {
+  id: string;
+  provider: "onesignal";
+  label: string;
+  /** Chave da organização (secreta). Vazia = não configurada. */
+  orgApiKey: string;
+  /** Opcional: várias organizações podem ser atendidas pela mesma chave. */
+  orgId: string;
+};
+
+/**
+ * Todas as contas de provedor, SMS/e-mail/voz (ProviderAccount) e OneSignal.
+ * Só usado pelos caminhos genéricos deste módulo (listagem/admin); o código
+ * de SMS/e-mail/voz continua enxergando apenas ProviderAccount — nunca
+ * precisa (nem deve) tratar o caso OneSignal.
+ */
+export type AnyProviderAccount = ProviderAccount | OneSignalAccount;
 
 /** A conta da casa existe mas não pode ser usada (desativada, ilegível, provedor errado). */
 export class ProviderAccountUnavailableError extends Error {
@@ -104,6 +124,22 @@ export function envInfobipAccount(): InfobipAccount {
   };
 }
 
+/** Conta padrão de web push (OneSignal). */
+export function envOneSignalAccount(): OneSignalAccount {
+  return {
+    id: DEFAULT_ONESIGNAL_ACCOUNT_ID,
+    provider: "onesignal",
+    label: "OneSignal (padrão)",
+    orgApiKey: cleanCredential(process.env.ONESIGNAL_ORG_API_KEY),
+    orgId: cleanCredential(process.env.ONESIGNAL_ORG_ID),
+  };
+}
+
+/** True quando a conta OneSignal tem a chave da organização. */
+export function oneSignalConfigured(account: OneSignalAccount): boolean {
+  return Boolean(account.orgApiKey);
+}
+
 /** True quando a conta Short Brasil tem alguma credencial utilizável. */
 export function shortBrasilConfigured(account: ShortBrasilAccount): boolean {
   return Boolean(account.shortcodeToken || (account.usuario && account.chave));
@@ -141,7 +177,7 @@ export const PROVIDER_ACCOUNTS_CACHE_MS = 30_000;
 
 let snapshot: Snapshot | null = null;
 let loading: Promise<Snapshot | null> | null = null;
-const decrypted = new Map<string, Promise<ProviderAccount>>();
+const decrypted = new Map<string, Promise<AnyProviderAccount>>();
 
 /**
  * Drops this instance's snapshot (after a super admin change). Other server
@@ -211,7 +247,7 @@ function configString(config: Record<string, unknown> | null, key: string): stri
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-async function buildDbAccount(row: AccountRow): Promise<ProviderAccount> {
+async function buildDbAccount(row: AccountRow): Promise<AnyProviderAccount> {
   if (!row.credentials_encrypted) {
     throw new ProviderAccountUnavailableError(`Conta de provedor "${row.label}" sem credenciais.`);
   }
@@ -250,12 +286,22 @@ async function buildDbAccount(row: AccountRow): Promise<ProviderAccount> {
       smsFrom: configString(config, "sms_from") ?? "",
     };
   }
+  if (row.provider === "onesignal") {
+    return {
+      id: row.id,
+      provider: "onesignal",
+      label: row.label,
+      orgApiKey: cleanCredential(creds.org_api_key),
+      orgId: configString(config, "org_id") ?? "",
+    };
+  }
   throw new ProviderAccountUnavailableError(`Provedor desconhecido: ${row.provider}`);
 }
 
-function envAccountFor(provider: string): ProviderAccount {
+function envAccountFor(provider: string): AnyProviderAccount {
   if (provider === "short_brasil") return { ...envShortBrasilAccount() };
   if (provider === "infobip") return { ...envInfobipAccount() };
+  if (provider === "onesignal") return { ...envOneSignalAccount() };
   throw new ProviderAccountUnavailableError(`Provedor desconhecido: ${provider}`);
 }
 
@@ -263,7 +309,10 @@ function defaultAccountFor(channel: ProviderChannel): ProviderAccount {
   return channel === "sms" ? envShortBrasilAccount() : envInfobipAccount();
 }
 
-async function accountFromRow(row: AccountRow, channel: ProviderChannel): Promise<ProviderAccount> {
+async function accountFromRow(
+  row: AccountRow,
+  channel: ProviderChannel,
+): Promise<AnyProviderAccount> {
   if (row.status !== "active") {
     throw new ProviderAccountUnavailableError(`A conta de provedor "${row.label}" está desativada.`);
   }
@@ -292,7 +341,7 @@ async function accountFromRow(row: AccountRow, channel: ProviderChannel): Promis
  */
 export async function resolveChannelAccount(
   tenantId: string | null | undefined,
-  channel: ProviderChannel,
+  channel: Exclude<ProviderChannel, "webpush">,
 ): Promise<ProviderAccount> {
   if (!tenantId) return defaultAccountFor(channel);
   const snap = await currentSnapshot();
@@ -304,16 +353,47 @@ export async function resolveChannelAccount(
       `A conta de provedor configurada para a casa (${channel}) não existe mais.`,
     );
   }
-  return accountFromRow(row, channel);
+  // channel is never "webpush" here: the account it resolves to is always
+  // Short Brasil or Infobip (OneSignal accounts only ever serve "webpush").
+  return accountFromRow(row, channel) as Promise<ProviderAccount>;
+}
+
+/**
+ * Conta que envia web push (OneSignal) da casa. Sem casa ou sem conta
+ * própria, a conta padrão (env). Mesma semântica de resolveInfobipAccount:
+ * sem fallback — uma conta própria desativada/ilegível lança
+ * ProviderAccountUnavailableError, nunca cai na conta padrão.
+ */
+export async function resolveOneSignalAccount(
+  tenantId: string | null | undefined,
+): Promise<OneSignalAccount> {
+  if (!tenantId) return envOneSignalAccount();
+  const snap = await currentSnapshot();
+  const accountId = snap?.overrides.get(`${tenantId}:webpush`);
+  if (!snap || !accountId) return envOneSignalAccount();
+  const row = snap.accounts.get(accountId);
+  if (!row) {
+    throw new ProviderAccountUnavailableError(
+      "A conta de provedor configurada para a casa (webpush) não existe mais.",
+    );
+  }
+  const account = await accountFromRow(row, "webpush");
+  if (account.provider !== "onesignal") {
+    throw new ProviderAccountUnavailableError(`A conta "${account.label}" não é OneSignal.`);
+  }
+  return account;
 }
 
 /**
  * Conta pelo id lida direto do banco (sem cache), qualquer status ou canal:
  * usada pelo super admin para testar a conexão de uma conta.
  */
-export async function loadProviderAccountForAdmin(accountId: string): Promise<ProviderAccount> {
+export async function loadProviderAccountForAdmin(
+  accountId: string,
+): Promise<AnyProviderAccount> {
   if (accountId === DEFAULT_SHORT_BRASIL_ACCOUNT_ID) return envShortBrasilAccount();
   if (accountId === DEFAULT_INFOBIP_ACCOUNT_ID) return envInfobipAccount();
+  if (accountId === DEFAULT_ONESIGNAL_ACCOUNT_ID) return envOneSignalAccount();
   const { data, error } = await db()
     .from("provider_accounts")
     .select("id, provider, label, channels, credentials_source, credentials_encrypted, config, status")
@@ -326,6 +406,27 @@ export async function loadProviderAccountForAdmin(accountId: string): Promise<Pr
     return { ...envAccountFor(row.provider), id: row.id, label: row.label };
   }
   return buildDbAccount(row);
+}
+
+/**
+ * Conta OneSignal pelo id (ex.: a conta gravada em tenant_webpush_apps.
+ * provider_account_id de um app específico). null/id padrão = conta padrão
+ * da plataforma.
+ */
+export async function oneSignalAccountById(
+  accountId: string | null | undefined,
+): Promise<OneSignalAccount> {
+  if (!accountId || accountId === DEFAULT_ONESIGNAL_ACCOUNT_ID) return envOneSignalAccount();
+  const snap = await currentSnapshot();
+  const row = snap?.accounts.get(accountId);
+  if (!row) {
+    throw new ProviderAccountUnavailableError(`A conta de provedor ${accountId} não existe mais.`);
+  }
+  const account = await accountFromRow(row, "webpush");
+  if (account.provider !== "onesignal") {
+    throw new ProviderAccountUnavailableError(`A conta "${account.label}" não é OneSignal.`);
+  }
+  return account;
 }
 
 /**
@@ -355,7 +456,7 @@ export async function infobipAccountById(
  */
 export async function channelConfiguredFor(
   tenantId: string | null | undefined,
-  channel: ProviderChannel,
+  channel: Exclude<ProviderChannel, "webpush">,
 ): Promise<boolean> {
   try {
     const account = await resolveChannelAccount(tenantId, channel);

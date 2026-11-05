@@ -26,6 +26,15 @@ vi.mock("./worker-check.server", () => ({ checkWorkerFile: workerCheck.checkWork
 const billing = vi.hoisted(() => ({ reserveUsage: vi.fn() }));
 vi.mock("@/lib/billing/wallet.server", () => ({ reserveUsage: billing.reserveUsage }));
 
+const providerAccounts = vi.hoisted(() => ({
+  resolveOneSignalAccount: vi.fn(),
+  oneSignalAccountById: vi.fn(),
+}));
+vi.mock("@/lib/provider-accounts.server", () => ({
+  resolveOneSignalAccount: providerAccounts.resolveOneSignalAccount,
+  oneSignalAccountById: providerAccounts.oneSignalAccountById,
+}));
+
 import {
   getWebpushIntegrationState,
   listRecentWebpushSubscriptions,
@@ -49,6 +58,15 @@ describe("Task 7: web push integration state", () => {
     onesignal.updateOneSignalAppIcon.mockReset();
     workerCheck.checkWorkerFile.mockReset();
     billing.reserveUsage.mockReset();
+    providerAccounts.resolveOneSignalAccount.mockReset();
+    providerAccounts.oneSignalAccountById.mockReset();
+    providerAccounts.oneSignalAccountById.mockImplementation(async (id: string | null) => ({
+      id: id ?? "00000000-0000-4000-a000-00000000a003",
+      provider: "onesignal",
+      label: "OneSignal (padrão)",
+      orgApiKey: "",
+      orgId: "",
+    }));
   });
 
   function pushApp(overrides: Partial<Record<string, unknown>> = {}) {
@@ -375,10 +393,81 @@ describe("Task 7: web push integration state", () => {
       expect(onesignal.updateOneSignalAppIcon).toHaveBeenCalledWith(
         "os-1",
         "https://cdn.example.test/icon.png",
+        { orgApiKey: "", orgId: "" },
       );
       expect(onesignal.updateOneSignalAppIcon).toHaveBeenCalledWith(
         "os-2",
         "https://cdn.example.test/icon.png",
+        { orgApiKey: "", orgId: "" },
+      );
+    });
+
+    it("uses each app's own provider_account_id (default when null) and skips an unavailable account without failing the save", async () => {
+      pushApp({
+        id: "app-own",
+        created_via: "api",
+        status: "ativo",
+        onesignal_app_id: "os-own",
+        provider_account_id: "own-account-1",
+      });
+      pushApp({
+        id: "app-default",
+        created_via: "api",
+        status: "ativo",
+        onesignal_app_id: "os-default",
+        provider_account_id: null,
+      });
+      pushApp({
+        id: "app-unavailable",
+        created_via: "api",
+        status: "ativo",
+        onesignal_app_id: "os-unavailable",
+        provider_account_id: "disabled-account",
+      });
+      db.rows("tenant_webpush_settings").push({
+        tenant_id: TENANT,
+        public_token: "tok",
+        prompt_text: "x",
+        accept_label: "Sim",
+        cancel_label: "Não",
+        icon_url: null,
+      });
+
+      providerAccounts.oneSignalAccountById.mockImplementation(async (id: string | null) => {
+        if (id === "own-account-1") {
+          return { id, provider: "onesignal", label: "OneSignal Casa", orgApiKey: "own-key", orgId: "own-org" };
+        }
+        if (id === "disabled-account") {
+          throw new Error('A conta de provedor "OneSignal Casa" está desativada.');
+        }
+        return { id: "default", provider: "onesignal", label: "padrão", orgApiKey: "", orgId: "" };
+      });
+
+      const saved = await saveWebpushPrompt(db.client, {
+        tenantId: TENANT,
+        promptText: "Quer receber promoções?",
+        acceptLabel: "Sim",
+        cancelLabel: "Não",
+        iconUrl: "https://cdn.example.test/icon.png",
+      });
+
+      // The save itself must succeed even though one app's account is unavailable.
+      expect(saved.iconUrl).toBe("https://cdn.example.test/icon.png");
+      expect(onesignal.updateOneSignalAppIcon).toHaveBeenCalledTimes(2);
+      expect(onesignal.updateOneSignalAppIcon).toHaveBeenCalledWith(
+        "os-own",
+        "https://cdn.example.test/icon.png",
+        { orgApiKey: "own-key", orgId: "own-org" },
+      );
+      expect(onesignal.updateOneSignalAppIcon).toHaveBeenCalledWith(
+        "os-default",
+        "https://cdn.example.test/icon.png",
+        { orgApiKey: "", orgId: "" },
+      );
+      expect(onesignal.updateOneSignalAppIcon).not.toHaveBeenCalledWith(
+        "os-unavailable",
+        expect.anything(),
+        expect.anything(),
       );
     });
 

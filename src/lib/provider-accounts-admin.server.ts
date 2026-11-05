@@ -11,18 +11,22 @@ import { assertSuperAdmin } from "@/lib/provider-governance.server";
 import {
   cleanCredential,
   DEFAULT_INFOBIP_ACCOUNT_ID,
+  DEFAULT_ONESIGNAL_ACCOUNT_ID,
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
   envInfobipAccount,
+  envOneSignalAccount,
   envShortBrasilAccount,
   infobipConfigured,
   invalidateProviderAccountsCache,
   loadProviderAccountForAdmin,
+  oneSignalConfigured,
   shortBrasilConfigured,
   type ProviderChannel,
 } from "@/lib/provider-accounts.server";
 import { decryptProviderCredentials, encryptProviderCredentials } from "@/lib/secret-box.server";
 import { requireBrazilianPhone } from "@/lib/phone-normalization";
 import {
+  PROVIDER_LABEL,
   saveProviderAccountInput,
   setProviderAccountStatusInput,
   setTenantChannelProviderInput,
@@ -34,23 +38,29 @@ type AdminContext = { userId: string };
 
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-const PLATFORM_ACCOUNT_IDS = new Set([DEFAULT_SHORT_BRASIL_ACCOUNT_ID, DEFAULT_INFOBIP_ACCOUNT_ID]);
+const PLATFORM_ACCOUNT_IDS = new Set([
+  DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+  DEFAULT_INFOBIP_ACCOUNT_ID,
+  DEFAULT_ONESIGNAL_ACCOUNT_ID,
+]);
 
 /** Credential fields per provider (the only keys ever stored). */
 const CREDENTIAL_KEYS = {
   short_brasil: ["shortcode_token", "usuario", "chave"],
   infobip: ["api_key"],
+  onesignal: ["org_api_key"],
 } as const;
 
 /** Non-secret config fields per provider. */
 const CONFIG_KEYS = {
   short_brasil: ["shortcode_url", "single_url", "bulk_url"],
   infobip: ["base_url", "voice_from", "sms_from"],
+  onesignal: ["org_id"],
 } as const;
 
 type AccountRow = {
   id: string;
-  provider: "short_brasil" | "infobip";
+  provider: "short_brasil" | "infobip" | "onesignal";
   label: string;
   channels: ProviderChannel[];
   credentials_source: "env" | "db";
@@ -63,7 +73,7 @@ type AccountRow = {
 
 export type ProviderAccountView = {
   id: string;
-  provider: "short_brasil" | "infobip";
+  provider: "short_brasil" | "infobip" | "onesignal";
   label: string;
   channels: ProviderChannel[];
   status: "active" | "disabled";
@@ -118,10 +128,14 @@ async function accountView(
           .filter(([, v]) => v)
           .map(([k, v]) => [k, hint(v)]),
       );
-    } else {
+    } else if (row.provider === "infobip") {
       const env = envInfobipAccount();
       configured = infobipConfigured(env);
       if (env.apiKey) credentialHints = { api_key: hint(env.apiKey) };
+    } else {
+      const env = envOneSignalAccount();
+      configured = oneSignalConfigured(env);
+      if (env.orgApiKey) credentialHints = { org_api_key: hint(env.orgApiKey) };
     }
   } else if (row.credentials_encrypted) {
     try {
@@ -135,7 +149,9 @@ async function accountView(
       configured =
         row.provider === "short_brasil"
           ? Boolean(creds.shortcode_token || (creds.usuario && creds.chave))
-          : Boolean(creds.api_key && config.base_url);
+          : row.provider === "infobip"
+            ? Boolean(creds.api_key && config.base_url)
+            : Boolean(creds.org_api_key);
     } catch {
       configured = false;
     }
@@ -180,13 +196,14 @@ export async function adminListProviderAccountsFor(context: AdminContext) {
   }>;
 
   const housesOf = (accountId: string) => {
-    const counts = { sms: 0, email: 0, voice: 0 } as Record<ProviderChannel, number>;
+    const counts = { sms: 0, email: 0, voice: 0, webpush: 0 } as Record<ProviderChannel, number>;
     for (const link of links) if (link.provider_account_id === accountId) counts[link.channel]++;
     return counts;
   };
   const byTenant = new Map<string, Record<ProviderChannel, string | null>>();
   for (const link of links) {
-    const current = byTenant.get(link.tenant_id) ?? { sms: null, email: null, voice: null };
+    const current =
+      byTenant.get(link.tenant_id) ?? { sms: null, email: null, voice: null, webpush: null };
     current[link.channel] = link.provider_account_id;
     byTenant.set(link.tenant_id, current);
   }
@@ -197,7 +214,7 @@ export async function adminListProviderAccountsFor(context: AdminContext) {
       (tenant): TenantProvidersView => ({
         id: tenant.id,
         nome: tenant.nome,
-        accounts: byTenant.get(tenant.id) ?? { sms: null, email: null, voice: null },
+        accounts: byTenant.get(tenant.id) ?? { sms: null, email: null, voice: null, webpush: null },
       }),
     ),
   };
@@ -230,7 +247,13 @@ export async function adminSaveProviderAccountFor(
   const supported = SUPPORTED_CHANNELS[data.provider];
   const channels = [...new Set(data.channels)];
   const unsupported = channels.filter((c) => !supported.includes(c));
-  if (unsupported.length) throw new Error("A Short Brasil só atende SMS.");
+  if (unsupported.length) {
+    throw new Error(
+      data.provider === "short_brasil"
+        ? "A Short Brasil só atende SMS."
+        : `${PROVIDER_LABEL[data.provider]} não atende ${unsupported.join(", ")}.`,
+    );
+  }
 
   const config: Record<string, string> = {};
   for (const key of CONFIG_KEYS[data.provider]) {
@@ -245,11 +268,12 @@ export async function adminSaveProviderAccountFor(
       if (digits.length < 10) throw new Error("Informe o número de origem das ligações (voz).");
       config.voice_from = digits;
     }
-  } else {
+  } else if (data.provider === "short_brasil") {
     assertHttpsUrl(config.shortcode_url, "URL da API Short Code");
     assertHttpsUrl(config.single_url, "URL de envio individual");
     assertHttpsUrl(config.bulk_url, "URL de envio em lote");
   }
+  // onesignal: org_id is a plain identifier, not a URL — nothing to validate.
 
   let before: AccountRow | null = null;
   let stored: Record<string, string> = {};
@@ -293,12 +317,16 @@ export async function adminSaveProviderAccountFor(
   const hasCredentials =
     data.provider === "short_brasil"
       ? Boolean(credentials.shortcode_token || (credentials.usuario && credentials.chave))
-      : Boolean(credentials.api_key);
+      : data.provider === "infobip"
+        ? Boolean(credentials.api_key)
+        : Boolean(credentials.org_api_key);
   if (!hasCredentials) {
     throw new Error(
       data.provider === "short_brasil"
         ? "Informe o token da API Short Code ou o usuário e a chave da API legada."
-        : "Informe a API key da conta Infobip.",
+        : data.provider === "infobip"
+          ? "Informe a API key da conta Infobip."
+          : "Informe a chave da organização OneSignal.",
     );
   }
 
@@ -419,6 +447,28 @@ export async function adminTestProviderAccountFor(
         result = {
           ok: false,
           message: `Sem resposta da Infobip: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    }
+  } else if (account.provider === "onesignal") {
+    if (!oneSignalConfigured(account)) {
+      result = { ok: false, message: "Chave da organização não configurada." };
+    } else {
+      try {
+        const response = await fetch("https://api.onesignal.com/apps", {
+          headers: { Accept: "application/json", Authorization: `Key ${account.orgApiKey}` },
+          signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
+        });
+        result =
+          response.status === 401 || response.status === 403
+            ? { ok: false, message: "Chave recusada pela OneSignal." }
+            : response.ok
+              ? { ok: true, message: "Chave da organização aceita." }
+              : { ok: false, message: `A OneSignal respondeu HTTP ${response.status}.` };
+      } catch (error) {
+        result = {
+          ok: false,
+          message: `Sem resposta da OneSignal: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
     }
