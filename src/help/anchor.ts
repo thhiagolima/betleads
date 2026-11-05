@@ -10,3 +10,8 @@
 export function tourAnchor(id: string): { "data-tour": string } {
   return { "data-tour": id };
 }
+
+// The HTML attribute name itself, exported so tour-runner.ts can build a
+// `[data-tour="…"]` selector without the literal string "data-tour=" in its
+// own source (-coverage.test.ts forbids that literal outside this file).
+export const ANCHOR_ATTR = "data-tour";
