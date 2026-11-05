@@ -1,7 +1,12 @@
 // Pure tour-engine logic (brief, Task 3). No DOM: that part lives in
 // tour-runner.ts and isn't unit-tested here (no jsdom in this repo).
 import { describe, expect, it } from "vitest";
-import { filterAvailableSteps, pickVisible, shouldAutoStart } from "./tour-logic";
+import {
+  filterAvailableSteps,
+  pickVisible,
+  shouldAutoStart,
+  tourResultFromReason,
+} from "./tour-logic";
 
 describe("shouldAutoStart", () => {
   const base = {
@@ -64,4 +69,17 @@ describe("filterAvailableSteps", () => {
     const result = filterAvailableSteps(steps, (anchor) => (anchor === "b" ? {} : null));
     expect(result.map((s) => s.anchor)).toEqual(["b"]);
   });
+});
+
+describe("tourResultFromReason", () => {
+  it('is "done" only for driver.js\'s "done" reason', () => {
+    expect(tourResultFromReason("done")).toBe("done");
+  });
+
+  it.each(["close", "escape", "overlay", "replaced", "api", undefined])(
+    '"%s" is "skipped"',
+    (reason) => {
+      expect(tourResultFromReason(reason)).toBe("skipped");
+    },
+  );
 });

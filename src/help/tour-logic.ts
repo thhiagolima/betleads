@@ -48,3 +48,11 @@ export function filterAvailableSteps(
 ): TourStep[] {
   return steps.filter((step) => findVisible(step.anchor) !== null);
 }
+
+/** Maps driver.js's own `DestroyReason` to the tour's result: "done" only
+ * when the user clicked "Concluir" on the last step (driver.js's "done"
+ * reason); anything else — closing early, Escape, clicking the overlay, the
+ * "Pular tour" button, or no reason at all — is "skipped". */
+export function tourResultFromReason(reason: string | undefined): "done" | "skipped" {
+  return reason === "done" ? "done" : "skipped";
+}

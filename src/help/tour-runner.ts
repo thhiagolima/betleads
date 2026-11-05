@@ -6,7 +6,7 @@
 import "driver.js/dist/driver.css";
 import { driver, type DriveStep } from "driver.js";
 import { ANCHOR_ATTR } from "./anchor";
-import { filterAvailableSteps, pickVisible } from "./tour-logic";
+import { filterAvailableSteps, pickVisible, tourResultFromReason } from "./tour-logic";
 import type { TourStep } from "./types";
 import "./tour.css";
 
@@ -38,6 +38,7 @@ export type RunTourOptions = {
 };
 
 const LEARN_MORE_CLASS = "tour-learn-more-btn";
+const SKIP_TOUR_CLASS = "tour-skip-btn";
 
 /** Runs a guided tour over `steps`, skipping any step whose anchor isn't
  * currently visible (constraints.md "Tour"). Does nothing if that leaves no
@@ -54,6 +55,10 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): void {
     },
   }));
 
+  // `closeBtnLabel` only sets the × icon's aria-label (driver.js has no
+  // visible text there) — it does not make "Pular tour" visible to sighted
+  // users, so a real footer button is added below via `onPopoverRender`,
+  // alongside "Saiba mais". The × keeps its aria-label for screen readers.
   const instance = driver({
     steps: driveSteps,
     showProgress: true,
@@ -66,7 +71,17 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): void {
     onPopoverRender: (popover, hookOpts) => {
       const activeIndex = hookOpts.state.activeIndex ?? 0;
       const activeStep = available[activeIndex];
+
       popover.footerButtons.querySelector(`.${LEARN_MORE_CLASS}`)?.remove();
+      popover.footerButtons.querySelector(`.${SKIP_TOUR_CLASS}`)?.remove();
+
+      const skipBtn = document.createElement("button");
+      skipBtn.type = "button";
+      skipBtn.className = `driver-popover-footer-btn ${SKIP_TOUR_CLASS}`;
+      skipBtn.textContent = "Pular tour";
+      skipBtn.addEventListener("click", () => instance.destroy());
+      popover.footerButtons.insertBefore(skipBtn, popover.footerButtons.firstChild);
+
       if (!activeStep) return;
       const learnMoreBtn = document.createElement("button");
       learnMoreBtn.type = "button";
@@ -76,8 +91,7 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): void {
       popover.footerButtons.insertBefore(learnMoreBtn, popover.footerButtons.firstChild);
     },
     onDestroyed: (_element, _step, hookOpts) => {
-      const reachedLastStep = hookOpts.index === available.length - 1;
-      opts.onFinish(reachedLastStep ? "done" : "skipped");
+      opts.onFinish(tourResultFromReason(hookOpts.reason));
     },
   });
 
