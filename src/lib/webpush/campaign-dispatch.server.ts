@@ -33,8 +33,11 @@
 //                -> liquidado. The adjustment reservation failing pauses the
 //                campaign with the batch left `enviado` (next tick retries
 //                settlement before sending anything new).
-//   liquidado / falhou -> writeLogs + markDispatches + deactivate (all
-//                idempotent) -> concluido.
+//   liquidado / falhou -> writeLogs + markDispatches (both idempotent) ->
+//                concluido. `liquidado` also deactivates its refused rows
+//                (OneSignal reported them invalid/not subscribed); `falhou`
+//                never does — a whole-call failure (bad key, malformed
+//                request, ...) says nothing about subscription validity.
 //
 // Cursor: a freshly fetched page creates batches for ALL of its app-groups
 // or NONE of them (a burst/budget denial on any group aborts the whole page,
@@ -379,7 +382,16 @@ async function advanceBatch(
         sentAt: deps.now(),
       });
 
-      if (refusedSet.size > 0) await deps.deactivate([...refusedSet]);
+      // Ruling correction (fix round 2): deactivation means "OneSignal says
+      // this subscription isn't valid" (invalid_player_ids / not subscribed)
+      // — that only ever comes from an ok:true send, i.e. a `liquidado`
+      // batch. A `falhou` batch's rows are refused because the WHOLE call
+      // failed for an unrelated reason (bad key, malformed request, ...),
+      // which says nothing about the subscriptions themselves — never
+      // deactivate them, only log/mark them `recusado`.
+      if (batch.status === "liquidado" && refusedSet.size > 0) {
+        await deps.deactivate([...refusedSet]);
+      }
 
       await deps.updateBatch(batch.id, { status: "concluido" });
       return { kind: "concluded", accepted: batch.accepted ?? 0, refused: refusedSet.size };

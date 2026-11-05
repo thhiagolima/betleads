@@ -294,7 +294,7 @@ describe("processWebpushCampaignTick", () => {
     expect(r.status).toBe("enviado");
   });
 
-  it("permanent send failure, all invalid: net charge is 0 (reserved then fully refunded)", async () => {
+  it("permanent send failure, all invalid: net charge is 0 (reserved then fully refunded); subscriptions stay 'ativa'", async () => {
     const { state, deps } = world();
     state.subs = [sub(1), sub(2)];
     state.sendResponder = async () => ({ ok: false, temporary: false, status: 400, error: "bad request" });
@@ -305,13 +305,13 @@ describe("processWebpushCampaignTick", () => {
     expect(state.refundCalls[0].referenceId).toBe(state.reserveCalls[0].referenceId);
     expect(state.logs.every((l) => l.status === "recusado")).toBe(true);
     expect(state.logs).toHaveLength(2);
-    // Ruling step 4 treats `falhou`'s `refused_row_ids` (here: every row of
-    // the batch) the same as a partial-acceptance's: both get deactivated.
-    // Flagged in the fix report — a permanent failure isn't necessarily
-    // "this subscription is invalid", so this deactivates healthy
-    // subscriptions on e.g. a malformed request; implemented literally per
-    // the ruling rather than improvised away.
-    expect(state.deactivated.sort()).toEqual([rowId(1), rowId(2)].sort());
+    // Ruling correction (fix round 2): a `falhou` batch's failure is about
+    // the WHOLE call (bad key, malformed request, ...), not about any one
+    // subscription's validity — `deactivate` must never be called for it.
+    // Only an ok:true send's `invalidSubscriptionIds` (OneSignal itself
+    // reporting "not subscribed") ever deactivates anything (see the
+    // "OneSignal accepts only part of the batch" test above).
+    expect(state.deactivated).toEqual([]);
     expect(r.sent).toBe(0);
     expect(r.failed).toBe(2);
     // Nothing was ever actually sent (every row failed permanently), so the
