@@ -36,6 +36,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { LinksOverview } from "@/components/integrations/links-overview";
 import { LinksSettings } from "@/components/integrations/links-settings";
 import { MetaConnectionPanel } from "@/components/integrations/meta-connection";
+import { WebpushIntegrationPanel } from "@/components/webpush/webpush-integration-panel";
 import {
   getMyWebhookAccess,
   getMyWebhookHealth,
@@ -58,6 +59,7 @@ const TABS = [
   { value: "plataforma", label: "Plataforma de apostas" },
   { value: "links", label: "Links curtos" },
   { value: "meta", label: "Meta Ads" },
+  { value: "webpush", label: "Web Push" },
 ] as const;
 type IntegrationTab = (typeof TABS)[number]["value"];
 
@@ -89,6 +91,7 @@ function IntegrationsPage() {
           </>
         )}
         {tab === "meta" && <MetaConnectionPanel />}
+        {tab === "webpush" && <WebpushIntegrationPanel />}
       </div>
     </Page>
   );
