@@ -51,7 +51,7 @@
 // landed between "add to counter" and "mark batch concluido").
 import { publicAppBaseUrl } from "@/lib/click-tracking.server";
 import type { RefundUsageArgs, ReserveUsageArgs, ReserveUsageResult } from "@/lib/billing/wallet.server";
-import { refundUsage, reserveUsage } from "@/lib/billing/wallet.server";
+import { reserveUsage } from "@/lib/billing/wallet.server";
 import { channelBudget } from "@/lib/rate-limit/channel-budget.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { startJobRun } from "@/lib/observability/job-monitor.server";
@@ -167,8 +167,6 @@ export type WebpushDispatchDeps = {
   /** Non-terminal batches of this campaign, oldest first: pendente/enviado/liquidado/falhou. */
   listOpenBatches(campaignId: string): Promise<WebpushDispatchBatch[]>;
   updateBatch(batchId: string, patch: Record<string, unknown>): Promise<WebpushDispatchBatch>;
-  /** Only ever called on a `pendente` batch whose reservation failed (nothing was charged). */
-  deleteBatch(batchId: string): Promise<void>;
   rowDetails(subscriptionRowIds: string[]): Promise<WebpushRowDetail[]>;
   prepareDispatches(args: {
     tenantId: string;
@@ -184,6 +182,15 @@ export type WebpushDispatchDeps = {
     sentAt: Date;
   }): Promise<void>;
   reserve(args: ReserveUsageArgs): Promise<ReserveUsageResult>;
+  /**
+   * MUST throw on a transient/transport failure (RPC error, network error) —
+   * never swallow it the way `refundUsage` in wallet.server.ts does (fix
+   * round 2: that swallowing let the state machine treat a refund that
+   * never happened as done, settling/failing the batch without the money
+   * ever coming back). A refusal that means "there is nothing left to
+   * refund" (`reservation_not_found`, `already_refunded`) is the one case
+   * that resolves normally (the batch proceeds) rather than throwing.
+   */
   refund(args: RefundUsageArgs): Promise<void>;
   send(input: WebpushSendInput): Promise<OneSignalSendResult>;
   deactivate(subscriptionRowIds: string[]): Promise<void>;
@@ -255,8 +262,16 @@ async function advanceBatch(
         idempotencyKey: referenceId,
       });
       if (!reserveResult.ok) {
-        // Nothing was ever charged for this batch: safe to delete it outright.
-        await deps.deleteBatch(batch.id);
+        // Fix round 2: do NOT delete the batch — a failed reserve writes no
+        // ledger row (the idempotency key stays free), so the batch simply
+        // stays `pendente` and the next resume retries this same reserve
+        // call. Deleting it here (as the original fix did) let a SIBLING
+        // batch of the same page reach `concluido` on its own while this
+        // one vanished — the cursor-flush then advanced past this batch's
+        // (never sent) rows forever, since nothing was left to mark them
+        // open. Leaving it `pendente` keeps the campaign's "no open batch"
+        // cursor-flush invariant intact (see module header): the cursor
+        // can't advance past this page until this batch is also resolved.
         return { kind: "stop-insufficient-initial" };
       }
 
@@ -311,7 +326,16 @@ async function advanceBatch(
       const refusedRowIds = rows
         .filter((r) => invalidIds.has(r.subscriptionId))
         .map((r) => r.subscriptionRowId);
-      const accepted = batch.subscriptionRowIds.length - refusedRowIds.length;
+      // Fix round 2 (ruling): `rows` already only holds subscriptions that
+      // still exist (rowDetails selects by id — a row deleted via a
+      // player/app cascade simply isn't in it). Deriving `accepted` from
+      // `rows.length` — never from `batch.subscriptionRowIds.length`, the
+      // ORIGINAL count at batch-creation time — means a since-deleted row
+      // is never counted as accepted/charged; the settlement step (below,
+      // `enviado` -> `liquidado`) already refunds+re-reserves for exactly
+      // `accepted` whenever it's less than `units`, so this one change is
+      // enough to keep the net charge correct without any other change here.
+      const accepted = rows.length - refusedRowIds.length;
       batch = await deps.updateBatch(batch.id, {
         status: "enviado",
         accepted,
@@ -361,9 +385,22 @@ async function advanceBatch(
     if (batch.status === "liquidado" || batch.status === "falhou") {
       const refusedSet = new Set(batch.refusedRowIds ?? []);
       const rows = await deps.rowDetails(batch.subscriptionRowIds);
+      const existingIds = new Set(rows.map((r) => r.subscriptionRowId));
       const playerOf = new Map(rows.map((r) => [r.subscriptionRowId, r.playerId]));
 
-      const logs: WebpushLogRow[] = batch.subscriptionRowIds.map((rowId) => ({
+      // Fix round 2 (ruling): `webpush_send_logs.subscription_row_id`
+      // references `push_subscriptions(id)` — a row deleted by a
+      // player/app cascade while this batch was open can NEVER be
+      // inserted there; attempting it would fail the same way on every
+      // retry, permanently blocking the campaign behind this batch. Only
+      // rows re-confirmed to still exist (`existingIds`, from a fresh
+      // `rowDetails` call) are logged/marked/deactivated — a missing one
+      // is silently dropped from every write below (it was already
+      // excluded from `accepted` when the batch left `pendente`, so
+      // nothing here double-counts or double-charges it).
+      const loggableIds = batch.subscriptionRowIds.filter((id) => existingIds.has(id));
+
+      const logs: WebpushLogRow[] = loggableIds.map((rowId) => ({
         campaignId: c.id,
         subscriptionRowId: rowId,
         playerId: playerOf.get(rowId) ?? null,
@@ -377,8 +414,8 @@ async function advanceBatch(
       await deps.markDispatches({
         tenantId: c.tenant_id,
         campaignId: c.id,
-        sentIds: batch.subscriptionRowIds.filter((id) => !refusedSet.has(id)),
-        failedIds: batch.subscriptionRowIds.filter((id) => refusedSet.has(id)),
+        sentIds: loggableIds.filter((id) => !refusedSet.has(id)),
+        failedIds: loggableIds.filter((id) => refusedSet.has(id)),
         sentAt: deps.now(),
       });
 
@@ -389,8 +426,9 @@ async function advanceBatch(
       // failed for an unrelated reason (bad key, malformed request, ...),
       // which says nothing about the subscriptions themselves — never
       // deactivate them, only log/mark them `recusado`.
-      if (batch.status === "liquidado" && refusedSet.size > 0) {
-        await deps.deactivate([...refusedSet]);
+      const refusedExistingIds = loggableIds.filter((id) => refusedSet.has(id));
+      if (batch.status === "liquidado" && refusedExistingIds.length > 0) {
+        await deps.deactivate(refusedExistingIds);
       }
 
       await deps.updateBatch(batch.id, { status: "concluido" });
@@ -471,12 +509,18 @@ export async function processWebpushCampaignTick(
     // fetching a new page (never past an un-batched row — see module header).
     const flush = await deps.concludedTotals(c.id);
     if (flush.maxRowId && flush.maxRowId !== c.sent_cursor) {
-      await deps.updateCampaign(c, {
+      const ok = await deps.updateCampaign(c, {
         sent_cursor: flush.maxRowId,
         sent_count: flush.sent,
         failed_count: flush.failed,
         locked_at: deps.now().toISOString(),
       });
+      // Fix round 2 (lock-token guard regression): another worker re-claimed
+      // this campaign (its lock no longer matches) — stop immediately,
+      // before fetching a new page or creating any batch under a lock we no
+      // longer hold. Mirrors the guard every other `updateCampaign` call
+      // site already gets implicitly by returning right after its patch.
+      if (!ok) return returnWithTotals(c.id, deps, "enviando");
       c = { ...c, sent_cursor: flush.maxRowId };
     }
 
@@ -556,6 +600,48 @@ function iconUrlLoader() {
     cache.set(tenantId, promise);
     return promise;
   };
+}
+
+/**
+ * Fix round 2: `refundUsage` (wallet.server.ts) deliberately swallows every
+ * failure (RPC/transport error, or `wallet_refund` refusing for any other
+ * reason) — fine for its other, fire-and-forget callers, but wrong here:
+ * the state machine above relies on a refund either genuinely happening or
+ * throwing, never silently doing nothing while the caller believes it
+ * succeeded (that was letting a transient failure during settlement reach
+ * `liquidado` — or a permanent send failure reach `falhou` — with the
+ * original reservation never actually reversed: the house pays for units
+ * it also re-reserved, or for a push that was never sent at all). Calls
+ * `wallet_refund` directly: a transport/RPC error, or any refusal other
+ * than "there is nothing left to refund" (`reservation_not_found`,
+ * `already_refunded` — both meaning a previous attempt already finished
+ * the job), throws so the batch stays exactly where it was and the next
+ * resume retries this same refund.
+ *
+ * `db` is parameterized (rather than closing over `webpushDb` directly) so
+ * this exact contract — throw vs. resolve per `wallet_refund`'s response —
+ * is unit-testable without a real database
+ * (campaign-dispatch.server.test.ts's "refundOrThrow" suite).
+ */
+export async function refundOrThrow(
+  db: { rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }> },
+  args: RefundUsageArgs,
+): Promise<void> {
+  const { data, error } = await db.rpc("wallet_refund", {
+    _tenant: args.tenantId,
+    _reference_id: args.referenceId,
+    _idempotency_key: args.idempotencyKey,
+    _reason: args.reason,
+  });
+  if (error) throw new Error(`wallet_refund falhou: ${error.message}`);
+  const result = (data ?? {}) as { ok?: boolean; reason?: string };
+  if (
+    result.ok === false &&
+    result.reason !== "reservation_not_found" &&
+    result.reason !== "already_refunded"
+  ) {
+    throw new Error(`wallet_refund recusado: ${result.reason ?? "unknown"}`);
+  }
 }
 
 function toDispatchBatch(row: Record<string, unknown>): WebpushDispatchBatch {
@@ -652,10 +738,6 @@ function realWebpushDeps(loadIconUrl: (tenantId: string) => Promise<string | nul
       if (error) throw new Error(error.message);
       return toDispatchBatch(data as Record<string, unknown>);
     },
-    async deleteBatch(batchId) {
-      const { error } = await webpushDb.from("webpush_dispatch_batches").delete().eq("id", batchId);
-      if (error) throw new Error(error.message);
-    },
     async rowDetails(subscriptionRowIds) {
       if (subscriptionRowIds.length === 0) return [];
       const { data, error } = await webpushDb
@@ -670,7 +752,7 @@ function realWebpushDeps(loadIconUrl: (tenantId: string) => Promise<string | nul
     prepareDispatches: (args) => prepareWebpushDispatches(webpushDb, args),
     markDispatches: (args) => markWebpushDispatches(webpushDb, args),
     reserve: (args) => reserveUsage(webpushDb, args),
-    refund: (args) => refundUsage(webpushDb, args),
+    refund: (args) => refundOrThrow(webpushDb, args),
     async send(input) {
       const iconUrl = await loadIconUrl(input.tenantId);
       return sendOneSignalPush({

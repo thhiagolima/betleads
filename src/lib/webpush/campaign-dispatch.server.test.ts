@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canSendWithinBurstLimit,
   processWebpushCampaignTick,
+  refundOrThrow,
   WEBPUSH_CAMPAIGN_NO_BALANCE_MESSAGE,
   WEBPUSH_SETTLEMENT_NO_BALANCE_MESSAGE,
   type WebpushBatchRow,
@@ -15,6 +16,8 @@ import { deterministicUuid, type OneSignalSendResult } from "./onesignal.server"
 const rowId = (n: number) => `row-${String(n).padStart(6, "0")}`;
 let batchCounter = 0;
 const nextBatchId = () => `batch-${String(++batchCounter).padStart(6, "0")}`;
+/** Matches the fake wallet's own pricing below (`reserve`'s `units * UNIT_PRICE`). */
+const UNIT_PRICE = 0.01;
 
 function campaign(over: Partial<WebpushCampaignRow> = {}): WebpushCampaignRow {
   return {
@@ -73,6 +76,8 @@ function world(opts: { appStats?: Map<string, { sentLast15m: number; active: num
   const state = {
     clock: 0,
     subs: [] as WebpushBatchRow[],
+    /** Simulates a push_subscriptions row deleted (player/app cascade) after its batch was created. */
+    deletedRowIds: new Set<string>(),
     logged: new Set<string>(),
     ledger: new Map<string, { referenceId: string; units: number; refunded: boolean }>(),
     refundedReferenceIds: new Set<string>(),
@@ -153,15 +158,16 @@ function world(opts: { appStats?: Map<string, { sentLast15m: number; active: num
       state.batches.set(batchId, updated);
       return updated;
     },
-    async deleteBatch(batchId) {
-      state.batches.delete(batchId);
-    },
     async rowDetails(subscriptionRowIds) {
       const byId = new Map(state.subs.map((r) => [r.subscriptionRowId, r]));
-      return subscriptionRowIds.map((id) => {
-        const r = byId.get(id);
-        return { subscriptionRowId: id, subscriptionId: r?.subscriptionId ?? id, playerId: r?.playerId ?? null };
-      });
+      // Mirrors a real `select ... where id in (...)`: a deleted row is
+      // simply absent from the result, never synthesized.
+      return subscriptionRowIds
+        .filter((id) => !state.deletedRowIds.has(id))
+        .map((id) => {
+          const r = byId.get(id);
+          return { subscriptionRowId: id, subscriptionId: r?.subscriptionId ?? id, playerId: r?.playerId ?? null };
+        });
     },
     async prepareDispatches() {
       // no-op: tracked links are not under test here.
@@ -183,7 +189,7 @@ function world(opts: { appStats?: Map<string, { sentLast15m: number; active: num
       }
       state.reserveIdempotentFlags.push(false);
       state.ledger.set(args.idempotencyKey, { referenceId: args.referenceId, units: args.units, refunded: false });
-      return { ok: true, idempotent: false, exempt: false, amount: args.units * 0.01, balance: 1000 };
+      return { ok: true, idempotent: false, exempt: false, amount: args.units * UNIT_PRICE, balance: 1000 };
     },
     async refund(args) {
       state.refundCalls.push({ referenceId: args.referenceId, idempotencyKey: args.idempotencyKey });
@@ -235,6 +241,22 @@ function world(opts: { appStats?: Map<string, { sentLast15m: number; active: num
 }
 
 const lastPatch = (patches: Record<string, unknown>[]) => patches[patches.length - 1];
+
+/**
+ * Net amount currently reserved-and-not-refunded in the fake ledger — the
+ * real "how much is the house actually out" number, computed independently
+ * of whatever `sent`/`failed` the tick reports. Pins "accepted × price"
+ * directly instead of trusting the tick's own counters, which is exactly
+ * the kind of double-charge/free-retry bug this fake's ledger exists to
+ * catch (see the module doc comment above).
+ */
+function netCharge(state: ReturnType<typeof world>["state"]): number {
+  let total = 0;
+  for (const entry of state.ledger.values()) {
+    if (!entry.refunded) total += entry.units * UNIT_PRICE;
+  }
+  return total;
+}
 
 describe("canSendWithinBurstLimit", () => {
   it("allows exactly 5x active subscriptions", () => {
@@ -292,6 +314,7 @@ describe("processWebpushCampaignTick", () => {
     expect(r.sent).toBe(2);
     expect(r.failed).toBe(1);
     expect(r.status).toBe("enviado");
+    expect(netCharge(state)).toBeCloseTo(2 * UNIT_PRICE, 6); // accepted × price, not 3 × price
   });
 
   it("permanent send failure, all invalid: net charge is 0 (reserved then fully refunded); subscriptions stay 'ativa'", async () => {
@@ -318,21 +341,59 @@ describe("processWebpushCampaignTick", () => {
     // campaign is reported `falhou`, same formula as "no recipient resolved"
     // elsewhere in the codebase (sent === 0 && failed > 0).
     expect(r.status).toBe("falhou");
+    expect(netCharge(state)).toBe(0);
   });
 
-  it("'Saldo insuficiente' on the initial reservation pauses the campaign before any send; the batch is deleted", async () => {
+  it("'Saldo insuficiente' on the initial reservation pauses the campaign before any send; the batch stays pendente (never deleted)", async () => {
     const { state, deps } = world();
     state.subs = [sub(1)];
     deps.reserve = async () => ({ ok: false, error: "Saldo insuficiente" });
     const r = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
 
     expect(state.sendCalls).toHaveLength(0);
-    expect(state.batches.size).toBe(0);
+    // Fix round 2: deleting the batch here was the bug — nothing was ever
+    // charged (a failed reserve writes no ledger row), so there's nothing
+    // to clean up; keeping it `pendente` is what lets the next resume
+    // retry THIS SAME batch instead of a sibling batch's cursor advancing
+    // past its never-sent rows (see the multi-app test below).
+    expect(state.batches.size).toBe(1);
+    expect([...state.batches.values()][0].status).toBe("pendente");
     expect(r.status).toBe("pausada");
     expect(lastPatch(state.patches)).toMatchObject({
       status: "pausada",
       last_error: WEBPUSH_CAMPAIGN_NO_BALANCE_MESSAGE,
       locked_by: null,
+    });
+  });
+
+  describe("Review Focus (fix round 2): 'Saldo insuficiente' on one batch of a multi-app page must never let the cursor skip its rows", () => {
+    it("app A's reserve fails first; app B's batch is never even attempted; a later tick (after top-up) sends BOTH, cursor covers both", async () => {
+      const { state, deps } = world();
+      // app-b's row has the HIGHEST id — if app-a's failed batch were
+      // deleted (the old bug) and app-b were left to finish on its own, the
+      // cursor-flush would advance past app-a's never-sent row forever.
+      state.subs = [sub(1, "app-a"), sub(2, "app-b")];
+      let reserveCalls = 0;
+      const realReserve = deps.reserve;
+      deps.reserve = async (args) => {
+        reserveCalls++;
+        if (reserveCalls === 1) return { ok: false, error: "Saldo insuficiente" };
+        return realReserve(args);
+      };
+
+      const tick1 = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
+      expect(tick1.status).toBe("pausada");
+      expect(state.sendCalls).toHaveLength(0); // app-b's batch was created but never even reached
+      expect(state.batches.size).toBe(2); // BOTH batches exist — neither was deleted
+      expect([...state.batches.values()].map((b) => b.status)).toEqual(["pendente", "pendente"]);
+      expect(lastPatch(state.patches).sent_cursor).toBeUndefined(); // cursor untouched
+
+      // "Top-up": every reserve from here on succeeds.
+      const tick2 = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
+      expect(state.sendCalls).toHaveLength(2); // both app-a and app-b now sent
+      expect(tick2.status).toBe("enviado");
+      expect(tick2.sent).toBe(2);
+      expect(netCharge(state)).toBeCloseTo(2 * UNIT_PRICE, 6);
     });
   });
 
@@ -412,6 +473,7 @@ describe("processWebpushCampaignTick", () => {
       expect(state.refundCalls).toHaveLength(0);
       expect(tick2.status).toBe("enviado");
       expect(tick2.sent).toBe(2); // charged for 2, not 0
+      expect(netCharge(state)).toBeCloseTo(2 * UNIT_PRICE, 6);
     });
 
     it("crash after send (ok) and before settlement: retry converges to the same accepted charge, no duplicate log", async () => {
@@ -475,6 +537,7 @@ describe("processWebpushCampaignTick", () => {
       expect(ajusteReserves[0].units).toBe(1);
       expect(r.status).toBe("enviado");
       expect(r.sent).toBe(1);
+      expect(netCharge(state)).toBeCloseTo(1 * UNIT_PRICE, 6); // the accepted unit only, not 2
     });
 
     it("crash right after the :ajuste reserve succeeds (before marking liquidado): retry converges without a second charge", async () => {
@@ -589,6 +652,93 @@ describe("processWebpushCampaignTick", () => {
     });
   });
 
+  describe("Review Focus (fix round 2 — controller ruling): a subscription deleted while its batch is open", () => {
+    it("a row removed by a player/app cascade is refused, not charged, not logged, not deactivated — never blocks the campaign", async () => {
+      const { state, deps } = world();
+      state.subs = [sub(1), sub(2), sub(3)];
+      // Row 2's push_subscriptions row is gone by the time the batch is
+      // advanced (player or app deleted while the batch sat `pendente`).
+      state.deletedRowIds.add(rowId(2));
+
+      const r = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
+
+      // Never sent to OneSignal: the send list is derived from rows that
+      // still exist, not from the batch's original stored id count.
+      expect(state.sendCalls[0].subscriptionIds).toEqual(["s1", "s3"]);
+      // Never charged: `accepted` is 2 (rows.length, not the original 3),
+      // so the batch is fully accepted and settles with no refund/adjust.
+      expect(netCharge(state)).toBeCloseTo(2 * UNIT_PRICE, 6);
+      // Never logged (an insert would fail its FK against push_subscriptions
+      // forever) and never deactivated (nothing to deactivate).
+      expect(state.logs.map((l) => l.subscriptionRowId).sort()).toEqual(
+        [rowId(1), rowId(3)].sort(),
+      );
+      expect(state.deactivated).toEqual([]);
+      expect(r.status).toBe("enviado");
+      expect(r.sent).toBe(2);
+    });
+
+    it("a row that disappears between settlement and the logging step is dropped from logs/marks/deactivate, not retried forever", async () => {
+      const { state, deps } = world();
+      state.subs = [sub(1), sub(2)];
+      state.sendResponder = async () => ({
+        ok: true,
+        notificationId: "note-1",
+        invalidSubscriptionIds: ["s2"], // row 2 refused by OneSignal itself
+      });
+      // Row 1 (the ACCEPTED one) disappears only after settlement — i.e. the
+      // batch already reached `liquidado` with accepted=1 before this.
+      let updateBatchCalls = 0;
+      const realUpdateBatch = deps.updateBatch;
+      deps.updateBatch = async (id, patch) => {
+        updateBatchCalls++;
+        const result = await realUpdateBatch(id, patch);
+        if (updateBatchCalls === 2) state.deletedRowIds.add(rowId(1)); // right after liquidado is persisted
+        return result;
+      };
+
+      const r = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
+
+      // Row 1 was charged (it was genuinely accepted before it vanished)
+      // but is never logged/marked/deactivated once gone; row 2 (refused,
+      // never charged) is logged `recusado` and deactivated as usual.
+      expect(state.logs.map((l) => l.subscriptionRowId)).toEqual([rowId(2)]);
+      expect(state.marks).toEqual([{ sentIds: [], failedIds: [rowId(2)] }]);
+      expect(state.deactivated).toEqual([rowId(2)]);
+      expect(r.status).toBe("enviado");
+    });
+  });
+
+  describe("Review Focus (fix round 2 — controller ruling): the lock-token guard must stop the tick immediately, not just the report", () => {
+    it("a lost lock at the cursor flush stops before fetching a new page or creating any new batch", async () => {
+      const { state, deps } = world();
+      state.subs = [sub(1), sub(2)]; // one page, one batch
+      let nextBatchCalls = 0;
+      const realNextBatch = deps.nextBatch;
+      deps.nextBatch = async (c, after, limit) => {
+        nextBatchCalls++;
+        return realNextBatch(c, after, limit);
+      };
+      const realUpdateCampaign = deps.updateCampaign;
+      deps.updateCampaign = async (c, patch) => {
+        // Another worker re-claimed the campaign exactly at the cursor flush.
+        if ("sent_cursor" in patch) return false;
+        return realUpdateCampaign(c, patch);
+      };
+
+      const r = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
+
+      // The one batch from the first (and only) page fetch still ran its
+      // own money/log steps to completion (those aren't gated by the
+      // campaign's lock) — but the tick must stop right there: no second
+      // page fetch, no second batch, under a lock this worker no longer holds.
+      expect(nextBatchCalls).toBe(1);
+      expect(state.batches.size).toBe(1);
+      expect([...state.batches.values()][0].status).toBe("concluido");
+      expect(r.status).toBe("enviando");
+    });
+  });
+
   it("the OneSignal idempotency key is a deterministic hash of the batch id (referenceId)", async () => {
     const { state, deps } = world();
     state.subs = [sub(1)];
@@ -596,5 +746,47 @@ describe("processWebpushCampaignTick", () => {
     expect(state.sendCalls[0].idempotencyKey).toBe(
       await deterministicUuid(state.reserveCalls[0].referenceId),
     );
+  });
+});
+
+describe("refundOrThrow (fix round 2 — the real wallet_refund wiring must never swallow an error)", () => {
+  type FakeRpcDb = { rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }> };
+
+  function fakeDb(response: { data?: unknown; error?: { message: string } | null }): FakeRpcDb {
+    return {
+      rpc: async () => ({ data: response.data ?? null, error: response.error ?? null }),
+    };
+  }
+
+  const args = {
+    tenantId: "00000000-0000-4000-8000-000000000001",
+    referenceId: "batch-x",
+    idempotencyKey: "batch-x:refund",
+    reason: "test",
+  };
+
+  it("throws on a transport/RPC error (never silently swallows it)", async () => {
+    const db = fakeDb({ error: { message: "connection reset" } });
+    await expect(refundOrThrow(db, args)).rejects.toThrow(/connection reset/);
+  });
+
+  it("throws when wallet_refund refuses for a reason other than 'nothing left to refund'", async () => {
+    const db = fakeDb({ data: { ok: false, reason: "idempotency_key_conflict" } });
+    await expect(refundOrThrow(db, args)).rejects.toThrow(/idempotency_key_conflict/);
+  });
+
+  it("resolves (does not throw) when the reservation was already refunded by a previous attempt", async () => {
+    const db = fakeDb({ data: { ok: false, reason: "already_refunded" } });
+    await expect(refundOrThrow(db, args)).resolves.toBeUndefined();
+  });
+
+  it("resolves (does not throw) when the reservation was never found (settled by a previous attempt)", async () => {
+    const db = fakeDb({ data: { ok: false, reason: "reservation_not_found" } });
+    await expect(refundOrThrow(db, args)).resolves.toBeUndefined();
+  });
+
+  it("resolves on a genuine success", async () => {
+    const db = fakeDb({ data: { ok: true, idempotent: false, amount: 0.02, balance: 10 } });
+    await expect(refundOrThrow(db, args)).resolves.toBeUndefined();
   });
 });
