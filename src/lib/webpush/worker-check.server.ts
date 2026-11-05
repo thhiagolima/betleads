@@ -57,7 +57,9 @@ export async function checkWorkerFile(origin: string): Promise<WorkerCheckResult
       return { ok: false, reason: "inacessivel" };
     }
 
-    if (redirectUrl.host !== requestHost) return { ok: false, reason: "inacessivel" };
+    if (redirectUrl.host !== requestHost || redirectUrl.protocol !== "https:") {
+      return { ok: false, reason: "inacessivel" };
+    }
 
     let followed: Response;
     try {

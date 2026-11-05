@@ -104,6 +104,22 @@ describe("checkWorkerFile", () => {
     expect(result).toEqual({ ok: false, reason: "inacessivel" });
   });
 
+  it("returns inacessivel for a same-host redirect that downgrades to http", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(null, {
+        status: 301,
+        headers: { location: "http://bravabet365.com/push/onesignal/OneSignalSDKWorker.js" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { checkWorkerFile } = await import("./worker-check.server");
+    const result = await checkWorkerFile("https://bravabet365.com");
+
+    expect(result).toEqual({ ok: false, reason: "inacessivel" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("follows a same-host redirect once and evaluates the final response", async () => {
     const fetchMock = vi
       .fn()
