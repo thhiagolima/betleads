@@ -290,11 +290,22 @@ export const getJourneyReportDetails = createServerFn({ method: "GET" })
 export const getCampaignReportDetails = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((value: unknown) => campaignDetailsSchema.parse(value))
-  .handler(async ({ data, context }) => {
-    const tenantId = await resolveOperationalTenantId(context.supabase);
-    const db = context.supabase as any;
+  .handler(async ({ data, context }) => getCampaignReportDetailsFor(context, data));
 
-    const [smsResult, emailResult, voiceResult, dispatchResult] = await Promise.all([
+/**
+ * Pure body of `getCampaignReportDetails`, extracted so it can be unit tested
+ * against `createFakeDb()` (the compiled server fn is replaced by a stub
+ * outside the TanStack Start server, same reason `getMarketingOverviewFor`
+ * exists in marketing.functions.ts).
+ */
+export async function getCampaignReportDetailsFor(
+  context: { supabase: unknown },
+  data: { campaignId: string; limit: number },
+) {
+  const db = context.supabase as any;
+  const tenantId = await resolveOperationalTenantId(db);
+
+  const [smsResult, emailResult, voiceResult, webpushResult, dispatchResult] = await Promise.all([
       db
         .from("sms_campaigns")
         .select(
@@ -319,6 +330,19 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
         .eq("tenant_id", tenantId)
         .eq("id", data.campaignId)
         .maybeSingle(),
+      // webpush_campaigns has no `authenticated` grant (service_role only, like every
+      // other Task 1 webpush table) — the caller's authenticated client always gets a
+      // permission-denied error here. Read it with supabaseAdmin instead, scoped by the
+      // already-resolved tenantId so this stays tenant-safe, and never let a failure here
+      // (RLS edge case, table outage) take down the SMS/e-mail/voice report below.
+      supabaseAdmin
+        .from("webpush_campaigns")
+        .select(
+          "id,name,title,body,status,target_count,sent_count,failed_count,scheduled_at,created_at,updated_at",
+        )
+        .eq("tenant_id", tenantId)
+        .eq("id", data.campaignId)
+        .maybeSingle(),
       db
         .from("link_dispatches")
         .select(
@@ -333,10 +357,19 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
     if (dispatchResult.error) throw new Error(dispatchResult.error.message);
     const sourceError = [smsResult.error, emailResult.error, voiceResult.error].find(Boolean);
     if (sourceError) throw new Error(sourceError.message);
+    // A webpush lookup failure (RLS edge case, table outage) must not break the report
+    // for the other channels: treat it as "no webpush campaign found" instead of throwing.
+    if (webpushResult.error) {
+      console.error("getCampaignReportDetailsFor: webpush_campaigns lookup failed", {
+        campaignId: data.campaignId,
+        error: webpushResult.error.message,
+      });
+    }
 
     const sms = smsResult.data;
     const email = emailResult.data;
     const voice = voiceResult.data;
+    const webpush = webpushResult.error ? null : webpushResult.data;
     const [voiceHistoryResult, voicePlayerResult, voiceScriptResult, voiceAssetResult] = voice
       ? await Promise.all([
           db
@@ -449,7 +482,26 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
               audience: 1,
               lastError: null,
             }
-          : null;
+          : webpush
+            ? {
+                channel: "webpush" as const,
+                name: webpush.name,
+                content: webpush.title ? `${webpush.title} — ${webpush.body}` : webpush.body,
+                route: "Web Push",
+                status: webpush.status,
+                total: Number(webpush.target_count ?? 0),
+                sent: Number(webpush.sent_count ?? 0),
+                deduplicated: 0,
+                failed: Number(webpush.failed_count ?? 0),
+                scheduledAt: webpush.scheduled_at,
+                createdAt: webpush.created_at,
+                finishedAt: ["enviado", "falhou", "cancelada"].includes(webpush.status)
+                  ? webpush.updated_at
+                  : null,
+                audience: Number(webpush.target_count ?? 0),
+                lastError: null,
+              }
+            : null;
 
     const voiceDetails = voice
       ? {
@@ -688,8 +740,8 @@ export const getCampaignReportDetails = createServerFn({ method: "GET" })
           groups[reason] = (groups[reason] ?? 0) + 1;
           return groups;
         }, {}),
-    };
-  });
+  };
+}
 
 export const exportCampaignRecipientsCsv = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

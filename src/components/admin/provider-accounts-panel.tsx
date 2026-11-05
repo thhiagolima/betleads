@@ -65,6 +65,7 @@ const CREDENTIAL_FIELDS: Record<Provider, Array<{ key: string; label: string }>>
     { key: "chave", label: "Chave (API legada)" },
   ],
   infobip: [{ key: "api_key", label: "API key" }],
+  onesignal: [{ key: "org_api_key", label: "Chave da organização" }],
 };
 
 const CONFIG_FIELDS: Record<
@@ -99,6 +100,13 @@ const CONFIG_FIELDS: Record<
       key: "voice_from",
       label: "Número de origem das ligações (voz)",
       placeholder: "5511999990000",
+    },
+  ],
+  onesignal: [
+    {
+      key: "org_id",
+      label: "ID da organização (opcional)",
+      placeholder: "Em branco = sem organization_id nas chamadas",
     },
   ],
 };
@@ -394,6 +402,7 @@ function AccountDialog({
                 <SelectContent>
                   <SelectItem value="infobip">Infobip</SelectItem>
                   <SelectItem value="short_brasil">Short Brasil</SelectItem>
+                  <SelectItem value="onesignal">OneSignal</SelectItem>
                 </SelectContent>
               </Select>
             </div>

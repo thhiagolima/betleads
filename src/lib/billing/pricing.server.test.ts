@@ -11,8 +11,13 @@ vi.mock("@/integrations/supabase/client.server", () => ({
 import { getEffectivePrices, getReportUnitPrices } from "./pricing.server";
 
 describe("getReportUnitPrices", () => {
-  it("returns sms/voice_30s/email via billing_report_unit_price", async () => {
-    const byItem: Record<string, number> = { sms: 0.08, voice_30s: 0.09, email: 0.002 };
+  it("returns sms/voice_30s/email/webpush via billing_report_unit_price", async () => {
+    const byItem: Record<string, number> = {
+      sms: 0.08,
+      voice_30s: 0.09,
+      email: 0.002,
+      webpush: 0.01,
+    };
     rpc.mockImplementation((fn: string, args: { _tenant: string; _item: string }) => {
       expect(fn).toBe("billing_report_unit_price");
       return Promise.resolve({ data: byItem[args._item], error: null });
@@ -20,7 +25,7 @@ describe("getReportUnitPrices", () => {
 
     const prices = await getReportUnitPrices("tenant-1");
 
-    expect(prices).toEqual({ sms: 0.08, voice_30s: 0.09, email: 0.002 });
+    expect(prices).toEqual({ sms: 0.08, voice_30s: 0.09, email: 0.002, webpush: 0.01 });
   });
 
   it("throws if any item comes back null", async () => {

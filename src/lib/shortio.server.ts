@@ -18,7 +18,7 @@ const TRAILING_PUNCTUATION = /[.,;:!?]+$/;
 
 // WhatsApp is retained only so legacy callers type-check; it is never enabled
 // by defaults or tenant configuration in this rollout.
-export type LinkTrackingChannel = "sms" | "email" | "whatsapp";
+export type LinkTrackingChannel = "sms" | "email" | "whatsapp" | "webpush";
 export type LinkTrackingSource =
   | "manual"
   | "test"
@@ -685,7 +685,7 @@ export async function assertDestinationAllowed(input: {
  * status 'failed', so syncShortioMetrics (status 'active' only) never asks
  * Short.io for it.
  */
-async function getOrCreateFirstPartyTrackedLink(tenantId: string, firstPartyUrl: string) {
+export async function getOrCreateFirstPartyTrackedLink(tenantId: string, firstPartyUrl: string) {
   const db = supabaseAdmin as any;
   const hash = await canonicalHash(firstPartyUrl);
   const { error } = await db.from("tracked_links").upsert(

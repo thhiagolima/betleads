@@ -2,24 +2,30 @@
 import { z } from "zod";
 import { dbUuid } from "@/lib/zod-helpers";
 
-export const PROVIDER_CHANNELS = ["sms", "email", "voice"] as const;
+export const PROVIDER_CHANNELS = ["sms", "email", "voice", "webpush"] as const;
 export type ProviderChannelName = (typeof PROVIDER_CHANNELS)[number];
 
 export const PROVIDER_CHANNEL_LABEL: Record<ProviderChannelName, string> = {
   sms: "SMS",
   email: "E-mail",
   voice: "Voz",
+  webpush: "Web push",
 };
 
-export const PROVIDER_LABEL = { short_brasil: "Short Brasil", infobip: "Infobip" } as const;
+export const PROVIDER_LABEL = {
+  short_brasil: "Short Brasil",
+  infobip: "Infobip",
+  onesignal: "OneSignal",
+} as const;
 
 /** Channels each provider can serve. */
 export const SUPPORTED_CHANNELS: Record<
-  "short_brasil" | "infobip",
+  "short_brasil" | "infobip" | "onesignal",
   readonly ProviderChannelName[]
 > = {
   short_brasil: ["sms"],
   infobip: ["sms", "email", "voice"],
+  onesignal: ["webpush"],
 };
 
 const optionalText = z
@@ -31,7 +37,7 @@ const optionalText = z
 
 export const saveProviderAccountInput = z.object({
   id: dbUuid().optional(),
-  provider: z.enum(["short_brasil", "infobip"]),
+  provider: z.enum(["short_brasil", "infobip", "onesignal"]),
   label: z.string().trim().min(1, "Informe um nome para a conta.").max(80),
   channels: z.array(z.enum(PROVIDER_CHANNELS)).min(1, "Escolha pelo menos um canal."),
   config: z
@@ -42,6 +48,7 @@ export const saveProviderAccountInput = z.object({
       single_url: optionalText,
       bulk_url: optionalText,
       sms_from: optionalText,
+      org_id: optionalText,
     })
     .prefault({}),
   /** Only the fields being set; an empty/absent field keeps the stored value. */
@@ -51,6 +58,7 @@ export const saveProviderAccountInput = z.object({
       usuario: optionalText,
       chave: optionalText,
       api_key: optionalText,
+      org_api_key: optionalText,
     })
     .prefault({}),
 });

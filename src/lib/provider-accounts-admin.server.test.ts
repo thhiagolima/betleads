@@ -26,14 +26,16 @@ import {
   adminSaveProviderAccountFor,
   adminSetProviderAccountStatusFor,
   adminSetTenantChannelProviderFor,
+  adminTestProviderAccountFor,
 } from "./provider-accounts-admin.server";
 import {
   __resetProviderAccountsCacheForTests,
   DEFAULT_INFOBIP_ACCOUNT_ID,
+  DEFAULT_ONESIGNAL_ACCOUNT_ID,
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
 } from "./provider-accounts.server";
 import { saveProviderAccountInput } from "./provider-accounts.shared";
-import { decryptProviderCredentials } from "./secret-box.server";
+import { decryptProviderCredentials, encryptProviderCredentials } from "./secret-box.server";
 
 const ADMIN = { userId: "00000000-0000-4000-8000-0000000000ad" };
 const NOT_ADMIN = { userId: "00000000-0000-4000-8000-0000000000ee" };
@@ -63,6 +65,17 @@ function platformAccounts() {
       config: {},
       status: "active",
       created_at: "2026-10-28T00:00:01Z",
+    },
+    {
+      id: DEFAULT_ONESIGNAL_ACCOUNT_ID,
+      provider: "onesignal",
+      label: "OneSignal (padrão)",
+      channels: ["webpush"],
+      credentials_source: "env",
+      credentials_encrypted: null,
+      config: {},
+      status: "active",
+      created_at: "2026-10-28T00:00:02Z",
     },
   );
 }
@@ -134,7 +147,11 @@ describe("provider accounts admin", () => {
     expect(JSON.stringify(listing)).not.toContain("segredo-da-casa");
     expect(JSON.stringify(listing)).not.toContain("platform-infobip-key");
     expect(listing.tenants).toEqual([
-      { id: TENANT, nome: "Casa Um", accounts: { sms: null, email: null, voice: null } },
+      {
+        id: TENANT,
+        nome: "Casa Um",
+        accounts: { sms: null, email: null, voice: null, webpush: null },
+      },
     ]);
   });
 
@@ -344,6 +361,157 @@ describe("provider accounts admin", () => {
         }),
       ).rejects.toThrow(/não atende este canal/);
       expect(fake.db.rows("tenant_channel_providers")).toEqual([]);
+    });
+  });
+
+  describe("OneSignal accounts", () => {
+    it("creates an account with encrypted credentials; config carries org_id, not credentials", async () => {
+      const { id } = await save({
+        provider: "onesignal",
+        label: "OneSignal Casa Um",
+        channels: ["webpush"],
+        config: { org_id: "org-casa-1" },
+        credentials: { org_api_key: "segredo-onesignal-1234" },
+      });
+
+      const row = fake.db.rows("provider_accounts").find((r) => r.id === id)!;
+      expect(row).toMatchObject({
+        credentials_source: "db",
+        status: "active",
+        config: { org_id: "org-casa-1" },
+      });
+      expect(JSON.stringify(row)).not.toContain("segredo-onesignal");
+      expect(await decryptProviderCredentials(String(row.credentials_encrypted))).toEqual({
+        org_api_key: "segredo-onesignal-1234",
+      });
+
+      const listing = await adminListProviderAccountsFor(ADMIN);
+      const view = listing.accounts.find((a) => a.id === id)!;
+      expect(view).toMatchObject({
+        provider: "onesignal",
+        configured: true,
+        credentialHints: { org_api_key: "••••1234" },
+      });
+    });
+
+    it("rejects a channel other than webpush and missing credentials", async () => {
+      await expect(
+        save({
+          provider: "onesignal",
+          label: "x",
+          channels: ["sms"],
+          credentials: { org_api_key: "k" },
+        }),
+      ).rejects.toThrow(/não atende/);
+      await expect(
+        save({ provider: "onesignal", label: "x", channels: ["webpush"], credentials: {} }),
+      ).rejects.toThrow(/chave da organização/);
+    });
+
+    it("refuses to edit or disable the platform default", async () => {
+      await expect(
+        save({
+          id: DEFAULT_ONESIGNAL_ACCOUNT_ID,
+          provider: "onesignal",
+          label: "x",
+          channels: ["webpush"],
+          credentials: { org_api_key: "k" },
+        }),
+      ).rejects.toThrow(/variáveis de ambiente/);
+      await expect(
+        adminSetProviderAccountStatusFor(ADMIN, {
+          id: DEFAULT_ONESIGNAL_ACCOUNT_ID,
+          status: "disabled",
+        }),
+      ).rejects.toThrow(/não podem ser desativadas/);
+    });
+
+    it("assigns a house's webpush channel to its own account", async () => {
+      const id = await create(
+        {
+          provider: "onesignal",
+          label: "OneSignal Casa Um",
+          channels: ["webpush"],
+          config: { org_id: "org-casa-1" },
+          credentials: { org_api_key: "k-1" },
+        },
+        "88888888-8888-4888-8888-888888888888",
+      );
+
+      await adminSetTenantChannelProviderFor(ADMIN, {
+        tenantId: TENANT,
+        channel: "webpush",
+        accountId: id,
+      });
+
+      expect(fake.db.rows("tenant_channel_providers")).toEqual([
+        expect.objectContaining({ tenant_id: TENANT, channel: "webpush", provider_account_id: id }),
+      ]);
+    });
+
+    describe("adminTestProviderAccountFor", () => {
+      async function ownOneSignal(status = "active") {
+        const { id } = await save({
+          provider: "onesignal",
+          label: "OneSignal Casa Um",
+          channels: ["webpush"],
+          credentials: { org_api_key: "org-key-1" },
+        });
+        if (status !== "active") {
+          fake.db.rows("provider_accounts").find((r) => r.id === id)!.status = status;
+        }
+        return id;
+      }
+
+      it("200 reports the key accepted", async () => {
+        const id = await ownOneSignal();
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async () => new Response("{}", { status: 200 })),
+        );
+        const result = await adminTestProviderAccountFor(ADMIN, { id });
+        expect(result).toEqual({ ok: true, message: "Chave da organização aceita." });
+      });
+
+      it("401/403 reports the key refused", async () => {
+        const id = await ownOneSignal();
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async () => new Response("{}", { status: 401 })),
+        );
+        const result = await adminTestProviderAccountFor(ADMIN, { id });
+        expect(result).toEqual({ ok: false, message: "Chave recusada pela OneSignal." });
+      });
+
+      it("other statuses report the HTTP status", async () => {
+        const id = await ownOneSignal();
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async () => new Response("{}", { status: 500 })),
+        );
+        const result = await adminTestProviderAccountFor(ADMIN, { id });
+        expect(result).toEqual({ ok: false, message: "A OneSignal respondeu HTTP 500." });
+      });
+
+      it("never calls the real OneSignal API when unconfigured", async () => {
+        fake.db.rows("provider_accounts").push({
+          id: "99999999-9999-4999-8999-999999999999",
+          provider: "onesignal",
+          label: "OneSignal vazia",
+          channels: ["webpush"],
+          credentials_source: "db",
+          credentials_encrypted: await encryptProviderCredentials({}),
+          config: {},
+          status: "active",
+        });
+        const fetchMock = vi.fn();
+        vi.stubGlobal("fetch", fetchMock);
+        const result = await adminTestProviderAccountFor(ADMIN, {
+          id: "99999999-9999-4999-8999-999999999999",
+        });
+        expect(result.ok).toBe(false);
+        expect(fetchMock).not.toHaveBeenCalled();
+      });
     });
   });
 });

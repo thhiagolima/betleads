@@ -176,7 +176,7 @@ export const adminPlatformMetrics = createServerFn({ method: "POST" })
 // current (latest `valid_from`) row per item. Per-tenant overrides are a
 // separate, item-scoped dialog — see `src/lib/billing/billing.functions.ts`
 // (`adminSetTenantPrice`/`adminClearTenantPrice`).
-const BILLING_ITEMS = ["sms", "voice_30s", "email"] as const;
+const BILLING_ITEMS = ["sms", "voice_30s", "email", "webpush"] as const;
 
 /** Body of `getPricing`, exported so the "latest valid_from <= now()" rule is directly testable. */
 export async function getPricingFor(userId: string) {

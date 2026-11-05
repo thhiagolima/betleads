@@ -97,6 +97,9 @@ import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/pu
 import { Route as ApiPublicHooksWhatsappResumeRouteImport } from './routes/api/public/hooks/whatsapp-resume'
 import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/meta-sync/tick'
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
+import { Route as ApiPublicPushLoaderDotjsRouteImport } from './routes/api/public/push/loader[.]js'
+import { Route as ApiPublicPushSubscribeRouteImport } from './routes/api/public/push/subscribe'
+import { Route as ApiPublicPushWorkerDotjsRouteImport } from './routes/api/public/push/worker[.]js'
 import { Route as ApiPublicShortioSyncRouteImport } from './routes/api/public/shortio/sync'
 import { Route as ApiPublicTenantDomainsVerifyRouteImport } from './routes/api/public/tenant-domains/verify'
 import { Route as ApiPublicUpperWebhookRouteImport } from './routes/api/public/upper/webhook'
@@ -108,6 +111,7 @@ import { Route as ApiPublicInfobipVoiceCmlRouteImport } from './routes/api/publi
 import { Route as ApiPublicInfobipVoiceEventsRouteImport } from './routes/api/public/infobip/voice/events'
 import { Route as ApiPublicInfobipVoiceReconcileRouteImport } from './routes/api/public/infobip/voice/reconcile'
 import { Route as ApiPublicWebhookTokenEventoRouteImport } from './routes/api/public/webhook.$token.$evento'
+import { Route as ApiPublicPushCCampaignIdKeyRouteImport } from './routes/api/public/push/c.$campaignId.$key'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -570,6 +574,23 @@ const ApiPublicPrecallDispatchRoute =
     path: '/api/public/precall/dispatch',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicPushLoaderDotjsRoute =
+  ApiPublicPushLoaderDotjsRouteImport.update({
+    id: '/api/public/push/loader.js',
+    path: '/api/public/push/loader.js',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicPushSubscribeRoute = ApiPublicPushSubscribeRouteImport.update({
+  id: '/api/public/push/subscribe',
+  path: '/api/public/push/subscribe',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicPushWorkerDotjsRoute =
+  ApiPublicPushWorkerDotjsRouteImport.update({
+    id: '/api/public/push/worker.js',
+    path: '/api/public/push/worker.js',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicShortioSyncRoute = ApiPublicShortioSyncRouteImport.update({
   id: '/api/public/shortio/sync',
   path: '/api/public/shortio/sync',
@@ -631,6 +652,12 @@ const ApiPublicWebhookTokenEventoRoute =
   ApiPublicWebhookTokenEventoRouteImport.update({
     id: '/api/public/webhook/$token/$evento',
     path: '/api/public/webhook/$token/$evento',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicPushCCampaignIdKeyRoute =
+  ApiPublicPushCCampaignIdKeyRouteImport.update({
+    id: '/api/public/push/c/$campaignId/$key',
+    path: '/api/public/push/c/$campaignId/$key',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -723,6 +750,9 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
+  '/api/public/push/loader.js': typeof ApiPublicPushLoaderDotjsRoute
+  '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
+  '/api/public/push/worker.js': typeof ApiPublicPushWorkerDotjsRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
@@ -734,6 +764,7 @@ export interface FileRoutesByFullPath {
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
+  '/api/public/push/c/$campaignId/$key': typeof ApiPublicPushCCampaignIdKeyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -824,6 +855,9 @@ export interface FileRoutesByTo {
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
+  '/api/public/push/loader.js': typeof ApiPublicPushLoaderDotjsRoute
+  '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
+  '/api/public/push/worker.js': typeof ApiPublicPushWorkerDotjsRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
@@ -835,6 +869,7 @@ export interface FileRoutesByTo {
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
+  '/api/public/push/c/$campaignId/$key': typeof ApiPublicPushCCampaignIdKeyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -926,6 +961,9 @@ export interface FileRoutesById {
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
+  '/api/public/push/loader.js': typeof ApiPublicPushLoaderDotjsRoute
+  '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
+  '/api/public/push/worker.js': typeof ApiPublicPushWorkerDotjsRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
@@ -937,6 +975,7 @@ export interface FileRoutesById {
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
+  '/api/public/push/c/$campaignId/$key': typeof ApiPublicPushCCampaignIdKeyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -1029,6 +1068,9 @@ export interface FileRouteTypes {
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
+    | '/api/public/push/loader.js'
+    | '/api/public/push/subscribe'
+    | '/api/public/push/worker.js'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
     | '/api/public/upper/webhook'
@@ -1040,6 +1082,7 @@ export interface FileRouteTypes {
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
     | '/api/public/webhook/$token/$evento'
+    | '/api/public/push/c/$campaignId/$key'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -1130,6 +1173,9 @@ export interface FileRouteTypes {
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
+    | '/api/public/push/loader.js'
+    | '/api/public/push/subscribe'
+    | '/api/public/push/worker.js'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
     | '/api/public/upper/webhook'
@@ -1141,6 +1187,7 @@ export interface FileRouteTypes {
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
     | '/api/public/webhook/$token/$evento'
+    | '/api/public/push/c/$campaignId/$key'
   id:
     | '__root__'
     | '/'
@@ -1231,6 +1278,9 @@ export interface FileRouteTypes {
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
+    | '/api/public/push/loader.js'
+    | '/api/public/push/subscribe'
+    | '/api/public/push/worker.js'
     | '/api/public/shortio/sync'
     | '/api/public/tenant-domains/verify'
     | '/api/public/upper/webhook'
@@ -1242,6 +1292,7 @@ export interface FileRouteTypes {
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
     | '/api/public/webhook/$token/$evento'
+    | '/api/public/push/c/$campaignId/$key'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1315,6 +1366,9 @@ export interface RootRouteChildren {
   ApiPublicHooksWhatsappResumeRoute: typeof ApiPublicHooksWhatsappResumeRoute
   ApiPublicMetaSyncTickRoute: typeof ApiPublicMetaSyncTickRoute
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
+  ApiPublicPushLoaderDotjsRoute: typeof ApiPublicPushLoaderDotjsRoute
+  ApiPublicPushSubscribeRoute: typeof ApiPublicPushSubscribeRoute
+  ApiPublicPushWorkerDotjsRoute: typeof ApiPublicPushWorkerDotjsRoute
   ApiPublicShortioSyncRoute: typeof ApiPublicShortioSyncRoute
   ApiPublicTenantDomainsVerifyRoute: typeof ApiPublicTenantDomainsVerifyRoute
   ApiPublicUpperWebhookRoute: typeof ApiPublicUpperWebhookRoute
@@ -1326,6 +1380,7 @@ export interface RootRouteChildren {
   ApiPublicInfobipVoiceEventsRoute: typeof ApiPublicInfobipVoiceEventsRoute
   ApiPublicInfobipVoiceReconcileRoute: typeof ApiPublicInfobipVoiceReconcileRoute
   ApiPublicWebhookTokenEventoRoute: typeof ApiPublicWebhookTokenEventoRoute
+  ApiPublicPushCCampaignIdKeyRoute: typeof ApiPublicPushCCampaignIdKeyRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1946,6 +2001,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicPrecallDispatchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/push/loader.js': {
+      id: '/api/public/push/loader.js'
+      path: '/api/public/push/loader.js'
+      fullPath: '/api/public/push/loader.js'
+      preLoaderRoute: typeof ApiPublicPushLoaderDotjsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/push/subscribe': {
+      id: '/api/public/push/subscribe'
+      path: '/api/public/push/subscribe'
+      fullPath: '/api/public/push/subscribe'
+      preLoaderRoute: typeof ApiPublicPushSubscribeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/push/worker.js': {
+      id: '/api/public/push/worker.js'
+      path: '/api/public/push/worker.js'
+      fullPath: '/api/public/push/worker.js'
+      preLoaderRoute: typeof ApiPublicPushWorkerDotjsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/shortio/sync': {
       id: '/api/public/shortio/sync'
       path: '/api/public/shortio/sync'
@@ -2021,6 +2097,13 @@ declare module '@tanstack/react-router' {
       path: '/api/public/webhook/$token/$evento'
       fullPath: '/api/public/webhook/$token/$evento'
       preLoaderRoute: typeof ApiPublicWebhookTokenEventoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/push/c/$campaignId/$key': {
+      id: '/api/public/push/c/$campaignId/$key'
+      path: '/api/public/push/c/$campaignId/$key'
+      fullPath: '/api/public/push/c/$campaignId/$key'
+      preLoaderRoute: typeof ApiPublicPushCCampaignIdKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -2250,6 +2333,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksWhatsappResumeRoute: ApiPublicHooksWhatsappResumeRoute,
   ApiPublicMetaSyncTickRoute: ApiPublicMetaSyncTickRoute,
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
+  ApiPublicPushLoaderDotjsRoute: ApiPublicPushLoaderDotjsRoute,
+  ApiPublicPushSubscribeRoute: ApiPublicPushSubscribeRoute,
+  ApiPublicPushWorkerDotjsRoute: ApiPublicPushWorkerDotjsRoute,
   ApiPublicShortioSyncRoute: ApiPublicShortioSyncRoute,
   ApiPublicTenantDomainsVerifyRoute: ApiPublicTenantDomainsVerifyRoute,
   ApiPublicUpperWebhookRoute: ApiPublicUpperWebhookRoute,
@@ -2261,6 +2347,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicInfobipVoiceEventsRoute: ApiPublicInfobipVoiceEventsRoute,
   ApiPublicInfobipVoiceReconcileRoute: ApiPublicInfobipVoiceReconcileRoute,
   ApiPublicWebhookTokenEventoRoute: ApiPublicWebhookTokenEventoRoute,
+  ApiPublicPushCCampaignIdKeyRoute: ApiPublicPushCCampaignIdKeyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

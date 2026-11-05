@@ -1090,6 +1090,7 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
                 <SelectItem value="sms">SMS</SelectItem>
                 <SelectItem value="voice_30s">Voz</SelectItem>
                 <SelectItem value="email">E-mail</SelectItem>
+                <SelectItem value="webpush">Web Push</SelectItem>
               </SelectContent>
             </Select>
           </div>
