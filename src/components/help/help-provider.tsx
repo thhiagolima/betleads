@@ -324,7 +324,18 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setScreenOverride = useCallback((route: string | null, tab?: string | null) => {
-    setOverride(route ? { route, tab: tab ?? null } : null);
+    setOverride((prev) => {
+      const next = route ? { route, tab: tab ?? null } : null;
+      // Defense in depth: bail out when nothing actually changed, so a
+      // caller that re-applies the same override every render (or every
+      // effect run) doesn't force a new object identity — and therefore a
+      // re-render of every consumer of `target`/`currentScreen` — for
+      // nothing.
+      if (prev === next) return prev;
+      if (prev === null || next === null) return next;
+      if (prev.route === next.route && prev.tab === next.tab) return prev;
+      return next;
+    });
   }, []);
 
   const value = useMemo<HelpContextValue>(

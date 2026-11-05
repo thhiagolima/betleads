@@ -11,7 +11,7 @@
 // call throws for a locked house.
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useHelp } from "@/components/help/help-provider";
 import { HOUSE_SETUP_STATUS_QUERY_KEY } from "@/components/house-config/house-config-query";
@@ -19,6 +19,18 @@ import { useTenantAccessStatus } from "@/components/tenant-status-gate";
 import { billingView } from "@/lib/billing/billing-view";
 import { getHouseSetupStatus } from "@/lib/house-config.functions";
 import { HouseSetupWizard, type WizardStepId } from "@/components/onboarding/house-setup-wizard";
+
+/** Pure: what the help context should look like while the wizard
+ * shows/doesn't show — `OnboardingGate`'s `useEffect` just applies this.
+ * Kept pure (and exported) so it's unit-testable without React: effects
+ * never run under `renderToStaticMarkup` (no jsdom in this repo). */
+export function onboardingHelpTarget(
+  showWizard: boolean,
+  step: WizardStepId,
+): { overlayActive: boolean; overrideRoute: string | null; overrideTab: string | null } {
+  if (!showWizard) return { overlayActive: false, overrideRoute: null, overrideTab: null };
+  return { overlayActive: true, overrideRoute: "onboarding", overrideTab: step };
+}
 
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const access = useTenantAccessStatus();
@@ -43,19 +55,24 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // While the wizard shows, the screen underneath must not auto-start its
   // own tour (`setOverlayActive(true)`), and the help panel/tour must refer
   // to the wizard's own article instead (`setScreenOverride`), one tour per
-  // step (`tour:onboarding#<passo>`). `OnboardingGate` is always mounted
-  // under `__root`, never actually unmounting between a locked/loading state
-  // and the wizard showing, so "ao montar"/"ao desmontar" is simply "while
-  // showing"/"while not showing", applied on every render — no effect, no
-  // cleanup needed.
+  // step (`tour:onboarding#<passo>`). Both are state setters owned by the
+  // ancestor `HelpProvider` — calling them during this component's own
+  // render (instead of an effect) triggers a render-phase update to a
+  // different component and, since `setScreenOverride` used to build a new
+  // object on every call, re-renders `HelpProvider` → re-renders this gate →
+  // calls it again: an infinite loop in a real browser. A `useEffect` is
+  // the correct place for this; cleanup reverts both when the wizard stops
+  // showing or the step changes.
   const { setOverlayActive, setScreenOverride } = useHelp();
-  if (showWizard) {
-    setOverlayActive(true);
-    setScreenOverride("onboarding", step);
-  } else {
-    setOverlayActive(false);
-    setScreenOverride(null);
-  }
+  useEffect(() => {
+    const target = onboardingHelpTarget(showWizard, step);
+    setOverlayActive(target.overlayActive);
+    setScreenOverride(target.overrideRoute, target.overrideTab);
+    return () => {
+      setOverlayActive(false);
+      setScreenOverride(null);
+    };
+  }, [showWizard, step, setOverlayActive, setScreenOverride]);
 
   if (!showWizard) {
     return <>{children}</>;

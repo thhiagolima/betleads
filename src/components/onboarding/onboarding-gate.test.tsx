@@ -40,7 +40,7 @@ vi.mock("@/components/help/help-provider", () => ({
   useHelp: () => helpMock,
 }));
 
-import { OnboardingGate } from "./onboarding-gate";
+import { OnboardingGate, onboardingHelpTarget } from "./onboarding-gate";
 
 function billing(over: Record<string, unknown> = {}) {
   return {
@@ -79,19 +79,6 @@ describe("OnboardingGate", () => {
     expect(setupQueryOptions.at(-1)?.enabled).toBe(true);
   });
 
-  it("activates the help overlay and overrides the screen to 'onboarding' when the wizard shows", () => {
-    render();
-    expect(helpMock.setOverlayActive).toHaveBeenCalledWith(true);
-    expect(helpMock.setScreenOverride).toHaveBeenCalledWith("onboarding", "casa");
-  });
-
-  it("deactivates the help overlay and clears the override when the wizard doesn't show", () => {
-    accessState.data = { blocked: false, tenant: null, billing: billing() };
-    render();
-    expect(helpMock.setOverlayActive).toHaveBeenCalledWith(false);
-    expect(helpMock.setScreenOverride).toHaveBeenCalledWith(null);
-  });
-
   it("skips the wizard (and the setup query) for a house locked for the monthly fee", () => {
     accessState.data = { blocked: false, tenant: null, billing: billing() };
     const html = render();
@@ -116,5 +103,33 @@ describe("OnboardingGate", () => {
       billing: billing({ effectiveLock: false, enforcement: false }),
     };
     expect(render()).toContain("assistente-de-configuracao");
+  });
+});
+
+// `OnboardingGate` applies this inside a `useEffect` (so cleanup can revert
+// it on hide/unmount) — effects never run under `renderToStaticMarkup` (no
+// jsdom in this repo), so the gate's render-only tests above can't observe
+// `setOverlayActive`/`setScreenOverride` being called. This pure function is
+// what the effect applies, tested directly instead.
+describe("onboardingHelpTarget", () => {
+  it("activates the overlay and overrides the screen to 'onboarding' at the current step, while showing", () => {
+    expect(onboardingHelpTarget(true, "casa")).toEqual({
+      overlayActive: true,
+      overrideRoute: "onboarding",
+      overrideTab: "casa",
+    });
+    expect(onboardingHelpTarget(true, "pronto")).toEqual({
+      overlayActive: true,
+      overrideRoute: "onboarding",
+      overrideTab: "pronto",
+    });
+  });
+
+  it("deactivates the overlay and clears the override when not showing, regardless of step", () => {
+    expect(onboardingHelpTarget(false, "email")).toEqual({
+      overlayActive: false,
+      overrideRoute: null,
+      overrideTab: null,
+    });
   });
 });

@@ -51,7 +51,7 @@ const screen: HelpScreen = {
           label: "Avançar / Concluir",
           what: 'O botão principal do rodapé: chama-se "Avançar" em Casa, Encurtador e E-mail, e "Concluir" no último passo (Pronto). No passo Casa, "Avançar" primeiro salva a URL da casa e as URLs rápidas que você tiver digitado (mesmo sem clicar em "Salvar" dentro do passo) antes de seguir adiante; nos outros passos ele só avança. "Concluir" fecha o assistente de vez, com a configuração marcada como feita.',
           notes:
-            'Se o salvamento automático do passo Casa falhar (por exemplo, "URL inválida"), o assistente continua no mesmo passo e mostra o erro — nada avança até corrigir.',
+            'Enquanto salva, o texto do botão muda para "Salvando…" (passo Casa) ou "Concluindo…" (passo Pronto) e ele fica desabilitado até terminar. Se o salvamento automático do passo Casa falhar (por exemplo, "URL inválida"), o assistente continua no mesmo passo e mostra o erro — nada avança até corrigir.',
         },
       ],
     },
@@ -76,7 +76,20 @@ const screen: HelpScreen = {
     },
   ],
 
-  states: [],
+  states: [
+    {
+      id: "pular-falhou",
+      title: "Erro ao salvar que o assistente foi pulado",
+      what: 'Se "Pular configuração" não conseguir gravar (uma falha de comunicação com o banco de dados), aparece um aviso com a mensagem do erro e o assistente continua na tela, no mesmo passo.',
+      action: "Tente novamente; se continuar falhando, recarregue a página e tente de novo.",
+    },
+    {
+      id: "concluir-falhou",
+      title: "Erro ao concluir a configuração",
+      what: 'Se "Concluir" (passo Pronto) não conseguir gravar (uma falha de comunicação com o banco de dados), aparece um aviso com a mensagem do erro e o assistente continua na tela, no passo Pronto.',
+      action: "Tente novamente; se continuar falhando, recarregue a página e tente de novo.",
+    },
+  ],
 
   tours: {
     casa: [
