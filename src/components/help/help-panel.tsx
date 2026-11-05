@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { GLOSSARY } from "@/help/glossary";
 import { GUIDES } from "@/help/guides";
 import { loadAllHelpScreens } from "@/help/registry";
+import { effectiveTab, tabSectionId } from "@/help/resolve";
 import {
   buildSearchIndex,
   canOpenRoute,
@@ -206,7 +207,7 @@ function Article({
 export function HelpPanelView(props: HelpPanelViewProps) {
   const { screen, role, glossary, query, results, highlightTermId, currentTab } = props;
   const searching = query.trim().length >= 2;
-  const hasTour = !!screen && tourFor(screen, currentTab).steps.length > 0;
+  const hasTour = !!screen && tourFor(screen, effectiveTab(screen, currentTab)).steps.length > 0;
 
   return (
     <div className="space-y-6">
@@ -467,10 +468,11 @@ export function HelpPanel(props: HelpPanelProps) {
   const toggleArticle = () => {
     const next = !articleOpen;
     setArticleOpen(next);
-    if (!next || !screen || !currentTab) return;
-    // Screens with tabs open on the first section of the current tab.
-    const section = screen.sections.find((s) => s.tab === currentTab);
-    if (section) setScrollTarget({ domId: sectionDomId(section.id), nonce: Date.now() });
+    if (!next || !screen) return;
+    // Screens with tabs open on the first section of the tab showing (the
+    // screen's `defaultTab` when the URL has no hash).
+    const sectionId = tabSectionId(screen, currentTab);
+    if (sectionId) setScrollTarget({ domId: sectionDomId(sectionId), nonce: Date.now() });
   };
 
   return (

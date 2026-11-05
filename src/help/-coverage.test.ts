@@ -15,7 +15,12 @@ import {
   extractTourAnchorCalls,
   isTestFile,
 } from "./coverage-scan";
-import { ANCHORS_PENDING_ARTICLE, EXCLUDED_ROUTES, PENDING_ROUTES } from "./coverage-config";
+import {
+  ANCHORS_PENDING_ARTICLE,
+  EXCLUDED_ROUTES,
+  PENDING_ROUTES,
+  VIRTUAL_SCREENS,
+} from "./coverage-config";
 import { GLOSSARY } from "./glossary";
 import { GUIDES } from "./guides";
 import { HELP_SCREEN_LOADERS } from "./registry";
@@ -201,6 +206,32 @@ describe("help coverage", () => {
       expect(mod.default.route, `HELP_SCREEN_LOADERS["${key}"] carrega um artigo de outra rota`).toBe(
         key,
       );
+    }
+  });
+
+  it("tela com tours só por aba (sem \"default\") declara defaultTab, e ele é uma aba dela", async () => {
+    // Without a hash the route shows its own fallback tab, but resolveHelpScreen
+    // gives tab null; `effectiveTab` maps that to `defaultTab`. Virtual screens
+    // (onboarding, shell) are exempt: they never come from a URL — the
+    // override always names the tab.
+    const virtual = new Set<string>(VIRTUAL_SCREENS);
+    for (const screen of await loadAllScreens()) {
+      if (virtual.has(screen.route)) continue;
+      const tourTabs = Object.keys(screen.tours);
+      const onlyTabTours = tourTabs.length > 0 && !tourTabs.includes("default");
+      if (onlyTabTours) {
+        expect(
+          screen.defaultTab,
+          `"${screen.id}" só tem tours por aba (${tourTabs.join(", ")}) e não declara defaultTab`,
+        ).toBeTruthy();
+      }
+      if (!screen.defaultTab) continue;
+      const sectionTabs = new Set(screen.sections.map((section) => section.tab).filter(Boolean));
+      const pendingTab = PENDING_ROUTES.includes(`${screen.route}#${screen.defaultTab}`);
+      expect(
+        sectionTabs.has(screen.defaultTab) || pendingTab,
+        `defaultTab "${screen.defaultTab}" de "${screen.id}" não é aba de nenhuma seção (nem pendente em PENDING_ROUTES)`,
+      ).toBe(true);
     }
   });
 

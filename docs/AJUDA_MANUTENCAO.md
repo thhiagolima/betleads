@@ -12,10 +12,10 @@ Isso vale para qualquer controle interativo novo, inclusive dentro de diálogos 
 ## Estrutura de `src/help/`
 
 - **`types.ts`** — os tipos do conteúdo: `HelpScreen` (um artigo), `HelpSection`, `HelpItem`, `HelpState`, `TourStep`, `GlossaryTerm`. Dados puros, sem MDX, para o teste de cobertura conseguir percorrer tudo.
-- **`screens/*.ts`** — um arquivo por artigo, cada um exportando um `HelpScreen` default (ex.: `screens/webhooks.ts`, `screens/shell.ts`). Cada artigo tem `sections` (os controles, agrupados), `states` (vazio/erro/bloqueio) e `tours` (um `TourStep[]` por aba, chave `"default"` quando a tela não tem abas).
+- **`screens/*.ts`** — um arquivo por artigo, cada um exportando um `HelpScreen` default (ex.: `screens/webhooks.ts`, `screens/shell.ts`). Cada artigo tem `sections` (os controles, agrupados), `states` (vazio/erro/bloqueio) e `tours` (um `TourStep[]` por aba, chave `"default"` quando a tela não tem abas). Tela com abas cujos tours são todos por aba (sem `"default"`) declara `defaultTab`: a aba que a rota mostra quando a URL não tem `#` (ex.: `"casa"` em `/configuracoes/casa`). Sem isso, a URL de entrada não acharia tour nenhum; com isso, `/configuracoes/casa` e `/configuracoes/casa#casa` usam o mesmo tour e a mesma chave de progresso (`effectiveTab`, em `resolve.ts`).
 - **`guides.ts`** — os "Guias passo a passo" do painel (ex.: "Configurar o encurtador de links"). Cada `GuideStep` aponta para uma rota/aba/âncora e um `signal` (um booleano vindo do banco) que diz se o passo já foi concluído.
 - **`glossary.ts`** — o `GLOSSARY`: um registro por termo/sigla (`id`, `term`, `short`, `long?`), usado pelo componente `<Term id="...">` (`src/components/help/term.tsx`) e por `screen.terms`.
-- **`registry.ts`** — `HELP_SCREEN_LOADERS`: um `import()` por artigo, chaveado pela rota exata de `ROUTE_META` (`src/lib/navigation.ts`) ou por um id de `VIRTUAL_SCREENS`. É o único lugar que registra um artigo — sem entrada aqui, a tela não tem artigo nenhum, mesmo que o arquivo em `screens/` exista.
+- **`registry.ts`** — `HELP_SCREEN_LOADERS`: um `import()` por artigo, chaveado pela rota exata de `ROUTE_META` (`src/lib/navigation.ts`) ou por um id de `VIRTUAL_SCREENS`. É o único lugar que registra um artigo — sem entrada aqui, a tela não tem artigo nenhum, mesmo que o arquivo em `screens/` exista. O artigo carregado precisa ter `route` igual à chave (o painel só mostra o artigo quando `screen.route` bate com a rota resolvida): um mesmo artigo em duas rotas exporta uma cópia com a outra `route` (ex.: `editScreen` em `screens/jornada-editor.ts`, para `/jornadas/$journeyId`), com o mesmo `id` — a busca indexa cada `id` uma vez só.
 - **`coverage-config.ts`** — a classificação de toda rota de `ROUTE_META`:
   - `PENDING_ROUTES`: tela ainda sem artigo (com o motivo/fase em comentário). Pode ser a rota inteira ou `"/rota#aba"` para pendência só de uma aba/seção.
   - `EXCLUDED_ROUTES`: tela que nunca vai ter artigo (super admin, rota só de redirect, endpoint não-UI). Toda entrada aqui precisa ser uma rota real de `ROUTE_META`.
@@ -33,7 +33,7 @@ Isso vale para qualquer controle interativo novo, inclusive dentro de diálogos 
 
 ## Como adicionar uma tela nova
 
-1. Crie `src/help/screens/<nome>.ts` exportando um `HelpScreen` default (`title`, `purpose`, `roles`, `sections`, `states`, `tours`).
+1. Crie `src/help/screens/<nome>.ts` exportando um `HelpScreen` default (`title`, `purpose`, `roles`, `sections`, `states`, `tours` e, se a tela tiver abas, `defaultTab`).
 2. Registre em `registry.ts`, em `HELP_SCREEN_LOADERS`, com a rota exata de `ROUTE_META` (ou o id de `VIRTUAL_SCREENS`, se não houver rota).
 3. Remova a rota (ou a entrada `"/rota#aba"`) de `PENDING_ROUTES` em `coverage-config.ts`.
 4. Em cada controle interativo da tela, aplique `tourAnchor("tela.secao.elemento")` nas props do elemento e cite a mesma âncora no `HelpItem.anchor` do artigo (e no `TourStep.anchor` do tour, se o passo usar esse elemento).
@@ -51,6 +51,8 @@ Isso vale para qualquer controle interativo novo, inclusive dentro de diálogos 
 7. Todo tour tem entre 1 e 8 passos, e todo passo tem `anchor` e `body` não vazios.
 8. `GLOSSARY` não tem ids duplicados.
 9. Toda entrada de `EXCLUDED_ROUTES`/`PENDING_ROUTES` é uma rota real de `ROUTE_META` (não uma rota inventada ou já removida).
+10. Todo artigo de `HELP_SCREEN_LOADERS` tem `route` igual à sua chave.
+11. Tela (não virtual) cujos tours são todos por aba declara `defaultTab`; e todo `defaultTab` é a aba de alguma seção do artigo ou está pendente como `"/rota#aba"` em `PENDING_ROUTES` (ex.: `/webhooks`, `defaultTab: "plataforma"`, sem tour ainda — o botão do tour some nessa aba).
 
 ## Como rodar o teste
 

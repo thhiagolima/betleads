@@ -129,4 +129,17 @@ describe("HelpPanelView", () => {
       "Fazer o tour desta tela",
     );
   });
+
+  it('without a hash, "Fazer o tour desta tela" follows the screen defaultTab', () => {
+    const tabOnlyTours: HelpScreen = {
+      ...screen,
+      tours: { email: [{ anchor: "casa.email.add-domain", title: "t", body: "b" }] },
+    };
+    expect(render({ screen: tabOnlyTours, currentTab: null })).not.toContain(
+      "Fazer o tour desta tela",
+    );
+    expect(
+      render({ screen: { ...tabOnlyTours, defaultTab: "email" }, currentTab: null }),
+    ).toContain("Fazer o tour desta tela");
+  });
 });

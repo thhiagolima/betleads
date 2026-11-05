@@ -11,6 +11,9 @@ import type { HelpScreen } from "../types";
 const screen: HelpScreen = {
   id: "webhooks",
   route: "/webhooks",
+  // The route's own fallback tab; it has no section/tour yet (pending as
+  // "/webhooks#plataforma"), so the landing URL offers no tour.
+  defaultTab: "plataforma",
   title: "Integrações",
   purpose:
     "Conectar a plataforma de apostas, configurar os links curtos (encurtador) e a conta de anúncios da Meta. Esta versão do artigo cobre só a aba Links curtos.",

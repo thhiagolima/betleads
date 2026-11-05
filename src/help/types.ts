@@ -65,6 +65,11 @@ export type HelpScreen = {
   /** Keyed by "default", or by the tab (hash, without "#") for screens with
    * tabs — one tour per tab. */
   tours: Record<string, TourStep[]>;
+  /** The tab the screen opens on when the URL has no hash (the route's own
+   * fallback, e.g. "casa" for /configuracoes/casa). Required when every tour
+   * is tab-keyed (no "default"), or the landing URL would find no tour —
+   * enforced by -coverage.test.ts. Resolved by `effectiveTab` (resolve.ts). */
+  defaultTab?: string;
   /** Glossary term ids (glossary.ts) used by this screen, beyond any
    * `<Term id>` already found in its own component source. */
   terms?: string[];

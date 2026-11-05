@@ -23,6 +23,7 @@ import type { HelpScreen } from "../types";
 const screen: HelpScreen = {
   id: "automacoes",
   route: "/automacoes",
+  defaultTab: "jornadas",
   title: "Automações",
   purpose:
     "O painel de jornadas: criar, ativar/pausar, acompanhar quem está em cada etapa, ver falhas e conflitos de prioridade, a lista de leads mortos e os fluxos de ligação (voz).",

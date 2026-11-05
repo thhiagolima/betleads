@@ -11,6 +11,7 @@ import type { HelpScreen } from "../types";
 const screen: HelpScreen = {
   id: "configuracoes-casa",
   route: "/configuracoes/casa",
+  defaultTab: "casa",
   title: "Configuração da casa",
   purpose:
     "Endereço do site da casa, atalhos usados em campanhas e jornadas, os domínios próprios do encurtador de links e de e-mail (com o DNS de cada um) e os remetentes que enviam os e-mails.",

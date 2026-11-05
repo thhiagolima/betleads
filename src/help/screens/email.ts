@@ -12,6 +12,7 @@ import type { HelpScreen } from "../types";
 const screen: HelpScreen = {
   id: "email",
   route: "/email",
+  defaultTab: "visao-geral",
   title: "Email",
   purpose:
     "Visão geral dos envios de e-mail, os templates usados em campanhas e jornadas (com dois jeitos de criar: Editor Rápido e Editor Avançado) e o histórico completo de envios.",

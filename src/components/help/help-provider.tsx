@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import { useShellNav } from "@/components/shell/use-shell-nav";
 import { GUIDES, type GuideStep } from "@/help/guides";
 import { HELP_SCREEN_LOADERS } from "@/help/registry";
-import { resolveHelpScreen } from "@/help/resolve";
+import { effectiveTab, resolveHelpScreen } from "@/help/resolve";
 import type { SearchEntry } from "@/help/search";
 import { effectiveOverlayForAutoStart, shouldAutoStart, tourFor } from "@/help/tour-logic";
 import type { HelpRole, HelpScreen, TourStep } from "@/help/types";
@@ -183,7 +183,11 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     };
   }, [targetRoute]);
   const currentScreen = screen && screen.route === targetRoute ? screen : null;
-  const currentTab = target?.tab ?? null;
+  // The tab actually showing: without a hash, the screen's `defaultTab` — so
+  // the landing URL gets the same tour (and progress key) as its "#aba".
+  const currentTab = currentScreen
+    ? effectiveTab(currentScreen, target?.tab ?? null)
+    : (target?.tab ?? null);
 
   // --- Panel state ---
   const [panelOpen, setPanelOpen] = useState(false);
