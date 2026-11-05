@@ -121,4 +121,15 @@ export const VIRTUAL_SCREENS = ["onboarding", "shell"] as const;
 export const ANCHORS_PENDING_ARTICLE: string[] = [
   // The header "?" (HelpButton, Task 4); the shell article ships later.
   "shell.header.help",
+  // Domain card controls (Task 7); the /configuracoes/casa article ships in
+  // Task 9, which empties this list.
+  "casa.dominio.card",
+  "casa.dominio.status",
+  "casa.dominio.dns-table",
+  "casa.dominio.copy",
+  "casa.dominio.verify",
+  "casa.dominio.send-instructions",
+  "casa.dominio.set-default",
+  "casa.dominio.remove",
+  "casa.dominio.next-check",
 ];

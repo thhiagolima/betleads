@@ -14,6 +14,7 @@ function makeDomain(overrides: Partial<DomainDetailDomain> = {}): DomainDetailDo
     status: "pending",
     is_default: false,
     dns_records: records,
+    created_at: "2026-10-21T10:00:00.000Z",
     last_checked_at: null,
     last_error: null,
     ...overrides,
@@ -109,5 +110,60 @@ describe("DomainDetail", () => {
     expect(isDisabled(findButtonOpenTag(html, "Enviar instruções por e-mail"))).toBe(true);
     expect(isDisabled(findButtonOpenTag(html, "Definir como padrão"))).toBe(true);
     expect(isDisabled(findButtonOpenTag(html, "Remover"))).toBe(true);
+  });
+
+  it("shows the per-record DNS status: ok for true, pendente for false, — for null", () => {
+    const records: DnsRecord[] = [
+      { type: "CNAME", name: "go.suacasa.bet.br", value: "cname.short.io", verified: true },
+      { type: "TXT", name: "_dnsauth.go.suacasa.bet.br", value: "abc123", verified: false },
+      { type: "MX", name: "mail.suacasa.bet.br", value: "mx.infobip.com", verified: null },
+    ];
+    const html = renderToStaticMarkup(
+      <DomainDetail domain={makeDomain({ dns_records: records })} canEdit />,
+    );
+
+    expect(html).toContain("ok");
+    expect(html).toContain("pendente");
+    expect(html).toContain("—");
+  });
+
+  it("shows last_error highlighted inside an element with the text-destructive class", () => {
+    const html = renderToStaticMarkup(
+      <DomainDetail
+        domain={makeDomain({ status: "failed", last_error: "Domínio rejeitado pelo provedor" })}
+        canEdit
+      />,
+    );
+
+    const re = /<[^>]*class="[^"]*text-destructive[^"]*"[^>]*>Domínio rejeitado pelo provedor/;
+    expect(html).toMatch(re);
+  });
+
+  it("a pending domain shows the 'Próxima verificação automática' label", () => {
+    const html = renderToStaticMarkup(
+      <DomainDetail domain={makeDomain({ status: "pending" })} canEdit />,
+    );
+
+    expect(html).toContain("Próxima verificação automática");
+  });
+
+  it("a verified domain shows the 'Próxima checagem' label instead", () => {
+    const html = renderToStaticMarkup(
+      <DomainDetail
+        domain={makeDomain({ status: "verified", last_checked_at: "2026-10-21T09:00:00.000Z" })}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Próxima checagem");
+    expect(html).not.toContain("Próxima verificação automática");
+  });
+
+  it("pending + canEdit: shows the disabled 'Definir como padrão' tooltip explaining why", () => {
+    const html = renderToStaticMarkup(
+      <DomainDetail domain={makeDomain({ status: "pending" })} canEdit />,
+    );
+
+    expect(html).toContain("Disponível depois que o domínio for verificado");
   });
 });
