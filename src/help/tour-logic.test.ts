@@ -3,10 +3,16 @@
 import { describe, expect, it } from "vitest";
 import type { HelpScreen } from "./types";
 import {
+  AUTO_START_SUPPRESS_PENDING_MS,
   effectiveOverlayForAutoStart,
   filterAvailableSteps,
+  isAutoStartSuppressed,
+  nextAutoStartSuppression,
+  pickHelpTarget,
   pickVisible,
+  sameHelpTarget,
   shouldAutoStart,
+  startAutoStartSuppression,
   tourFor,
   tourResultFromReason,
 } from "./tour-logic";
@@ -144,4 +150,59 @@ describe("tourResultFromReason", () => {
       expect(tourResultFromReason(reason)).toBe("skipped");
     },
   );
+});
+
+describe("sameHelpTarget / pickHelpTarget", () => {
+  const casa = { route: "/configuracoes/casa", tab: null };
+  const onboarding = { route: "onboarding", tab: "email" };
+  const shell = { route: "shell", tab: null };
+
+  it("compares route and tab", () => {
+    expect(sameHelpTarget(casa, { route: "/configuracoes/casa", tab: null })).toBe(true);
+    expect(sameHelpTarget(casa, { route: "/configuracoes/casa", tab: "email" })).toBe(false);
+    expect(sameHelpTarget(null, null)).toBe(true);
+    expect(sameHelpTarget(casa, null)).toBe(false);
+  });
+
+  it('"Sobre o CRM" wins while open; closing it goes back to the onboarding override, not to the URL', () => {
+    expect(pickHelpTarget(shell, onboarding, casa)).toBe(shell);
+    expect(pickHelpTarget(null, onboarding, casa)).toBe(onboarding);
+    expect(pickHelpTarget(null, null, casa)).toBe(casa);
+  });
+});
+
+describe("auto-start suppression after a highlight", () => {
+  const origin = { route: "/campanhas", tab: null };
+  const dest = { route: "/configuracoes/casa", tab: "email" };
+  const t0 = 1_000_000;
+
+  it("suppresses the destination's auto-start once the guide navigation lands there", () => {
+    let s = startAutoStartSuppression(dest, origin, t0);
+    expect(s.reached).toBe(false);
+    expect(isAutoStartSuppressed(s, origin)).toBe(false);
+    // Intermediate render: path changed, hash not yet.
+    s = nextAutoStartSuppression(s, { route: dest.route, tab: null }, t0 + 10)!;
+    expect(s).not.toBeNull();
+    s = nextAutoStartSuppression(s, dest, t0 + 20)!;
+    expect(s.reached).toBe(true);
+    expect(isAutoStartSuppressed(s, dest)).toBe(true);
+  });
+
+  it("is reached immediately for a highlight on the current screen (mostrar na tela)", () => {
+    const s = startAutoStartSuppression(origin, origin, t0);
+    expect(s.reached).toBe(true);
+    expect(isAutoStartSuppressed(s, origin)).toBe(true);
+  });
+
+  it("covers only that visit: leaving the reached destination drops it", () => {
+    const s = startAutoStartSuppression(origin, origin, t0);
+    expect(nextAutoStartSuppression(s, dest, t0 + 5)).toBeNull();
+  });
+
+  it("drops an unreached destination after the pending window", () => {
+    const s = startAutoStartSuppression(dest, origin, t0);
+    expect(nextAutoStartSuppression(s, origin, t0 + AUTO_START_SUPPRESS_PENDING_MS + 1)).toBeNull();
+    expect(nextAutoStartSuppression(null, dest, t0)).toBeNull();
+    expect(isAutoStartSuppressed(null, dest)).toBe(false);
+  });
 });

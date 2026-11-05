@@ -25,7 +25,17 @@ import { GUIDES, type GuideStep } from "@/help/guides";
 import { HELP_SCREEN_LOADERS } from "@/help/registry";
 import { effectiveTab, resolveHelpScreen } from "@/help/resolve";
 import type { SearchEntry } from "@/help/search";
-import { effectiveOverlayForAutoStart, shouldAutoStart, tourFor } from "@/help/tour-logic";
+import {
+  effectiveOverlayForAutoStart,
+  isAutoStartSuppressed,
+  nextAutoStartSuppression,
+  pickHelpTarget,
+  shouldAutoStart,
+  startAutoStartSuppression,
+  tourFor,
+  type AutoStartSuppression,
+  type HelpTarget,
+} from "@/help/tour-logic";
 import type { HelpRole, HelpScreen, TourStep } from "@/help/types";
 import {
   AUTO_TOURS_OFF_KEY,
@@ -98,14 +108,14 @@ function isDialogOpen(): boolean {
   );
 }
 
-type Target = { route: string; tab: string | null };
+type Target = HelpTarget;
 
 export function HelpProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const fetchProgress = useServerFn(getHelpProgress);
   const saveProgress = useServerFn(setHelpProgress);
   const fetchGuideSignals = useServerFn(getGuideSignals);
-  const { role: shellRole } = useShellNav();
+  const { role: shellRole, tenantId } = useShellNav();
   const role = helpRoleFor(shellRole);
 
   const progressQuery = useQuery({
@@ -118,11 +128,18 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     ? null
     : (progressQuery.data?.progress ?? null);
 
+  // --- Panel state ---
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelMounted, setPanelMounted] = useState(false);
+
   // Guides' progress counts (Task 6): failure or "not loaded yet" both mean
-  // "render the guides with no counts" (brief, Step 3).
+  // "render the guides with no counts" (brief, Step 3). Only fetched once the
+  // panel has been opened (it runs several DB queries; nothing else reads
+  // it), and per house, so switching houses doesn't show the other's counts.
   const guideSignalsQuery = useQuery({
-    queryKey: ["help-guide-signals"],
+    queryKey: ["help-guide-signals", tenantId ?? null],
     queryFn: () => fetchGuideSignals(),
+    enabled: panelMounted,
     retry: 1,
     staleTime: 60_000,
   });
@@ -142,24 +159,31 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  const urlTarget: Target | null = useMemo(
+    () => resolveHelpScreen(pathname, hash),
+    [pathname, hash],
+  );
+  // The onboarding wizard's override (`setScreenOverride`), which it clears
+  // itself based on wizard state...
   const [override, setOverride] = useState<Target | null>(null);
+  // ...and "Sobre o CRM" (ruling R4), kept apart so closing it restores the
+  // wizard's override instead of dropping it.
+  const [shellOverride, setShellOverride] = useState<Target | null>(null);
   const target: Target | null = useMemo(
-    () => override ?? resolveHelpScreen(pathname, hash),
-    [override, pathname, hash],
+    () => pickHelpTarget(shellOverride, override, urlTarget),
+    [shellOverride, override, urlTarget],
   );
 
-  // "Sobre o CRM" (ruling R4) overrides the screen without navigating
-  // anywhere, so a real navigation afterwards — unlike the onboarding
-  // wizard's own override, which it clears itself based on wizard state —
-  // has nothing else to drop it. A real navigation while it's active clears
-  // it, so the panel goes back to showing the new page's own article.
-  const lastPathname = useRef(pathname);
+  // "Sobre o CRM" overrides the screen without navigating anywhere, so
+  // nothing else would drop it: it goes away when the panel closes or the
+  // location (path or tab) changes, and the help is back on the page's own
+  // article (or the wizard's).
   useEffect(() => {
-    if (lastPathname.current !== pathname) {
-      lastPathname.current = pathname;
-      setOverride((prev) => (prev?.route === "shell" ? null : prev));
-    }
-  }, [pathname]);
+    setShellOverride(null);
+  }, [pathname, hash]);
+  useEffect(() => {
+    if (!panelOpen) setShellOverride(null);
+  }, [panelOpen]);
 
   // --- Article loading ---
   const [screen, setScreen] = useState<HelpScreen | null>(null);
@@ -189,9 +213,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     ? effectiveTab(currentScreen, target?.tab ?? null)
     : (target?.tab ?? null);
 
-  // --- Panel state ---
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [panelMounted, setPanelMounted] = useState(false);
+  // --- Panel focus/overlay ---
   const [focus, setFocus] = useState<HelpPanelFocus | null>(null);
   const [overlayActive, setOverlayActive] = useState(false);
 
@@ -250,6 +272,22 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   // Auto-start is evaluated once per tour key per visit of a route.
   const autoChecked = useRef(new Set<string>());
 
+  // A highlight ("mostrar na tela", a guide's "Ir para esta etapa") on a
+  // screen: that visit's auto-start must not replace it (tour-logic.ts).
+  // Declared before the auto-start effect so it's updated first.
+  const suppression = useRef<AutoStartSuppression | null>(null);
+  useEffect(() => {
+    suppression.current = nextAutoStartSuppression(suppression.current, urlTarget, Date.now());
+  }, [urlTarget]);
+  const suppressAutoStartAt = useCallback(
+    (destination: Target | null) => {
+      suppression.current = destination
+        ? startAutoStartSuppression(destination, urlTarget, Date.now())
+        : null;
+    },
+    [urlTarget],
+  );
+
   // Any running tour/highlight stops when the route changes.
   useEffect(() => {
     autoChecked.current.clear();
@@ -264,8 +302,13 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     const { tourTab, steps } = tourFor(currentScreen, currentTab);
     const key = tourKey(currentScreen.route, tourTab);
     if (autoChecked.current.has(key)) return;
+    if (isAutoStartSuppressed(suppression.current, urlTarget)) {
+      autoChecked.current.add(key);
+      return;
+    }
     const timer = window.setTimeout(() => {
       autoChecked.current.add(key);
+      if (isAutoStartSuppressed(suppression.current, urlTarget)) return;
       const latest = queryClient.getQueryData<{ progress: HelpProgressMap }>(
         HELP_PROGRESS_QUERY_KEY,
       );
@@ -276,14 +319,25 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         overlayActive: effectiveOverlayForAutoStart({
           overlayActive,
           panelOpen,
-          isOverrideScreen: override !== null,
+          isOverrideScreen: (shellOverride ?? override) !== null,
         }),
         hasSteps: steps.length > 0,
       });
       if (ok) runSteps(currentScreen.route, tourTab, steps);
     }, AUTO_START_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [currentScreen, currentTab, progressReady, overlayActive, panelOpen, override, queryClient, runSteps]);
+  }, [
+    currentScreen,
+    currentTab,
+    progressReady,
+    overlayActive,
+    panelOpen,
+    override,
+    shellOverride,
+    urlTarget,
+    queryClient,
+    runSteps,
+  ]);
 
   const setScreenOverride = useCallback((route: string | null, tab?: string | null) => {
     setOverride((prev) => {
@@ -310,14 +364,14 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     (entry: SearchEntry) => {
       if (!entry.route) return;
       if (!entry.route.startsWith("/")) {
-        setScreenOverride(entry.route, entry.tab ?? null);
+        setShellOverride({ route: entry.route, tab: entry.tab ?? null });
       } else {
         const href = entry.tab ? `${entry.route}#${entry.tab}` : entry.route;
         void navigate({ href });
       }
       setFocus({ target: entry.sectionId, nonce: Date.now(), route: entry.route });
     },
-    [navigate, setScreenOverride],
+    [navigate],
   );
 
   // "Sobre o CRM" (ruling R4): same mechanism as a cross-screen search
@@ -327,14 +381,20 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     openElsewhere({ kind: "item", title: "", text: "", route: "shell", sectionId: "cabecalho" });
   }, [openElsewhere]);
 
-  const showAnchor = useCallback((anchor: string) => {
-    setPanelOpen(false);
-    window.setTimeout(() => {
-      void loadTourRunner().then(({ highlightAnchor }) => {
-        if (!highlightAnchor(anchor)) toast("Este elemento não está visível agora");
-      });
-    }, PANEL_CLOSE_MS);
-  }, []);
+  const closeShellArticle = useCallback(() => setShellOverride(null), []);
+
+  const showAnchor = useCallback(
+    (anchor: string) => {
+      suppressAutoStartAt(urlTarget);
+      setPanelOpen(false);
+      window.setTimeout(() => {
+        void loadTourRunner().then(({ highlightAnchor }) => {
+          if (!highlightAnchor(anchor)) toast("Este elemento não está visível agora");
+        });
+      }, PANEL_CLOSE_MS);
+    },
+    [suppressAutoStartAt, urlTarget],
+  );
 
   // A guide step's "Ir para esta etapa" (Task 6): go to its route/tab, close
   // the panel, then highlight its anchor once the screen has loaded — same
@@ -343,7 +403,9 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const goToGuideStep = useCallback(
     (step: GuideStep) => {
       setPanelOpen(false);
-      const href = step.tab ? `${step.route}#${step.tab}` : step.route;
+      const stepHash = step.tab ? `#${step.tab}` : "";
+      if (step.anchor) suppressAutoStartAt(resolveHelpScreen(step.route, stepHash));
+      const href = `${step.route}${stepHash}`;
       void navigate({ href }).then(() => {
         if (!step.anchor) return;
         window.setTimeout(() => {
@@ -355,7 +417,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         }, PANEL_CLOSE_MS);
       });
     },
-    [navigate],
+    [navigate, suppressAutoStartAt],
   );
 
   // A guide search result (Task 6): expand that guide in the GuideList
@@ -388,6 +450,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
             onShowAnchor={showAnchor}
             onOpenElsewhere={openElsewhere}
             onOpenShellArticle={openShellArticle}
+            onCloseShellArticle={closeShellArticle}
             onOpenGuide={openGuide}
             guidesSlot={
               <GuideList

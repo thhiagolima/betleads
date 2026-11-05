@@ -27,6 +27,7 @@ import {
   canOpenRoute,
   roleCanSee,
   searchHelp,
+  selectionAction,
   STATES_SECTION_ID,
   type SearchEntry,
 } from "@/help/search";
@@ -69,6 +70,9 @@ export type HelpPanelViewProps = {
   /** Opens the "shell" virtual article ("Sobre o CRM", ruling R4): the
    * header, sidebar, mobile nav and banners, below "Nesta tela". */
   onOpenShellArticle: () => void;
+  /** While the "shell" article is showing: "Voltar para esta tela" goes back
+   * to the current screen's own article. */
+  onCloseShellArticle?: () => void;
 };
 
 function Heading({ children }: { children: ReactNode }) {
@@ -271,13 +275,23 @@ export function HelpPanelView(props: HelpPanelViewProps) {
                 CRM todo.
               </p>
             )}
-            <button
-              type="button"
-              onClick={props.onOpenShellArticle}
-              className="mt-3 text-[13px] font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              Sobre o CRM
-            </button>
+            {screen?.route === "shell" && props.onCloseShellArticle ? (
+              <button
+                type="button"
+                onClick={props.onCloseShellArticle}
+                className="mt-3 text-[13px] font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Voltar para esta tela
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={props.onOpenShellArticle}
+                className="mt-3 text-[13px] font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Sobre o CRM
+              </button>
+            )}
           </section>
 
           <section aria-label="Guias passo a passo">
@@ -342,6 +356,8 @@ export type HelpPanelProps = {
   /** "Sobre o CRM" (ruling R4): opens the "shell" virtual article in this
    * same panel, without navigating anywhere. */
   onOpenShellArticle: () => void;
+  /** "Voltar para esta tela": leaves the "shell" article. */
+  onCloseShellArticle?: () => void;
   /** A search result of kind "guide": expand it in `guidesSlot` (the
    * provider owns that slot's state, since it also owns the signals query
    * and the "go to step" navigation). */
@@ -403,9 +419,21 @@ export function HelpPanel(props: HelpPanelProps) {
     [index, query, currentRoute],
   );
 
+  // Opens the article on the first section of the tab showing (a screen's
+  // title picked in search, or "Ver todos os botões e campos").
+  const openArticleAtTab = () => {
+    setArticleOpen(true);
+    const sectionId = screen ? tabSectionId(screen, currentTab) : null;
+    if (sectionId) setScrollTarget({ domId: sectionDomId(sectionId), nonce: Date.now() });
+  };
+
   const applyFocus = (f: HelpPanelFocus) => {
     setQuery("");
-    if (!f.target) return;
+    if (!f.target) {
+      // A screen's own title picked in search: open its article.
+      openArticleAtTab();
+      return;
+    }
     if (f.target.startsWith(GLOSSARY_TARGET_PREFIX)) {
       const termId = f.target.slice(GLOSSARY_TARGET_PREFIX.length);
       setHighlightTermId(termId);
@@ -448,37 +476,47 @@ export function HelpPanel(props: HelpPanelProps) {
     return scrollWhenMounted(scrollTarget.domId);
   }, [open, scrollTarget]);
 
+  // A glossary term highlighted by openPanel("glossary:<id>") or a search
+  // pick stays highlighted only while the panel is open.
+  useEffect(() => {
+    if (!open) setHighlightTermId(null);
+  }, [open]);
+
   const select = (entry: SearchEntry) => {
-    if (entry.kind === "item" && entry.route && entry.route !== currentRoute) {
+    const action = selectionAction(entry, currentRoute);
+    if (action.type === "elsewhere") {
       props.onOpenElsewhere(entry);
       return;
     }
     setQuery("");
-    if (entry.kind === "term" && entry.termId) {
-      setHighlightTermId(entry.termId);
-      setScrollTarget({ domId: termDomId(entry.termId), nonce: Date.now() });
-    } else if (entry.kind === "item" && entry.sectionId) {
+    if (action.type === "term") {
+      setHighlightTermId(action.termId);
+      setScrollTarget({ domId: termDomId(action.termId), nonce: Date.now() });
+    } else if (action.type === "section") {
       setArticleOpen(true);
-      setScrollTarget({ domId: sectionDomId(entry.sectionId), nonce: Date.now() });
-    } else if (entry.kind === "guide" && entry.guideId) {
-      props.onOpenGuide?.(entry.guideId);
+      setScrollTarget({ domId: sectionDomId(action.sectionId), nonce: Date.now() });
+    } else if (action.type === "article") {
+      openArticleAtTab();
+    } else if (action.type === "guide") {
+      props.onOpenGuide?.(action.guideId);
     }
   };
 
   const toggleArticle = () => {
-    const next = !articleOpen;
-    setArticleOpen(next);
-    if (!next || !screen) return;
+    if (articleOpen) {
+      setArticleOpen(false);
+      return;
+    }
     // Screens with tabs open on the first section of the tab showing (the
     // screen's `defaultTab` when the URL has no hash).
-    const sectionId = tabSectionId(screen, currentTab);
-    if (sectionId) setScrollTarget({ domId: sectionDomId(sectionId), nonce: Date.now() });
+    openArticleAtTab();
   };
 
   return (
     <Sheet open={open} onOpenChange={props.onOpenChange}>
       <SheetContent
         side={isMobile ? "bottom" : "right"}
+        closeLabel="Fechar"
         className={cn(
           "flex flex-col gap-0 overflow-y-auto p-0",
           isMobile ? "h-[85dvh] rounded-t-2xl" : "w-full sm:max-w-[480px]",
@@ -509,6 +547,7 @@ export function HelpPanel(props: HelpPanelProps) {
             onShowAnchor={props.onShowAnchor}
             onAutoToursOffChange={props.onAutoToursOffChange}
             onOpenShellArticle={props.onOpenShellArticle}
+            onCloseShellArticle={props.onCloseShellArticle}
           />
         </div>
       </SheetContent>

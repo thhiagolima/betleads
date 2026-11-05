@@ -88,3 +88,78 @@ export function filterAvailableSteps(
 export function tourResultFromReason(reason: string | undefined): "done" | "skipped" {
   return reason === "done" ? "done" : "skipped";
 }
+
+/** A help target: a registry route (or virtual screen id) plus the raw tab
+ * (URL hash without "#", or null). Same shape `resolveHelpScreen` returns. */
+export type HelpTarget = { route: string; tab: string | null };
+
+export function sameHelpTarget(a: HelpTarget | null, b: HelpTarget | null): boolean {
+  if (!a || !b) return a === b;
+  return a.route === b.route && (a.tab ?? null) === (b.tab ?? null);
+}
+
+/** Which screen the help refers to: the "Sobre o CRM" article while it is
+ * open (ruling R4), else the onboarding wizard's override, else the URL.
+ * Kept as two separate overrides so closing "Sobre o CRM" goes back to the
+ * wizard's article instead of dropping it. */
+export function pickHelpTarget(
+  shellOverride: HelpTarget | null,
+  override: HelpTarget | null,
+  urlTarget: HelpTarget | null,
+): HelpTarget | null {
+  return shellOverride ?? override ?? urlTarget;
+}
+
+/** How long a highlight's destination stays suppressed while the
+ * navigation to it hasn't landed yet. */
+export const AUTO_START_SUPPRESS_PENDING_MS = 10_000;
+
+/** "Mostrar na tela" / a guide's "Ir para esta etapa" highlight an element
+ * on a destination screen; that screen's own first-visit tour must not
+ * auto-start on top of it (driver.js would replace the highlight). The
+ * suppression covers that one visit: it holds from the click until the user
+ * leaves the destination after reaching it. */
+export type AutoStartSuppression = HelpTarget & {
+  /** The URL already got to the destination. */
+  reached: boolean;
+  /** Until when an unreached destination is still waited for. */
+  pendingUntil: number;
+};
+
+export function startAutoStartSuppression(
+  destination: HelpTarget,
+  urlTarget: HelpTarget | null,
+  now: number,
+): AutoStartSuppression {
+  return {
+    route: destination.route,
+    tab: destination.tab ?? null,
+    reached: sameHelpTarget(destination, urlTarget),
+    pendingUntil: now + AUTO_START_SUPPRESS_PENDING_MS,
+  };
+}
+
+/** The suppression after the URL target changed to `urlTarget`: marked
+ * reached on arrival, dropped once the user leaves a reached destination,
+ * and dropped when the destination was never reached in time (a failed or
+ * abandoned navigation must not silence a later, unrelated visit). While
+ * navigating, intermediate targets (path updated, hash not yet) keep it. */
+export function nextAutoStartSuppression(
+  suppression: AutoStartSuppression | null,
+  urlTarget: HelpTarget | null,
+  now: number,
+): AutoStartSuppression | null {
+  if (!suppression) return null;
+  const here = sameHelpTarget(suppression, urlTarget);
+  if (here) return suppression.reached ? suppression : { ...suppression, reached: true };
+  if (suppression.reached) return null;
+  return now > suppression.pendingUntil ? null : suppression;
+}
+
+/** Whether the auto-start check for `urlTarget` must be skipped. */
+export function isAutoStartSuppressed(
+  suppression: AutoStartSuppression | null,
+  urlTarget: HelpTarget | null,
+): boolean {
+  return !!suppression && sameHelpTarget(suppression, urlTarget);
+}

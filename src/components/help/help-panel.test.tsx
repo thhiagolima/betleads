@@ -117,6 +117,14 @@ describe("HelpPanelView", () => {
     expect(render({ screen: null })).toContain("Sobre o CRM");
   });
 
+  it('while the "shell" article shows, offers "Voltar para esta tela" instead of "Sobre o CRM"', () => {
+    const shell: HelpScreen = { ...screen, id: "shell", route: "shell", title: "Sobre o CRM", tours: {} };
+    const html = render({ screen: shell, onCloseShellArticle: noop });
+    expect(html).toContain("Voltar para esta tela");
+    expect(html).not.toContain(">Sobre o CRM</button>");
+    expect(render({ onCloseShellArticle: noop })).not.toContain("Voltar para esta tela");
+  });
+
   it('"Fazer o tour desta tela" is tab-aware (ruling R11): hidden on a tab with no tour of its own and no "default"', () => {
     const tabOnlyTours: HelpScreen = {
       ...screen,
