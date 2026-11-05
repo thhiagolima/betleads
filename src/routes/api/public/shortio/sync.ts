@@ -28,6 +28,9 @@ export const Route = createFileRoute("/api/public/shortio/sync")({
             claimed: result.total,
             sent: result.processed,
             errors: result.failures,
+            // Left to the next tick by Short.io's rate limit or the tick
+            // deadline; not errors, so they do not turn the run 'partial'.
+            rate_limited: result.deferred,
             stop_reason: result.skipped ? "skipped_active_run" : null,
           });
           return Response.json({ ok: true, ...result });

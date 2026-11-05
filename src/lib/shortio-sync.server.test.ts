@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Row = Record<string, unknown>;
 
-const state = vi.hoisted(() => ({ tables: {} as Record<string, Row[]> }));
+const state = vi.hoisted(() => ({
+  tables: {} as Record<string, Row[]>,
+  updates: [] as Array<{ table: string; payload: Row }>,
+}));
 
 vi.mock("@/integrations/supabase/client.server", () => {
   function from(table: string) {
@@ -24,7 +27,11 @@ vi.mock("@/integrations/supabase/client.server", () => {
     };
     const builder: any = {
       select: () => builder,
-      update: () => ((write = write ?? "update"), builder),
+      update: (payload: Row) => (
+        state.updates.push({ table, payload }),
+        (write = write ?? "update"),
+        builder
+      ),
       insert: () => ((write = "insert"), builder),
       upsert: () => Promise.resolve({ error: null }),
       eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), builder),
@@ -47,7 +54,7 @@ vi.mock("@/integrations/supabase/client.server", () => {
   return { supabaseAdmin: { from, rpc: async () => ({ data: [], error: null }) } };
 });
 
-import { syncShortioMetrics } from "./shortio.server";
+import { createShortioSyncPacer, syncShortioMetrics } from "./shortio.server";
 import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
 
 const DEMO = "00000000-0000-4000-8000-00000000d0d0";
@@ -81,6 +88,7 @@ beforeEach(() => {
   inFlight = 0;
   maxInFlight = 0;
   fetched = [];
+  state.updates = [];
   state.tables = {
     tenants: [
       { id: DEMO, status: "active", is_demo: true },
@@ -153,5 +161,97 @@ describe("syncShortioMetrics global run", () => {
     await syncShortioMetrics(300);
     expect(fetched.length).toBeGreaterThan(4);
     expect(maxInFlight).toBe(4);
+  });
+});
+
+describe("syncShortioMetrics rate limiting", () => {
+  const json = (status: number, headers: Record<string, string> = {}) =>
+    new Response(status === 200 ? JSON.stringify({ clicksStatistics: [] }) : "{}", {
+      status,
+      headers: { "Content-Type": "application/json", ...headers },
+    });
+  const runRows = () =>
+    state.updates.filter(
+      (u) => u.table === "link_tracking_sync_runs" && "finished_at" in u.payload,
+    );
+
+  it("pauses every call of the tick after a 429, then retries the link", async () => {
+    const starts: number[] = [];
+    let limitedAt = 0;
+    let first = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        starts.push(Date.now());
+        if (first) {
+          first = false;
+          // Answer late, so the other links are already in flight (those
+          // cannot be recalled); nothing may start after the 429 arrives.
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          limitedAt = Date.now();
+          return json(429);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        return json(200);
+      }),
+    );
+    // More links than slots: the free slot keeps starting new calls unless
+    // the 429 pauses the whole tick.
+    const pacer = createShortioSyncPacer({ concurrency: 2, backoffMs: 40 });
+    const result = await syncShortioMetrics(25, BIG, pacer);
+    expect(result.failures).toBe(0);
+    expect(result.deferred).toBe(0);
+    expect(result.processed).toBe(25);
+    // Nothing else reached Short.io during the pause (small timer slack).
+    const during = starts.filter((t) => t > limitedAt && t < limitedAt + 35);
+    expect(during).toHaveLength(0);
+  });
+
+  it("honours Retry-After for the pause", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => (++calls === 1 ? json(429, { "retry-after": "0.05" }) : json(200))),
+    );
+    const t0 = Date.now();
+    await syncShortioMetrics(25, NEW, createShortioSyncPacer({ concurrency: 1, backoffMs: 1 }));
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(45);
+  });
+
+  it("defers a link still rate limited after its retries instead of failing the run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => (String(url).includes(`sh_${SMALL}_0`) ? json(429) : json(200))),
+    );
+    const result = await syncShortioMetrics(
+      25,
+      SMALL,
+      createShortioSyncPacer({ concurrency: 4, backoffMs: 1 }),
+    );
+    expect(result).toMatchObject({ processed: 2, failures: 0, deferred: 1 });
+    expect(runRows().at(-1)?.payload).toMatchObject({ status: "completed", error: null });
+  });
+
+  it("defers the links left when the tick deadline passes", async () => {
+    const result = await syncShortioMetrics(
+      25,
+      SMALL,
+      createShortioSyncPacer({ concurrency: 4, deadlineAt: Date.now() - 1 }),
+    );
+    expect(fetched).toHaveLength(0);
+    expect(result).toMatchObject({ processed: 0, failures: 0, deferred: 3 });
+  });
+
+  it("still fails a link Short.io rejects for good", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => (String(url).includes(`sh_${SMALL}_0`) ? json(404) : json(200))),
+    );
+    const result = await syncShortioMetrics(25, SMALL, createShortioSyncPacer({ concurrency: 4 }));
+    expect(result).toMatchObject({ processed: 2, failures: 1, deferred: 0 });
+    expect(runRows().at(-1)?.payload).toMatchObject({
+      status: "failed",
+      error: "1 links falharam",
+    });
   });
 });

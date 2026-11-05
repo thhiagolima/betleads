@@ -954,6 +954,9 @@ type ShortioSyncResult = {
   startedAt: string;
   processed: number;
   failures: number;
+  /** Links left for the next tick: rate limited after their retries, or not
+   * reached before the tick deadline. Not failures. */
+  deferred: number;
   total: number;
   tenants?: number;
   skipped?: boolean;
@@ -967,6 +970,58 @@ const SHORTIO_STATS_WINDOW_MS = 30 * 24 * 60 * 60_000;
 const SHORTIO_SYNC_MIN_SHARE = 25;
 
 type ConcurrencyGate = <T>(task: () => Promise<T>) => Promise<T>;
+
+/** A tick spends at most this long calling Short.io (cron runs every 5 min);
+ * links not reached are deferred to the next tick. */
+const SHORTIO_SYNC_TICK_BUDGET_MS = 4 * 60_000;
+/** First pause after a 429 without Retry-After; doubles per attempt. */
+const SHORTIO_RATE_LIMIT_BACKOFF_MS = 2_000;
+const SHORTIO_RATE_LIMIT_MAX_PAUSE_MS = 30_000;
+const SHORTIO_STATS_ATTEMPTS = 4;
+
+/**
+ * Paces every Short.io statistics call of one tick, across all houses: one
+ * concurrency gate, plus a shared pause. Short.io answers "Rate limit
+ * exceeded" (429) to a share of calls at the tick's normal rate; a per-call
+ * retry let the other in-flight calls keep hitting the limit, so ~20% of the
+ * links of every house failed on every tick. A 429 now pauses the whole tick.
+ */
+export type ShortioSyncPacer = {
+  gate: ConcurrencyGate;
+  /** Resolves once no 429 pause is active. */
+  waitWhilePaused(): Promise<void>;
+  /** Pauses every call of the tick for at least `ms`. */
+  pause(ms: number): void;
+  /** True once the tick budget is spent. */
+  expired(): boolean;
+  backoffMs: number;
+};
+
+export function createShortioSyncPacer(
+  options: { concurrency?: number; backoffMs?: number; deadlineAt?: number } = {},
+): ShortioSyncPacer {
+  const deadlineAt = options.deadlineAt ?? Date.now() + SHORTIO_SYNC_TICK_BUDGET_MS;
+  let pausedUntil = 0;
+  return {
+    gate: createConcurrencyGate(options.concurrency ?? shortioSyncConcurrency()),
+    async waitWhilePaused() {
+      for (let wait = pausedUntil - Date.now(); wait > 0; wait = pausedUntil - Date.now()) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+    },
+    pause(ms) {
+      pausedUntil = Math.max(
+        pausedUntil,
+        Date.now() + Math.min(ms, SHORTIO_RATE_LIMIT_MAX_PAUSE_MS),
+      );
+    },
+    expired: () => Date.now() >= deadlineAt,
+    backoffMs: options.backoffMs ?? SHORTIO_RATE_LIMIT_BACKOFF_MS,
+  };
+}
+
+/** Thrown for a link left to the next tick (not counted as a failure). */
+class ShortioSyncDeferred extends Error {}
 
 /** Caps in-flight Short.io statistics calls across every house of a tick. */
 function createConcurrencyGate(size: number): ConcurrencyGate {
@@ -1000,7 +1055,7 @@ function shortioSyncConcurrency(): number {
 export async function syncShortioMetrics(
   limit = 100,
   tenantId?: string,
-  gate: ConcurrencyGate = createConcurrencyGate(shortioSyncConcurrency()),
+  pacer: ShortioSyncPacer = createShortioSyncPacer(),
 ): Promise<ShortioSyncResult> {
   const apiKey = process.env.SHORTIO_API_KEY?.trim();
   if (!apiKey) throw new Error("SHORTIO_API_KEY não configurada no servidor");
@@ -1031,11 +1086,12 @@ export async function syncShortioMetrics(
     );
     const ids = withLinks.filter((id): id is string => id !== null);
     const share = Math.max(SHORTIO_SYNC_MIN_SHARE, Math.ceil(limit / Math.max(1, ids.length)));
-    const results = await Promise.all(ids.map((id) => syncShortioMetrics(share, id, gate)));
+    const results = await Promise.all(ids.map((id) => syncShortioMetrics(share, id, pacer)));
     return {
       startedAt,
       processed: results.reduce((sum, result) => sum + result.processed, 0),
       failures: results.reduce((sum, result) => sum + result.failures, 0),
+      deferred: results.reduce((sum, result) => sum + result.deferred, 0),
       total: results.reduce((sum, result) => sum + result.total, 0),
       tenants: ids.length,
     };
@@ -1044,7 +1100,7 @@ export async function syncShortioMetrics(
   // A billing-locked house keeps receiving its click statistics (inbound
   // data, like its webhook): only demo/unknown tenants are skipped here.
   if (await demoSendBlockedReason(tenantId, { allowBillingLocked: true })) {
-    return { startedAt, processed: 0, failures: 0, total: 0, skipped: true };
+    return { startedAt, processed: 0, failures: 0, deferred: 0, total: 0, skipped: true };
   }
   const staleBefore = new Date(Date.now() - 20 * 60_000).toISOString();
   // A killed HTTP request must not leave a tenant permanently represented as
@@ -1067,7 +1123,8 @@ export async function syncShortioMetrics(
     .gte("started_at", staleBefore)
     .limit(1)
     .maybeSingle();
-  if (activeRun) return { startedAt, processed: 0, failures: 0, total: 0, skipped: true };
+  if (activeRun)
+    return { startedAt, processed: 0, failures: 0, deferred: 0, total: 0, skipped: true };
   const run = tenantId
     ? await db
         .from("link_tracking_sync_runs")
@@ -1124,12 +1181,15 @@ export async function syncShortioMetrics(
 
   let processed = 0;
   let failures = 0;
+  let deferred = 0;
   const snapshotAt = new Date();
   snapshotAt.setUTCMinutes(0, 0, 0);
   const syncLinks = links ?? [];
   const fetchStatistics = async (linkTenantId: string, shortioLinkId: string) => {
     let response: Response | null = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < SHORTIO_STATS_ATTEMPTS; attempt++) {
+      await pacer.waitWhilePaused();
+      if (pacer.expired()) throw new ShortioSyncDeferred("prazo do tick esgotado");
       // Demo guard immediately before the request (counted as a link failure).
       // Reading statistics back is allowed for a billing-locked house.
       await assertTenantNotDemoForSend(linkTenantId, { allowBillingLocked: true });
@@ -1155,17 +1215,23 @@ export async function syncShortioMetrics(
       const retryAfter = Number(response.headers.get("retry-after"));
       const waitMs =
         Number.isFinite(retryAfter) && retryAfter > 0
-          ? Math.min(retryAfter * 1_000, 5_000)
-          : 750 * (attempt + 1);
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+          ? retryAfter * 1_000
+          : pacer.backoffMs * 2 ** attempt;
+      if (response.status === 429) {
+        // The limit is account-wide: stop the whole tick, not just this call.
+        pacer.pause(waitMs);
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 5_000)));
+      }
     }
+    if (response?.status === 429) throw new ShortioSyncDeferred("Short.io retornou HTTP 429");
     throw new Error(`Short.io retornou HTTP ${response?.status ?? 0}`);
   };
   // The gate is shared by every house of a global tick; a retry's back-off
   // keeps its slot, so a 429 slows the whole tick instead of piling up calls.
   await Promise.all(
     syncLinks.map((link: any) =>
-      gate(async () => {
+      pacer.gate(async () => {
         try {
           const response = await fetchStatistics(String(link.tenant_id), link.shortio_link_id);
           const payload = (await response.json()) as {
@@ -1212,6 +1278,10 @@ export async function syncShortioMetrics(
             .eq("id", link.id);
           processed++;
         } catch (syncError) {
+          if (syncError instanceof ShortioSyncDeferred) {
+            deferred++;
+            return;
+          }
           failures++;
           console.error("Falha ao sincronizar métricas Short.io", {
             linkId: link.id,
@@ -1233,7 +1303,7 @@ export async function syncShortioMetrics(
       })
       .eq("id", runId);
   }
-  return { startedAt, processed, failures, total: (links ?? []).length };
+  return { startedAt, processed, failures, deferred, total: (links ?? []).length };
 }
 
 // ============================================================

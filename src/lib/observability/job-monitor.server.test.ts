@@ -54,6 +54,7 @@ vi.mock("@/lib/observability/sentry.server", () => ({ captureServerException }))
 import {
   HEARTBEAT_MIN_INTERVAL_MS,
   HEARTBEAT_TIMER_MS,
+  IDLE_REAP_INTERVAL_MS,
   LEGACY_SCHEMA_RETRY_MS,
   deriveLegacyStatus,
   PROGRESS_THROTTLE_MS,
@@ -141,6 +142,28 @@ describe("pingHeartbeat", () => {
     vi.advanceTimersByTime(HEARTBEAT_MIN_INTERVAL_MS);
     await pingHeartbeat("journey_dispatch", true);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("reaps abandoned rows on idle ticks, at most once per interval", async () => {
+    // A job whose last run died keeps a 'running' row until another run
+    // starts; idle ticks (nothing claimed) never start one.
+    const reaps = () => updates().filter((u) => u.payload.stop_reason === "abandoned");
+    await pingHeartbeat("sms_campaign_dispatch", true);
+    await flush();
+    expect(reaps()).toHaveLength(1);
+    expect(reaps()[0].filters).toEqual(
+      expect.arrayContaining([
+        ["eq", "job", "sms_campaign_dispatch"],
+        ["eq", "status", "running"],
+      ]),
+    );
+    await pingHeartbeat("sms_campaign_dispatch", true);
+    await flush();
+    expect(reaps()).toHaveLength(1);
+    vi.advanceTimersByTime(IDLE_REAP_INTERVAL_MS);
+    await pingHeartbeat("sms_campaign_dispatch", true);
+    await flush();
+    expect(reaps()).toHaveLength(2);
   });
 
   it("never throws when fetch rejects or throws synchronously", async () => {
