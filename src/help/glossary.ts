@@ -155,4 +155,24 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "O texto alternativo de uma imagem: o que aparece no lugar dela quando a imagem não carrega, e o que leitores de tela leem em voz alta.",
   },
+
+  // --- Automações (Task 13) ---
+  {
+    id: "leads-mortos",
+    term: "Leads mortos",
+    short:
+      "Jogador que recebeu várias mensagens de jornada (SMS, e-mail ou voz) seguidas sem fazer nenhuma ação na casa. Sai de todas as jornadas até voltar a agir ou ser reativado manualmente.",
+  },
+  {
+    id: "envio-imediato",
+    term: "Envio imediato",
+    short:
+      "Faz a jornada furar a fila: ignora o intervalo entre jornadas e os limites globais de mensagens por pessoa, e envia assim que o jogador entra. Use só em jornadas urgentes.",
+  },
+  {
+    id: "conflito-entre-jornadas",
+    term: "Conflito entre jornadas",
+    short:
+      "Quando o mesmo jogador cumpre o gatilho de duas jornadas ao mesmo tempo, só a de maior prioridade envia; a outra fica pausada até a primeira liberar o jogador.",
+  },
 ];

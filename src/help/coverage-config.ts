@@ -56,7 +56,6 @@ export const EXCLUDED_ROUTES: string[] = [
 export const PENDING_ROUTES: string[] = [
   // --- Fase 1 (shell/onboarding infra ships in Task 2; these 9 screens'
   // articles ship in Tasks 9-15) ---
-  "/automacoes",
   "/jornadas/nova",
   "/jornadas/$journeyId",
   "/jornadas/$journeyId/relatorio",
