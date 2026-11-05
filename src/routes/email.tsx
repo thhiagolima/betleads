@@ -146,7 +146,9 @@ function EmailPage() {
 // Visão geral
 // ============================================================
 
-function DashboardTab() {
+// Exported so the "Domínio do remetente" health row (with its "Configurar"
+// link when unset) is directly testable without the channel shell.
+export function DashboardTab() {
   const period = useChannelPeriod();
   const { query } = period;
   const fn = useServerFn(getEmailDashboard);
@@ -220,7 +222,24 @@ function DashboardTab() {
           <div>
             <MetricRow
               label="Domínio do remetente"
-              value={!health ? "—" : health.sender_configured ? "Configurado" : "Não configurado"}
+              value={
+                !health ? (
+                  "—"
+                ) : health.sender_configured ? (
+                  "Configurado"
+                ) : (
+                  <>
+                    Não configurado{" "}
+                    <Link
+                      to="/configuracoes/casa"
+                      hash="email"
+                      className="text-[12px] font-normal underline"
+                    >
+                      Configurar
+                    </Link>
+                  </>
+                )
+              }
               valueClassName={
                 !health ? undefined : health.sender_configured ? "text-success" : "text-warning"
               }
