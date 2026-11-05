@@ -58,7 +58,7 @@ type UsageRpcRow = {
 };
 
 /** PostgREST's "function not found" (PGRST202), or Postgres' own "does not exist": the
- * billing_month_usage migration (20261203100000) is not applied yet. */
+ * billing_month_usage migration (20261211100000) is not applied yet. */
 function isMissingFunction(error: DbError): boolean {
   return (
     error.code === "PGRST202" || /could not find the function|does not exist/i.test(error.message)

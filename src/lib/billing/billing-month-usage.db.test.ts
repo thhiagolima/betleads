@@ -1,4 +1,4 @@
-// Task 6 — SQL test for supabase/migrations/20261203100000_billing_month_usage.sql:
+// Task 6 — SQL test for supabase/migrations/20261211100000_billing_month_usage.sql:
 // billing_month_usage(_month) aggregates one month's usage_reservation/usage_refund
 // wallet_ledger rows per tenant x item, and only service_role may execute it.
 
@@ -12,7 +12,7 @@ const PRICE_BOOK_MIGRATION = readMigration(
 );
 const WALLET_MIGRATION = readMigration("supabase/migrations/20261022100100_billing_wallet.sql");
 const MONTH_USAGE_MIGRATION = readMigration(
-  "supabase/migrations/20261203100000_billing_month_usage.sql",
+  "supabase/migrations/20261211100000_billing_month_usage.sql",
 );
 
 const OTHER = "00000000-0000-4000-8000-0000000000f1";

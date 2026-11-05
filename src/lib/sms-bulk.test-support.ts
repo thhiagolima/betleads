@@ -229,7 +229,7 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
 
   // Read-only RPCs emulated over the in-memory tables, unless a test overrides them.
   const builtinRpcs: Record<string, (args: Row) => Result> = {
-    // public.billing_month_usage (20261203100000) is not "applied" in the fake by
+    // public.billing_month_usage (20261211100000) is not "applied" in the fake by
     // default: reply like PostgREST does for a missing function, so loadMonthData
     // takes its paged wallet_ledger fallback. Tests override it with onRpc.
     billing_month_usage: () => ({
