@@ -112,13 +112,16 @@ describe("OnboardingGate", () => {
 // `setOverlayActive`/`setScreenOverride` being called. This pure function is
 // what the effect applies, tested directly instead.
 describe("onboardingHelpTarget", () => {
+  const shown = { billingLocked: false, loading: false, showWizard: true };
+  const hidden = { billingLocked: false, loading: false, showWizard: false };
+
   it("activates the overlay and overrides the screen to 'onboarding' at the current step, while showing", () => {
-    expect(onboardingHelpTarget(true, "casa")).toEqual({
+    expect(onboardingHelpTarget(shown, "casa")).toEqual({
       overlayActive: true,
       overrideRoute: "onboarding",
       overrideTab: "casa",
     });
-    expect(onboardingHelpTarget(true, "pronto")).toEqual({
+    expect(onboardingHelpTarget(shown, "pronto")).toEqual({
       overlayActive: true,
       overrideRoute: "onboarding",
       overrideTab: "pronto",
@@ -126,7 +129,23 @@ describe("onboardingHelpTarget", () => {
   });
 
   it("deactivates the overlay and clears the override when not showing, regardless of step", () => {
-    expect(onboardingHelpTarget(false, "email")).toEqual({
+    expect(onboardingHelpTarget(hidden, "email")).toEqual({
+      overlayActive: false,
+      overrideRoute: null,
+      overrideTab: null,
+    });
+  });
+
+  it("keeps the overlay on (without overriding the screen) while the setup status is loading", () => {
+    expect(onboardingHelpTarget({ ...hidden, loading: true }, "casa")).toEqual({
+      overlayActive: true,
+      overrideRoute: null,
+      overrideTab: null,
+    });
+  });
+
+  it("never blocks a billing-locked house, even while loading", () => {
+    expect(onboardingHelpTarget({ billingLocked: true, loading: true, showWizard: false }, "casa")).toEqual({
       overlayActive: false,
       overrideRoute: null,
       overrideTab: null,

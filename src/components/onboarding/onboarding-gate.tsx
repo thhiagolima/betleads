@@ -23,13 +23,20 @@ import { HouseSetupWizard, type WizardStepId } from "@/components/onboarding/hou
 /** Pure: what the help context should look like while the wizard
  * shows/doesn't show — `OnboardingGate`'s `useEffect` just applies this.
  * Kept pure (and exported) so it's unit-testable without React: effects
- * never run under `renderToStaticMarkup` (no jsdom in this repo). */
+ * never run under `renderToStaticMarkup` (no jsdom in this repo).
+ *
+ * While the setup-status query is still loading nobody knows yet whether
+ * the wizard will cover the screen, so the overlay flag is already on (the
+ * screen underneath must not auto-start its tour in that window); the
+ * override to the wizard's own article only happens once it really shows.
+ * A billing-locked house never sees the wizard, so it never blocks. */
 export function onboardingHelpTarget(
-  showWizard: boolean,
+  state: { billingLocked: boolean; loading: boolean; showWizard: boolean },
   step: WizardStepId,
 ): { overlayActive: boolean; overrideRoute: string | null; overrideTab: string | null } {
-  if (!showWizard) return { overlayActive: false, overrideRoute: null, overrideTab: null };
-  return { overlayActive: true, overrideRoute: "onboarding", overrideTab: step };
+  const overlayActive = !state.billingLocked && (state.loading || state.showWizard);
+  if (!state.showWizard) return { overlayActive, overrideRoute: null, overrideTab: null };
+  return { overlayActive, overrideRoute: "onboarding", overrideTab: step };
 }
 
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
@@ -44,8 +51,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     enabled: !billingLocked,
   });
 
-  const showWizard =
-    !billingLocked && !query.isLoading && !query.isError && !!query.data?.showWizard;
+  const loading = query.isLoading;
+  const showWizard = !billingLocked && !loading && !query.isError && !!query.data?.showWizard;
 
   // The wizard's own step — mirrored from `HouseSetupWizard` (which owns the
   // real state) via `onStepChange`, just so the help override below can name
@@ -65,14 +72,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // showing or the step changes.
   const { setOverlayActive, setScreenOverride } = useHelp();
   useEffect(() => {
-    const target = onboardingHelpTarget(showWizard, step);
+    const target = onboardingHelpTarget({ billingLocked, loading, showWizard }, step);
     setOverlayActive(target.overlayActive);
     setScreenOverride(target.overrideRoute, target.overrideTab);
     return () => {
       setOverlayActive(false);
       setScreenOverride(null);
     };
-  }, [showWizard, step, setOverlayActive, setScreenOverride]);
+  }, [billingLocked, loading, showWizard, step, setOverlayActive, setScreenOverride]);
 
   if (!showWizard) {
     return <>{children}</>;
