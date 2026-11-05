@@ -33,6 +33,8 @@ import { selectAllPages } from "@/lib/pagination";
 import { listDemoTenantIds } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
+import { loadMonthData } from "./billing-month-data.server";
+import { computeMonthRows } from "./billing-month-report";
 import { cancelOpenInvoiceCharges, type CancelOpenInvoiceChargesFailure } from "./invoices.server";
 import { sendBillingEmail, type BillingEmailKind } from "./billing-emails.server";
 import { brtDayKey, parseBrtDayStart } from "../tz";
@@ -1228,168 +1230,37 @@ function csvTextSafe(value: string): string {
 export async function adminBillingMonthlyCsvFor(ctx: ServerContext, data: unknown): Promise<string> {
   const input = adminBillingMonthlyCsvInput.parse(data);
   await assertSuperAdmin(ctx.userId);
-  const sb = looseDb(supabaseAdmin);
 
-  const monthStart = `${input.month}-01`;
-  const monthStartISO = parseBrtDayStart(monthStart).toISOString();
-  const monthEndExclusiveISO = parseBrtDayStart(`${nextYyyyMm(input.month)}-01`).toISOString();
+  const monthData = await loadMonthData(input.month);
+  const monthRows = computeMonthRows(monthData);
 
-  type CsvTenantRow = { id: string; nome: string | null; slug: string | null; plano: string | null };
-  type CsvAmountRow = { id: string; tenant_id: string; paid_amount_cents: number | string | null };
-  type CsvLedgerRow = {
-    id: string;
-    tenant_id: string;
-    item: string | null;
-    units: number | string | null;
-    amount: number | string;
-    provider_unit_cost: number | string | null;
-    entry_type: string;
-  };
-  type CsvFeeRow = { id: string; tenant_id: string; fee_cents: number | string | null };
-
-  // I3: billing_invoices, payment_charges and wallet_ledger can each exceed PostgREST's
-  // 1000-row cap for a busy month, so they page with selectAllPages instead of a single
-  // `.select()` that would silently drop rows past it (and under-count the CSV).
-  const [tenantsRes, plansRes, invPaged, topupPaged, ledgerPaged, chargesPaged, demoIds] = await Promise.all([
-    sb.from("tenants").select("id,nome,slug,plano").order("nome", { ascending: true }),
-    sb.from("billing_plans").select("code,price_cents,exempt_all"),
-    selectAllPages<CsvAmountRow>("billing_invoices_paid_csv", () =>
-      sb
-        .from("billing_invoices")
-        .select("id,tenant_id,paid_amount_cents")
-        .eq("status", "paid")
-        .gte("paid_at", monthStartISO)
-        .lt("paid_at", monthEndExclusiveISO),
-    ),
-    selectAllPages<CsvAmountRow>("payment_charges_credit_topup_csv", () =>
-      sb
-        .from("payment_charges")
-        .select("id,tenant_id,paid_amount_cents")
-        .eq("kind", "credit_topup")
-        .not("credited_at", "is", null)
-        .gte("credited_at", monthStartISO)
-        .lt("credited_at", monthEndExclusiveISO),
-    ),
-    selectAllPages<CsvLedgerRow>("wallet_ledger_csv", () =>
-      sb
-        .from("wallet_ledger")
-        .select("id,tenant_id,item,units,amount,provider_unit_cost,entry_type")
-        .eq("usage_month", monthStart)
-        .in("entry_type", ["usage_reservation", "usage_refund"]),
-    ),
-    selectAllPages<CsvFeeRow>("payment_charges_fee_csv", () =>
-      sb
-        .from("payment_charges")
-        .select("id,tenant_id,fee_cents")
-        .eq("status", "PAID")
-        .gte("paid_at", monthStartISO)
-        .lt("paid_at", monthEndExclusiveISO),
-    ),
-    listDemoTenantIds(),
-  ]);
-  for (const res of [tenantsRes, plansRes]) {
-    if (res.error) throw new Error(res.error.message);
-  }
-  for (const res of [invPaged, topupPaged, ledgerPaged, chargesPaged]) {
-    if (res.error) throw new Error(res.error.message);
-  }
-
-  const plansByCode = new Map(((plansRes.data ?? []) as BillingPlanRow[]).map((p) => [p.code, p] as const));
-  const demoSet = new Set(demoIds);
-
-  function sumBy<T>(rows: T[], tenantId: string, pick: (row: T) => number, matchKey: (row: T) => string) {
-    return rows.filter((row) => matchKey(row) === tenantId).reduce((acc, row) => acc + pick(row), 0);
-  }
-
-  const tenantRows = (tenantsRes.data ?? []) as CsvTenantRow[];
-  const invoiceRows = invPaged.data;
-  const topupRows = topupPaged.data;
-  const ledgerRows = ledgerPaged.data;
-  const chargeRows = chargesPaged.data;
-
-  type CsvRow = { cells: string[]; isenta: boolean };
-  const rows: CsvRow[] = [];
-
-  // I4 (controller ruling, binding) — formulas for the row below, all in R$ (not cents):
+  // I4 (controller ruling, binding) — formulas, all in R$ (not cents):
   //   receita          = mensalidade_paga + consumo_sms + consumo_voz + consumo_email
   //                      (creditos_comprados is an informational cash column, not revenue)
   //   receita_liquida  = receita − custo_fornecedor − taxa_pix
   //   margem           = receita_liquida / receita × 100, a plain number (comma decimals, no
   //                      "%"); left empty when receita is 0 to avoid a division by zero.
-  for (const tenant of tenantRows) {
-    if (demoSet.has(tenant.id)) continue;
-    const plan = tenant.plano ? plansByCode.get(tenant.plano) : undefined;
-    const isenta = plan?.exempt_all === true;
-
-    const mensalidadeCents = sumBy(
-      invoiceRows,
-      tenant.id,
-      (r) => Number(r.paid_amount_cents ?? 0),
-      (r) => r.tenant_id,
-    );
-    const creditosCents = sumBy(
-      topupRows,
-      tenant.id,
-      (r) => Number(r.paid_amount_cents ?? 0),
-      (r) => r.tenant_id,
-    );
-
-    const consumoByItem = (item: string) =>
-      -ledgerRows
-        .filter((r) => r.tenant_id === tenant.id && r.item === item)
-        .reduce((acc, r) => acc + Number(r.amount ?? 0), 0);
-
-    const consumoSms = consumoByItem("sms");
-    const consumoVoz = consumoByItem("voice_30s");
-    const consumoEmail = consumoByItem("email");
-
-    const custoFornecedor = ledgerRows
-      .filter((r) => r.tenant_id === tenant.id)
-      .reduce((acc, r) => {
-        const sign = r.entry_type === "usage_reservation" ? 1 : -1;
-        return acc + sign * Number(r.units ?? 0) * Number(r.provider_unit_cost ?? 0);
-      }, 0);
-
-    const taxaPixCents = sumBy(
-      chargeRows,
-      tenant.id,
-      (r) => Number(r.fee_cents ?? 0),
-      (r) => r.tenant_id,
-    );
-
-    const mensalidadeReais = mensalidadeCents / 100;
-    const creditosReais = creditosCents / 100;
-    const taxaPixReais = taxaPixCents / 100;
-    const receitaBrutaReais = mensalidadeReais + consumoSms + consumoVoz + consumoEmail;
-    const receitaLiquida = receitaBrutaReais - custoFornecedor - taxaPixReais;
-    const margemText = receitaBrutaReais !== 0 ? brlReais((receitaLiquida / receitaBrutaReais) * 100) : "";
-
-    rows.push({
-      isenta,
-      cells: [
-        csvTextSafe(tenant.nome ?? ""),
-        csvTextSafe(tenant.slug ?? ""),
-        csvTextSafe(plan?.code ?? tenant.plano ?? ""),
-        brlReais(mensalidadeReais),
-        brlReais(creditosReais),
-        brlReais(consumoSms),
-        brlReais(consumoVoz),
-        brlReais(consumoEmail),
-        brlReais(custoFornecedor),
-        brlReais(taxaPixReais),
-        brlReais(receitaBrutaReais),
-        brlReais(receitaLiquida),
-        margemText,
-        isenta ? "sim" : "não",
-      ],
-    });
-  }
-
-  const paying = rows.filter((r) => !r.isenta);
-  const exempt = rows.filter((r) => r.isenta);
-  const ordered = [...paying, ...exempt];
-
-  const lines = [CSV_HEADER.join(";"), ...ordered.map((r) => r.cells.join(";"))];
+  const lines = [
+    CSV_HEADER.join(";"),
+    ...monthRows.map((row) =>
+      [
+        csvTextSafe(row.name),
+        csvTextSafe(row.slug),
+        csvTextSafe(row.plan ?? ""),
+        brlReais(row.mensalidadeReais),
+        brlReais(row.topupReais),
+        brlReais(row.consumoSms),
+        brlReais(row.consumoVoz),
+        brlReais(row.consumoEmail),
+        brlReais(row.custoFornecedor),
+        brlReais(row.taxaPixReais),
+        brlReais(row.receitaBruta),
+        brlReais(row.receitaLiquida),
+        row.margemPct != null ? brlReais(row.margemPct) : "",
+        row.exempt ? "sim" : "não",
+      ].join(";"),
+    ),
+  ];
   // BOM so Excel (pt-BR) opens accents correctly.
   return "﻿" + lines.join("\n");
 }
