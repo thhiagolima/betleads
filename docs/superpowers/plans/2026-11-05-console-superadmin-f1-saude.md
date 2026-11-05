@@ -106,7 +106,8 @@ Worktree: `C:\Users\Carol\Desktop\betleads-synchealth`, branch `feat/console-sup
     seconds_since_last_start: number | null; stale_running: number; oldest_running_heartbeat_at: string | null;
     runs_last_hour: number; failed_last_hour: number; partial_last_hour: number };
   export type WebhookStats = { tenantId: string; name: string; lastEventAt: string | null;
-    events7d: number; events24h: number; errors24h: number };
+    /** Estimated from the last ≤200 events of the past 7 days (see Task 3). */
+    eventsPerDay: number; errors24h: number };
   export type QueueMetricRow = { tenant_id: string; channel: string; ready: number; paused: number;
     oldest_ready_age_seconds: number | null; sent_15m: number; errors_15m: number };
   export type BreakerRow = { channel: string; state: string; reason: string | null; first_opened_at: string | null };
@@ -124,17 +125,17 @@ Worktree: `C:\Users\Carol\Desktop\betleads-synchealth`, branch `feat/console-sup
   export function sourceFailureAlert(source: string): PlatformAlert; // warning, kind "source"
   export function sortAlerts(alerts: PlatformAlert[]): PlatformAlert[]; // critical first, then oldest `since` first (null last)
   ```
-- Thresholds (spec §5.2): job stale = `stale_running > 0`; job late = `seconds_since_last_start > 3 × JOB_EXPECTED_PERIOD_S[job]`; webhook silence = `max(2 h, 6 × 7·86400/events7d)`, critical at ≥ 100 events/day, warning at ≥ 20/day, error rate > 5% with ≥ 50 events in 24 h; queue critical `oldest_ready_age_seconds > 1800` with `ready > 0` and `paused = 0`, warning > 600 or error share > 20% with ≥ 20 attempts; runway critical < 6 h, warning < 24 h (reuse `RUNWAY_URGENT_HOURS` / `RUNWAY_ALERT_HOURS` from `src/lib/billing/wallet-alerts.server.ts` only if importing them keeps this file free of server-only imports; otherwise copy the values with a comment pointing there); Short.io warning when the last 6 runs have `Σ rate_limited / Σ claimed > 0.2`.
+- Thresholds (spec §5.2): job stale = `stale_running > 0`; job late = `seconds_since_last_start > 3 × JOB_EXPECTED_PERIOD_S[job]`; webhook silence = `max(2 h, 6 × 86400/eventsPerDay)`, critical at ≥ 100 events/day, warning at ≥ 20/day, error rate `errors24h / eventsPerDay` > 5% with `eventsPerDay ≥ 50`; queue critical `oldest_ready_age_seconds > 1800` with `ready > 0` and `paused = 0`, warning > 600 or error share > 20% with ≥ 20 attempts; runway critical < 6 h, warning < 24 h (reuse `RUNWAY_URGENT_HOURS` / `RUNWAY_ALERT_HOURS` from `src/lib/billing/wallet-alerts.server.ts` only if importing them keeps this file free of server-only imports; otherwise copy the values with a comment pointing there); Short.io warning when the last 6 runs have `Σ rate_limited / Σ claimed > 0.2`.
 - Hrefs: job/queue/provider → `/admin#canais`; webhook → `/webhooks`; runway → `/admin#saldo`; billing → `/admin#faturamento`. `tenantId` set when the alert is about one house (the UI switches house before following a house-scoped href).
 - Keys: `job:<job>`, `webhook:<tenantId>:silence|errors`, `queue:<tenantId>:<channel>`, `provider:breaker:<channel>`, `provider:rate:<channel>`, `provider:shortio`, `runway:<tenantId>`, `billing:<code>`, `source:<name>`.
 
-- [ ] **Step 0: Confirm job cadences in production (read-only).** Connect as in the `db-access-pooler` notes (session pooler, `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`) and run:
+- [ ] **Step 0 (done by the controller, 05/11 — use these values):** measured over 48 h, every job below wrote rows in every hour; use `billing-cycle` 3600, `billing-reconcile` 300, `dashboard_metrics_refresh` 300, `email_tick` 60, `journey_dispatch` 60, `journey_level_outbox` 60, `journey_scan` 60, `recovery` 60, `shortio_sync` 300, `sms_tick` 60, `tenant_domains_verify` 600, `webhook_replay` 300. `sms_campaign_dispatch` wrote rows in only 10 of 48 hours and stays out. Original instruction, for reference: confirm job cadences in production (read-only). Connect as in the `db-access-pooler` notes (session pooler, `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`) and run:
   `select job, date_trunc('hour', started_at at time zone 'America/Sao_Paulo') h, count(*) from dispatcher_runs where started_at > now() - interval '48 hours' group by 1,2 order by 1,2;`
   Fill `JOB_EXPECTED_PERIOD_S` only with jobs that write a row on every tick **at every hour** (from the 05/11 snapshot: `email_tick`, `sms_tick`, `journey_dispatch`, `journey_scan`, `journey_level_outbox`, `recovery` ≈ 60 s; `billing-reconcile`, `shortio_sync` ≈ 300 s; `webhook_replay` ≈ 180 s; `tenant_domains_verify` ≈ 600 s; `billing-cycle` ≈ 3600 s; `dashboard_metrics_refresh` ≈ 300 s). Leave out any job with hours without rows, and always leave out `sms_campaign_dispatch` (writes only when it claims a campaign).
 
 - [ ] **Step 1: Write the failing tests** — one `describe` per rule, cases:
   - jobs: stale row → critical `job:sms_tick`; `shortio_sync` last start 20 min ago → critical (late); `failed_last_hour 2` → warning; `sms_campaign_dispatch` last start 15 h ago → **no alert** (Review Focus 5); unknown job late → no alert.
-  - webhook: 7d = 7000 events (1000/day), last event 3 h ago → critical; same house, last event 30 min ago → none; Sorte-da-Bet-like 7d = 70 events, last event 14 h ago → **none**; 24 h 200 events with 20 `erro` → warning `…:errors`.
+  - webhook: `eventsPerDay 1000`, last event 3 h ago → critical; same house, last event 30 min ago → none; Sorte-da-Bet-like `eventsPerDay 10`, last event 14 h ago → **none**; `eventsPerDay 200` with `errors24h 20` → warning `…:errors`.
   - queue: age 2000 s, ready 5, paused 0 → critical; paused 3 → none; 15 min 30 sent + 10 errors → warning.
   - provider: breaker `open`/`no_balance` on `sms` → critical with message mentioning Short Brasil; `backoff_until` in the future with error text → warning; 6 Short.io runs with 600 claimed / 150 rate_limited → warning `provider:shortio`; 6 runs with 600/30 → none.
   - runway: 4 h → critical; 12 h → warning; 30 h → none.
@@ -178,10 +179,10 @@ Worktree: `C:\Users\Carol\Desktop\betleads-synchealth`, branch `feat/console-sup
   - `dispatcher_runs` where `job = 'shortio_sync'` order `started_at desc` limit 6 (`started_at,claimed,rate_limited`).
   - `rpc("billing_runway_alert_candidates", { _after: null, _limit: 500, _hours: 24 })`.
   - `checkBillingHealth({ windowHours: 24, now })` (never throws; its findings go through `billingAlerts`).
-  - webhook stats per house (concurrency 4): latest `webhook_logs.created_at` (order desc limit 1), `count: "exact", head: true` for 7 d and 24 h, and 24 h `status = 'erro'` count.
+  - webhook stats per house (concurrency 4): the last 200 `webhook_logs.created_at` of the past 7 days (order desc limit 200; index-only scan, ~0.05 ms) and the 24 h `status = 'erro'` count (`count: "exact", head: true`, served by `webhook_logs_tenant_status_created_idx`). `lastEventAt` = newest; `eventsPerDay` = `n / 7` when fewer than 200 rows, else `200 / (newest − oldest in days)`. Put this estimate in an exported pure function `estimateEventsPerDay(createdAtDesc: string[], now: Date): number` in `alert-rules.ts`'s neighbour `platform-health.server.ts` and test it (fewer than 200 → n/7; 200 rows spanning 2 days → 100).
 - Cache: module-level `{ at, value }`; reuse when `now − at < 60 s` and `!opts.fresh`.
 
-- [ ] **Step 0: Measure the webhook reads in production (read-only)** for the largest house (PixReals or Sorte Alta): `EXPLAIN (ANALYZE, BUFFERS) select count(*) from webhook_logs where tenant_id = $1 and created_at > now() - interval '7 days';` and the same for the latest-event query. If the 7-day count takes > 500 ms, **stop and report** (a small SQL function would be a migration). Record the timings in the commit message.
+- [ ] **Step 0 (done by the controller, 05/11):** a 7-day exact count took 1.06 s for Sorte Alta (57k rows; betgreen has 106k), the latest-event read 0.04 ms. Hence the 200-event sample above instead of exact counts. Nothing to run.
 
 - [ ] **Step 1: Write the failing tests** with `createFakeDb` (`src/lib/sms-bulk.test-support.ts`) mocked as `@/integrations/supabase/client.server`, `is_super_admin` RPC handler returning true, and `checkBillingHealth` mocked:
   - non-super-admin → rejects with the forbidden message, no other read made.
