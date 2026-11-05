@@ -1,0 +1,294 @@
+// HelpProvider (brief, Task 4): resolves the current screen's help article,
+// auto-starts its tour on a first visit, records tour results and owns the
+// help panel. Everything heavy stays lazy (constraints.md "Carregamento"):
+// articles via HELP_SCREEN_LOADERS' `import()`, the panel via React.lazy,
+// and tour-runner.ts (driver.js) via `import()` only.
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouterState } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
+import {
+  createContext,
+  lazy,
+  Suspense,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { toast } from "sonner";
+
+import { useShellNav } from "@/components/shell/use-shell-nav";
+import { HELP_SCREEN_LOADERS } from "@/help/registry";
+import { resolveHelpScreen } from "@/help/resolve";
+import { shouldAutoStart } from "@/help/tour-logic";
+import type { HelpRole, HelpScreen, TourStep } from "@/help/types";
+import {
+  AUTO_TOURS_OFF_KEY,
+  tourKey,
+  type HelpProgressMap,
+  type HelpProgressStatus,
+} from "@/lib/help-progress";
+import { getHelpProgress, setHelpProgress } from "@/lib/help-progress.functions";
+import type { ShellRole } from "@/lib/navigation";
+
+const HelpPanel = lazy(() => import("./help-panel").then((m) => ({ default: m.HelpPanel })));
+
+// Memoized so "is driver.js loaded yet?" is known: stopping a tour on route
+// change must not pull the chunk in when no tour ever ran.
+let tourRunner: Promise<typeof import("@/help/tour-runner")> | null = null;
+const loadTourRunner = () => (tourRunner ??= import("@/help/tour-runner"));
+
+export const HELP_PROGRESS_QUERY_KEY = ["help-progress"] as const;
+
+/** Delay between a screen's article loading and the auto-start check. */
+const AUTO_START_DELAY_MS = 600;
+/** Lets the Sheet's close animation finish before highlighting the page. */
+const PANEL_CLOSE_MS = 350;
+
+export type HelpContextValue = {
+  /** Opens the panel; `sectionId` scrolls to that article section, or
+   * "glossary:<termId>" to that glossary term. */
+  openPanel: (sectionId?: string) => void;
+  /** Starts the current screen's tour (or that tab's). */
+  startTour: (tab?: string | null) => void;
+  /** Something else (onboarding, a blocking overlay) is on screen: no
+   * auto-start while true. */
+  setOverlayActive: (active: boolean) => void;
+  /** Forces the screen the help refers to (the onboarding uses it); `null`
+   * goes back to the URL. */
+  setScreenOverride: (route: string | null, tab?: string | null) => void;
+  progress: HelpProgressMap | null;
+};
+
+const noop = () => {};
+const HelpContext = createContext<HelpContextValue>({
+  openPanel: noop,
+  startTour: noop,
+  setOverlayActive: noop,
+  setScreenOverride: noop,
+  progress: null,
+});
+
+export function useHelp(): HelpContextValue {
+  return useContext(HelpContext);
+}
+
+/** super_admin reads the help as admin; no role yet filters as member. */
+export function helpRoleFor(role: ShellRole | null): HelpRole {
+  if (role === "super_admin") return "admin";
+  return role ?? "member";
+}
+
+/** Which tour of `screen` applies to `tab`: the tab's own, else "default". */
+export function tourFor(
+  screen: HelpScreen,
+  tab: string | null,
+): { tourTab: string | null; steps: TourStep[] } {
+  if (tab && screen.tours[tab]) return { tourTab: tab, steps: screen.tours[tab] };
+  return { tourTab: null, steps: screen.tours.default ?? [] };
+}
+
+function isDialogOpen(): boolean {
+  return !!document.querySelector(
+    '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+  );
+}
+
+type Target = { route: string; tab: string | null };
+
+export function HelpProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+  const fetchProgress = useServerFn(getHelpProgress);
+  const saveProgress = useServerFn(setHelpProgress);
+  const { role: shellRole } = useShellNav();
+  const role = helpRoleFor(shellRole);
+
+  const progressQuery = useQuery({
+    queryKey: HELP_PROGRESS_QUERY_KEY,
+    queryFn: () => fetchProgress(),
+    retry: 1,
+    staleTime: Infinity,
+  });
+  const progress: HelpProgressMap | null = progressQuery.isError
+    ? null
+    : (progressQuery.data?.progress ?? null);
+
+  // --- Location: pathname + hash (tabs live in the hash; PageTabs navigate
+  // through the router, but a plain `hashchange` is also honoured). ---
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const routerHash = useRouterState({ select: (s) => s.location.hash });
+  const [hash, setHash] = useState("");
+  useEffect(() => {
+    setHash(window.location.hash);
+  }, [pathname, routerHash]);
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const [override, setOverride] = useState<Target | null>(null);
+  const target: Target | null = useMemo(
+    () => override ?? resolveHelpScreen(pathname, hash),
+    [override, pathname, hash],
+  );
+
+  // --- Article loading ---
+  const [screen, setScreen] = useState<HelpScreen | null>(null);
+  const targetRoute = target?.route ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    const loader = targetRoute ? HELP_SCREEN_LOADERS[targetRoute] : undefined;
+    if (!loader) {
+      setScreen(null);
+      return;
+    }
+    loader()
+      .then((mod) => {
+        if (!cancelled) setScreen(mod.default);
+      })
+      .catch(() => {
+        if (!cancelled) setScreen(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [targetRoute]);
+  const currentScreen = screen && screen.route === targetRoute ? screen : null;
+  const currentTab = target?.tab ?? null;
+
+  // --- Panel state ---
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelMounted, setPanelMounted] = useState(false);
+  const [focus, setFocus] = useState<{ target: string; nonce: number } | null>(null);
+  const [overlayActive, setOverlayActive] = useState(false);
+
+  const openPanel = useCallback((sectionId?: string) => {
+    setPanelMounted(true);
+    setPanelOpen(true);
+    if (sectionId) setFocus({ target: sectionId, nonce: Date.now() });
+  }, []);
+
+  // --- Progress writes (optimistic) ---
+  const writeProgress = useCallback(
+    (key: string, status: HelpProgressStatus | null) => {
+      queryClient.setQueryData<{ progress: HelpProgressMap }>(HELP_PROGRESS_QUERY_KEY, (old) => {
+        if (!old) return old;
+        const next = { ...old.progress };
+        if (status === null) delete next[key];
+        else next[key] = status;
+        return { progress: next };
+      });
+      saveProgress({ data: { key, status } }).catch(() => {
+        void queryClient.invalidateQueries({ queryKey: HELP_PROGRESS_QUERY_KEY });
+      });
+    },
+    [queryClient, saveProgress],
+  );
+
+  // --- Tours ---
+  const runSteps = useCallback(
+    (route: string, tourTab: string | null, steps: TourStep[]) => {
+      if (steps.length === 0) return;
+      const key = tourKey(route, tourTab);
+      void loadTourRunner().then(({ runTour, stopActiveTour }) => {
+        runTour(steps, {
+          onFinish: (result) => writeProgress(key, result),
+          onLearnMore: (step) => {
+            stopActiveTour({ record: true });
+            openPanel(step.articleSection);
+          },
+        });
+      });
+    },
+    [openPanel, writeProgress],
+  );
+
+  const startTour = useCallback(
+    (tab?: string | null) => {
+      if (!currentScreen) return;
+      const { tourTab, steps } = tourFor(currentScreen, tab === undefined ? currentTab : tab);
+      setPanelOpen(false);
+      // Wait for the panel (if open) to close so its overlay isn't in the way.
+      window.setTimeout(() => runSteps(currentScreen.route, tourTab, steps), PANEL_CLOSE_MS);
+    },
+    [currentScreen, currentTab, runSteps],
+  );
+
+  // Auto-start is evaluated once per tour key per visit of a route.
+  const autoChecked = useRef(new Set<string>());
+
+  // Any running tour/highlight stops when the route changes.
+  useEffect(() => {
+    autoChecked.current.clear();
+    return () => {
+      void tourRunner?.then(({ stopActiveTour }) => stopActiveTour());
+    };
+  }, [pathname]);
+
+  const progressReady = progress !== null;
+  useEffect(() => {
+    if (!currentScreen || !progressReady) return;
+    const { tourTab, steps } = tourFor(currentScreen, currentTab);
+    const key = tourKey(currentScreen.route, tourTab);
+    if (autoChecked.current.has(key)) return;
+    const timer = window.setTimeout(() => {
+      autoChecked.current.add(key);
+      const latest = queryClient.getQueryData<{ progress: HelpProgressMap }>(
+        HELP_PROGRESS_QUERY_KEY,
+      );
+      const ok = shouldAutoStart({
+        key,
+        progress: latest?.progress ?? null,
+        dialogOpen: isDialogOpen(),
+        overlayActive: overlayActive || panelOpen,
+        hasSteps: steps.length > 0,
+      });
+      if (ok) runSteps(currentScreen.route, tourTab, steps);
+    }, AUTO_START_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [currentScreen, currentTab, progressReady, overlayActive, panelOpen, queryClient, runSteps]);
+
+  const showAnchor = useCallback((anchor: string) => {
+    setPanelOpen(false);
+    window.setTimeout(() => {
+      void loadTourRunner().then(({ highlightAnchor }) => {
+        if (!highlightAnchor(anchor)) toast("Este elemento não está visível agora");
+      });
+    }, PANEL_CLOSE_MS);
+  }, []);
+
+  const setScreenOverride = useCallback((route: string | null, tab?: string | null) => {
+    setOverride(route ? { route, tab: tab ?? null } : null);
+  }, []);
+
+  const value = useMemo<HelpContextValue>(
+    () => ({ openPanel, startTour, setOverlayActive, setScreenOverride, progress }),
+    [openPanel, startTour, setScreenOverride, progress],
+  );
+
+  return (
+    <HelpContext.Provider value={value}>
+      {children}
+      {panelMounted ? (
+        <Suspense fallback={null}>
+          <HelpPanel
+            open={panelOpen}
+            onOpenChange={setPanelOpen}
+            screen={currentScreen}
+            role={role}
+            currentTab={currentTab}
+            focus={focus}
+            autoToursOff={progress?.[AUTO_TOURS_OFF_KEY] === "off"}
+            onAutoToursOffChange={(off) => writeProgress(AUTO_TOURS_OFF_KEY, off ? "off" : null)}
+            onStartTour={() => startTour()}
+            onShowAnchor={showAnchor}
+          />
+        </Suspense>
+      ) : null}
+    </HelpContext.Provider>
+  );
+}

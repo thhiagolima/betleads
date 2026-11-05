@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ActiveTenantSwitcher } from "@/components/active-tenant-switcher";
 import { BillingBanner } from "@/components/billing/billing-banner";
 import { DemoBanner } from "@/components/demo-banner";
+import { HelpButton } from "@/components/help/help-button";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
 import { AccountMenu } from "@/components/shell/account-menu";
 import { MobileMenu, MobileTabBar } from "@/components/shell/mobile-nav";
@@ -95,6 +96,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <ActiveTenantSwitcher />
             </div>
             <RealtimeIndicator />
+            <HelpButton />
             <AccountMenu role={role} />
           </div>
         </header>

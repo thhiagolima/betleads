@@ -118,4 +118,7 @@ export const VIRTUAL_SCREENS = ["onboarding", "shell"] as const;
  * by any article yet — Task 7 populates articles for the touched screens
  * and shrinks this list. Starts empty.
  */
-export const ANCHORS_PENDING_ARTICLE: string[] = [];
+export const ANCHORS_PENDING_ARTICLE: string[] = [
+  // The header "?" (HelpButton, Task 4); the shell article ships later.
+  "shell.header.help",
+];

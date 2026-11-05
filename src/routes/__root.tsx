@@ -14,6 +14,7 @@ import appCss from "../styles.css?url";
 import { AppLayout } from "@/components/app-layout";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthGate } from "@/components/auth-gate";
+import { HelpProvider } from "@/components/help/help-provider";
 import { OnboardingGate } from "@/components/onboarding/onboarding-gate";
 import { SystemDialogHost } from "@/components/system-dialog-host";
 import { createClientOnlyFn } from "@tanstack/react-start";
@@ -184,11 +185,13 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGate>
-        <AppLayout>
-          <OnboardingGate>
-            <Outlet />
-          </OnboardingGate>
-        </AppLayout>
+        <HelpProvider>
+          <AppLayout>
+            <OnboardingGate>
+              <Outlet />
+            </OnboardingGate>
+          </AppLayout>
+        </HelpProvider>
       </AuthGate>
       <SystemDialogHost />
       <Toaster />

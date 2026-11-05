@@ -4,7 +4,7 @@
 // the top level, or driver.js would end up in the initial bundle
 // (constraints.md "Carregamento").
 import "driver.js/dist/driver.css";
-import { driver, type DriveStep } from "driver.js";
+import { driver, type Driver, type DriveStep } from "driver.js";
 import { ANCHOR_ATTR } from "./anchor";
 import { filterAvailableSteps, pickVisible, tourResultFromReason } from "./tour-logic";
 import type { TourStep } from "./types";
@@ -21,13 +21,35 @@ export function findVisibleAnchor(anchor: string): HTMLElement | null {
   return pickVisible(candidates, (el) => el.getClientRects().length > 0);
 }
 
+// Only one driver.js instance at a time: a new highlight or tour first
+// destroys the previous one, so rapid calls never stack overlays.
+// `silenceFinish` stops a tour's `onFinish` from recording a result when it
+// is torn down by the app (route change, a new tour) rather than the user.
+let active: { instance: Driver; silenceFinish: () => void } | null = null;
+
+/** Destroys the running tour/highlight, if any. With `record: false` (the
+ * default) a running tour's `onFinish` is not called. */
+export function stopActiveTour(opts: { record?: boolean } = {}): void {
+  const current = active;
+  if (!current) return;
+  active = null;
+  if (!opts.record) current.silenceFinish();
+  current.instance.destroy();
+}
+
 /** Highlights a single element by its tour anchor (used by the help panel's
  * "Nesta tela" links). Returns `false` without doing anything if the anchor
  * isn't currently visible. */
 export function highlightAnchor(anchor: string): boolean {
   const el = findVisibleAnchor(anchor);
   if (!el) return false;
-  const instance = driver();
+  stopActiveTour();
+  const instance = driver({
+    onDestroyed: () => {
+      if (active?.instance === instance) active = null;
+    },
+  });
+  active = { instance, silenceFinish: () => {} };
   instance.highlight({ element: el });
   return true;
 }
@@ -46,6 +68,8 @@ const SKIP_TOUR_CLASS = "tour-skip-btn";
 export function runTour(steps: TourStep[], opts: RunTourOptions): void {
   const available = filterAvailableSteps(steps, findVisibleAnchor);
   if (available.length === 0) return;
+  stopActiveTour();
+  let silenced = false;
 
   const driveSteps: DriveStep[] = available.map((step) => ({
     element: anchorSelector(step.anchor),
@@ -91,9 +115,16 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): void {
       popover.footerButtons.insertBefore(learnMoreBtn, popover.footerButtons.firstChild);
     },
     onDestroyed: (_element, _step, hookOpts) => {
-      opts.onFinish(tourResultFromReason(hookOpts.reason));
+      if (active?.instance === instance) active = null;
+      if (!silenced) opts.onFinish(tourResultFromReason(hookOpts.reason));
     },
   });
 
+  active = {
+    instance,
+    silenceFinish: () => {
+      silenced = true;
+    },
+  };
   instance.drive();
 }
