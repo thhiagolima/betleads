@@ -30,6 +30,22 @@ const INNER_TABS = [
 ] as const;
 type InnerTab = (typeof INNER_TABS)[number]["value"];
 
+export type RedoEvent = { type: "redo" } | { type: "test-sent" };
+
+/**
+ * "Refazer verificação" hides the completed summary (`redoing: true`) so
+ * the wizard shows again; a fresh successful test push (`test-sent`) is
+ * exactly the signal that the house has proven the pipeline again, so it
+ * clears `redoing` and lets the summary reappear. Any other progress event
+ * (worker verified, script confirmed) leaves `redoing` untouched — those
+ * alone don't mean the house is done again.
+ */
+export function reduceRedoing(current: boolean, event: RedoEvent): boolean {
+  if (event.type === "redo") return true;
+  if (event.type === "test-sent") return false;
+  return current;
+}
+
 export function WebpushIntegrationPanel() {
   const qc = useQueryClient();
   const fetchIntegration = useServerFn(getWebpushIntegrationFn);
@@ -42,7 +58,10 @@ export function WebpushIntegrationPanel() {
     queryFn: () => fetchIntegration(),
   });
 
-  const onProgress = () => qc.invalidateQueries({ queryKey: WEBPUSH_INTEGRATION_QUERY_KEY });
+  function onProgress(opts?: { testSent?: boolean }) {
+    qc.invalidateQueries({ queryKey: WEBPUSH_INTEGRATION_QUERY_KEY });
+    if (opts?.testSent) setRedoing((r) => reduceRedoing(r, { type: "test-sent" }));
+  }
 
   if (query.isLoading || !query.data) {
     return (
@@ -84,7 +103,7 @@ export function WebpushIntegrationPanel() {
                     activeSubscriptions: app.activeSubscriptions,
                     identifiedSubscriptions: app.identifiedSubscriptions,
                   }))}
-                  onRedo={() => setRedoing(true)}
+                  onRedo={() => setRedoing((r) => reduceRedoing(r, { type: "redo" }))}
                 />
               ) : (
                 <WebpushSetupWizard

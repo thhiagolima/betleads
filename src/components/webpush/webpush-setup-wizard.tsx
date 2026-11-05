@@ -403,7 +403,12 @@ export function WebpushSetupWizard({
   app: WebpushWizardApp;
   loaderSnippet: string;
   playerSnippet: string;
-  onProgress: () => void;
+  /** Called after any server-side progress (verify success, "Já colei,
+   * verificar", a sent test push) so the caller can refetch. `testSent:
+   * true` additionally tells the caller a real test push just succeeded —
+   * the signal "Refazer verificação" should stop hiding the completed
+   * summary for (see `reduceRedoing` in webpush-integration-panel.tsx). */
+  onProgress: (opts?: { testSent?: boolean }) => void;
 }) {
   const [step, setStep] = useState<WizardStepId>(() => initialWizardStep(app));
   const [sendingId, setSendingId] = useState<string | null>(null);
@@ -433,7 +438,7 @@ export function WebpushSetupWizard({
     },
     onSuccess: () => {
       toast.success("Teste enviado");
-      onProgress();
+      onProgress({ testSent: true });
     },
     onError: (error: Error) => toast.error(error.message),
     onSettled: () => setSendingId(null),
