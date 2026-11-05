@@ -1,0 +1,38 @@
+// Pure text-scanning helpers for -coverage.test.ts. Kept separate from the
+// test file (which does the `fs` walking) so the regexes themselves are
+// unit-testable without touching the filesystem.
+
+const TOUR_ANCHOR_CALL_RE = /tourAnchor\("([^"]+)"\)/g;
+const RAW_DATA_TOUR_RE = /data-tour\s*=/g;
+const TERM_ID_RE = /<Term\s+id="([^"]+)"/g;
+
+function matchAll(source: string, re: RegExp): string[] {
+  const regex = new RegExp(re.source, re.flags);
+  const out: string[] = [];
+  let match: RegExpExecArray | null;
+  // eslint-disable-next-line no-cond-assign
+  while ((match = regex.exec(source))) out.push(match[1]);
+  return out;
+}
+
+/** Every id passed to the `tourAnchor` helper call in a source file. */
+export function extractTourAnchorCalls(source: string): string[] {
+  return matchAll(source, TOUR_ANCHOR_CALL_RE);
+}
+
+/** How many times the raw tour-anchor HTML attribute appears written by
+ * hand (should be 0 outside src/help/anchor.ts — spec §6 rule 2,
+ * constraints.md "Âncoras"). */
+export function countRawDataTourUsages(source: string): number {
+  return (source.match(RAW_DATA_TOUR_RE) ?? []).length;
+}
+
+/** Every id passed to a `Term` component's `id` prop in a source file. */
+export function extractTermIds(source: string): string[] {
+  return matchAll(source, TERM_ID_RE);
+}
+
+/** `*.test.*` files are left out of the coverage scan (brief, Task 2). */
+export function isTestFile(filename: string): boolean {
+  return filename.includes(".test.");
+}
