@@ -127,18 +127,44 @@ describe("summarizeHouse", () => {
     expect(row.reason).toBeNull();
   });
 
-  it("flags no_history for a new house with activity in only 1 of 4 base weeks (Review Focus 2)", () => {
+  it("flags no_history for a new house whose history starts in the newest base week (Review Focus 2)", () => {
     const baseWeeks: WeekTotals[] = [
+      ZERO_WEEK,
+      ZERO_WEEK,
+      ZERO_WEEK,
       { registrations: 100, ftds: 50, recovered: 0 },
-      ZERO_WEEK,
-      ZERO_WEEK,
-      ZERO_WEEK,
     ];
     const input = makeInput(baseWeeks, { registrations: 196, ftds: 90, recovered: 0 });
     const row = summarizeHouse(input, WINDOWS) as HouseHealthRow;
 
     expect(row.level).toBe("no_history");
     expect(row.deltas.registrationsPct).toBeNull();
+  });
+
+  it("flags no_history when history starts in the 3rd base week (only 2 weeks since the first active one)", () => {
+    const active = { registrations: 400, ftds: 100, recovered: 0 };
+    const input = makeInput([ZERO_WEEK, ZERO_WEEK, active, active], active);
+    expect((summarizeHouse(input, WINDOWS) as HouseHealthRow).level).toBe("no_history");
+  });
+
+  it("a house active in the 2 oldest base weeks and dead since is red, not no_history", () => {
+    const active = { registrations: 400, ftds: 100, recovered: 0 };
+    const input = makeInput([active, active, ZERO_WEEK, ZERO_WEEK], ZERO_WEEK);
+    const row = summarizeHouse(input, WINDOWS) as HouseHealthRow;
+
+    expect(row.level).toBe("red");
+    expect(row.deltas.registrationsPct).toBe(-100);
+    expect(row.reason).toContain("−100%");
+  });
+
+  it("with recoveryUnavailable, recovery is ignored: null delta, no recovery rule", () => {
+    const baseWeeks = Array(4).fill({ registrations: 50, ftds: 20, recovered: 10000 });
+    const input = makeInput(baseWeeks, { registrations: 50, ftds: 20, recovered: 0 });
+    const row = summarizeHouse(input, WINDOWS, { recoveryUnavailable: true }) as HouseHealthRow;
+
+    expect(row.level).toBe("green");
+    expect(row.reason).toBeNull();
+    expect(row.deltas.recoveredPct).toBeNull();
   });
 
   it("returns null for a house with no movement at all", () => {

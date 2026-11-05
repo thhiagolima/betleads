@@ -47,6 +47,12 @@ export const HEALTH_THRESHOLDS = {
   minBaseRegistrations: 20,
   minBaseFtds: 10,
   minBaseRecovered: 500,
+  /**
+   * "Sem histórico" when fewer than this many base weeks go from the first
+   * week with a cadastro to the end of the base (history starts late). Empty
+   * weeks *after* an active one don't count against the house: they are a
+   * drop, judged by the normal rules.
+   */
   minHistoryWeeks: 3,
 } as const;
 
@@ -171,6 +177,7 @@ type Metric = { value: number; level: Exclude<HealthLevel, "no_history">; messag
 export function summarizeHouse(
   input: HouseHealthInput,
   windows: HealthWindows,
+  opts: { recoveryUnavailable?: boolean } = {},
 ): HouseHealthRow | null {
   const currentSum = sumDays(input.days, windows.current.from, windows.current.to);
   const baseSum = sumDays(input.days, windows.base.from, windows.base.to);
@@ -187,12 +194,17 @@ export function summarizeHouse(
     recovered: baseSum.recovered / 4,
   });
 
-  let historyWeeks = 0;
+  // Base weeks oldest first; history = weeks from the first active one on.
+  let firstActiveWeek = 4;
   for (let w = 0; w < 4; w++) {
     const weekFrom = addDays(windows.base.from, w * 7);
     const weekTo = addDays(weekFrom, 6);
-    if (sumDays(input.days, weekFrom, weekTo).registrations > 0) historyWeeks++;
+    if (sumDays(input.days, weekFrom, weekTo).registrations > 0) {
+      firstActiveWeek = w;
+      break;
+    }
   }
+  const historyWeeks = 4 - firstActiveWeek;
 
   if (historyWeeks < HEALTH_THRESHOLDS.minHistoryWeeks) {
     return {
@@ -210,7 +222,10 @@ export function summarizeHouse(
 
   const registrationsPct = pctDelta(current.registrations, base.registrations);
   const ftdsPct = pctDelta(current.ftds, base.ftds);
-  const recoveredPct = pctDelta(current.recovered, base.recovered);
+  // finance_activity_days failed: recovery is unknown, not zero.
+  const recoveredPct = opts.recoveryUnavailable
+    ? null
+    : pctDelta(current.recovered, base.recovered);
   const conversionPts =
     current.conversion === null || base.conversion === null
       ? null
