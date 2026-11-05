@@ -30,7 +30,6 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { neutralizeCsvFormula } from "@/lib/csv-safe";
 import { selectAllPages } from "@/lib/pagination";
-import { listDemoTenantIds } from "@/lib/tenant-access.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 import { loadMonthData } from "./billing-month-data.server";

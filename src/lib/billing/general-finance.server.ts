@@ -59,6 +59,9 @@ export type GeneralFinanceHouse = MonthHouseRow & {
   bucket: BillingBucket;
   daysOverdue: number | null;
   openInvoiceCents: number | null;
+  /** The house has a row in tenant_channel_providers (its own provider account for some
+   * channel), so the Short Brasil/Infobip split by item is only approximate for it. */
+  ownProvider: boolean;
 };
 
 export type GeneralFinance = {
@@ -67,6 +70,8 @@ export type GeneralFinance = {
   totals: MonthTotals;
   states: Omit<BillingStateSummary, "rows">;
   houses: GeneralFinanceHouse[];
+  /** Names of the houses with ownProvider, in `houses` order. */
+  ownProviderHouses: string[];
 };
 
 const TRUNCATED_MESSAGE = "Histórico de faturas grande demais para calcular o Financeiro geral.";
@@ -79,6 +84,7 @@ type OpenInvoiceRow = {
   due_date: string;
 };
 type PaidAtRow = { id: string; tenant_id: string; paid_at: string };
+type ChannelProviderRow = { tenant_id: string; channel: string };
 
 export async function adminGeneralFinanceFor(
   ctx: { userId: string },
@@ -92,8 +98,9 @@ export async function adminGeneralFinanceFor(
   const totals = sumMonthRows(monthRows);
 
   const sb = looseDb(supabaseAdmin);
+  const tenantIds = monthData.tenants.map((t) => t.id);
 
-  const [tbPaged, openInvPaged, paidAtPaged] = await Promise.all([
+  const [tbPaged, openInvPaged, paidAtPaged, channelProviders] = await Promise.all([
     selectAllPages<TenantBillingStateRow>(
       "general_finance_tenant_billing",
       () => sb.from("tenant_billing").select("tenant_id,access_state"),
@@ -105,7 +112,15 @@ export async function adminGeneralFinanceFor(
     selectAllPages<PaidAtRow>("general_finance_paid_at", () =>
       sb.from("billing_invoices").select("id,tenant_id,paid_at").eq("status", "paid"),
     ),
+    // Tiny table (at most houses × 3 channels): one plain read, no paging.
+    tenantIds.length > 0
+      ? sb
+          .from<ChannelProviderRow[]>("tenant_channel_providers")
+          .select("tenant_id,channel")
+          .in("tenant_id", tenantIds)
+      : Promise.resolve({ data: [] as ChannelProviderRow[], error: null }),
   ]);
+  if (channelProviders.error) throw new Error(channelProviders.error.message);
   for (const res of [tbPaged, openInvPaged, paidAtPaged]) {
     if (res.error) throw new Error(res.error.message);
   }
@@ -130,6 +145,7 @@ export async function adminGeneralFinanceFor(
     const current = firstPaidAtByTenant.get(row.tenant_id);
     if (!current || row.paid_at < current) firstPaidAtByTenant.set(row.tenant_id, row.paid_at);
   }
+  const ownProviderTenants = new Set((channelProviders.data ?? []).map((r) => r.tenant_id));
   const paidInMonthTenants = new Set(monthData.invoicesPaid.map((r) => r.tenant_id));
 
   const todayBrt = brtDayKey(new Date());
@@ -137,7 +153,7 @@ export async function adminGeneralFinanceFor(
   const stateInputs: BillingStateInput[] = monthData.tenants.map((tenant) => ({
     tenantId: tenant.id,
     name: tenant.nome,
-    accessState: accessStateByTenant.get(tenant.id) ?? "ok",
+    accessState: accessStateByTenant.get(tenant.id) ?? (tenant.exempt ? "exempt" : "ok"),
     openInvoice: openInvoiceByTenant.get(tenant.id) ?? null,
     firstPaidAt: firstPaidAtByTenant.get(tenant.id) ?? null,
     paidInMonth: paidInMonthTenants.has(tenant.id),
@@ -153,6 +169,7 @@ export async function adminGeneralFinanceFor(
       bucket: stateRow?.bucket ?? "ok",
       daysOverdue: stateRow?.daysOverdue ?? null,
       openInvoiceCents: openInvoiceByTenant.get(row.tenantId)?.amountCents ?? null,
+      ownProvider: ownProviderTenants.has(row.tenantId),
     };
   });
 
@@ -171,12 +188,14 @@ export async function adminGeneralFinanceFor(
     });
 
   const { rows: _rows, ...statesWithoutRows } = states;
+  const houses = [...debtorHouses, ...restHouses];
 
   return {
     month: input.month,
     generatedAt: new Date().toISOString(),
     totals,
     states: statesWithoutRows,
-    houses: [...debtorHouses, ...restHouses],
+    houses,
+    ownProviderHouses: houses.filter((h) => h.ownProvider).map((h) => h.name),
   };
 }

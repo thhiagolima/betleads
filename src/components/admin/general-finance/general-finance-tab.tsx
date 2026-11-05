@@ -4,6 +4,7 @@
 // month picker is the only thing that changes the query key).
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronLeft, ChevronRight, CircleAlert, Download } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +29,15 @@ function shiftMonth(month: string, delta: number): string {
   const [y, m] = month.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1 + delta, 1));
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** The month input's new value, or `current` when it was cleared or isn't a valid AAAA-MM. */
+export function monthFromInput(current: string, value: string): string {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : current;
+}
+
+function missingCostHint(units: number): string | undefined {
+  return units > 0 ? `${units.toLocaleString("pt-BR")} unidades sem custo cadastrado` : undefined;
 }
 
 function marginHint(pct: number | null): string {
@@ -73,7 +83,10 @@ export function GeneralFinanceTab() {
       <Input
         type="month"
         value={month}
-        onChange={(e) => setMonth(e.target.value)}
+        onChange={(e) => {
+          const value = e.target.value;
+          setMonth((current) => monthFromInput(current, value));
+        }}
         className="w-40"
       />
       <Button
@@ -120,15 +133,11 @@ export function GeneralFinanceTab() {
   const filteredHouses = selectedBucket
     ? houses.filter((h) => h.bucket === selectedBucket)
     : houses;
-  const movementParts: string[] = [];
-  if (states.movements.newPaying.length > 0) {
-    movementParts.push(`Novas pagantes no mês: ${states.movements.newPaying.join(", ")}`);
-  }
-  if (states.movements.lost.length > 0) {
-    movementParts.push(
-      `Perdidas (bloqueadas/congeladas sem pagar): ${states.movements.lost.join(", ")}`,
-    );
-  }
+  const hasMissingCost =
+    totals.shortBrasil.missingCostUnits > 0 || totals.infobip.missingCostUnits > 0;
+  const margemHint = hasMissingCost
+    ? `${marginHint(totals.margemPct)} · margem superestimada: há unidades sem custo cadastrado`
+    : marginHint(totals.margemPct);
 
   return (
     <div className="space-y-4">
@@ -147,28 +156,32 @@ export function GeneralFinanceTab() {
         <MetricCard
           label="Custo Short Brasil"
           value={brl(totals.shortBrasil.amount)}
-          hint={
-            totals.shortBrasil.missingCostUnits > 0
-              ? `${totals.shortBrasil.missingCostUnits} unidades sem custo cadastrado`
-              : undefined
-          }
+          hint={missingCostHint(totals.shortBrasil.missingCostUnits)}
         />
         <MetricCard
           label="Custo Infobip"
           value={brl(totals.infobip.amount)}
-          hint={
-            totals.infobip.missingCostUnits > 0
-              ? `${totals.infobip.missingCostUnits} unidades sem custo cadastrado`
-              : undefined
-          }
+          hint={missingCostHint(totals.infobip.missingCostUnits)}
         />
         <MetricCard label="Taxa Pix" value={brl(totals.taxaPixReais)} />
-        <MetricCard
-          label="Margem"
-          value={brl(totals.receitaLiquida)}
-          hint={marginHint(totals.margemPct)}
-        />
+        <MetricCard label="Margem" value={brl(totals.receitaLiquida)} hint={margemHint} />
       </div>
+
+      {finance.ownProviderHouses.length > 0 && (
+        <p className="text-xs text-warning">
+          Divisão Short Brasil/Infobip aproximada para: {finance.ownProviderHouses.join(", ")}
+        </p>
+      )}
+
+      {states.movements.newPaying.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          Novas pagantes no mês: {states.movements.newPaying.join(", ")}
+        </p>
+      )}
+
+      {/* Billing states, debtors and lost houses are today's situation, not the selected
+          month's (tenant_billing / open invoices have no history). */}
+      <h3 className="pt-2 text-sm font-semibold text-foreground">Situação atual (hoje)</h3>
 
       <BillingStateCards
         counts={states.counts}
@@ -194,19 +207,22 @@ export function GeneralFinanceTab() {
                     ? `${debtor.daysOverdue} dias de atraso`
                     : BUCKET_LABELS[debtor.bucket]}
                 </span>
-                <a href="/admin#faturamento" className="text-primary hover:underline">
+                <Link to="/admin" hash="faturamento" className="text-primary hover:underline">
                   Ver em Faturamento
-                </a>
+                </Link>
               </li>
             ))}
           </ul>
         )}
       </DataCard>
 
-      {movementParts.length > 0 && (
-        <p className="text-sm text-muted-foreground">{movementParts.join(" · ")}</p>
+      {states.movements.lost.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          Perdidas (bloqueadas/congeladas sem pagar): {states.movements.lost.join(", ")}
+        </p>
       )}
 
+      <h3 className="pt-2 text-sm font-semibold text-foreground">Por casa no mês</h3>
       <GeneralFinanceTable houses={filteredHouses} />
 
       <p className="text-xs text-muted-foreground">

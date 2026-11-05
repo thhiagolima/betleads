@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { BUCKET_LABELS } from "@/lib/billing/billing-state-summary";
 import { brl } from "@/lib/format";
+import type { ProviderCost } from "@/lib/billing/billing-month-report";
 import type { GeneralFinanceHouse } from "@/lib/billing/general-finance.server";
 import { cn } from "@/lib/utils";
 
@@ -85,6 +86,22 @@ function compareHouses(a: GeneralFinanceHouse, b: GeneralFinanceHouse, key: Sort
     return String(va).localeCompare(String(vb), "pt-BR");
   }
   return va - vb;
+}
+
+function hasMissingCost(house: GeneralFinanceHouse): boolean {
+  return house.shortBrasil.missingCostUnits > 0 || house.infobip.missingCostUnits > 0;
+}
+
+/** Never shows an unpriced provider cost as R$ 0: the known amount plus "+ N sem custo", or
+ * "não cadastrado" when nothing is priced. */
+function providerCostLabel(cost: ProviderCost): string {
+  if (cost.missingCostUnits <= 0) return brl(cost.amount);
+  if (cost.amount === 0) return "não cadastrado";
+  return `${brl(cost.amount)} + ${cost.missingCostUnits.toLocaleString("pt-BR")} sem custo`;
+}
+
+function consumoBreakdown(house: GeneralFinanceHouse): string {
+  return `SMS ${brl(house.consumoSms)} · Voz ${brl(house.consumoVoz)} · E-mail ${brl(house.consumoEmail)}`;
 }
 
 function marginLabel(pct: number | null): string {
@@ -169,6 +186,7 @@ export function GeneralFinanceTable({ houses }: { houses: GeneralFinanceHouse[] 
                 <span className="inline-flex flex-wrap items-center gap-2">
                   <span className="font-medium">{house.name}</span>
                   {house.exempt && <Badge variant="secondary">isenta</Badge>}
+                  {house.ownProvider && <Badge variant="outline">fornecedor próprio</Badge>}
                 </span>
               </TableCell>
               <TableCell>{BUCKET_LABELS[house.bucket]}</TableCell>
@@ -178,11 +196,15 @@ export function GeneralFinanceTable({ houses }: { houses: GeneralFinanceHouse[] 
               <TableCell className="text-right tabular-nums">
                 {house.topupCount} · {brl(house.topupReais)}
               </TableCell>
-              <TableCell className="text-right tabular-nums">{brl(consumoTotal(house))}</TableCell>
-              <TableCell className="text-right tabular-nums">
-                {brl(house.shortBrasil.amount)}
+              <TableCell className="text-right tabular-nums" title={consumoBreakdown(house)}>
+                {brl(consumoTotal(house))}
               </TableCell>
-              <TableCell className="text-right tabular-nums">{brl(house.infobip.amount)}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                {providerCostLabel(house.shortBrasil)}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {providerCostLabel(house.infobip)}
+              </TableCell>
               <TableCell className="text-right tabular-nums">{brl(house.taxaPixReais)}</TableCell>
               <TableCell className="text-right tabular-nums">{brl(house.receitaLiquida)}</TableCell>
               <TableCell
@@ -192,6 +214,14 @@ export function GeneralFinanceTable({ houses }: { houses: GeneralFinanceHouse[] 
                 )}
               >
                 {marginLabel(house.margemPct)}
+                {hasMissingCost(house) && (
+                  <span
+                    className="ml-0.5 text-warning"
+                    title="margem superestimada: custo não cadastrado"
+                  >
+                    *
+                  </span>
+                )}
               </TableCell>
             </TableRow>
           ))}

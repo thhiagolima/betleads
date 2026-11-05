@@ -245,4 +245,71 @@ describe("adminGeneralFinanceFor", () => {
       "Histórico de faturas grande demais para calcular o Financeiro geral.",
     );
   });
+  // Final review, item 4: a house without a tenant_billing row falls back to "exempt" when its
+  // plan is exempt, else "ok" — even with an open invoice.
+  it("falls back to ok / exempt for houses without a tenant_billing row", async () => {
+    fake.admin
+      .rows("billing_plans")
+      .push({ code: "plano_interno", price_cents: 0, exempt_all: true });
+    fake.admin
+      .rows("tenants")
+      .push(
+        { id: TENANT, nome: "Casa Sem Linha", slug: "sem-linha", plano: "crm_unico" },
+        { id: OTHER_TENANT, nome: "Casa Interna", slug: "interna", plano: "plano_interno" },
+      );
+    fake.admin.rows("billing_invoices").push({
+      id: "inv-open",
+      tenant_id: TENANT,
+      status: "open",
+      amount_cents: 400000,
+      due_date: "2026-10-01",
+    });
+
+    const result = await adminGeneralFinanceFor(ctxFor(SUPER_ADMIN), { month: "2026-11" });
+    const byId = new Map(result.houses.map((h) => [h.tenantId, h] as const));
+    expect(byId.get(TENANT)?.bucket).toBe("ok");
+    expect(byId.get(OTHER_TENANT)?.bucket).toBe("exempt");
+    expect(result.states.counts.exempt).toBe(1);
+  });
+
+  // Final review, item 2 (spec §6.4 "trate ou avise"): houses with a row in
+  // tenant_channel_providers are flagged, and their names listed.
+  it("flags houses with their own provider per channel", async () => {
+    fake.admin
+      .rows("tenants")
+      .push(
+        { id: TENANT, nome: "Casa Padrão", slug: "padrao", plano: "crm_unico" },
+        { id: OTHER_TENANT, nome: "Casa Própria", slug: "propria", plano: "crm_unico" },
+      );
+    fake.admin
+      .rows("tenant_billing")
+      .push(
+        { tenant_id: TENANT, access_state: "ok" },
+        { tenant_id: OTHER_TENANT, access_state: "ok" },
+      );
+    fake.admin
+      .rows("tenant_channel_providers")
+      .push(
+        { tenant_id: OTHER_TENANT, channel: "sms", provider_account_id: "acc-1" },
+        { tenant_id: OTHER_TENANT, channel: "email", provider_account_id: "acc-2" },
+      );
+
+    const result = await adminGeneralFinanceFor(ctxFor(SUPER_ADMIN), { month: "2026-11" });
+    const byId = new Map(result.houses.map((h) => [h.tenantId, h] as const));
+    expect(byId.get(TENANT)?.ownProvider).toBe(false);
+    expect(byId.get(OTHER_TENANT)?.ownProvider).toBe(true);
+    expect(result.ownProviderHouses).toEqual(["Casa Própria"]);
+  });
+
+  it("throws when the tenant_channel_providers read fails", async () => {
+    fake.admin
+      .rows("tenants")
+      .push({ id: TENANT, nome: "Casa Paga", slug: "casa-paga", plano: "crm_unico" });
+    fake.admin.rows("tenant_billing").push({ tenant_id: TENANT, access_state: "ok" });
+    fake.admin.failNext("tenant_channel_providers", "select", "tcp boom");
+
+    await expect(adminGeneralFinanceFor(ctxFor(SUPER_ADMIN), { month: "2026-11" })).rejects.toThrow(
+      "tcp boom",
+    );
+  });
 });
