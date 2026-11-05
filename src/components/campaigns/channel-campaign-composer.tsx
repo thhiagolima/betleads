@@ -16,6 +16,8 @@ import { toast } from "sonner";
 
 import type { Json } from "@/integrations/supabase/types";
 
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
 import { ScriptFormDialog } from "@/components/ligacoes/script-form-dialog";
@@ -1099,24 +1101,26 @@ export function ChannelCampaignComposer({
             <div className="min-w-0 space-y-5">
               <div className="space-y-2">
                 <Label>Canal</Label>
-                <SegmentedFilter
-                  label="Canal da campanha"
-                  value={channel}
-                  onValueChange={(item) => {
-                    setChannel(item);
-                    // The external phone list is an SMS-only audience.
-                    if (audienceId === EXTERNAL_LIST_ID && item !== "sms") setAudienceId("");
-                    const selected = audienceOptions.find((option) => option.id === audienceId);
-                    if (selected) {
-                      setAudienceCriteria(selected.criteria);
-                      audienceMutation.mutate({ criteria: selected.criteria, channel: item });
-                    }
-                  }}
-                  items={(Object.keys(channelMeta) as Channel[]).map((item) => ({
-                    value: item,
-                    label: channelMeta[item].label,
-                  }))}
-                />
+                <div {...tourAnchor("campanhas.compositor.canal")}>
+                  <SegmentedFilter
+                    label="Canal da campanha"
+                    value={channel}
+                    onValueChange={(item) => {
+                      setChannel(item);
+                      // The external phone list is an SMS-only audience.
+                      if (audienceId === EXTERNAL_LIST_ID && item !== "sms") setAudienceId("");
+                      const selected = audienceOptions.find((option) => option.id === audienceId);
+                      if (selected) {
+                        setAudienceCriteria(selected.criteria);
+                        audienceMutation.mutate({ criteria: selected.criteria, channel: item });
+                      }
+                    }}
+                    items={(Object.keys(channelMeta) as Channel[]).map((item) => ({
+                      value: item,
+                      label: channelMeta[item].label,
+                    }))}
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor={fieldIds.name}>Nome da campanha</Label>
@@ -1128,6 +1132,7 @@ export function ChannelCampaignComposer({
                   placeholder="Ex.: Bônus de fim de semana"
                   aria-invalid={submitAttempted && !name.trim()}
                   aria-describedby={fieldIds.validation}
+                  {...tourAnchor("campanhas.compositor.nome")}
                 />
               </div>
               <div className="space-y-2">
@@ -1152,6 +1157,7 @@ export function ChannelCampaignComposer({
                     aria-invalid={
                       submitAttempted && Boolean(!audience && !audienceMutation.isPending)
                     }
+                    {...tourAnchor("campanhas.compositor.publico")}
                   >
                     <SelectValue placeholder="Selecione um público salvo" />
                   </SelectTrigger>
@@ -1187,6 +1193,7 @@ export function ChannelCampaignComposer({
                       onChange={(event) => setExternalText(event.target.value)}
                       placeholder="Cole os números: um por linha ou separados por vírgula ou ponto e vírgula"
                       aria-label="Números da lista"
+                      {...tourAnchor("campanhas.compositor.lista-numeros")}
                     />
                     <div className="flex flex-wrap items-center gap-2">
                       <input
@@ -1221,6 +1228,7 @@ export function ChannelCampaignComposer({
                         variant="outline"
                         disabled={externalFileLoading}
                         onClick={() => externalFileRef.current?.click()}
+                        {...tourAnchor("campanhas.compositor.lista-arquivo")}
                       >
                         <Upload className="mr-1.5 size-3.5" aria-hidden="true" />
                         {externalFileLoading ? "Lendo arquivo…" : "Enviar arquivo (CSV, TXT, XLS)"}
@@ -1277,6 +1285,7 @@ export function ChannelCampaignComposer({
                           id={fieldIds.smsTemplate}
                           aria-labelledby={fieldIds.smsTemplateLabel}
                           className="sm:flex-1"
+                          {...tourAnchor("campanhas.compositor.sms-template")}
                         >
                           <SelectValue placeholder="Mensagem manual" />
                         </SelectTrigger>
@@ -1293,6 +1302,7 @@ export function ChannelCampaignComposer({
                           type="button"
                           variant="outline"
                           onClick={() => setSmsTemplateDialogOpen(true)}
+                          {...tourAnchor("campanhas.compositor.sms-novo-template")}
                         >
                           <Plus /> Novo template
                         </Button>
@@ -1313,20 +1323,25 @@ export function ChannelCampaignComposer({
                         submitAttempted && (Boolean(invalidVariables.length) || !smsContent.trim())
                       }
                       aria-describedby={fieldIds.validation}
+                      {...tourAnchor("campanhas.compositor.sms-mensagem")}
                     />
-                    <MessageVariablePicker
-                      channel="sms"
-                      textareaRef={smsContentRef}
-                      value={smsContent}
-                      onChange={setSmsContent}
-                    />
-                    <LinkInsertMenu
-                      siteUrl={siteUrl}
-                      quickLinks={quickLinks}
-                      textareaRef={smsContentRef}
-                      value={smsContent}
-                      onChange={setSmsContent}
-                    />
+                    <div {...tourAnchor("campanhas.compositor.sms-variaveis")}>
+                      <MessageVariablePicker
+                        channel="sms"
+                        textareaRef={smsContentRef}
+                        value={smsContent}
+                        onChange={setSmsContent}
+                      />
+                    </div>
+                    <div {...tourAnchor("campanhas.compositor.links")}>
+                      <LinkInsertMenu
+                        siteUrl={siteUrl}
+                        quickLinks={quickLinks}
+                        textareaRef={smsContentRef}
+                        value={smsContent}
+                        onChange={setSmsContent}
+                      />
+                    </div>
                     <p className="text-meta text-muted-foreground">
                       {Array.from(smsContent).length} caracteres · {smsSegmentInfo.encoding} ·{" "}
                       {parts} segmento{parts === 1 ? "" : "s"} ·{" "}
@@ -1343,18 +1358,20 @@ export function ChannelCampaignComposer({
                   </div>
                   {isExpert ? null : (
                     <div className="space-y-2">
-                      <Label>Domínio do encurtador</Label>
+                      <Label><Term id="encurtador">Domínio do encurtador</Term></Label>
                       <ShortenerFallbackNotice
                         isSuccess={composerOptions.isSuccess}
                         isError={composerOptions.isError}
                         shortenerPending={shortenerPending}
                         hasVerifiedDomain={shortDomains.length > 0}
                       />
-                      <ShortDomainSelect
-                        domains={shortDomains}
-                        value={shortDomainId}
-                        onChange={setShortDomainId}
-                      />
+                      <div {...tourAnchor("campanhas.compositor.sms-dominio")}>
+                        <ShortDomainSelect
+                          domains={shortDomains}
+                          value={shortDomainId}
+                          onChange={setShortDomainId}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1371,6 +1388,7 @@ export function ChannelCampaignComposer({
                           aria-invalid={submitAttempted && !emailTemplateId}
                           aria-describedby={fieldIds.validation}
                           className="sm:flex-1"
+                          {...tourAnchor("campanhas.compositor.email-template")}
                         >
                           <SelectValue placeholder="Selecione um template" />
                         </SelectTrigger>
@@ -1387,6 +1405,7 @@ export function ChannelCampaignComposer({
                           type="button"
                           variant="outline"
                           onClick={() => setEmailTemplateDialogOpen(true)}
+                          {...tourAnchor("campanhas.compositor.email-novo-template")}
                         >
                           <Plus /> Novo template
                         </Button>
@@ -1399,39 +1418,45 @@ export function ChannelCampaignComposer({
                       </p>
                     ) : null}
                   </div>
-                  <MessageVariablePicker
-                    channel="email"
-                    readOnly
-                    label="Variáveis aceitas nos templates de e-mail"
-                  />
+                  <div {...tourAnchor("campanhas.compositor.email-variaveis")}>
+                    <MessageVariablePicker
+                      channel="email"
+                      readOnly
+                      label="Variáveis aceitas nos templates de e-mail"
+                    />
+                  </div>
                   {isExpert ? null : (
                     <>
                       <div className="space-y-2">
-                        <Label>Remetente</Label>
+                        <Label><Term id="remetente">Remetente</Term></Label>
                         <EmailBlockedNotice
                           isSuccess={composerOptions.isSuccess}
                           isError={composerOptions.isError}
                           hasVerifiedSender={emailSenders.length > 0}
                         />
-                        <EmailSenderSelect
-                          senders={emailSenders}
-                          value={senderId}
-                          onChange={setSenderId}
-                        />
+                        <div {...tourAnchor("campanhas.compositor.email-remetente")}>
+                          <EmailSenderSelect
+                            senders={emailSenders}
+                            value={senderId}
+                            onChange={setSenderId}
+                          />
+                        </div>
                       </div>
                       <div className="space-y-2">
-                        <Label>Domínio do encurtador</Label>
+                        <Label><Term id="encurtador">Domínio do encurtador</Term></Label>
                         <ShortenerFallbackNotice
                           isSuccess={composerOptions.isSuccess}
                           isError={composerOptions.isError}
                           shortenerPending={shortenerPending}
                           hasVerifiedDomain={shortDomains.length > 0}
                         />
-                        <ShortDomainSelect
-                          domains={shortDomains}
-                          value={shortDomainId}
-                          onChange={setShortDomainId}
-                        />
+                        <div {...tourAnchor("campanhas.compositor.email-dominio")}>
+                          <ShortDomainSelect
+                            domains={shortDomains}
+                            value={shortDomainId}
+                            onChange={setShortDomainId}
+                          />
+                        </div>
                       </div>
                     </>
                   )}
@@ -1441,18 +1466,20 @@ export function ChannelCampaignComposer({
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label>Conteúdo da ligação</Label>
-                    <SegmentedFilter
-                      label="Conteúdo da ligação"
-                      value={voiceMode}
-                      onValueChange={(mode) => {
-                        setVoiceMode(mode);
-                        setVoiceSourceId("");
-                      }}
-                      items={[
-                        { value: "asset", label: "Áudio gravado" },
-                        { value: "script", label: "Roteiro (voz gerada)" },
-                      ]}
-                    />
+                    <div {...tourAnchor("campanhas.compositor.voz-modo")}>
+                      <SegmentedFilter
+                        label="Conteúdo da ligação"
+                        value={voiceMode}
+                        onValueChange={(mode) => {
+                          setVoiceMode(mode);
+                          setVoiceSourceId("");
+                        }}
+                        items={[
+                          { value: "asset", label: "Áudio gravado" },
+                          { value: "script", label: "Roteiro (voz gerada)" },
+                        ]}
+                      />
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label id={fieldIds.voiceSourceLabel}>
@@ -1466,6 +1493,7 @@ export function ChannelCampaignComposer({
                           aria-invalid={submitAttempted && !voiceSourceId}
                           aria-describedby={fieldIds.validation}
                           className="sm:flex-1"
+                          {...tourAnchor("campanhas.compositor.voz-fonte")}
                         >
                           <SelectValue placeholder="Selecione uma opção" />
                         </SelectTrigger>
@@ -1488,6 +1516,7 @@ export function ChannelCampaignComposer({
                             if (voiceMode === "asset") setVoiceUploadDialogOpen(true);
                             else setVoiceScriptDialogOpen(true);
                           }}
+                          {...tourAnchor("campanhas.compositor.voz-novo")}
                         >
                           <Plus />
                           {voiceMode === "asset" ? "Enviar áudio" : "Novo roteiro"}
@@ -1502,25 +1531,29 @@ export function ChannelCampaignComposer({
                       : ""}
                   </p>
                   {voiceMode === "script" && (
-                    <MessageVariablePicker
-                      channel="voice"
-                      readOnly
-                      label="Variáveis aceitas nos roteiros de voz"
-                    />
+                    <div {...tourAnchor("campanhas.compositor.voz-variaveis")}>
+                      <MessageVariablePicker
+                        channel="voice"
+                        readOnly
+                        label="Variáveis aceitas nos roteiros de voz"
+                      />
+                    </div>
                   )}
                 </div>
               )}
               <div className="space-y-2">
                 <Label>Quando enviar</Label>
-                <SegmentedFilter
-                  label="Quando enviar"
-                  value={when}
-                  onValueChange={setWhen}
-                  items={[
-                    { value: "now", label: "Agora" },
-                    { value: "schedule", label: "Agendar" },
-                  ]}
-                />
+                <div {...tourAnchor("campanhas.compositor.quando")}>
+                  <SegmentedFilter
+                    label="Quando enviar"
+                    value={when}
+                    onValueChange={setWhen}
+                    items={[
+                      { value: "now", label: "Agora" },
+                      { value: "schedule", label: "Agendar" },
+                    ]}
+                  />
+                </div>
                 {when === "schedule" && (
                   <>
                     <Input
@@ -1532,6 +1565,7 @@ export function ChannelCampaignComposer({
                       aria-invalid={
                         submitAttempted && when === "schedule" && (!scheduledAt || scheduleTooSoon)
                       }
+                      {...tourAnchor("campanhas.compositor.agendamento")}
                       aria-describedby={fieldIds.validation}
                       aria-label="Data e hora do agendamento, horário de Brasília"
                       className="sm:max-w-xs"
@@ -1551,6 +1585,7 @@ export function ChannelCampaignComposer({
                   className="rounded-xl border border-border bg-secondary/40 p-3 text-body"
                   role="status"
                   aria-live="polite"
+                  {...tourAnchor("campanhas.compositor.avisos")}
                 >
                   {serverError ? (
                     <p
@@ -1608,6 +1643,7 @@ export function ChannelCampaignComposer({
             <aside
               className="h-fit space-y-3 rounded-xl border border-border bg-card p-4 text-body"
               aria-label="Resumo da campanha"
+              {...tourAnchor("campanhas.compositor.resumo")}
             >
               <h3 className="flex items-center gap-2 text-section">
                 <MetaIcon
@@ -1699,7 +1735,12 @@ export function ChannelCampaignComposer({
         </div>
 
         <DialogFooter className="shrink-0 flex-col-reverse gap-2 border-t border-border px-4 py-3 sm:flex-row sm:px-6">
-          <Button className="w-full sm:w-auto" variant="ghost" onClick={() => void requestClose()}>
+          <Button
+            className="w-full sm:w-auto"
+            variant="ghost"
+            onClick={() => void requestClose()}
+            {...tourAnchor("campanhas.compositor.cancelar")}
+          >
             Cancelar
           </Button>
           <Button
@@ -1725,6 +1766,7 @@ export function ChannelCampaignComposer({
                 .filter(Boolean)
                 .join(" ") || undefined
             }
+            {...tourAnchor("campanhas.compositor.enviar")}
           >
             {submit.isPending
               ? "Processando..."

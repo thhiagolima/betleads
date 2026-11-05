@@ -110,6 +110,12 @@ vi.mock("@/components/system-dialog-host", () => ({
   requestConfirmation: vi.fn(),
   requestTextInput: vi.fn(),
 }));
+// Term pulls in HelpProvider's chain (shell nav, active tenant, ...) through
+// useHelp() — out of scope for this pure component test, so it's replaced
+// with a passthrough, the same way every other external dependency here is.
+vi.mock("@/components/help/term", () => ({
+  Term: ({ children }: { children?: ReactNode }) => <>{children}</>,
+}));
 
 import { ChannelCampaignComposer, EXPERT_APPROVAL_NOTICE } from "./channel-campaign-composer";
 

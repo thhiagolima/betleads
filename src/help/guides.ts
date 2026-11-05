@@ -148,6 +148,7 @@ export const GUIDES: Guide[] = [
         id: "email-campaign-sent",
         title: "Envie a campanha",
         route: "/campanhas",
+        anchor: "campanhas.hub.nova-campanha",
         substeps: ["Mandar um envio de teste antes"],
         signal: "emailCampaignSent",
       },

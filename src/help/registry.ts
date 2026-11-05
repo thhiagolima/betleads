@@ -14,6 +14,8 @@ import type { HelpScreen } from "./types";
 export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpScreen }>> = {
   "/configuracoes/casa": () => import("./screens/configuracoes-casa"),
   "/email": () => import("./screens/email"),
+  "/campanhas": () => import("./screens/campanhas"),
+  "/campanhas/$campaignId/relatorio": () => import("./screens/campanha-relatorio"),
   onboarding: () => import("./screens/onboarding"),
 };
 
