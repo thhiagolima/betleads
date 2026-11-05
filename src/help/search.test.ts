@@ -161,10 +161,19 @@ describe("buildSearchIndex", () => {
   });
 
   it("skips screens the role doesn't see and duplicate routes", () => {
-    const adminOnly = makeScreen({ route: "/a", title: "Admin", roles: ["admin"] });
+    const adminOnly = makeScreen({ id: "a", route: "/a", title: "Admin", roles: ["admin"] });
     const idx = buildSearchIndex([screen, screen, adminOnly], "gestor", []);
     expect(idx.filter((e) => e.title === "Tela X")).toHaveLength(1);
     expect(idx.some((e) => e.route === "/a")).toBe(false);
+  });
+
+  it("indexes the same article (same id) once even under two routes, current screen first", () => {
+    const nova = makeScreen({ id: "ed", route: "/j/nova", title: "Editor" });
+    const edit = { ...nova, route: "/j/$id" };
+    const idx = buildSearchIndex([edit, nova, edit], "gestor", []);
+    const titles = idx.filter((e) => e.title === "Editor");
+    expect(titles).toHaveLength(1);
+    expect(titles[0].route).toBe("/j/$id");
   });
 
   it("works with no screens", () => {
@@ -196,6 +205,7 @@ describe("buildSearchIndex", () => {
 
   it("a gestor on /campanhas finds the Configuração da casa items, current screen first", () => {
     const casa = makeScreen({
+      id: "configuracoes-casa",
       route: "/configuracoes/casa",
       title: "Configuração da casa",
       sections: [
@@ -208,6 +218,7 @@ describe("buildSearchIndex", () => {
       ],
     });
     const campanhas = makeScreen({
+      id: "campanhas",
       route: "/campanhas",
       title: "Campanhas",
       sections: [

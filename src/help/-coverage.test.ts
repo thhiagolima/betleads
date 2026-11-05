@@ -193,6 +193,17 @@ describe("help coverage", () => {
     }
   });
 
+  it("todo artigo do registro tem route igual à chave em HELP_SCREEN_LOADERS", async () => {
+    // HelpProvider only shows an article whose `route` equals the resolved
+    // key, so a loader returning another route's article shows nothing.
+    for (const [key, loader] of Object.entries(HELP_SCREEN_LOADERS)) {
+      const mod = await loader();
+      expect(mod.default.route, `HELP_SCREEN_LOADERS["${key}"] carrega um artigo de outra rota`).toBe(
+        key,
+      );
+    }
+  });
+
   it("GLOSSARY não tem ids duplicados", () => {
     const ids = GLOSSARY.map((term) => term.id);
     expect(new Set(ids).size).toBe(ids.length);

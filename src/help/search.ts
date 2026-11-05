@@ -105,7 +105,10 @@ function guideEntry(guide: Guide): SearchEntry {
 
 /** Every article the role sees (title/purpose, section titles/intros, the
  * items the role can see, states), every guide, plus every glossary term.
- * Duplicate routes are indexed once. */
+ * Each article is indexed once: duplicates by route, and by `id` (the
+ * journey editor is the same article under /jornadas/nova and
+ * /jornadas/$journeyId) — the first one wins, so pass the current screen
+ * first. */
 export function buildSearchIndex(
   screens: HelpScreen[],
   role: HelpRole,
@@ -113,10 +116,13 @@ export function buildSearchIndex(
   guides: Guide[] = [],
 ): SearchEntry[] {
   const entries: SearchEntry[] = [];
-  const seen = new Set<string>();
+  const seenRoutes = new Set<string>();
+  const seenIds = new Set<string>();
   for (const screen of screens) {
-    if (seen.has(screen.route) || !screen.roles.includes(role)) continue;
-    seen.add(screen.route);
+    if (seenRoutes.has(screen.route) || seenIds.has(screen.id)) continue;
+    if (!screen.roles.includes(role)) continue;
+    seenRoutes.add(screen.route);
+    seenIds.add(screen.id);
     entries.push(...screenEntries(screen, role));
   }
   for (const guide of guides) {

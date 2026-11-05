@@ -582,3 +582,9 @@ const screen: HelpScreen = {
 };
 
 export default screen;
+
+/** The same article for /jornadas/$journeyId (editing an existing journey):
+ * HelpProvider only shows an article whose `route` equals the resolved
+ * registry key, so the edit route needs its own `route` (registry.ts). Same
+ * `id`, so search indexes the article once (search.ts dedupes by id). */
+export const editScreen: HelpScreen = { ...screen, route: "/jornadas/$journeyId" };
