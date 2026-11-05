@@ -58,7 +58,7 @@ export const getBillingPrices = createServerFn({ method: "GET" })
     return getEffectivePrices(tenantId);
   });
 
-export const billingItem = z.enum(["sms", "voice_30s", "email"]);
+export const billingItem = z.enum(["sms", "voice_30s", "email", "webpush"]);
 
 async function assertSuperAdmin(userId: string) {
   const { data, error } = await supabaseAdmin.rpc("is_super_admin", { _user_id: userId });

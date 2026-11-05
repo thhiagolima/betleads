@@ -24,7 +24,7 @@ function looseDb(client: unknown) {
 
 export type ReserveUsageArgs = {
   tenantId: string;
-  item: "sms" | "voice_30s" | "email";
+  item: "sms" | "voice_30s" | "email" | "webpush";
   units: number;
   referenceType: string;
   referenceId: string;
