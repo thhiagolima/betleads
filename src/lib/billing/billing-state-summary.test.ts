@@ -71,6 +71,27 @@ describe("summarizeBillingStates", () => {
     ]);
   });
 
+  it("lists an awaiting_first_payment house with a future due date as a debtor with daysOverdue null", () => {
+    const rows: BillingStateInput[] = [
+      row({
+        tenantId: "a",
+        name: "Casa Nova",
+        accessState: "awaiting_first_payment",
+        openInvoice: { amountCents: 400000, dueDate: "2026-11-20" },
+      }),
+    ];
+    const result = summarizeBillingStates(rows, "2026-11-05", "2026-11");
+    expect(result.debtors).toEqual([
+      {
+        tenantId: "a",
+        name: "Casa Nova",
+        amountCents: 400000,
+        daysOverdue: null,
+        bucket: "awaiting_first_payment",
+      },
+    ]);
+  });
+
   it("daysOverdue is null when the due date is today or in the future, or there is no open invoice", () => {
     const rows: BillingStateInput[] = [
       row({

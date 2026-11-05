@@ -43,7 +43,7 @@ export type Debtor = {
   tenantId: string;
   name: string;
   amountCents: number;
-  daysOverdue: number;
+  daysOverdue: number | null;
   bucket: BillingBucket;
 };
 
@@ -135,7 +135,7 @@ export function summarizeBillingStates(
         tenantId: input.tenantId,
         name: input.name,
         amountCents: input.openInvoice.amountCents,
-        daysOverdue: daysOverdue ?? 0,
+        daysOverdue,
         bucket,
       });
     }
@@ -149,7 +149,9 @@ export function summarizeBillingStates(
     }
   }
 
-  debtors.sort((a, b) => b.amountCents - a.amountCents || b.daysOverdue - a.daysOverdue);
+  debtors.sort(
+    (a, b) => b.amountCents - a.amountCents || (b.daysOverdue ?? 0) - (a.daysOverdue ?? 0),
+  );
 
   return {
     rows: outRows,
