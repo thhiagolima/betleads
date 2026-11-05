@@ -121,10 +121,8 @@ partida: SMS, e-mail e voz ligados para todas; web push desligado para todas.
 
 - Nova tabela `tenant_channels (tenant_id, channel, enabled bool, updated_by,
   updated_at, PK (tenant_id, channel))` — *chamada minha* sobre a forma;
-  semeada para todas as casas existentes com sms/email/voice=true,
-  webpush=false. Casa nova nasce com o mesmo padrão (sem linha =
-  sms/email/voice ligados, webpush desligado — o código trata a ausência
-  assim, então não depende de semear casa nova).
+  sem seed: ausência de linha = sms/email/voice ligados, webpush desligado
+  (vale para casas existentes e novas).
 - Onde o super admin liga/desliga: na configuração da casa, junto da escolha
   de conta por canal (mesmo bloco que chama `adminSetTenantChannelProvider`)
   — *chamada minha*. Desligar pede confirmação mostrando quantas jornadas
@@ -165,7 +163,7 @@ equipe da casa (fatura, alerta de cobrança, convite) continuam
 ### 5. Envios e jornadas
 
 - Motor de jornada: ao chegar num passo de canal desligado, marca o passo
-  como pulado (status próprio, ex. `skipped_channel_disabled`) e segue para o
+  como pulado (status `skipped` já existente, `provider: "channel_disabled"`, igual ao holdout) e segue para o
   próximo. Não envia, não cobra, não conta como falha.
 - Campanhas agendadas / envios em fila no canal: não enviam; marcadas como
   canceladas por canal desabilitado (*chamada minha*).
@@ -183,7 +181,6 @@ equipe da casa (fatura, alerta de cobrança, convite) continuam
   `tenant_channels` (semeada), tabela/colunas do aviso "Ciente", RLS de
   leitura para a casa. Aplicar antes do app (o app antigo ignora). Precisa de
   ok explícito do usuário para aplicar em prod.
-- Seed do demo (Casa Betleads) com os mesmos padrões.
 - `npm run build` antes de mergear (vazamento de `*.server` no bundle).
 
 ## Deixado para quem constrói
@@ -197,5 +194,4 @@ equipe da casa (fatura, alerta de cobrança, convite) continuam
   `tenant_domains` e das chaves de breaker com o id da conta env atual, para
   que trocar a padrão não mude retroativamente o que eles significam.
 - Devolver crédito já reservado de envios cancelados por canal desligado.
-- Passo pulado conta como "não clicou/não abriu" em condições seguintes da
-  jornada.
+- (Passos de condição ainda não existem no motor; nada a fazer agora.)
