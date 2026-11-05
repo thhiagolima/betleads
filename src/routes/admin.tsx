@@ -52,6 +52,7 @@ import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { ChannelObservabilityPanel } from "@/components/admin/channel-observability-panel";
 import { PlatformHealthTab } from "@/components/admin/platform-health/platform-health-tab";
+import { GeneralFinanceTab } from "@/components/admin/general-finance/general-finance-tab";
 import { ProviderAccountsPanel } from "@/components/admin/provider-accounts-panel";
 import { McpAccessPanel } from "@/components/admin/mcp-access-panel";
 import { getMyMcpStatus } from "@/lib/mcp/mcp.functions";
@@ -136,6 +137,7 @@ function fmtDate(d: string | null) {
 
 type AdminView =
   | "health"
+  | "general-finance"
   | "metrics"
   | "users"
   | "pricing"
@@ -147,6 +149,7 @@ type AdminView =
 
 const ADMIN_VIEWS: ReadonlyArray<{ value: AdminView; label: string; hash: string }> = [
   { value: "health", label: "Saúde", hash: "saude" },
+  { value: "general-finance", label: "Financeiro geral", hash: "financeiro-geral" },
   { value: "metrics", label: "Métricas", hash: "metricas" },
   { value: "users", label: "Usuários", hash: "usuarios" },
   { value: "pricing", label: "Preços", hash: "precos" },
@@ -235,6 +238,7 @@ function AdminPage() {
 
       <div role="tabpanel" aria-labelledby={`tab-${view}`} className="space-y-4">
         {view === "health" && <PlatformHealthTab />}
+        {view === "general-finance" && <GeneralFinanceTab />}
         {view === "metrics" && <MetricsTab />}
         {view === "users" && <UsersTab />}
         {view === "pricing" && <PricingTab />}
