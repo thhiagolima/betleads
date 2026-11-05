@@ -58,6 +58,11 @@ vi.mock("@/lib/email.functions", () => ({
 vi.mock("@/lib/billing/billing.functions", () => ({ getBillingPrices: vi.fn() }));
 vi.mock("@/lib/journey-voice-assets.functions", () => ({ listJourneyVoiceAssets: vi.fn() }));
 vi.mock("@/lib/sms-audiences.functions", () => ({ resolveCampaignAudience: vi.fn() }));
+vi.mock("@/lib/webpush/webpush.functions", () => ({ getWebpushIntegrationFn: vi.fn() }));
+vi.mock("@/lib/webpush/campaigns.functions", () => ({
+  countWebpushAudienceFn: vi.fn(),
+  scheduleWebpushCampaignFn: vi.fn(),
+}));
 vi.mock("@/lib/sms-templates.functions", () => ({ listSmsTemplates: vi.fn() }));
 vi.mock("@/lib/sms.functions", () => ({
   previewSmsCampaignRecipients: vi.fn(),
@@ -119,7 +124,7 @@ vi.mock("@/components/help/term", () => ({
 
 import { ChannelCampaignComposer, EXPERT_APPROVAL_NOTICE } from "./channel-campaign-composer";
 
-const render = (channel: "sms" | "email" | "voice" = "sms") =>
+const render = (channel: "sms" | "email" | "voice" | "webpush" = "sms") =>
   renderToStaticMarkup(
     <ChannelCampaignComposer
       open
@@ -160,6 +165,29 @@ describe("ChannelCampaignComposer — house", () => {
     expect(sms).not.toContain(EXPERT_APPROVAL_NOTICE);
     expect(sms).not.toContain("Restante do teto");
     expect(render("email")).toContain("Remetente");
+  });
+
+  it("webpush fields stay hidden when the house's integration is disabled, even with channel='webpush'", () => {
+    queryData["webpush-integration"] = { enabled: false };
+    const html = render("webpush");
+    // The composer can be seeded with channel="webpush" (e.g. a stale
+    // ?newChannel=webpush link) before the clamp effect runs; the fields
+    // themselves must stay gated on webpushAvailable regardless.
+    expect(html).not.toContain("Título da notificação");
+    expect(html).not.toContain("Pré-visualização");
+  });
+
+  it("webpush fields stay hidden before the integration state is known", () => {
+    // queryData["webpush-integration"] left unset — data undefined, isSuccess false.
+    const html = render("webpush");
+    expect(html).not.toContain("Título da notificação");
+  });
+
+  it("webpush fields show once the house's integration is enabled", () => {
+    queryData["webpush-integration"] = { enabled: true };
+    const html = render("webpush");
+    expect(html).toContain("Título da notificação");
+    expect(html).toContain("Pré-visualização");
   });
 });
 

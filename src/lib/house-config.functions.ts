@@ -324,14 +324,14 @@ async function fetchNoticeRows(tenantId: string): Promise<NoticeDomainRow[]> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural RPC boundary, same pattern as tenant-access.server.ts's RpcClient.
-async function checkTenantAdmin(supabase: any, tenantId: string): Promise<boolean> {
+export async function checkTenantAdmin(supabase: any, tenantId: string): Promise<boolean> {
   const { data, error } = await supabase.rpc("is_tenant_admin", { _tenant: tenantId });
   if (error) throw new Error(error.message);
   return Boolean(data);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- structural RPC boundary, same pattern as tenant-access.server.ts's RpcClient.
-async function checkSuperAdmin(supabase: any, userId: string): Promise<boolean> {
+export async function checkSuperAdmin(supabase: any, userId: string): Promise<boolean> {
   const { data, error } = await supabase.rpc("is_super_admin", { _user_id: userId });
   if (error) throw new Error(error.message);
   return Boolean(data);

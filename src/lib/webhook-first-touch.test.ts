@@ -91,10 +91,9 @@ const CRM_TRACKING = {
 function setup(origin: Record<string, unknown> | null) {
   return fakeSupabase((op) => {
     if (op.table === "webhook_logs" && op.op === "insert") return { data: { id: "log-1" } };
-    if (op.table === "players" && op.op === "select") {
-      const byId = op.filters.some(([f, column]) => f === "eq" && column === "id");
-      return { data: byId ? origin : { id: "player-1" } };
-    }
+    // The lookup by external id returns the stored origin with the id.
+    if (op.table === "players" && op.op === "select")
+      return { data: { id: "player-1", ...origin } };
     if (op.table === "players" && op.op === "insert") return { data: { id: "player-1" } };
     return undefined;
   });

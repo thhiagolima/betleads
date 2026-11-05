@@ -4,7 +4,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { recordCompletedRun } from "@/lib/observability/job-monitor.server";
 
-export type Channel = "sms" | "email";
+export type Channel = "sms" | "email" | "webpush";
 
 export type RateState = {
   channel: Channel;

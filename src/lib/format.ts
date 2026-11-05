@@ -39,15 +39,16 @@ export function walletEntryTypeLabel(entryType: string) {
   return WALLET_ENTRY_TYPE_LABEL[entryType] ?? entryType;
 }
 
-export type BillingItem = "sms" | "voice_30s" | "email";
+export type BillingItem = "sms" | "voice_30s" | "email" | "webpush";
 
-export const BILLING_ITEMS: BillingItem[] = ["sms", "voice_30s", "email"];
+export const BILLING_ITEMS: BillingItem[] = ["sms", "voice_30s", "email", "webpush"];
 
 /** pt-BR label for a `wallet_ledger.item`/price-book item (PG1 Task 8, ruling 3). */
 export const BILLING_ITEM_LABEL: Record<BillingItem, string> = {
   sms: "SMS",
   voice_30s: "Voz",
   email: "E-mail",
+  webpush: "Web Push",
 };
 
 export function billingItemLabel(item: string | null | undefined) {

@@ -81,6 +81,8 @@ export const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
 export const HEARTBEAT_TIMER_MS = 30_000;
 /** A 'running' row without heartbeat for this long is closed as abandoned. */
 export const ABANDONED_AFTER_MS = 15 * 60_000;
+/** Idle ticks reap abandoned rows of their job at most once per this period. */
+export const IDLE_REAP_INTERVAL_MS = 5 * 60_000;
 /** After falling back to the legacy schema, retry the new columns after this long. */
 export const LEGACY_SCHEMA_RETRY_MS = 10 * 60_000;
 
@@ -115,6 +117,7 @@ function markLegacySchema() {
 export function __resetJobMonitorStateForTests() {
   legacySchemaSince = null;
   lastHeartbeatAt.clear();
+  lastIdleReapAt.clear();
 }
 
 function isMissingColumnError(error: unknown): boolean {
@@ -175,13 +178,29 @@ export function heartbeatUrl(job: string, ok: boolean, env = process.env): strin
 }
 
 const lastHeartbeatAt = new Map<string, number>();
+const lastIdleReapAt = new Map<string, number>();
 
 /**
  * Fire-and-forget heartbeat ping. Never throws, never blocks for more than
  * HEARTBEAT_TIMEOUT_MS (the returned promise resolves even on timeout/error).
  * Pings are throttled per job/outcome to one per HEARTBEAT_MIN_INTERVAL_MS.
+ *
+ * Idle ticks call this instead of opening a run, so it also reaps the job's
+ * abandoned 'running' rows: otherwise a run killed right before the job goes
+ * quiet stays 'running' (and stale in observability_job_health) until the next
+ * real run starts.
  */
 export function pingHeartbeat(job: string, ok: boolean): Promise<void> {
+  try {
+    const now = Date.now();
+    const lastReap = lastIdleReapAt.get(job);
+    if (lastReap === undefined || now - lastReap >= IDLE_REAP_INTERVAL_MS) {
+      lastIdleReapAt.set(job, now);
+      void reapAbandonedRuns(job, null);
+    }
+  } catch (error) {
+    console.error("[job-monitor] idle reap failed", { job, error: errorMessage(error) });
+  }
   try {
     const url = heartbeatUrl(job, ok);
     if (!url) return Promise.resolve();

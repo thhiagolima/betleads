@@ -7,6 +7,7 @@ import { runJourneyDispatcher } from "@/lib/journeys.server";
 import { runVoiceQueueDispatcher } from "@/lib/calls.server";
 import { requireSharedSecret } from "@/lib/cron-auth.server";
 import { isVoiceDispatchEnabled } from "@/lib/voice-dispatch-policy";
+import { runScheduledWebpushCampaigns } from "@/lib/webpush/campaign-dispatch.server";
 
 export const Route = createFileRoute("/api/public/hooks/dispatch")({
   server: {
@@ -54,6 +55,7 @@ export const Route = createFileRoute("/api/public/hooks/dispatch")({
             result = await runJourneyDispatcher(1000);
           }
           else if (channel === "whatsapp") result = await runWhatsappDispatcher({ limit: 50 });
+          else if (channel === "webpush") result = await runScheduledWebpushCampaigns({ limit: 10 });
           else return Response.json({ ok: false, error: "channel inválido" }, { status: 400 });
           return Response.json({ ok: true, channel, result });
         } catch (e) {

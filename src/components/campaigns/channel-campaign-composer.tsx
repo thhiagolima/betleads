@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   AlertTriangle,
+  Bell,
   CheckCircle2,
   Mail,
   MessageSquare,
@@ -122,8 +123,23 @@ import {
   requiresTypedConfirmation,
   typedCountMatches,
 } from "./campaign-send-confirmation";
+import {
+  WebpushCampaignFields,
+  buildWebpushScheduleInput,
+  type WebpushAudienceKind,
+} from "./webpush-campaign-fields";
+import { getWebpushIntegrationFn } from "@/lib/webpush/webpush.functions";
+import {
+  countWebpushAudienceFn,
+  scheduleWebpushCampaignFn,
+} from "@/lib/webpush/campaigns.functions";
+import { validateCampaignContent } from "@/lib/webpush/shared";
 
-type Channel = "sms" | "email" | "voice";
+type Channel = "sms" | "email" | "voice" | "webpush";
+/** Channels that still go through `resolveCampaignAudience`/`resolveExpertCampaignAudience`
+ *  (an identifier-based audience resolved to eligible players). Web push counts
+ *  subscriptions instead (`countWebpushAudienceFn`), never this resolver. */
+type AudienceResolvedChannel = "sms" | "email" | "voice";
 type AudienceOption = {
   id: string;
   name: string;
@@ -141,6 +157,7 @@ const channelMeta: Record<Channel, { label: string; icon: typeof MessageSquare }
   sms: { label: "SMS", icon: MessageSquare },
   email: { label: "E-mail", icon: Mail },
   voice: { label: "Voz", icon: Phone },
+  webpush: { label: "Web Push", icon: Bell },
 };
 
 const fieldIds = {
@@ -220,6 +237,17 @@ export function ChannelCampaignComposer({
   const dispatchVoice = useServerFn(bulkDispatchCalls);
   const createEmailTemplate = useServerFn(saveEmailTemplate);
   const getComposerOpts = useServerFn(getComposerOptions);
+  const getWebpushIntegration = useServerFn(getWebpushIntegrationFn);
+  const countWebpushAudience = useServerFn(countWebpushAudienceFn);
+  const scheduleWebpushCampaign = useServerFn(scheduleWebpushCampaignFn);
+
+  // Web push only shows up as a channel once the house's integration is enabled.
+  const webpushIntegration = useQuery({
+    queryKey: ["webpush-integration", "composer"],
+    queryFn: () => getWebpushIntegration(),
+    enabled: open && !isExpert,
+  });
+  const webpushAvailable = !isExpert && webpushIntegration.data?.enabled === true;
 
   const composerOptions = useQuery({
     queryKey: COMPOSER_OPTIONS_QUERY_KEY,
@@ -271,6 +299,11 @@ export function ChannelCampaignComposer({
   const [senderId, setSenderId] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<"script" | "asset">("asset");
   const [voiceSourceId, setVoiceSourceId] = useState("");
+  const [webpushTitle, setWebpushTitle] = useState("");
+  const [webpushBody, setWebpushBody] = useState("");
+  const [webpushUrl, setWebpushUrl] = useState("");
+  const [webpushImageUrl, setWebpushImageUrl] = useState("");
+  const [webpushAudienceKind, setWebpushAudienceKind] = useState<WebpushAudienceKind>("todos");
   const [when, setWhen] = useState<"now" | "schedule">("now");
   const [scheduledAt, setScheduledAt] = useState("");
   const trackLinks = true;
@@ -449,6 +482,11 @@ export function ChannelCampaignComposer({
     setSenderId(null);
     setVoiceMode("asset");
     setVoiceSourceId("");
+    setWebpushTitle("");
+    setWebpushBody("");
+    setWebpushUrl("");
+    setWebpushImageUrl("");
+    setWebpushAudienceKind("todos");
     setWhen("now");
     setScheduledAt("");
     setSubmitAttempted(false);
@@ -460,6 +498,18 @@ export function ChannelCampaignComposer({
     hydratedDraftId.current = null;
     idempotencyKey.current = crypto.randomUUID();
   }, [open, initialChannel, initialDraftId, initialAudienceId]);
+
+  // The hub's `?newChannel=webpush` link (or a stale `initialChannel` prop)
+  // can seed `channel` with "webpush" before the integration's enabled state
+  // is known, or for a house/expert where it's disabled or never comes
+  // available (expert: `webpushAvailable` is house-only, so it's always
+  // false for them). Clamp back to the default channel as soon as that's
+  // certain — the tab itself is already filtered out of the SegmentedFilter,
+  // but the channel state must not silently stay on a tab nobody can select.
+  useEffect(() => {
+    if (!open || channel !== "webpush") return;
+    if (isExpert || (webpushIntegration.isSuccess && !webpushAvailable)) setChannel("sms");
+  }, [open, channel, isExpert, webpushIntegration.isSuccess, webpushAvailable]);
 
   useEffect(() => {
     const draft = draftQuery.data as CampaignDraft | undefined;
@@ -490,8 +540,32 @@ export function ChannelCampaignComposer({
     }
   }, [draftQuery.data, open]);
 
+  const webpushAudienceInput = useMemo(
+    () =>
+      webpushAudienceKind === "todos"
+        ? ({ kind: "todos" } as const)
+        : ({ kind: "filtro", criteria: audienceCriteria ?? {} } as const),
+    [webpushAudienceKind, audienceCriteria],
+  );
+  const webpushCountQuery = useQuery({
+    queryKey: ["webpush-audience-count", webpushAudienceKind, JSON.stringify(audienceCriteria)],
+    queryFn: () => countWebpushAudience({ data: { audience: webpushAudienceInput } }),
+    enabled:
+      open &&
+      channel === "webpush" &&
+      (webpushAudienceKind === "todos" || Boolean(audienceCriteria)),
+  });
+  const webpushCounts = channel === "webpush" ? webpushCountQuery.data : undefined;
+  const webpushExempt = webpushCounts?.unitPrice === 0;
+
   const audienceMutation = useMutation({
-    mutationFn: ({ criteria, channel }: { criteria: SmsAudienceCriteria; channel: Channel }) =>
+    mutationFn: ({
+      criteria,
+      channel,
+    }: {
+      criteria: SmsAudienceCriteria;
+      channel: AudienceResolvedChannel;
+    }) =>
       isExpert
         ? // Counts only (no identifier lists) + the estimated cost.
           (resolveExpertAudience({
@@ -513,7 +587,7 @@ export function ChannelCampaignComposer({
   }, [voiceSourceId, voiceMode]);
 
   useEffect(() => {
-    if (!open || initialDraftId || !initialAudienceId) return;
+    if (!open || initialDraftId || !initialAudienceId || channel === "webpush") return;
     const selected = audienceOptions.find((item) => item.id === initialAudienceId);
     if (!selected) return;
     setAudienceId(selected.id);
@@ -528,15 +602,23 @@ export function ChannelCampaignComposer({
       ? smsContent
       : channel === "email"
         ? (activeEmailTemplate?.body_html ?? activeEmailTemplate?.corpo ?? "")
-        : (activeScript?.content ?? "");
-  const invalidVariables = unknownMessageVariables(previewContent, channel);
+        : channel === "webpush"
+          ? ""
+          : (activeScript?.content ?? "");
+  const invalidVariables =
+    channel === "webpush" ? [] : unknownMessageVariables(previewContent, channel);
   const isExternalList = !isExpert && channel === "sms" && audienceId === EXTERNAL_LIST_ID;
   const externalList = useMemo(
     () => parsePhoneList(`${externalText}\n${externalFile?.text ?? ""}`),
     [externalText, externalFile],
   );
   const externalBlockedVariables = isExternalList ? externalListBlockedVariables(smsContent) : [];
-  const recipients = isExternalList ? externalList.phones.length : (audience?.eligibleTotal ?? 0);
+  const recipients =
+    channel === "webpush"
+      ? (webpushCounts?.subscriptions ?? 0)
+      : isExternalList
+        ? externalList.phones.length
+        : (audience?.eligibleTotal ?? 0);
   // ENV-06: a campanha de SMS só envia a quem corresponde a um jogador
   // cadastrado; os demais são reportados. A prévia usa o mesmo resolvedor do envio.
   // Lista externa: o inverso — só vai para quem ainda NÃO é jogador.
@@ -564,13 +646,19 @@ export function ChannelCampaignComposer({
   const sendableRecipients = smsPreview ? smsPreview.resolved : recipients;
   const smsSegmentInfo = countSmsSegments(toGsm7Text(smsContent));
   const parts = smsSegmentInfo.segments;
-  const cost = channel === "sms" ? sendableRecipients * parts : recipients;
+  const cost =
+    channel === "sms"
+      ? sendableRecipients * parts
+      : channel === "webpush"
+        ? (webpushCounts?.estimatedCost ?? 0)
+        : recipients;
   const smsCostBrl = smsPrice == null ? null : parts * smsPrice.unitPrice;
   // Expert: estimated cost for every channel and what the monthly cap allows.
   const expertUsageData = expertUsage.data as ExpertCampaignUsageData | undefined;
   const expertCost = isExpert
     ? expertEstimatedCost({
-        channel,
+        // Web push is never offered to the expert (webpushAvailable is house-only).
+        channel: channel as "sms" | "email" | "voice",
         recipients,
         smsSegments: parts,
         prices: expertOptions.data?.prices,
@@ -589,15 +677,35 @@ export function ChannelCampaignComposer({
   // The input is read in Brasília time, whatever the browser's timezone.
   const scheduleIso = fromBrtInput(scheduledAt);
   const scheduleTooSoon = !scheduleIso || Date.parse(scheduleIso) < Date.now() + 60_000;
+  const webpushContentError =
+    channel === "webpush"
+      ? (() => {
+          try {
+            validateCampaignContent({
+              title: webpushTitle,
+              body: webpushBody,
+              url: webpushUrl,
+              imageUrl: webpushImageUrl || null,
+            });
+            return null;
+          } catch (error) {
+            return error instanceof Error ? error.message : "Conteúdo inválido.";
+          }
+        })()
+      : null;
   const validationIssues = [
     !name.trim() ? "Informe o nome da campanha." : null,
-    isExternalList
-      ? recipients === 0
-        ? "Cole ou envie uma lista com números de celular válidos."
-        : null
-      : !audience || recipients === 0
+    channel === "webpush"
+      ? (webpushAudienceKind === "filtro" && !audienceCriteria) || recipients === 0
         ? "Escolha um público com destinatários elegíveis."
-        : null,
+        : null
+      : isExternalList
+        ? recipients === 0
+          ? "Cole ou envie uma lista com números de celular válidos."
+          : null
+        : !audience || recipients === 0
+          ? "Escolha um público com destinatários elegíveis."
+          : null,
     isExternalList && recipients > EXTERNAL_LIST_MAX_PHONES
       ? `A lista aceita até ${num(EXTERNAL_LIST_MAX_PHONES)} números por campanha.`
       : null,
@@ -609,6 +717,7 @@ export function ChannelCampaignComposer({
         ? "Selecione um roteiro."
         : "Selecione um áudio da biblioteca."
       : null,
+    webpushContentError,
     when === "schedule" && !scheduledAt ? "Escolha a data e hora do agendamento." : null,
     when === "schedule" && scheduledAt && scheduleTooSoon
       ? "O agendamento deve ter pelo menos um minuto de antecedência."
@@ -631,7 +740,9 @@ export function ChannelCampaignComposer({
 
   const draftPayload = useMemo<CampaignDraftPayload>(
     () => ({
-      channel,
+      // Web push has no draft (controller ruling): this payload is computed
+      // but the autosave effect skips `channel === "webpush"` entirely.
+      channel: channel as "sms" | "email" | "voice",
       name,
       audienceId: audienceId || null,
       audienceCriteria: (audienceCriteria as unknown as Record<string, Json>) ?? null,
@@ -757,11 +868,13 @@ export function ChannelCampaignComposer({
   };
 
   useEffect(() => {
-    if (!open || submitted.current || (initialDraftId && !draftQuery.data)) return;
+    // Web push has no draft (controller ruling, Task 13 brief).
+    if (!open || submitted.current || channel === "webpush" || (initialDraftId && !draftQuery.data))
+      return;
     setDraftState("dirty");
     const timer = window.setTimeout(() => autosave.mutate(), 700);
     return () => window.clearTimeout(timer);
-  }, [serializedDraft, open, initialDraftId, draftQuery.data]);
+  }, [serializedDraft, open, channel, initialDraftId, draftQuery.data]);
 
   // A server refusal no longer applies once the campaign is edited.
   useEffect(() => {
@@ -770,13 +883,22 @@ export function ChannelCampaignComposer({
 
   const submit = useMutation({
     mutationFn: async (confirmedCount?: number) => {
+      // Defense in depth: the tab and the fields are already gated on
+      // `webpushAvailable`, but a click racing the clamp effect (or a stale
+      // `channel` captured just before the integration query settles) must
+      // not reach `scheduleWebpushCampaignFn`.
+      if (channel === "webpush" && !webpushAvailable)
+        throw new Error("Web Push não está disponível para esta casa.");
       if (!name.trim()) throw new Error("Informe o nome da campanha.");
       // The audience changed after the typed confirmation: ask again for the new count.
       if (requiresTypedConfirmation(sendableRecipients) && confirmedCount !== sendableRecipients)
         throw new Error(
           "A quantidade de destinatários mudou depois da confirmação. Nada foi enviado; confirme de novo.",
         );
-      if (isExternalList) {
+      if (channel === "webpush") {
+        if ((webpushAudienceKind === "filtro" && !audienceCriteria) || recipients === 0)
+          throw new Error("Escolha um público com destinatários elegíveis.");
+      } else if (isExternalList) {
         if (recipients === 0)
           throw new Error("Cole ou envie uma lista com números de celular válidos.");
         if (externalBlockedVariables.length)
@@ -792,6 +914,23 @@ export function ChannelCampaignComposer({
         throw new Error("O agendamento deve ter pelo menos um minuto de antecedência.");
       if (channel === "email" && emailBlocked) throw new Error(EMAIL_BLOCKED_WARNING);
       const scheduleAt = when === "schedule" ? (fromBrtInput(scheduledAt) ?? undefined) : undefined;
+
+      if (channel === "webpush") {
+        const payload = buildWebpushScheduleInput({
+          name,
+          title: webpushTitle,
+          body: webpushBody,
+          url: webpushUrl,
+          imageUrl: webpushImageUrl,
+          audienceKind: webpushAudienceKind,
+          audienceCriteria,
+          scheduledAt: scheduleAt ?? null,
+        });
+        const completed = await scheduleWebpushCampaign({ data: payload });
+        // No draft (controller ruling): nothing to submit here.
+        submitted.current = true;
+        return completed;
+      }
 
       if (isExpert) {
         // The expert sends the audience criteria; the server re-resolves it
@@ -993,7 +1132,12 @@ export function ChannelCampaignComposer({
   const confirmAndSubmit = async () => {
     setSubmitAttempted(true);
     // The audience is still being (re)calculated: the count on screen is not final.
-    if (audienceMutation.isPending || smsRecipientPreview.isFetching) return;
+    if (
+      audienceMutation.isPending ||
+      smsRecipientPreview.isFetching ||
+      (channel === "webpush" && webpushCountQuery.isFetching)
+    )
+      return;
     let confirmedCount: number | undefined;
     if (validationIssues.length === 0 && requiresTypedConfirmation(sendableRecipients)) {
       const count = sendableRecipients;
@@ -1006,6 +1150,7 @@ export function ChannelCampaignComposer({
             cost,
             smsUnitPrice: smsPrice?.unitPrice,
             smsExempt,
+            webpushExempt,
           });
       const typed = await requestTextInput({
         title: when === "schedule" ? "Confirmar agendamento em massa" : "Confirmar envio em massa",
@@ -1075,24 +1220,28 @@ export function ChannelCampaignComposer({
         <DialogHeader className="shrink-0 space-y-1 border-b border-border px-4 py-4 pr-12 text-left sm:px-6">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <DialogTitle className="text-section">Nova campanha</DialogTitle>
-            <span
-              className={cn(
-                "text-meta",
-                draftState === "error" ? "text-danger" : "text-muted-foreground",
-              )}
-              aria-live="polite"
-            >
-              {draftState === "saving" || draftState === "dirty"
-                ? "Salvando rascunho…"
-                : draftState === "error"
-                  ? "Não foi possível salvar o rascunho"
-                  : draftState === "saved"
-                    ? "Rascunho salvo"
-                    : "Preparando rascunho"}
-            </span>
+            {channel !== "webpush" && (
+              <span
+                className={cn(
+                  "text-meta",
+                  draftState === "error" ? "text-danger" : "text-muted-foreground",
+                )}
+                aria-live="polite"
+              >
+                {draftState === "saving" || draftState === "dirty"
+                  ? "Salvando rascunho…"
+                  : draftState === "error"
+                    ? "Não foi possível salvar o rascunho"
+                    : draftState === "saved"
+                      ? "Rascunho salvo"
+                      : "Preparando rascunho"}
+              </span>
+            )}
           </div>
           <DialogDescription className="text-body">
-            Escolha o canal, o público e a mensagem. O rascunho é salvo enquanto você edita.
+            {channel === "webpush"
+              ? "Escolha o público e a mensagem da notificação."
+              : "Escolha o canal, o público e a mensagem. O rascunho é salvo enquanto você edita."}
           </DialogDescription>
         </DialogHeader>
 
@@ -1109,16 +1258,21 @@ export function ChannelCampaignComposer({
                       setChannel(item);
                       // The external phone list is an SMS-only audience.
                       if (audienceId === EXTERNAL_LIST_ID && item !== "sms") setAudienceId("");
+                      // Web push counts subscriptions (countWebpushAudienceFn), it never
+                      // goes through resolveCampaignAudience like the other channels.
+                      if (item === "webpush") return;
                       const selected = audienceOptions.find((option) => option.id === audienceId);
                       if (selected) {
                         setAudienceCriteria(selected.criteria);
                         audienceMutation.mutate({ criteria: selected.criteria, channel: item });
                       }
                     }}
-                    items={(Object.keys(channelMeta) as Channel[]).map((item) => ({
-                      value: item,
-                      label: channelMeta[item].label,
-                    }))}
+                    items={(Object.keys(channelMeta) as Channel[])
+                      .filter((item) => item !== "webpush" || webpushAvailable)
+                      .map((item) => ({
+                        value: item,
+                        label: channelMeta[item].label,
+                      }))}
                   />
                 </div>
               </div>
@@ -1135,6 +1289,7 @@ export function ChannelCampaignComposer({
                   {...tourAnchor("campanhas.compositor.nome")}
                 />
               </div>
+              {channel !== "webpush" && (
               <div className="space-y-2">
                 <Label id={fieldIds.audienceLabel}>Público</Label>
                 <Select
@@ -1261,6 +1416,7 @@ export function ChannelCampaignComposer({
                   </p>
                 ) : null}
               </div>
+              )}
               {channel !== "voice" ? (
                 <p className="text-meta text-muted-foreground">
                   <span className="font-medium text-foreground">Rastreamento automático.</span>{" "}
@@ -1541,6 +1697,29 @@ export function ChannelCampaignComposer({
                   )}
                 </div>
               )}
+              {channel === "webpush" && webpushAvailable && (
+                <WebpushCampaignFields
+                  title={webpushTitle}
+                  onTitleChange={setWebpushTitle}
+                  body={webpushBody}
+                  onBodyChange={setWebpushBody}
+                  url={webpushUrl}
+                  onUrlChange={setWebpushUrl}
+                  imageUrl={webpushImageUrl}
+                  onImageUrlChange={setWebpushImageUrl}
+                  audienceKind={webpushAudienceKind}
+                  onAudienceKindChange={setWebpushAudienceKind}
+                  audienceOptions={audienceOptions}
+                  audienceId={audienceId}
+                  onAudienceChange={(id, criteria) => {
+                    setAudienceId(id);
+                    setAudienceCriteria(criteria);
+                  }}
+                  counts={webpushCounts}
+                  countsLoading={webpushCountQuery.isFetching}
+                  submitAttempted={submitAttempted}
+                />
+              )}
               <div className="space-y-2">
                 <Label>Quando enviar</Label>
                 <div {...tourAnchor("campanhas.compositor.quando")}>
@@ -1655,7 +1834,9 @@ export function ChannelCampaignComposer({
               <div>
                 <p className="text-meta text-muted-foreground">Destinatários</p>
                 <p className="text-kpi-sm tabular-nums" aria-live="polite">
-                  {audienceMutation.isPending ? "…" : num(sendableRecipients)}
+                  {(channel === "webpush" ? webpushCountQuery.isFetching : audienceMutation.isPending)
+                    ? "…"
+                    : num(sendableRecipients)}
                 </p>
                 {isExternalList ? (
                   <p className="text-meta text-muted-foreground">
@@ -1703,13 +1884,29 @@ export function ChannelCampaignComposer({
                   </p>
                 </div>
               ) : null}
+              {channel === "webpush" ? (
+                <div>
+                  <p className="text-meta text-muted-foreground">Custo estimado</p>
+                  <p className="font-medium tabular-nums">
+                    {webpushCountQuery.isFetching
+                      ? "—"
+                      : webpushExempt
+                        ? "Isento"
+                        : brl(cost)}
+                  </p>
+                </div>
+              ) : null}
               <div>
                 <p className="text-meta text-muted-foreground">Conteúdo</p>
                 <p className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded-lg bg-secondary/50 p-2.5 text-meta text-muted-foreground">
-                  {channel === "voice" && voiceMode === "asset"
-                    ? (assets.find((item) => item.id === voiceSourceId)?.name ??
-                      "Selecione um áudio")
-                    : isExpert && channel === "email" && activeEmailTemplate
+                  {channel === "webpush"
+                    ? webpushTitle || webpushBody
+                      ? `${webpushTitle} — ${webpushBody}`
+                      : "Selecione o conteúdo para visualizar"
+                    : channel === "voice" && voiceMode === "asset"
+                      ? (assets.find((item) => item.id === voiceSourceId)?.name ??
+                        "Selecione um áudio")
+                      : isExpert && channel === "email" && activeEmailTemplate
                       ? `${activeEmailTemplate.nome ?? activeEmailTemplate.name ?? ""}${
                           activeEmailTemplate.subject
                             ? ` · Assunto: ${activeEmailTemplate.subject}`
@@ -1747,12 +1944,15 @@ export function ChannelCampaignComposer({
             className="h-auto min-h-9 w-full whitespace-normal py-2 sm:w-auto"
             disabled={
               submit.isPending ||
-              audienceMutation.isPending ||
+              (channel === "webpush" ? webpushCountQuery.isFetching : audienceMutation.isPending) ||
               smsRecipientPreview.isFetching ||
-              !draftId ||
-              draftState === "dirty" ||
-              draftState === "saving" ||
-              draftState === "error" ||
+              // Web push has no draft (controller ruling): the draft gates below
+              // don't apply to it.
+              (channel !== "webpush" &&
+                (!draftId ||
+                  draftState === "dirty" ||
+                  draftState === "saving" ||
+                  draftState === "error")) ||
               (channel === "email" && emailBlocked) ||
               Boolean(expertCapBlock)
             }
@@ -1779,6 +1979,7 @@ export function ChannelCampaignComposer({
                     cost,
                     smsUnitPrice: smsPrice?.unitPrice,
                     smsExempt,
+                    webpushExempt,
                   })}
           </Button>
         </DialogFooter>

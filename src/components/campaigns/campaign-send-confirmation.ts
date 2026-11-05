@@ -3,7 +3,7 @@ import { brl, num } from "@/lib/format";
 /** Acima deste número de destinatários, o envio exige digitar a quantidade. */
 export const TYPED_CONFIRMATION_THRESHOLD = 1000;
 
-export type CampaignSendChannel = "sms" | "email" | "voice";
+export type CampaignSendChannel = "sms" | "email" | "voice" | "webpush";
 
 /**
  * Tudo o que a revisão de risco cobre. Quando qualquer item muda, a
@@ -58,11 +58,18 @@ function players(count: number) {
   return `${num(count)} ${count === 1 ? "jogador" : "jogadores"}`;
 }
 
+function subscribers(count: number) {
+  return `${num(count)} ${count === 1 ? "inscrito" : "inscritos"}`;
+}
+
 /**
  * Texto do botão final: diz a quem vai e quanto custa, em R$, não em
  * "créditos" (PG1 final review). Só o SMS tem custo diferente da
  * quantidade de destinatários (mensagens longas usam mais de um segmento),
- * e a casa isenta (`interno`) não paga nada pelo envio.
+ * e a casa isenta (`interno`) não paga nada pelo envio. Web push vai para
+ * inscrições, não jogadores (uma inscrição pode ser anônima), e o custo é
+ * o que `countWebpushAudienceFn` já calculou (`cost`), não uma tarifa a
+ * multiplicar aqui.
  */
 export function campaignSendLabel({
   channel,
@@ -71,6 +78,7 @@ export function campaignSendLabel({
   cost,
   smsUnitPrice,
   smsExempt,
+  webpushExempt,
 }: {
   channel: CampaignSendChannel;
   when: "now" | "schedule";
@@ -80,8 +88,14 @@ export function campaignSendLabel({
   smsUnitPrice?: number | null;
   /** Casa isenta (`interno`): não exibe preço, o envio não é cobrado. */
   smsExempt?: boolean;
+  /** Web push: `unitPrice` de `countWebpushAudienceFn` é 0 (casa isenta). */
+  webpushExempt?: boolean;
 }): string {
   const verb = when === "schedule" ? "Agendar para" : "Enviar para";
+  if (channel === "webpush") {
+    const base = `${verb} ${subscribers(recipients)}`;
+    return webpushExempt ? `${base} · isento` : `${base} · custo estimado ${brl(cost)}`;
+  }
   const base = `${verb} ${players(recipients)}`;
   if (channel === "sms") {
     const segments = `${num(cost)} ${cost === 1 ? "segmento" : "segmentos"}`;

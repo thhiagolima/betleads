@@ -45,6 +45,10 @@ const DORMANT_FIRST_DEPOSIT_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261109100000_crm_influenced_dormant_first_deposit.sql"),
   "utf8",
 );
+const LATE_DAYS_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261202100000_crm_results_late_days.sql"),
+  "utf8",
+);
 const CONSUMO_P0_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261129100000_supabase_consumo_p0.sql"),
   "utf8",
@@ -79,7 +83,7 @@ create table public.players (
   created_at timestamptz not null default '2026-08-01');
 create table public.deposits (
   id uuid primary key default gen_random_uuid(), tenant_id uuid, player_id uuid,
-  valor numeric, status text, created_at timestamptz);
+  valor numeric, status text, created_at timestamptz, updated_at timestamptz not null default now());
 create table public.sms_send_logs (
   id uuid primary key default gen_random_uuid(), tenant_id uuid, player_id uuid, status text,
   trigger_name text, idempotency_key text, created_at timestamptz);
@@ -193,6 +197,8 @@ beforeAll(async () => {
   await db.exec(`begin; ${FINISHED_WITHOUT_MESSAGE_MIGRATION}; commit;`);
   await db.exec(`begin; ${CONSUMO_P0_MIGRATION}; commit;`);
   await db.exec(`begin; ${CONSUMO_P0_MIGRATION}; commit;`);
+  await db.exec(`begin; ${LATE_DAYS_MIGRATION}; commit;`);
+  await db.exec(`begin; ${LATE_DAYS_MIGRATION}; commit;`);
   // The home dashboard function reads tables this schema does not model.
   const reports = `begin; set local check_function_bodies = off; ${REPORTS_MIGRATION}; commit;`;
   await db.exec(reports);
@@ -313,10 +319,13 @@ describe("crm_results_daily (golden day)", () => {
 
 describe("consumption P0: journey join as uuid, quiet days skipped", () => {
   it("turns a text key into a uuid and anything else into null", async () => {
-    const { rows: out } = await db.query<{ ok: string | null; bad: string | null; none: string | null }>(
-      `select crm_try_uuid($1) ok, crm_try_uuid('k-d') bad, crm_try_uuid(null) none`,
-      [KEY_A.toUpperCase()],
-    );
+    const { rows: out } = await db.query<{
+      ok: string | null;
+      bad: string | null;
+      none: string | null;
+    }>(`select crm_try_uuid($1) ok, crm_try_uuid('k-d') bad, crm_try_uuid(null) none`, [
+      KEY_A.toUpperCase(),
+    ]);
     expect(out[0]).toEqual({ ok: KEY_A, bad: null, none: null });
   });
 
@@ -339,12 +348,61 @@ describe("consumption P0: journey join as uuid, quiet days skipped", () => {
         create or replace function refresh_player_lifecycle_day(_tenant uuid, _day date)
         returns integer language sql as $$ select 0 $$;
       `);
-      const { rows: failed } = await db.query<{ n: number }>(`select refresh_crm_results_recent(1) n`);
+      const { rows: failed } = await db.query<{ n: number }>(
+        `select refresh_crm_results_recent(1) n`,
+      );
       expect(failed[0].n).toBe(0);
       const { rows: done } = await db.query<{ tenant_id: string }>(
         `select tenant_id from rebuilt order by tenant_id`,
       );
       expect(done.map((r) => r.tenant_id)).toEqual([BUSY, STALE]);
+    } finally {
+      await db.exec("rollback");
+    }
+  });
+});
+
+describe("late data: past days rebuilt once their deposits change", () => {
+  it("rebuilds an older day whose approved deposit changed after its last rebuild", async () => {
+    const LATE = "00000000-0000-4000-8000-0000000000b7";
+    await db.exec("begin");
+    try {
+      await db.exec(`
+        alter table tenants add column if not exists is_demo boolean not null default false;
+        insert into tenants (id, slug) values ('${LATE}', 'late');
+        -- A deposit made 3 days ago (BRT) that only reached us now.
+        insert into deposits (tenant_id, player_id, valor, status, created_at, updated_at) values
+          ('${LATE}', '${A}', 10, 'aprovado',
+           ((now() at time zone 'America/Sao_Paulo')::date - 3)::timestamp at time zone 'America/Sao_Paulo' + interval '20 hours',
+           clock_timestamp());
+        create table rebuilt (tenant_id uuid, day date);
+        create or replace function refresh_crm_results_day(_tenant uuid, _day date)
+        returns integer language sql as $$ insert into rebuilt values (_tenant, _day) returning 1 $$;
+        create or replace function refresh_player_lifecycle_day(_tenant uuid, _day date)
+        returns integer language sql as $$ select 0 $$;
+      `);
+      const lateDay = async () =>
+        (
+          await db.query<{ n: number }>(
+            `select count(*)::int n from rebuilt
+             where tenant_id = $1 and day = (now() at time zone 'America/Sao_Paulo')::date - 3`,
+            [LATE],
+          )
+        ).rows[0].n;
+
+      await db.query(`select refresh_crm_results_recent(1)`);
+      expect(await lateDay()).toBe(1);
+
+      // Nothing changed since: the next run leaves the day alone.
+      await db.query(`select refresh_crm_results_recent(1)`);
+      expect(await lateDay()).toBe(1);
+
+      // Another late change (e.g. a pending deposit approved later): rebuilt again.
+      await db.exec(
+        `update deposits set updated_at = clock_timestamp() where tenant_id = '${LATE}'`,
+      );
+      await db.query(`select refresh_crm_results_recent(1)`);
+      expect(await lateDay()).toBe(2);
     } finally {
       await db.exec("rollback");
     }

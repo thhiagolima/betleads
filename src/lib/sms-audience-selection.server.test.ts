@@ -121,18 +121,20 @@ function recordingDb(players: Row[]) {
       },
       rpc: (fn: string, args: Row) => {
         rpcCalls.push({ fn, args });
-        return Promise.resolve({
-          data: {
-            phones: ["5511999990001"],
-            total: 1,
-            recipientTotal: 1,
-            emailPlayerIds: [],
-            emailRecipientTotal: 0,
-            facets: {},
-            settings: { thresholds: {}, cooling: 2, sleeping: 7 },
-          },
-          error: null,
-        });
+        const criteria = (args._criteria ?? {}) as Row;
+        const data: Row = {
+          phones: ["5511999990001"],
+          total: 1,
+          recipientTotal: 1,
+          emailPlayerIds: [],
+          emailRecipientTotal: 0,
+          facets: {},
+          settings: { thresholds: {}, cooling: 2, sleeping: 7 },
+        };
+        // Espelha o comportamento do RPC real: a chave só existe quando a
+        // chamada pediu `includePlayerIds`.
+        if (criteria.includePlayerIds === true) data.playerIds = [pid(1)];
+        return Promise.resolve({ data, error: null });
       },
     },
   };
@@ -322,6 +324,44 @@ describe("resolveAudienceForTenant", () => {
     expect(sent.timing).not.toBe("selection");
     expect("playerIds" in sent || "audienceId" in sent).toBe(false);
     expect(result.phones).toEqual(["5511999990001"]);
+  });
+
+  it("regra: sem opts, o payload do RPC não ganha 'includePlayerIds' e o resultado não tem 'playerIds'", async () => {
+    const { db, rpcCalls } = recordingDb(players);
+    const raw = { activity: { deposit: "yes" } };
+    const result = await resolveAudienceForTenant(db, TENANT, raw);
+    const sent = rpcCalls[0].args._criteria as Row;
+    expect("includePlayerIds" in sent).toBe(false);
+    expect("playerIds" in result).toBe(false);
+  });
+
+  it("regra: opts.includePlayerIds repassa a flag no _criteria do RPC e devolve playerIds", async () => {
+    const { db, rpcCalls } = recordingDb(players);
+    const raw = { activity: { deposit: "yes" } };
+    const result = await resolveAudienceForTenant(db, TENANT, raw, undefined, {
+      includePlayerIds: true,
+    });
+    const sent = rpcCalls[0].args._criteria as Row;
+    expect(sent.includePlayerIds).toBe(true);
+    expect(result.playerIds).toEqual([pid(1)]);
+  });
+
+  it("seleção: opts.includePlayerIds devolve os ids carregados (após filtro de afiliado do expert)", async () => {
+    const { db } = recordingDb(players);
+    const result = await resolveAudienceForTenant(
+      db,
+      TENANT,
+      selection([pid(1), pid(2), pid(3), pid(4)]),
+      undefined,
+      { includePlayerIds: true },
+    );
+    expect(result.playerIds?.sort()).toEqual([pid(1), pid(2), pid(3)].sort());
+  });
+
+  it("seleção: sem opts, o resultado não tem 'playerIds'", async () => {
+    const { db } = recordingDb(players);
+    const result = await resolveAudienceForTenant(db, TENANT, selection([pid(1), pid(2)]));
+    expect("playerIds" in result).toBe(false);
   });
 });
 

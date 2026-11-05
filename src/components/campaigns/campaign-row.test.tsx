@@ -32,6 +32,11 @@ vi.mock("@/lib/campaign-drafts.functions", () => ({
   deleteCampaignDraft: vi.fn(),
   listCampaignDrafts: vi.fn(),
 }));
+vi.mock("@/lib/webpush/campaigns.functions", () => ({
+  cancelWebpushCampaignFn: vi.fn(),
+  listWebpushCampaignsFn: vi.fn(),
+  resumeWebpushCampaignFn: vi.fn(),
+}));
 
 import { CampaignRow, type Campaign } from "./campaigns-hub";
 import { expertCampaignToRow } from "@/lib/expert-campaign-rows";
@@ -61,12 +66,37 @@ const pausedSms: Campaign = {
   resumable: true,
 };
 
+const pausedWebpush: Campaign = {
+  id: "wp1",
+  name: "Promo push",
+  scheduled_at: "2026-11-05T12:00:00.000Z",
+  status: "pausada",
+  total_count: 500,
+  sent_count: 100,
+  failed_count: 0,
+  channel: "webpush",
+  cancellable: true,
+  resumable: true,
+};
+
 describe("CampaignRow", () => {
   it("house: report, resume and the wallet link stay", () => {
     const html = row(pausedSms);
     expect(html).toContain("Relatório");
     expect(html).toContain("Retomar");
     expect(html).toContain('href="/plano-e-creditos"');
+  });
+
+  it("webpush: paused for lack of balance shows Retomar and the wallet link", () => {
+    const html = row(pausedWebpush);
+    expect(html).toContain("Retomar");
+    expect(html).toContain('href="/plano-e-creditos"');
+  });
+
+  it("webpush: an 'agendada' (not paused) row has no Retomar", () => {
+    const html = row({ ...pausedWebpush, status: "agendada", resumable: false });
+    expect(html).not.toContain("Retomar");
+    expect(html).not.toContain('href="/plano-e-creditos"');
   });
 
   it("expert: no report, resume or wallet link; can still cancel", () => {

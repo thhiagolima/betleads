@@ -7347,6 +7347,378 @@ export type Database = {
           },
         ];
       };
+      tenant_webpush_settings: {
+        Row: {
+          accept_label: string;
+          cancel_label: string;
+          icon_url: string | null;
+          prompt_text: string;
+          public_token: string;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          accept_label?: string;
+          cancel_label?: string;
+          icon_url?: string | null;
+          prompt_text?: string;
+          public_token?: string;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          accept_label?: string;
+          cancel_label?: string;
+          icon_url?: string | null;
+          prompt_text?: string;
+          public_token?: string;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "tenant_webpush_settings_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: true;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      tenant_webpush_apps: {
+        Row: {
+          api_key_encrypted: string;
+          created_at: string;
+          created_via: string;
+          id: string;
+          onesignal_app_id: string;
+          origin: string;
+          player_linked_at: string | null;
+          script_seen_at: string | null;
+          status: string;
+          tenant_id: string;
+          test_sent_at: string | null;
+          updated_at: string;
+          worker_verified_at: string | null;
+        };
+        Insert: {
+          api_key_encrypted: string;
+          created_at?: string;
+          created_via: string;
+          id?: string;
+          onesignal_app_id: string;
+          origin: string;
+          player_linked_at?: string | null;
+          script_seen_at?: string | null;
+          status?: string;
+          tenant_id: string;
+          test_sent_at?: string | null;
+          updated_at?: string;
+          worker_verified_at?: string | null;
+        };
+        Update: {
+          api_key_encrypted?: string;
+          created_at?: string;
+          created_via?: string;
+          id?: string;
+          onesignal_app_id?: string;
+          origin?: string;
+          player_linked_at?: string | null;
+          script_seen_at?: string | null;
+          status?: string;
+          tenant_id?: string;
+          test_sent_at?: string | null;
+          updated_at?: string;
+          worker_verified_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "tenant_webpush_apps_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      push_subscriptions: {
+        Row: {
+          app_id: string;
+          click_key: string;
+          first_seen_at: string | null;
+          id: string;
+          last_seen_at: string | null;
+          linked_at: string | null;
+          player_id: string | null;
+          status: string;
+          subscription_id: string;
+          tenant_id: string;
+          user_agent: string | null;
+        };
+        Insert: {
+          app_id: string;
+          click_key?: string;
+          first_seen_at?: string | null;
+          id?: string;
+          last_seen_at?: string | null;
+          linked_at?: string | null;
+          player_id?: string | null;
+          status?: string;
+          subscription_id: string;
+          tenant_id: string;
+          user_agent?: string | null;
+        };
+        Update: {
+          app_id?: string;
+          click_key?: string;
+          first_seen_at?: string | null;
+          id?: string;
+          last_seen_at?: string | null;
+          linked_at?: string | null;
+          player_id?: string | null;
+          status?: string;
+          subscription_id?: string;
+          tenant_id?: string;
+          user_agent?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_app_id_fkey";
+            columns: ["app_id"];
+            isOneToOne: false;
+            referencedRelation: "tenant_webpush_apps";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "push_subscriptions_player_id_fkey";
+            columns: ["player_id"];
+            isOneToOne: false;
+            referencedRelation: "players";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "push_subscriptions_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      webpush_campaigns: {
+        Row: {
+          audience_criteria: Json | null;
+          audience_kind: string;
+          body: string;
+          created_at: string;
+          created_by: string | null;
+          failed_count: number;
+          id: string;
+          image_url: string | null;
+          last_error: string | null;
+          locked_at: string | null;
+          locked_by: string | null;
+          name: string;
+          scheduled_at: string;
+          sent_count: number;
+          sent_cursor: string | null;
+          status: string;
+          target_count: number;
+          target_player_ids: string[] | null;
+          tenant_id: string;
+          title: string;
+          updated_at: string;
+          url: string;
+        };
+        Insert: {
+          audience_criteria?: Json | null;
+          audience_kind: string;
+          body: string;
+          created_at?: string;
+          created_by?: string | null;
+          failed_count?: number;
+          id?: string;
+          image_url?: string | null;
+          last_error?: string | null;
+          locked_at?: string | null;
+          locked_by?: string | null;
+          name: string;
+          scheduled_at: string;
+          sent_count?: number;
+          sent_cursor?: string | null;
+          status?: string;
+          target_count?: number;
+          target_player_ids?: string[] | null;
+          tenant_id: string;
+          title: string;
+          updated_at?: string;
+          url: string;
+        };
+        Update: {
+          audience_criteria?: Json | null;
+          audience_kind?: string;
+          body?: string;
+          created_at?: string;
+          created_by?: string | null;
+          failed_count?: number;
+          id?: string;
+          image_url?: string | null;
+          last_error?: string | null;
+          locked_at?: string | null;
+          locked_by?: string | null;
+          name?: string;
+          scheduled_at?: string;
+          sent_count?: number;
+          sent_cursor?: string | null;
+          status?: string;
+          target_count?: number;
+          target_player_ids?: string[] | null;
+          tenant_id?: string;
+          title?: string;
+          updated_at?: string;
+          url?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "webpush_campaigns_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      webpush_dispatch_batches: {
+        Row: {
+          accepted: number | null;
+          app_id: string;
+          campaign_id: string;
+          created_at: string;
+          id: string;
+          last_error: string | null;
+          onesignal_notification_id: string | null;
+          refused_row_ids: string[] | null;
+          status: string;
+          subscription_row_ids: string[];
+          tenant_id: string;
+          units: number;
+          updated_at: string;
+        };
+        Insert: {
+          accepted?: number | null;
+          app_id: string;
+          campaign_id: string;
+          created_at?: string;
+          id?: string;
+          last_error?: string | null;
+          onesignal_notification_id?: string | null;
+          refused_row_ids?: string[] | null;
+          status?: string;
+          subscription_row_ids: string[];
+          tenant_id: string;
+          units: number;
+          updated_at?: string;
+        };
+        Update: {
+          accepted?: number | null;
+          app_id?: string;
+          campaign_id?: string;
+          created_at?: string;
+          id?: string;
+          last_error?: string | null;
+          onesignal_notification_id?: string | null;
+          refused_row_ids?: string[] | null;
+          status?: string;
+          subscription_row_ids?: string[];
+          tenant_id?: string;
+          units?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "webpush_dispatch_batches_app_id_fkey";
+            columns: ["app_id"];
+            isOneToOne: false;
+            referencedRelation: "tenant_webpush_apps";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "webpush_dispatch_batches_campaign_id_fkey";
+            columns: ["campaign_id"];
+            isOneToOne: false;
+            referencedRelation: "webpush_campaigns";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "webpush_dispatch_batches_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      webpush_send_logs: {
+        Row: {
+          app_id: string | null;
+          billing_reference: string | null;
+          campaign_id: string;
+          created_at: string;
+          id: string;
+          onesignal_notification_id: string | null;
+          player_id: string | null;
+          status: string;
+          subscription_row_id: string;
+          tenant_id: string;
+        };
+        Insert: {
+          app_id?: string | null;
+          billing_reference?: string | null;
+          campaign_id: string;
+          created_at?: string;
+          id?: string;
+          onesignal_notification_id?: string | null;
+          player_id?: string | null;
+          status: string;
+          subscription_row_id: string;
+          tenant_id: string;
+        };
+        Update: {
+          app_id?: string | null;
+          billing_reference?: string | null;
+          campaign_id?: string;
+          created_at?: string;
+          id?: string;
+          onesignal_notification_id?: string | null;
+          player_id?: string | null;
+          status?: string;
+          subscription_row_id?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "webpush_send_logs_campaign_id_fkey";
+            columns: ["campaign_id"];
+            isOneToOne: false;
+            referencedRelation: "webpush_campaigns";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "webpush_send_logs_subscription_row_id_fkey";
+            columns: ["subscription_row_id"];
+            isOneToOne: false;
+            referencedRelation: "push_subscriptions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "webpush_send_logs_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       webhook_configs: {
         Row: {
           ativo: boolean;
@@ -8856,6 +9228,58 @@ export type Database = {
       wallet_summary: {
         Args: { _tenant?: string };
         Returns: Json;
+      };
+      claim_due_webpush_campaigns: {
+        Args: { p_limit: number };
+        Returns: {
+          audience_criteria: Json | null;
+          audience_kind: string;
+          body: string;
+          created_at: string;
+          created_by: string | null;
+          failed_count: number;
+          id: string;
+          image_url: string | null;
+          last_error: string | null;
+          locked_at: string | null;
+          locked_by: string | null;
+          name: string;
+          scheduled_at: string;
+          sent_count: number;
+          sent_cursor: string | null;
+          status: string;
+          target_count: number;
+          target_player_ids: string[] | null;
+          tenant_id: string;
+          title: string;
+          updated_at: string;
+          url: string;
+        }[];
+        SetofOptions: {
+          from: "*";
+          to: "webpush_campaigns";
+          isOneToOne: false;
+          isSetofReturn: true;
+        };
+      };
+      webpush_campaign_batch: {
+        Args: { p_after: string | null; p_campaign: string; p_limit: number };
+        Returns: {
+          app_id: string;
+          click_key: string;
+          onesignal_app_id: string;
+          player_id: string | null;
+          subscription_id: string;
+          subscription_row_id: string;
+        }[];
+      };
+      webpush_app_sent_last_15m: {
+        Args: { p_app: string };
+        Returns: number;
+      };
+      webpush_app_active_count: {
+        Args: { p_app: string };
+        Returns: number;
       };
     };
     Enums: {

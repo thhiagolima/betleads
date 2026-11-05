@@ -51,6 +51,7 @@ import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { ChannelObservabilityPanel } from "@/components/admin/channel-observability-panel";
+import { PlatformHealthTab } from "@/components/admin/platform-health/platform-health-tab";
 import { ProviderAccountsPanel } from "@/components/admin/provider-accounts-panel";
 import { McpAccessPanel } from "@/components/admin/mcp-access-panel";
 import { getMyMcpStatus } from "@/lib/mcp/mcp.functions";
@@ -134,6 +135,7 @@ function fmtDate(d: string | null) {
 }
 
 type AdminView =
+  | "health"
   | "metrics"
   | "users"
   | "pricing"
@@ -144,6 +146,7 @@ type AdminView =
   | "mcp";
 
 const ADMIN_VIEWS: ReadonlyArray<{ value: AdminView; label: string; hash: string }> = [
+  { value: "health", label: "Saúde", hash: "saude" },
   { value: "metrics", label: "Métricas", hash: "metricas" },
   { value: "users", label: "Usuários", hash: "usuarios" },
   { value: "pricing", label: "Preços", hash: "precos" },
@@ -156,7 +159,7 @@ const ADMIN_VIEWS: ReadonlyArray<{ value: AdminView; label: string; hash: string
 
 function viewFromHash(hash: string): AdminView {
   const clean = hash.replace(/^#/, "");
-  return ADMIN_VIEWS.find((item) => item.hash === clean)?.value ?? "metrics";
+  return ADMIN_VIEWS.find((item) => item.hash === clean)?.value ?? "health";
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -193,7 +196,7 @@ function AdminPage() {
   const setView = (next: AdminView) => {
     void navigate({
       to: "/admin",
-      hash: ADMIN_VIEWS.find((item) => item.value === next)?.hash ?? "metricas",
+      hash: ADMIN_VIEWS.find((item) => item.value === next)?.hash ?? "saude",
     });
   };
 
@@ -231,6 +234,7 @@ function AdminPage() {
       />
 
       <div role="tabpanel" aria-labelledby={`tab-${view}`} className="space-y-4">
+        {view === "health" && <PlatformHealthTab />}
         {view === "metrics" && <MetricsTab />}
         {view === "users" && <UsersTab />}
         {view === "pricing" && <PricingTab />}
@@ -1086,6 +1090,7 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
                 <SelectItem value="sms">SMS</SelectItem>
                 <SelectItem value="voice_30s">Voz</SelectItem>
                 <SelectItem value="email">E-mail</SelectItem>
+                <SelectItem value="webpush">Web Push</SelectItem>
               </SelectContent>
             </Select>
           </div>

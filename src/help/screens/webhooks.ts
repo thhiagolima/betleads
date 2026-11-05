@@ -1,8 +1,9 @@
 // Help article for "Integrações" (/webhooks). Nesta fase 1, só a aba
 // "Links curtos" (`links`) tem conteúdo — as abas "Plataforma de apostas"
-// (`plataforma`) e "Meta Ads" (`meta`) ficam em PENDING_ROUTES
-// ("/webhooks#plataforma", "/webhooks#meta") até uma tarefa futura cobri-las.
-// Fonte: src/routes/webhooks.tsx (as 3 abas, TABS, hash default "plataforma")
+// (`plataforma`), "Meta Ads" (`meta`) e "Web Push" (`webpush`) ficam em
+// PENDING_ROUTES ("/webhooks#plataforma", "/webhooks#meta",
+// "/webhooks#webpush") até uma tarefa futura cobri-las.
+// Fonte: src/routes/webhooks.tsx (as 4 abas, TABS, hash default "plataforma")
 // e, para a aba Links curtos: src/components/integrations/links-overview.tsx
 // (KPIs + "Por canal e origem") e src/components/integrations/links-settings.tsx
 // (formulário de configuração + o card de erro do não-admin).
@@ -16,7 +17,7 @@ const screen: HelpScreen = {
   defaultTab: "plataforma",
   title: "Integrações",
   purpose:
-    "Conectar a plataforma de apostas, configurar os links curtos (encurtador) e a conta de anúncios da Meta. Esta versão do artigo cobre só a aba Links curtos.",
+    "Conectar a plataforma de apostas, configurar os links curtos (encurtador), a conta de anúncios da Meta e o Web Push (notificações no navegador). Esta versão do artigo cobre só a aba Links curtos.",
   roles: ["admin", "gestor", "member", "expert"],
   terms: ["encurtador"],
   sections: [

@@ -87,6 +87,18 @@ describe("getChannelOperationState", () => {
       expect(state.actionTo).toMatch(/^\//);
     }
   });
+
+  it("web push: configuração aponta para /webhooks#webpush", () => {
+    expect(getChannelOperationState("audio_ready", "webpush").actionTo).toBe("/webhooks#webpush");
+  });
+
+  it("web push pausado leva para saldo, igual SMS (não para configurações)", () => {
+    const sms = getChannelOperationState("pausada", "sms");
+    const webpush = getChannelOperationState("pausada", "webpush");
+    expect(webpush.actionTo).toBe("/plano-e-creditos");
+    expect(webpush.actionTo).toBe(sms.actionTo);
+    expect(webpush.actionLabel).toBe("Ver saldo");
+  });
 });
 
 describe("groupVoiceQueueItems", () => {

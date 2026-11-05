@@ -47,6 +47,11 @@ import {
 import { CampaignBlockedBadge } from "@/components/house-config/campaign-blocked-badge";
 import { listCallQueue } from "@/lib/calls.functions";
 import { deleteCampaignDraft, listCampaignDrafts } from "@/lib/campaign-drafts.functions";
+import {
+  cancelWebpushCampaignFn,
+  listWebpushCampaignsFn,
+  resumeWebpushCampaignFn,
+} from "@/lib/webpush/campaigns.functions";
 
 type CampaignStatus = "todos" | "agendadas" | "enviando" | "pausadas" | "finalizadas";
 
@@ -98,9 +103,9 @@ export type Campaign = {
   /** E-mail only: why the last send attempt was blocked (sender/domain). */
   blocked_reason?: string | null;
   updated_at?: string | null;
-  channel: "sms" | "email" | "voice";
+  channel: "sms" | "email" | "voice" | "webpush";
   cancellable?: boolean;
-  /** SMS paused for lack of balance: "Retomar" puts it back in the queue. */
+  /** SMS/web push paused for lack of balance: "Retomar" puts it back in the queue. */
   resumable?: boolean;
   /** E-mail: a batched send is between two batches ("Enviando em lotes"). */
   batch_in_progress?: boolean;
@@ -128,6 +133,17 @@ export type DraftSummary = {
   updatedAt: string;
 };
 
+type WebpushCampaignSummaryRow = {
+  id: string;
+  name: string;
+  status: string;
+  scheduledAt: string;
+  targetCount: number;
+  sentCount: number;
+  failedCount: number;
+  createdAt: string;
+};
+
 export function CampaignsHub() {
   const queryClient = useQueryClient();
   const listCampaigns = useServerFn(listScheduledSmsCampaigns);
@@ -138,8 +154,13 @@ export function CampaignsHub() {
   const sendEmailNow = useServerFn(sendEmailCampaignNow);
   const listDrafts = useServerFn(listCampaignDrafts);
   const deleteDraftFn = useServerFn(deleteCampaignDraft);
+  const listWebpushCampaigns = useServerFn(listWebpushCampaignsFn);
+  const cancelWebpushCampaign = useServerFn(cancelWebpushCampaignFn);
+  const resumeWebpushCampaign = useServerFn(resumeWebpushCampaignFn);
   const [composerOpen, setComposerOpen] = useState(false);
-  const [initialChannel, setInitialChannel] = useState<"sms" | "email" | "voice">("sms");
+  const [initialChannel, setInitialChannel] = useState<"sms" | "email" | "voice" | "webpush">(
+    "sms",
+  );
   const [initialAudienceId, setInitialAudienceId] = useState("");
   const [individualOpen, setIndividualOpen] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
@@ -149,7 +170,12 @@ export function CampaignsHub() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get("newChannel");
-    if (requested === "email" || requested === "voice" || requested === "sms") {
+    if (
+      requested === "email" ||
+      requested === "voice" ||
+      requested === "sms" ||
+      requested === "webpush"
+    ) {
       setInitialChannel(requested);
       setComposerOpen(true);
     } else if (params.get("newCampaign") === "1") {
@@ -181,6 +207,11 @@ export function CampaignsHub() {
     queryFn: () => listDrafts(),
     refetchInterval: 30_000,
   });
+  const webpushCampaigns = useQuery({
+    queryKey: ["webpush-campaigns"],
+    queryFn: () => listWebpushCampaigns(),
+    refetchInterval: 30_000,
+  });
   const cancel = useMutation({
     mutationFn: (id: string) => cancelCampaign({ data: { id } }),
     onSuccess: () => {
@@ -194,6 +225,22 @@ export function CampaignsHub() {
     onSuccess: () => {
       toast.success("Campanha retomada. Se ainda faltar saldo, ela volta a pausar.");
       queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const cancelWebpush = useMutation({
+    mutationFn: (id: string) => cancelWebpushCampaign({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Campanha cancelada");
+      queryClient.invalidateQueries({ queryKey: ["webpush-campaigns"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const resumeWebpush = useMutation({
+    mutationFn: (id: string) => resumeWebpushCampaign({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Campanha retomada. Se ainda faltar saldo, ela volta a pausar.");
+      queryClient.invalidateQueries({ queryKey: ["webpush-campaigns"] });
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -279,7 +326,22 @@ export function CampaignsHub() {
     channel: "voice",
     cancellable: false,
   }));
-  const all: Campaign[] = [...smsCampaigns, ...emailRows, ...voiceRows].sort(
+  const webpushRows: Campaign[] = (
+    (webpushCampaigns.data ?? []) as WebpushCampaignSummaryRow[]
+  ).map((campaign) => ({
+    id: campaign.id,
+    name: campaign.name,
+    scheduled_at: campaign.scheduledAt,
+    status: campaign.status,
+    total_count: campaign.targetCount,
+    sent_count: campaign.sentCount,
+    failed_count: campaign.failedCount,
+    has_planned_total: true,
+    channel: "webpush" as const,
+    cancellable: campaign.status === "agendada" || campaign.status === "pausada",
+    resumable: campaign.status === "pausada",
+  }));
+  const all: Campaign[] = [...smsCampaigns, ...emailRows, ...voiceRows, ...webpushRows].sort(
     (a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
   );
   const normalizedSearch = search.trim().toLowerCase();
@@ -312,7 +374,8 @@ export function CampaignsHub() {
   const firstLoad =
     (campaigns.isLoading && !campaigns.data) ||
     (emailCampaigns.isLoading && !emailCampaigns.data) ||
-    (voiceQueue.isLoading && !voiceQueue.data);
+    (voiceQueue.isLoading && !voiceQueue.data) ||
+    (webpushCampaigns.isLoading && !webpushCampaigns.data);
   const draftItems = (drafts.data?.items ?? []) as DraftSummary[];
 
   const openNewCampaign = () => {
@@ -478,8 +541,8 @@ export function CampaignsHub() {
                     key={`${campaign.channel}-${campaign.id}`}
                     campaign={campaign}
                     isFirst={index === 0}
-                    cancelPending={cancel.isPending}
-                    resumePending={resume.isPending || resumeEmail.isPending}
+                    cancelPending={cancel.isPending || cancelWebpush.isPending}
+                    resumePending={resume.isPending || resumeEmail.isPending || resumeWebpush.isPending}
                     onCancel={async () => {
                       const confirmed = await requestConfirmation({
                         title: "Cancelar o envio desta campanha?",
@@ -488,11 +551,17 @@ export function CampaignsHub() {
                         cancelLabel: "Manter campanha",
                         destructive: true,
                       });
-                      if (confirmed) cancel.mutate(campaign.id);
+                      if (!confirmed) return;
+                      if (campaign.channel === "webpush") cancelWebpush.mutate(campaign.id);
+                      else cancel.mutate(campaign.id);
                     }}
                     onResume={async () => {
                       if (campaign.channel === "sms") {
                         resume.mutate(campaign.id);
+                        return;
+                      }
+                      if (campaign.channel === "webpush") {
+                        resumeWebpush.mutate(campaign.id);
                         return;
                       }
                       const confirmed = await requestConfirmation({
@@ -521,6 +590,7 @@ export function CampaignsHub() {
           queryClient.invalidateQueries({ queryKey: ["email-campaigns"] });
           queryClient.invalidateQueries({ queryKey: ["call-queue"] });
           queryClient.invalidateQueries({ queryKey: ["campaign-drafts"] });
+          queryClient.invalidateQueries({ queryKey: ["webpush-campaigns"] });
         }}
       />
       <IndividualSmsDialog open={individualOpen} onOpenChange={setIndividualOpen} />
@@ -644,7 +714,9 @@ export function CampaignRow({
     null;
   const unresolved = Number(campaign.unresolved_count ?? 0);
   const pausedForBalance =
-    !isExpertRow && campaign.channel === "sms" && campaign.status === "pausada";
+    !isExpertRow &&
+    (campaign.channel === "sms" || campaign.channel === "webpush") &&
+    campaign.status === "pausada";
   const when = campaign.date_is_creation
     ? `criada em ${new Date(campaign.scheduled_at).toLocaleDateString("pt-BR")}`
     : new Date(campaign.scheduled_at).toLocaleString("pt-BR", {
@@ -729,7 +801,9 @@ export function CampaignRow({
         )}
         {!isExpertRow &&
         campaign.resumable &&
-        (campaign.channel === "sms" || campaign.channel === "email") ? (
+        (campaign.channel === "sms" ||
+          campaign.channel === "email" ||
+          campaign.channel === "webpush") ? (
           <Button
             size="sm"
             variant="outline"

@@ -55,9 +55,10 @@ export const EXCLUDED_ROUTES: string[] = [
  */
 export const PENDING_ROUTES: string[] = [
   // --- Fase 1: "/webhooks" has an article (Task 15), but only the "links"
-  // tab/section — "plataforma" and "meta" are still pending, per tab. ---
+  // tab/section — "plataforma", "meta" and "webpush" are still pending, per tab. ---
   "/webhooks#plataforma",
   "/webhooks#meta",
+  "/webhooks#webpush",
 
   // --- Fase 2 ---
   "/",

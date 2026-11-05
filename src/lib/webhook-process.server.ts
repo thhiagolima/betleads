@@ -15,12 +15,30 @@ export function getServiceClient(): SupabaseClient | null {
   });
 }
 
+const PLAYER_CURRENT_COLUMNS =
+  "id, utm_source, utm_campaign, utm_content, utm_id, affiliate_id, expert, cpf";
+
+type PlayerCurrent = {
+  id: string;
+  utm_source: string | null;
+  utm_campaign: string | null;
+  utm_content: string | null;
+  utm_id: string | null;
+  affiliate_id: string | null;
+  expert: string | null;
+  cpf: string | null;
+};
+
 export async function processWebhookEvent(
   sb: SupabaseClient,
   tenantId: string,
   evento: string,
   payload: Record<string, unknown>,
-  options: { existingLogId?: string } = {},
+  options: {
+    existingLogId?: string;
+    /** crm_model and moeda already read by the route; replay omits them. */
+    tenant?: { crm_model: string | null; moeda: string | null };
+  } = {},
 ): Promise<Response> {
   let logId = options.existingLogId;
   let receiptClaimed = false;
@@ -104,11 +122,9 @@ export async function processWebhookEvent(
     // enrollments automáticos. CRM_EXPERT só aceita entrada via
     // `lead_cadastrado`; demais gatilhos (cashback, segmentos, alertas)
     // são ignorados dentro do CRM Expert.
-    const { data: tenantRow } = await sb
-      .from("tenants")
-      .select("crm_model,moeda")
-      .eq("id", tenantId)
-      .maybeSingle();
+    const tenantRow =
+      options.tenant ??
+      (await sb.from("tenants").select("crm_model,moeda").eq("id", tenantId).maybeSingle()).data;
     const tenantCrmModel = (tenantRow?.crm_model as string | null) ?? null;
     const tenantCurrency = toTenantCurrency((tenantRow as { moeda?: string | null } | null)?.moeda);
     const isExpertTenant = tenantCrmModel === "CRM_EXPERT";
@@ -129,7 +145,10 @@ export async function processWebhookEvent(
         userEnvelope ? payload.inviter : undefined,
       ) ?? null;
 
-    const expertNome = await lookupExpertName(sb as unknown as SupabaseLike, tenantId, affiliateId);
+    // Looked up only when it can be written (new player, or an empty expert).
+    let expertLookup: Promise<string | null> | null = null;
+    const expertName = () =>
+      (expertLookup ??= lookupExpertName(sb as unknown as SupabaseLike, tenantId, affiliateId));
 
     const externalId = resolveExternalId(evento, payload, data);
     const signupEvent = isSignupEvent(evento, payload);
@@ -286,11 +305,14 @@ export async function processWebhookEvent(
     }
 
     let playerId: string | null = null;
+    // Current values the "keep first touch" / "fill only if empty" rules read,
+    // fetched with the lookup instead of one query per rule.
+    let current: PlayerCurrent | null = null;
 
     if (externalId) {
       const { data: existing, error: existingError } = await sb
         .from("players")
-        .select("id")
+        .select(PLAYER_CURRENT_COLUMNS)
         .eq("player_external_id", externalId)
         .eq("tenant_id", tenantId)
         .maybeSingle();
@@ -301,7 +323,9 @@ export async function processWebhookEvent(
 
       if (existing) {
         playerId = existing.id;
+        current = existing as PlayerCurrent;
       } else {
+        const insertedExpert = await expertName();
         const { data: created, error: createError } = await sb
           .from("players")
           .insert({
@@ -313,7 +337,7 @@ export async function processWebhookEvent(
             player_external_id: externalId,
             status: "ativo",
             affiliate_id: affiliateId,
-            expert: expertNome,
+            expert: insertedExpert,
             tenant_id: tenantId,
             created_at: eventIso,
             updated_at: eventIso,
@@ -321,17 +345,30 @@ export async function processWebhookEvent(
           .select("id")
           .single();
         playerId = created?.id ?? null;
+        if (playerId) {
+          current = {
+            id: playerId,
+            utm_source: utm.utm_source ?? null,
+            utm_campaign: utm.utm_campaign ?? null,
+            utm_content: utm.utm_content ?? null,
+            utm_id: utm.utm_id ?? null,
+            affiliate_id: affiliateId,
+            expert: insertedExpert,
+            cpf: null,
+          };
+        }
         // Cadastro, login e evento financeiro podem chegar simultaneamente.
         // Se outro request criou o player entre o SELECT e o INSERT, recupera
         // a linha vencedora em vez de classificar o evento como sem_player.
         if (createError) {
           const { data: concurrentPlayer, error: retryError } = await sb
             .from("players")
-            .select("id")
+            .select(PLAYER_CURRENT_COLUMNS)
             .eq("player_external_id", externalId)
             .eq("tenant_id", tenantId)
             .maybeSingle();
           playerId = concurrentPlayer?.id ?? null;
+          current = (concurrentPlayer as PlayerCurrent | null) ?? null;
           if (!playerId) {
             await markLog("erro", {
               step: "create_player",
@@ -355,14 +392,7 @@ export async function processWebhookEvent(
 
       if (Object.values(utm).some(Boolean)) {
         let keepOrigin = false;
-        if (!signupEvent) {
-          const { data: origin } = await sb
-            .from("players")
-            .select("utm_source, utm_campaign, utm_content, utm_id")
-            .eq("id", playerId)
-            .maybeSingle();
-          keepOrigin = hasAcquisitionOrigin(origin);
-        }
+        if (!signupEvent) keepOrigin = hasAcquisitionOrigin(current);
         if (!keepOrigin) {
           if (utm.utm_source) updates.utm_source = utm.utm_source;
           if (utm.utm_medium) updates.utm_medium = utm.utm_medium;
@@ -375,25 +405,18 @@ export async function processWebhookEvent(
       if (origem) updates.origem = origem;
 
       if (affiliateId) {
-        const { data: cur } = await sb
-          .from("players")
-          .select("affiliate_id, expert")
-          .eq("id", playerId)
-          .single();
-        if (!cur?.affiliate_id) updates.affiliate_id = affiliateId;
-        if (!cur?.expert && expertNome) updates.expert = expertNome;
+        if (!current?.affiliate_id) updates.affiliate_id = affiliateId;
+        if (!current?.expert) {
+          const nome = await expertName();
+          if (nome) updates.expert = nome;
+        }
       }
 
       // CPF completo só chega nos eventos de saque PIX (pixData.keyValue).
       // O campo `document` do cadastro vem mascarado (146.***.**49-6*) e é ignorado.
       const cpfFromPayload = extractCpf(data);
       if (cpfFromPayload) {
-        const { data: curCpf } = await sb
-          .from("players")
-          .select("cpf")
-          .eq("id", playerId)
-          .maybeSingle();
-        if (!curCpf?.cpf) updates.cpf = cpfFromPayload;
+        if (!current?.cpf) updates.cpf = cpfFromPayload;
       }
 
       // Atividade de login precisa representar somente uma entrada real na plataforma.
@@ -766,40 +789,23 @@ export async function processWebhookEvent(
       }
 
       if (evento === "login") {
-        let sessionExists = false;
-        if (providerEventId) {
-          const { data: existingSession, error: existingSessionError } = await sb
-            .from("sessions")
-            .select("id")
-            .eq("tenant_id", tenantId)
-            .eq("provider_event_id", providerEventId)
-            .maybeSingle();
-          if (existingSessionError) {
-            await markLog("erro", { step: "find_session", error: existingSessionError.message });
-            return Response.json(
-              { ok: false, evento, error: existingSessionError.message },
-              { status: 200 },
-            );
-          }
-          sessionExists = !!existingSession;
-        }
-        if (!sessionExists) {
-          const { error: sessionInsertError } = await sb.from("sessions").upsert(
-            {
-              tenant_id: tenantId,
-              player_id: playerId,
-              iniciado_em: eventIso,
-              provider_event_id: providerEventId,
-            },
-            { onConflict: "tenant_id,provider_event_id", ignoreDuplicates: true },
+        // No pre-select: ON CONFLICT DO NOTHING on (tenant_id, provider_event_id)
+        // already skips a session recorded by an earlier delivery.
+        const { error: sessionInsertError } = await sb.from("sessions").upsert(
+          {
+            tenant_id: tenantId,
+            player_id: playerId,
+            iniciado_em: eventIso,
+            provider_event_id: providerEventId,
+          },
+          { onConflict: "tenant_id,provider_event_id", ignoreDuplicates: true },
+        );
+        if (sessionInsertError) {
+          await markLog("erro", { step: "insert_session", error: sessionInsertError.message });
+          return Response.json(
+            { ok: false, evento, error: sessionInsertError.message },
+            { status: 200 },
           );
-          if (sessionInsertError) {
-            await markLog("erro", { step: "insert_session", error: sessionInsertError.message });
-            return Response.json(
-              { ok: false, evento, error: sessionInsertError.message },
-              { status: 200 },
-            );
-          }
         }
       } else if (evento === "logout") {
         const { data: openSession, error: openSessionError } = await sb
@@ -840,43 +846,25 @@ export async function processWebhookEvent(
         }
       }
 
-      let eventExists = false;
-      if (providerEventId) {
-        const { data: existingEvent, error: existingEventError } = await sb
-          .from("events")
-          .select("id")
-          .eq("tenant_id", tenantId)
-          .eq("provider_event_id", providerEventId)
-          .maybeSingle();
-        if (existingEventError) {
-          await markLog("erro", { step: "find_event", error: existingEventError.message });
-          return Response.json(
-            { ok: false, evento, error: existingEventError.message },
-            { status: 200 },
-          );
-        }
-        eventExists = !!existingEvent;
-      }
-      if (!eventExists) {
-        const { error: eventInsertError } = await sb.from("events").upsert(
-          {
-            player_id: playerId,
-            tipo: evento,
-            valor,
-            metadata: payload,
-            tenant_id: tenantId,
-            provider_event_id: providerEventId,
-            created_at: eventIso,
-          },
-          { onConflict: "tenant_id,provider_event_id", ignoreDuplicates: true },
+      // No pre-select: ON CONFLICT DO NOTHING skips an event already recorded.
+      const { error: eventInsertError } = await sb.from("events").upsert(
+        {
+          player_id: playerId,
+          tipo: evento,
+          valor,
+          metadata: payload,
+          tenant_id: tenantId,
+          provider_event_id: providerEventId,
+          created_at: eventIso,
+        },
+        { onConflict: "tenant_id,provider_event_id", ignoreDuplicates: true },
+      );
+      if (eventInsertError) {
+        await markLog("erro", { step: "insert_event", error: eventInsertError.message });
+        return Response.json(
+          { ok: false, evento, error: eventInsertError.message },
+          { status: 200 },
         );
-        if (eventInsertError) {
-          await markLog("erro", { step: "insert_event", error: eventInsertError.message });
-          return Response.json(
-            { ok: false, evento, error: eventInsertError.message },
-            { status: 200 },
-          );
-        }
       }
 
       // Entrada principal do CRM EXPERT: ao receber um cadastro de lead
