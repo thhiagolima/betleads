@@ -46,7 +46,6 @@ const screen: HelpScreen = {
           anchor: "canal.pausado.retomar",
           label: 'Faixa "Disparos de Email pausados" e botão Retomar disparos',
           what: 'Só aparece quando os disparos de e-mail da casa estão pausados (saldo esgotado no provedor, manutenção do provedor ou pausa manual). O botão "Retomar disparos" abre a confirmação "Retomar disparos de Email?", com a descrição de que os envios voltam a sair imediatamente e os botões "Cancelar" / "Retomar disparos".',
-          roles: ["admin", "gestor"],
           notes:
             "Nada se perde enquanto pausado: campanhas e pendências continuam guardadas e são processadas quando o serviço voltar.",
         },
@@ -260,7 +259,9 @@ const screen: HelpScreen = {
         {
           anchor: "email.avancado.status",
           label: "Status (Rascunho / Publicado / Arquivado)",
-          what: "Define a situação do template. Só um template Publicado aparece disponível para uso normal nas campanhas e jornadas; Rascunho e Arquivado ficam visíveis na lista, mas fora de uso ativo.",
+          what: "Define a situação do template. No Editor Avançado, só um template Publicado fica disponível para uso em campanhas e jornadas; Rascunho e Arquivado ficam visíveis na lista, mas fora de uso.",
+          notes:
+            "Exceção: um template criado pelo Editor Rápido já sai disponível para uso mesmo mostrando o selo \"rascunho\" no cartão — o Editor Rápido não tem este seletor de Status. Use \"Pausar\" no menu \"…\" do cartão para tirá-lo de uso de verdade.",
         },
         {
           anchor: "email.avancado.rastreio",
@@ -293,7 +294,9 @@ const screen: HelpScreen = {
         {
           anchor: "email.avancado.campos",
           label: "Passo 4 — Campos rápidos",
-          what: 'Dez campos de texto (Nome do template, Assunto, Pré-header, Nome do remetente, Título principal, Texto principal, Cupom, Benefício, Botão/CTA, Link do botão). O campo em uso no momento ganha um selo "ativo", usado pelas variáveis do passo 5. O campo "Link do botão" tem um menu para inserir uma URL rápida ou a URL da casa.',
+          what: 'Dez campos de texto (Nome do template, Assunto, Pré-header, Nome do remetente, Título principal, Texto principal, Cupom, Benefício, Botão/CTA, Link do botão). O campo em uso no momento ganha um selo "ativo", usado pelas variáveis do passo 5. O campo "Link do botão" tem um menu que lista "URL da casa" e, abaixo, cada URL rápida cadastrada pelo próprio nome (ex.: "Depósito") — clicar insere o link escolhido no campo.',
+          notes:
+            'Sem nenhuma URL da casa cadastrada, o menu some e aparece "Cadastre a URL da casa para inserir links na mensagem" no lugar (veja os estados da tela).',
         },
         {
           anchor: "email.avancado.variaveis",
@@ -348,6 +351,12 @@ const screen: HelpScreen = {
           anchor: "historico.cards",
           label: 'Cartões "Envios", "Enviados", "Falhas", "Pendentes" e "Conversões"',
           what: '"Envios" é o total de tentativas, com a variação percentual contra o período anterior. "Enviados" mostra quantos saíram (sem taxa de entrega — o provedor de e-mail não confirma entrega). "Falhas" conta os que não saíram. "Pendentes" conta os que ainda estão esperando. "Conversões" conta jogadores que depositaram depois do envio.',
+        },
+        {
+          anchor: "historico.grafico",
+          label: 'Gráfico "Envios por dia" / "Envios por hora"',
+          what: "Mini gráfico de barras com o total de envios por dia (ou por hora, quando o período é um único dia), com o total geral do período ao lado do título.",
+          notes: "Só aparece quando há mais de um ponto no período — com um único ponto, o gráfico fica escondido.",
         },
         {
           anchor: "historico.jornadas",
@@ -444,6 +453,12 @@ const screen: HelpScreen = {
       title: "Descreva o gatilho ou contexto",
       what: 'Erro ao clicar em "Gerar" no diálogo "Gerar com IA" com o campo "Gatilho / contexto" vazio.',
       action: "Preencha o gatilho/contexto e clique em Gerar de novo.",
+    },
+    {
+      id: "sem-url-casa",
+      title: "Cadastre a URL da casa para inserir links na mensagem",
+      what: 'Mostrado no lugar do menu de inserir link (campo "Link do botão", passo 4 do Editor Avançado) quando a casa ainda não tem uma URL cadastrada.',
+      action: 'Cadastre em Configuração da casa → Casa → "URL da casa".',
     },
   ],
 

@@ -341,7 +341,7 @@ export function HistoryShell({
 
       {/* Sparkline */}
       {(timeline.data?.points?.length ?? 0) > 1 && (
-        <Card>
+        <Card {...tourAnchor("historico.grafico")}>
           <CardContent className="p-3">
             <div className="mb-1 flex items-center justify-between px-1">
               <p className="text-label text-muted-foreground">
