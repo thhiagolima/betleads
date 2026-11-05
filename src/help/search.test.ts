@@ -4,6 +4,7 @@ import {
   canOpenRoute,
   normalizeSearchText,
   searchHelp,
+  selectionAction,
   STATES_SECTION_ID,
   type SearchEntry,
 } from "./search";
@@ -238,5 +239,38 @@ describe("buildSearchIndex", () => {
       sectionId: "dominio",
       tab: "email",
     });
+  });
+});
+
+describe("selectionAction", () => {
+  const item = (over: Partial<SearchEntry>): SearchEntry => ({ kind: "item", title: "t", text: "", ...over });
+
+  it("a screen's own title (no section) opens that screen's article instead of doing nothing", () => {
+    expect(selectionAction(item({ route: "/email" }), "/email")).toEqual({ type: "article" });
+    expect(selectionAction(item({}), "/email")).toEqual({ type: "article" });
+  });
+
+  it("a result of another screen (title or section) goes there", () => {
+    expect(selectionAction(item({ route: "/campanhas" }), "/email")).toEqual({ type: "elsewhere" });
+    expect(selectionAction(item({ route: "/campanhas", sectionId: "s" }), "/email")).toEqual({
+      type: "elsewhere",
+    });
+    expect(selectionAction(item({ route: "shell", sectionId: "cabecalho" }), null)).toEqual({
+      type: "elsewhere",
+    });
+  });
+
+  it("a section of the current screen scrolls to it; terms and guides keep their own action", () => {
+    expect(selectionAction(item({ route: "/email", sectionId: "s" }), "/email")).toEqual({
+      type: "section",
+      sectionId: "s",
+    });
+    expect(selectionAction({ kind: "term", title: "GGR", text: "", termId: "ggr" }, "/email")).toEqual({
+      type: "term",
+      termId: "ggr",
+    });
+    expect(
+      selectionAction({ kind: "guide", title: "G", text: "", guideId: "primeiro-email" }, "/email"),
+    ).toEqual({ type: "guide", guideId: "primeiro-email" });
   });
 });

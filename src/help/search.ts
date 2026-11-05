@@ -62,6 +62,31 @@ export function canOpenRoute(route: string): boolean {
   return route.startsWith("/") && !route.includes("$");
 }
 
+/** What picking a search result does in the panel, given the screen it is
+ * showing (`currentRoute`):
+ * - "elsewhere": an article entry of another screen — navigate there (or
+ *   open the virtual "shell" article) and focus it once loaded;
+ * - "section": scroll to that section of the current article;
+ * - "article": a screen's own title (no section) — open its article;
+ * - "term" / "guide": highlight the glossary term / expand the guide. */
+export type SelectionAction =
+  | { type: "elsewhere" }
+  | { type: "section"; sectionId: string }
+  | { type: "article" }
+  | { type: "term"; termId: string }
+  | { type: "guide"; guideId: string }
+  | { type: "none" };
+
+export function selectionAction(entry: SearchEntry, currentRoute: string | null): SelectionAction {
+  if (entry.kind === "term") return entry.termId ? { type: "term", termId: entry.termId } : { type: "none" };
+  if (entry.kind === "guide") {
+    return entry.guideId ? { type: "guide", guideId: entry.guideId } : { type: "none" };
+  }
+  if (entry.route && entry.route !== currentRoute) return { type: "elsewhere" };
+  if (entry.sectionId) return { type: "section", sectionId: entry.sectionId };
+  return { type: "article" };
+}
+
 /** Whether `role` sees something restricted to `roles` (omitted = everyone). */
 export function roleCanSee(roles: HelpRole[] | undefined, role: HelpRole): boolean {
   return !roles || roles.includes(role);
