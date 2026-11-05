@@ -110,7 +110,7 @@ export async function recordSubscription(
         existingData as ExistingSubscriptionRow,
         { status, userAgent: input.userAgent, nowIso, linkedPlayerId },
       )
-    : await insertSubscription(db, {
+    : await insertOrRelinkSubscription(db, {
         tenantId,
         appId: app.id,
         subscriptionId: input.subscriptionId,
@@ -160,9 +160,12 @@ async function updateExistingSubscription(
     user_agent: opts.userAgent,
     status: opts.status,
   };
-  // Only ever establishes a link that wasn't there before — never overwrites
-  // or clears one that already exists.
-  if (opts.linkedPlayerId && !existing.player_id) {
+  // Links or re-links whenever a real player was resolved and it differs
+  // from what's currently on the row (design §5.4: "liga (ou religa)").
+  // Garbage/unmatched ids resolve to `null` and never reach here, so a
+  // previously established link is only ever replaced by another real
+  // player, never cleared.
+  if (opts.linkedPlayerId && opts.linkedPlayerId !== existing.player_id) {
     patch.player_id = opts.linkedPlayerId;
     patch.linked_at = opts.nowIso;
   }
@@ -171,17 +174,32 @@ async function updateExistingSubscription(
   return existing.click_key;
 }
 
-async function insertSubscription(
+type InsertSubscriptionOpts = {
+  tenantId: string;
+  appId: string;
+  subscriptionId: string;
+  status: string;
+  userAgent: string | null;
+  nowIso: string;
+  linkedPlayerId: string | null;
+};
+
+/** PostgREST/Postgres unique-violation error code. */
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * Inserts a new `push_subscriptions` row. The caller already checked no row
+ * exists for `(app_id, subscription_id)`, but between that select and this
+ * insert a concurrent report for the same subscription can land first — the
+ * table's `UNIQUE (app_id, subscription_id)` constraint then rejects us with
+ * a unique violation (never create a duplicate row for one browser
+ * subscription). On that race, falls back to updating the row the other
+ * request just created, preserving its original `first_seen_at` (an update
+ * never touches that column).
+ */
+async function insertOrRelinkSubscription(
   db: SubscriptionsDb,
-  opts: {
-    tenantId: string;
-    appId: string;
-    subscriptionId: string;
-    status: string;
-    userAgent: string | null;
-    nowIso: string;
-    linkedPlayerId: string | null;
-  },
+  opts: InsertSubscriptionOpts,
 ): Promise<string> {
   const clickKey = randomBytes(16).toString("hex");
   const { data, error } = await db
@@ -200,6 +218,24 @@ async function insertSubscription(
     })
     .select("click_key")
     .single();
-  if (error) throw new Error(error.message);
-  return (data as { click_key: string }).click_key;
+
+  if (!error) return (data as { click_key: string }).click_key;
+  if (error.code !== UNIQUE_VIOLATION) throw new Error(error.message);
+
+  const { data: raced, error: racedErr } = await db
+    .from("push_subscriptions")
+    .select("id,click_key,player_id")
+    .eq("app_id", opts.appId)
+    .eq("subscription_id", opts.subscriptionId)
+    .maybeSingle();
+  if (racedErr) throw new Error(racedErr.message);
+  if (!raced) {
+    throw new Error("push_subscriptions: conflito de chave única sem linha correspondente");
+  }
+  return updateExistingSubscription(db, raced as ExistingSubscriptionRow, {
+    status: opts.status,
+    userAgent: opts.userAgent,
+    nowIso: opts.nowIso,
+    linkedPlayerId: opts.linkedPlayerId,
+  });
 }

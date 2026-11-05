@@ -10,7 +10,10 @@ const TENANT = "tenant-1";
 const TOKEN = "tok-1";
 
 function seed() {
-  const db = createFakeDb();
+  // Mirrors the real `UNIQUE (app_id, subscription_id)` constraint on
+  // push_subscriptions (20261202100000_webpush_core.sql) so the conflict
+  // path can be exercised deterministically below.
+  const db = createFakeDb({ unique: { push_subscriptions: [["app_id", "subscription_id"]] } });
   db.rows("tenant_webpush_settings").push({
     tenant_id: TENANT,
     public_token: TOKEN,
@@ -33,11 +36,10 @@ function seed() {
       player_linked_at: null,
     },
   );
-  db.rows("players").push({
-    id: "player-1",
-    tenant_id: TENANT,
-    player_external_id: "ext-1",
-  });
+  db.rows("players").push(
+    { id: "player-1", tenant_id: TENANT, player_external_id: "ext-1" },
+    { id: "player-2", tenant_id: TENANT, player_external_id: "ext-2" },
+  );
   return db;
 }
 
@@ -91,7 +93,7 @@ describe("recordSubscription", () => {
     const db = seed();
     const result = await recordSubscription(db.client as any, baseInput({ playerId }));
     expect(result.status).toBe(200);
-    expect(db.rows("players")).toHaveLength(1); // unchanged — no insert
+    expect(db.rows("players")).toHaveLength(2); // unchanged — no insert
     const subs = db.rows("push_subscriptions");
     expect(subs).toHaveLength(1);
     expect(subs[0].player_id).toBeNull();
@@ -109,6 +111,81 @@ describe("recordSubscription", () => {
 
     const app = db.rows("tenant_webpush_apps").find((row) => row.id === "app-ativo");
     expect(app?.player_linked_at).toBeTruthy();
+  });
+
+  it("keeps a previous link when a later call has a garbage/unknown playerId", async () => {
+    const db = seed();
+    await recordSubscription(db.client as any, baseInput({ playerId: "ext-1" }));
+    const result = await recordSubscription(db.client as any, baseInput({ playerId: "ext-does-not-exist" }));
+    expect(result.status).toBe(200);
+
+    const subs = db.rows("push_subscriptions");
+    expect(subs).toHaveLength(1);
+    expect(subs[0].player_id).toBe("player-1"); // unchanged — not cleared
+  });
+
+  it("re-links to a different existing player on a later call (design §5.4: liga ou religa)", async () => {
+    const db = seed();
+    await recordSubscription(db.client as any, baseInput({ playerId: "ext-1" }));
+    const result = await recordSubscription(db.client as any, baseInput({ playerId: "ext-2" }));
+    expect(result.status).toBe(200);
+
+    const subs = db.rows("push_subscriptions");
+    expect(subs).toHaveLength(1);
+    expect(subs[0].player_id).toBe("player-2"); // re-linked
+    expect(subs[0].linked_at).toBeTruthy();
+  });
+
+  it("falls back to updating the row when a concurrent report wins the insert race (23505)", async () => {
+    const db = seed();
+    let selectCalls = 0;
+    const realFrom = db.client.from;
+    const wrappedDb = {
+      ...db.client,
+      from: (table: string) => {
+        const builder = realFrom(table);
+        if (table !== "push_subscriptions") return builder;
+        const originalMaybeSingle = builder.maybeSingle.bind(builder);
+        builder.maybeSingle = async () => {
+          selectCalls += 1;
+          if (selectCalls === 1) {
+            // Simulate another request's report landing its insert for the
+            // same (app_id, subscription_id) right after our select saw
+            // nothing — the row below is what that concurrent insert would
+            // have created.
+            db.rows("push_subscriptions").push({
+              id: "race-row",
+              tenant_id: TENANT,
+              app_id: "app-ativo",
+              subscription_id: "sub-race",
+              click_key: "race-click-key",
+              status: "ativa",
+              user_agent: "other-ua",
+              player_id: null,
+              first_seen_at: "2020-01-01T00:00:00.000Z",
+              last_seen_at: "2020-01-01T00:00:00.000Z",
+              linked_at: null,
+            });
+            return { data: null, error: null };
+          }
+          return originalMaybeSingle();
+        };
+        return builder;
+      },
+    };
+
+    const result = await recordSubscription(
+      wrappedDb as any,
+      baseInput({ subscriptionId: "sub-race" }),
+    );
+
+    expect(result.status).toBe(200);
+    if (result.status === 200) expect(result.clickKey).toBe("race-click-key");
+
+    const subs = db.rows("push_subscriptions").filter((r) => r.subscription_id === "sub-race");
+    expect(subs).toHaveLength(1); // no duplicate row from the losing insert
+    expect(subs[0].first_seen_at).toBe("2020-01-01T00:00:00.000Z"); // preserved
+    expect(subs[0].last_seen_at).not.toBe("2020-01-01T00:00:00.000Z"); // updated
   });
 
   it("flips status to 'inativa' on a second call with optedIn:false, keeping the same clickKey", async () => {

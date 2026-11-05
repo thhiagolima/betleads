@@ -9,41 +9,15 @@
 //   when the subscription was accepted (status 200) — a rejected request
 //   gets no CORS header pointing back at the caller's own origin.
 // - A bounded in-memory token-bucket per IP (`x-forwarded-for`'s first
-//   value) caps abuse at 60 req/min; stale buckets are swept so the map
-//   cannot grow without limit under a sustained flood of distinct IPs.
+//   value) caps abuse at 60 req/min — see `IpRateLimiter` for how its
+//   memory stays bounded under a flood of distinct IPs.
 import { createFileRoute } from "@tanstack/react-router";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { IpRateLimiter } from "@/lib/webpush/ip-rate-limit";
 import { recordSubscription } from "@/lib/webpush/subscriptions.server";
 
-const RATE_LIMIT_PER_MINUTE = 60;
-const WINDOW_MS = 60_000;
-// Hard cap on tracked IPs: once exceeded, a sweep drops every bucket whose
-// window has already lapsed before admitting the new one. Bounds memory
-// even if a flood of distinct IPs never comes back to let their own bucket
-// expire naturally.
-const MAX_TRACKED_IPS = 5_000;
-
-type Bucket = { count: number; windowStart: number };
-const buckets = new Map<string, Bucket>();
-
-function sweepStale(now: number): void {
-  for (const [ip, bucket] of buckets) {
-    if (now - bucket.windowStart >= WINDOW_MS) buckets.delete(ip);
-  }
-}
-
-/** Returns true when `ip` has exceeded the per-minute budget. */
-function isRateLimited(ip: string, now: number): boolean {
-  const bucket = buckets.get(ip);
-  if (!bucket || now - bucket.windowStart >= WINDOW_MS) {
-    if (buckets.size >= MAX_TRACKED_IPS) sweepStale(now);
-    buckets.set(ip, { count: 1, windowStart: now });
-    return false;
-  }
-  bucket.count += 1;
-  return bucket.count > RATE_LIMIT_PER_MINUTE;
-}
+const limiter = new IpRateLimiter({ limit: 60, windowMs: 60_000, maxTracked: 5_000 });
 
 function clientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -68,7 +42,7 @@ type SubscribeBody = { subscriptionId?: unknown; optedIn?: unknown; playerId?: u
 
 async function handleSubscribe(request: Request): Promise<Response> {
   const ip = clientIp(request);
-  if (isRateLimited(ip, Date.now())) {
+  if (limiter.hit(ip, Date.now())) {
     return Response.json({ error: "too_many_requests" }, { status: 429, headers: corsHeaders(null) });
   }
 
