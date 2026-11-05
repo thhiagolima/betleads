@@ -11,6 +11,7 @@ import { PageTabs } from "@/components/ui-premium/page-tabs";
 import type { DispatchChannel } from "@/lib/dispatch-pause.functions";
 
 import { CHANNEL_TABS, resolveChannelHash, type ChannelId, type ChannelTab } from "./channel-tabs";
+import { tourAnchor } from "@/help/anchor";
 
 const CHANNEL_ROUTE = { sms: "/sms", email: "/email", voz: "/ligacoes" } as const;
 const PAUSE_CHANNEL: Record<ChannelId, DispatchChannel> = {
@@ -75,7 +76,7 @@ export function ChannelPage<C extends ChannelId>({
         subtitle={subtitle}
         actions={
           <>
-            <Button asChild className="h-9">
+            <Button asChild className="h-9" {...tourAnchor("canal.header.nova-campanha")}>
               <Link to="/campanhas" search={{ newChannel: NEW_CAMPAIGN_CHANNEL[channel] } as never}>
                 <Plus className="size-4" aria-hidden="true" />
                 Nova campanha
@@ -90,11 +91,13 @@ export function ChannelPage<C extends ChannelId>({
           SMS already shows it in its overview, next to the balance KPI. */}
       {channel === "sms" ? null : <ActiveTenantWalletNotice />}
       <SendWindowCard compact />
-      <PageTabs
-        value={tab}
-        onValueChange={setTab}
-        items={CHANNEL_TABS[channel] as ReadonlyArray<{ value: ChannelTab<C>; label: string }>}
-      />
+      <div {...tourAnchor("canal.abas")}>
+        <PageTabs
+          value={tab}
+          onValueChange={setTab}
+          items={CHANNEL_TABS[channel] as ReadonlyArray<{ value: ChannelTab<C>; label: string }>}
+        />
+      </div>
       <div role="tabpanel" aria-labelledby={`tab-${tab}`} className="min-w-0">
         {children(tab, setTab)}
       </div>

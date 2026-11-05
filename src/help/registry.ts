@@ -13,6 +13,7 @@ import type { HelpScreen } from "./types";
  */
 export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpScreen }>> = {
   "/configuracoes/casa": () => import("./screens/configuracoes-casa"),
+  "/email": () => import("./screens/email"),
   onboarding: () => import("./screens/onboarding"),
 };
 

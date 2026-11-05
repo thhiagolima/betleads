@@ -129,4 +129,30 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "Cada bloco de até 160 caracteres de uma mensagem. Uma mensagem maior é cobrada em mais de um segmento.",
   },
+
+  // --- Email (Task 11) ---
+  {
+    id: "cta",
+    term: "CTA",
+    short:
+      "Sigla de \"call to action\" (chamada para ação): o botão principal do e-mail, como \"Acessar agora\", que leva o jogador para o link combinado.",
+  },
+  {
+    id: "preheader",
+    term: "Preheader",
+    short:
+      "O trecho de texto que aparece ao lado ou abaixo do assunto na caixa de entrada, antes de abrir o e-mail. Serve para completar o assunto e aumentar a chance de abertura.",
+  },
+  {
+    id: "hero",
+    term: "Hero",
+    short:
+      "A imagem grande de destaque logo abaixo da logo, no topo do corpo do e-mail — também chamada de \"banner principal\".",
+  },
+  {
+    id: "alt-text",
+    term: "Alt text",
+    short:
+      "O texto alternativo de uma imagem: o que aparece no lugar dela quando a imagem não carrega, e o que leitores de tela leem em voz alta.",
+  },
 ];

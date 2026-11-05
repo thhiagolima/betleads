@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { Line, LineChart, ResponsiveContainer } from "recharts";
 
 import type { Trend } from "@/lib/home-dashboard";
@@ -21,9 +21,13 @@ export function TrendText({ trend, className }: { trend: Trend | null; className
   );
 }
 
-export function HomeCard({ className, children }: { className?: string; children: ReactNode }) {
+export function HomeCard({
+  className,
+  children,
+  ...rest
+}: { className?: string; children: ReactNode } & HTMLAttributes<HTMLElement>) {
   return (
-    <section className={cn("rounded-2xl border border-border bg-card/80", className)}>
+    <section className={cn("rounded-2xl border border-border bg-card/80", className)} {...rest}>
       {children}
     </section>
   );

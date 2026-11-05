@@ -140,6 +140,7 @@ export const GUIDES: Guide[] = [
         title: "Publique um template de e-mail",
         route: "/email",
         tab: "templates",
+        anchor: "email.templates.novo",
         substeps: [],
         signal: "publishedEmailTemplate",
       },
