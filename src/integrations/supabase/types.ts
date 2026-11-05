@@ -7567,6 +7567,76 @@ export type Database = {
           },
         ];
       };
+      webpush_dispatch_batches: {
+        Row: {
+          accepted: number | null;
+          app_id: string;
+          campaign_id: string;
+          created_at: string;
+          id: string;
+          last_error: string | null;
+          onesignal_notification_id: string | null;
+          refused_row_ids: string[] | null;
+          status: string;
+          subscription_row_ids: string[];
+          tenant_id: string;
+          units: number;
+          updated_at: string;
+        };
+        Insert: {
+          accepted?: number | null;
+          app_id: string;
+          campaign_id: string;
+          created_at?: string;
+          id?: string;
+          last_error?: string | null;
+          onesignal_notification_id?: string | null;
+          refused_row_ids?: string[] | null;
+          status?: string;
+          subscription_row_ids: string[];
+          tenant_id: string;
+          units: number;
+          updated_at?: string;
+        };
+        Update: {
+          accepted?: number | null;
+          app_id?: string;
+          campaign_id?: string;
+          created_at?: string;
+          id?: string;
+          last_error?: string | null;
+          onesignal_notification_id?: string | null;
+          refused_row_ids?: string[] | null;
+          status?: string;
+          subscription_row_ids?: string[];
+          tenant_id?: string;
+          units?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "webpush_dispatch_batches_app_id_fkey";
+            columns: ["app_id"];
+            isOneToOne: false;
+            referencedRelation: "tenant_webpush_apps";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "webpush_dispatch_batches_campaign_id_fkey";
+            columns: ["campaign_id"];
+            isOneToOne: false;
+            referencedRelation: "webpush_campaigns";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "webpush_dispatch_batches_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       webpush_send_logs: {
         Row: {
           app_id: string | null;

@@ -1,21 +1,51 @@
 // Web push (OneSignal) — Task 11: one tick of a claimed webpush campaign.
 //
-// Free of module-level I/O: every side effect goes through
-// `WebpushDispatchDeps` (wired to Supabase/OneSignal in
-// `runScheduledWebpushCampaigns` below), mirroring
-// `sms-campaign-dispatch.server.ts`'s shape (claim → paged batches →
-// lock-guarded checkpoint).
+// Fix round 1 (controller ruling —
+// .superpowers/sdd/2026-11-05-web-push-onesignal/task-11-ruling.md,
+// supersedes the original brief's steps 3-7): every OneSignal call for one
+// (campaign, app) slice of a dispatch page is first persisted as a
+// `webpush_dispatch_batches` row (migration
+// 20261202100300_webpush_dispatch_batches.sql) BEFORE any money moves, and
+// every later step resumes that exact row by id. This matters because the
+// real wallet RPCs (20261022100100_billing_wallet.sql) have two properties
+// the original design (deriving its wallet key from "the current page")
+// got wrong:
+//   - `wallet_mutation` dedupes FOREVER on (tenant_id, idempotency_key) —
+//     even a refunded reservation's key can never be reused for a new
+//     charge, so "refund on temporary failure, re-reserve with the same key
+//     on retry" charges nothing on the retry (the retry's reserve just
+//     returns the old, refunded reservation as `idempotent: true`).
+//   - `wallet_refund` refunds only the NEWEST `usage_reservation` row for a
+//     reference_id, so reusing a reference_id for two different charges
+//     makes the older one unreachable.
+// Both are pinned against the real SQL in
+// src/lib/billing/wallet-reserve-refund-semantics.db.test.ts.
 //
-// Idempotency (Review Focus 3): every charge/send of a batch is keyed off
-// `webpush:<campaignId>:<first subscriptionRowId of the batch>`. That key is
-// fully determined by the campaign's current cursor, so a crash between the
-// OneSignal call and the checkpoint simply re-derives the same key on retry:
-// `reserve` comes back `idempotent: true` (no double charge), `send` is
-// called with the same OneSignal idempotency key, and `writeLogs` only ever
-// commits once per (campaign, subscription) because the batch itself is
-// re-fetched unchanged (the real `webpush_campaign_batch` RPC excludes rows
-// that already have a `webpush_send_logs` entry — nothing was written before
-// the crash, so nothing is skipped; nothing after it is re-sent twice).
+// State machine per batch (every step idempotent and resumable by re-running
+// `advanceBatch` on the same persisted row):
+//   pendente  -> reserve(batch.id) [stays pendente + reserved across a
+//                temporary send failure — NEVER refunded there] -> send
+//                -> enviado (ok) | falhou (permanent failure: refund once,
+//                all rows refused)
+//   enviado   -> settle: fully accepted -> liquidado; partially accepted ->
+//                refund(batch.id) once, then (if any accepted) a FRESH
+//                reserve(`${batch.id}:ajuste`) for just the accepted units
+//                -> liquidado. The adjustment reservation failing pauses the
+//                campaign with the batch left `enviado` (next tick retries
+//                settlement before sending anything new).
+//   liquidado / falhou -> writeLogs + markDispatches + deactivate (all
+//                idempotent) -> concluido.
+//
+// Cursor: a freshly fetched page creates batches for ALL of its app-groups
+// or NONE of them (a burst/budget denial on any group aborts the whole page,
+// no batch is created, nothing moves) — so by induction the set of
+// `concluido` batches for a campaign, whenever no batch is open
+// (pendente/enviado/liquidado/falhou), is always an exact, gap-free prefix
+// of `push_subscriptions` rows. That is the only moment it's safe to advance
+// `sent_cursor` (to the max row id among concluido batches) and refresh
+// `sent_count`/`failed_count` (recomputed from a SUM over concluido batches,
+// never incremented — incrementing would risk double-counting if a crash
+// landed between "add to counter" and "mark batch concluido").
 import { publicAppBaseUrl } from "@/lib/click-tracking.server";
 import type { RefundUsageArgs, ReserveUsageArgs, ReserveUsageResult } from "@/lib/billing/wallet.server";
 import { refundUsage, reserveUsage } from "@/lib/billing/wallet.server";
@@ -49,7 +79,7 @@ export type WebpushCampaignRow = {
   created_by: string | null;
 };
 
-/** One row of `webpush_campaign_batch` (Task 1). */
+/** One row of `webpush_campaign_batch` (Task 1) — a dispatch page before it's split into per-app batches. */
 export type WebpushBatchRow = {
   subscriptionRowId: string;
   subscriptionId: string;
@@ -57,6 +87,23 @@ export type WebpushBatchRow = {
   appId: string;
   onesignalAppId: string;
   clickKey: string;
+};
+
+export type WebpushDispatchBatchStatus = "pendente" | "enviado" | "liquidado" | "concluido" | "falhou";
+
+/** One `webpush_dispatch_batches` row (Task 11 fix round 1). */
+export type WebpushDispatchBatch = {
+  id: string;
+  tenantId: string;
+  campaignId: string;
+  appId: string;
+  subscriptionRowIds: string[];
+  units: number;
+  status: WebpushDispatchBatchStatus;
+  accepted: number | null;
+  refusedRowIds: string[] | null;
+  onesignalNotificationId: string | null;
+  lastError: string | null;
 };
 
 export type WebpushSendInput = {
@@ -81,8 +128,23 @@ export type WebpushLogRow = {
   billingReference: string | null;
 };
 
+/** `subscription_id`/`player_id` of a stored batch's `subscription_row_ids`, re-read at resume time. */
+export type WebpushRowDetail = {
+  subscriptionRowId: string;
+  subscriptionId: string;
+  playerId: string | null;
+};
+
+export type WebpushConcludedTotals = {
+  /** Max subscription_row_id among `concluido` batches, or null when there are none yet. */
+  maxRowId: string | null;
+  sent: number;
+  failed: number;
+};
+
 export type WebpushDispatchDeps = {
   now(): Date;
+  /** Pages `webpush_campaign_batch`: eligible subscriptions after `after`, up to `limit`. */
   nextBatch(
     campaign: WebpushCampaignRow,
     after: string | null,
@@ -90,6 +152,21 @@ export type WebpushDispatchDeps = {
   ): Promise<WebpushBatchRow[]>;
   appStats(appId: string): Promise<{ sentLast15m: number; active: number }>;
   credentials(appRowId: string): Promise<{ appId: string; apiKey: string }>;
+  acquireBudget(tenantId: string): Promise<boolean>;
+  /** Persists a new `pendente` batch row for one app-group of a page. */
+  createBatch(input: {
+    tenantId: string;
+    campaignId: string;
+    appId: string;
+    subscriptionRowIds: string[];
+    units: number;
+  }): Promise<WebpushDispatchBatch>;
+  /** Non-terminal batches of this campaign, oldest first: pendente/enviado/liquidado/falhou. */
+  listOpenBatches(campaignId: string): Promise<WebpushDispatchBatch[]>;
+  updateBatch(batchId: string, patch: Record<string, unknown>): Promise<WebpushDispatchBatch>;
+  /** Only ever called on a `pendente` batch whose reservation failed (nothing was charged). */
+  deleteBatch(batchId: string): Promise<void>;
+  rowDetails(subscriptionRowIds: string[]): Promise<WebpushRowDetail[]>;
   prepareDispatches(args: {
     tenantId: string;
     campaignId: string;
@@ -109,7 +186,8 @@ export type WebpushDispatchDeps = {
   deactivate(subscriptionRowIds: string[]): Promise<void>;
   writeLogs(rows: WebpushLogRow[]): Promise<void>;
   updateCampaign(campaign: WebpushCampaignRow, patch: Record<string, unknown>): Promise<boolean>;
-  acquireBudget(tenantId: string): Promise<boolean>;
+  /** SUM over `concluido` batches: authoritative sent/failed + the cursor ceiling. Recomputed, never incremented. */
+  concludedTotals(campaignId: string): Promise<WebpushConcludedTotals>;
 };
 
 export type WebpushCampaignTickResult = {
@@ -118,7 +196,7 @@ export type WebpushCampaignTickResult = {
   failed: number;
 };
 
-/** Burst guard (Global Constraints §burst): per app, sent in the last 15 min + this batch <= 5x active subscriptions. */
+/** Burst guard (Global Constraints): per app, sent in the last 15 min + this batch <= 5x active subscriptions. */
 export function canSendWithinBurstLimit(sentLast15m: number, batch: number, active: number): boolean {
   return sentLast15m + batch <= 5 * active;
 }
@@ -136,92 +214,66 @@ function groupByApp(rows: WebpushBatchRow[]): Array<{ appId: string; rows: Webpu
   return groups;
 }
 
-/** last_error of a campaign paused for lack of house balance (same text as SMS's SMS_CAMPAIGN_NO_BALANCE_MESSAGE). */
+/** last_error of a campaign paused because the initial reservation of a batch found no balance. */
 export const WEBPUSH_CAMPAIGN_NO_BALANCE_MESSAGE = "Saldo insuficiente";
+/** last_error of a campaign paused because settling an already-sent batch (the `:ajuste` reserve) found no balance. */
+export const WEBPUSH_SETTLEMENT_NO_BALANCE_MESSAGE = "Saldo insuficiente para liquidar envio";
+
+type AdvanceOutcome =
+  | { kind: "concluded"; accepted: number; refused: number }
+  | { kind: "stop-temporary" }
+  | { kind: "stop-insufficient-initial" }
+  | { kind: "stop-insufficient-settlement" };
 
 /**
- * Processes one claimed campaign for one tick: pages `nextBatch` up to
- * `opts.batchSize` (1000 — OneSignal's own per-call cap) at a time, grouped
- * by app (one OneSignal call per app per batch), charging the wallet before
- * each send and settling it (refund, or refund+adjusted reserve for a
- * partially-accepted batch) right after. The cursor and counters are
- * checkpointed after every full batch; a burst/budget denial, an
- * insufficient-balance refusal, or a temporary provider failure stops the
- * tick (releasing the lock so the next run picks the campaign back up)
- * without losing whatever earlier groups in that same batch already sent.
+ * Drives one `webpush_dispatch_batches` row through as much of its state
+ * machine as it can in one go, resuming from whatever status it's
+ * currently in. Every step it performs is safe to re-run (idempotent wallet
+ * calls, an idempotent OneSignal call, idempotent log/dispatch upserts), so
+ * calling this again on the same batch after a crash picks up exactly where
+ * it left off.
  */
-export async function processWebpushCampaignTick(
-  campaignRow: WebpushCampaignRow,
+async function advanceBatch(
+  batchRow: WebpushDispatchBatch,
+  c: WebpushCampaignRow,
   deps: WebpushDispatchDeps,
-  opts: { deadline: number; batchSize?: number },
-): Promise<WebpushCampaignTickResult> {
-  const batchSize = opts.batchSize ?? 1000;
-  let c = campaignRow;
-  let cursor = c.sent_cursor ?? null;
-  let sentCount = c.sent_count ?? 0;
-  let failedCount = c.failed_count ?? 0;
+): Promise<AdvanceOutcome> {
+  let batch = batchRow;
 
   for (;;) {
-    if (deps.now().getTime() >= opts.deadline) {
-      return { status: "enviando", sent: sentCount, failed: failedCount };
-    }
-
-    const batch = await deps.nextBatch(c, cursor, batchSize);
-    if (batch.length === 0) {
-      const finalStatus = sentCount === 0 && failedCount > 0 ? "falhou" : "enviado";
-      await deps.updateCampaign(c, { status: finalStatus, locked_at: null, locked_by: null });
-      return { status: finalStatus, sent: sentCount, failed: failedCount };
-    }
-
-    const groups = groupByApp(batch);
-    let batchSent = 0;
-    let batchFailed = 0;
-    let lastProcessedId: string | null = null;
-    let stopReason: "burst" | "budget" | "balance" | "temporary" | null = null;
-    let stopError: string | undefined;
-
-    for (const group of groups) {
-      const stats = await deps.appStats(group.appId);
-      if (!canSendWithinBurstLimit(stats.sentLast15m, group.rows.length, stats.active)) {
-        stopReason = "burst";
-        break;
-      }
-      if (!(await deps.acquireBudget(c.tenant_id))) {
-        stopReason = "budget";
-        break;
-      }
-
-      await deps.prepareDispatches({
-        tenantId: c.tenant_id,
-        campaignId: c.id,
-        url: c.url,
-        recipients: group.rows.map((r) => ({
-          subscriptionRowId: r.subscriptionRowId,
-          playerId: r.playerId,
-        })),
-      });
-
-      const referenceId = `webpush:${c.id}:${group.rows[0].subscriptionRowId}`;
+    if (batch.status === "pendente") {
+      const referenceId = batch.id;
       const reserveResult = await deps.reserve({
         tenantId: c.tenant_id,
         item: "webpush",
-        units: group.rows.length,
+        units: batch.units,
         referenceType: "webpush_campaign",
         referenceId,
         idempotencyKey: referenceId,
       });
       if (!reserveResult.ok) {
-        stopReason = "balance";
-        break;
+        // Nothing was ever charged for this batch: safe to delete it outright.
+        await deps.deleteBatch(batch.id);
+        return { kind: "stop-insufficient-initial" };
       }
 
-      const { appId: onesignalAppId, apiKey } = await deps.credentials(group.appId);
+      const rows = await deps.rowDetails(batch.subscriptionRowIds);
+      await deps.prepareDispatches({
+        tenantId: c.tenant_id,
+        campaignId: c.id,
+        url: c.url,
+        recipients: rows.map((r) => ({ subscriptionRowId: r.subscriptionRowId, playerId: r.playerId })),
+      });
+
+      const { appId: onesignalAppId, apiKey } = await deps.credentials(batch.appId);
       const idempotencyKey = await deterministicUuid(referenceId);
       const sendResult = await deps.send({
         tenantId: c.tenant_id,
         appId: onesignalAppId,
         apiKey,
-        subscriptionIds: group.rows.map((r) => r.subscriptionId),
+        // Same order as `rows` (derived from the batch's own stored ids), so
+        // the index-aligned mapping back to subscriptionRowId below holds.
+        subscriptionIds: rows.map((r) => r.subscriptionId),
         title: c.title,
         body: c.body,
         url: campaignPushUrl(publicAppBaseUrl(), c.id),
@@ -230,142 +282,236 @@ export async function processWebpushCampaignTick(
       });
 
       if (!sendResult.ok) {
+        if (sendResult.temporary) {
+          // Leave the batch `pendente` WITH its reservation — never refund a
+          // temporary failure. A retry re-reserves the same key (idempotent,
+          // no double charge) and resends with the same OneSignal key.
+          return { kind: "stop-temporary" };
+        }
+        // Permanent failure: refund once, every row of this batch refused.
         await deps.refund({
           tenantId: c.tenant_id,
           referenceId,
           idempotencyKey: `${referenceId}:refund`,
           reason: sendResult.error,
         });
-        stopError = sendResult.error;
-        if (sendResult.temporary) {
-          stopReason = "temporary";
-          break;
-        }
-        // Permanent failure: nothing was charged (refunded above); every
-        // recipient of this group is logged `recusado` and the tick moves on.
-        batchFailed += group.rows.length;
-        await deps.writeLogs(
-          group.rows.map((r) => ({
-            campaignId: c.id,
-            subscriptionRowId: r.subscriptionRowId,
-            playerId: r.playerId,
-            appId: r.appId,
-            onesignalNotificationId: null,
-            status: "recusado" as const,
-            billingReference: null,
-          })),
-        );
-        await deps.markDispatches({
-          tenantId: c.tenant_id,
-          campaignId: c.id,
-          sentIds: [],
-          failedIds: group.rows.map((r) => r.subscriptionRowId),
-          sentAt: deps.now(),
+        batch = await deps.updateBatch(batch.id, {
+          status: "falhou",
+          accepted: 0,
+          refused_row_ids: batch.subscriptionRowIds,
+          last_error: sendResult.error,
         });
-        lastProcessedId = group.rows[group.rows.length - 1].subscriptionRowId;
         continue;
       }
 
       const invalidIds = new Set(sendResult.invalidSubscriptionIds);
-      const accepted = group.rows.filter((r) => !invalidIds.has(r.subscriptionId));
-      const refused = group.rows.filter((r) => invalidIds.has(r.subscriptionId));
+      const refusedRowIds = rows
+        .filter((r) => invalidIds.has(r.subscriptionId))
+        .map((r) => r.subscriptionRowId);
+      const accepted = batch.subscriptionRowIds.length - refusedRowIds.length;
+      batch = await deps.updateBatch(batch.id, {
+        status: "enviado",
+        accepted,
+        refused_row_ids: refusedRowIds,
+        onesignal_notification_id: sendResult.notificationId,
+      });
+      continue;
+    }
 
-      if (refused.length > 0) {
-        await deps.refund({
-          tenantId: c.tenant_id,
-          referenceId,
-          idempotencyKey: `${referenceId}:refund`,
-          reason: "OneSignal recusou parte do lote (invalid_player_ids)",
-        });
-        if (accepted.length > 0) {
-          await deps.reserve({
-            tenantId: c.tenant_id,
-            item: "webpush",
-            units: accepted.length,
-            referenceType: "webpush_campaign",
-            referenceId,
-            idempotencyKey: `${referenceId}:ajuste`,
-          });
-        }
-        await deps.deactivate(refused.map((r) => r.subscriptionRowId));
+    if (batch.status === "enviado") {
+      const referenceId = batch.id;
+      if (batch.accepted === batch.units) {
+        batch = await deps.updateBatch(batch.id, { status: "liquidado" });
+        continue;
       }
+      // Partially (or not at all) accepted: refund the original reservation
+      // once (idempotent on retry), then — if anything was accepted — a
+      // FRESH reservation for just the accepted units, under its OWN
+      // reference (`:ajuste`) so it never collides with the original.
+      await deps.refund({
+        tenantId: c.tenant_id,
+        referenceId,
+        idempotencyKey: `${referenceId}:refund`,
+        reason: "OneSignal recusou parte do lote (invalid_player_ids)",
+      });
+      if ((batch.accepted ?? 0) > 0) {
+        const adjustReferenceId = `${referenceId}:ajuste`;
+        const adjustResult = await deps.reserve({
+          tenantId: c.tenant_id,
+          item: "webpush",
+          units: batch.accepted!,
+          referenceType: "webpush_campaign",
+          referenceId: adjustReferenceId,
+          idempotencyKey: adjustReferenceId,
+        });
+        if (!adjustResult.ok) {
+          // Batch stays `enviado` (already refunded; not yet re-reserved):
+          // the next tick retries settlement — refund is idempotent, so it
+          // goes straight to this same adjustment reserve attempt.
+          return { kind: "stop-insufficient-settlement" };
+        }
+      }
+      batch = await deps.updateBatch(batch.id, { status: "liquidado" });
+      continue;
+    }
 
-      batchSent += accepted.length;
-      batchFailed += refused.length;
+    if (batch.status === "liquidado" || batch.status === "falhou") {
+      const refusedSet = new Set(batch.refusedRowIds ?? []);
+      const rows = await deps.rowDetails(batch.subscriptionRowIds);
+      const playerOf = new Map(rows.map((r) => [r.subscriptionRowId, r.playerId]));
 
-      await deps.writeLogs([
-        ...accepted.map((r) => ({
-          campaignId: c.id,
-          subscriptionRowId: r.subscriptionRowId,
-          playerId: r.playerId,
-          appId: r.appId,
-          onesignalNotificationId: sendResult.notificationId,
-          status: "enviado" as const,
-          billingReference: referenceId,
-        })),
-        ...refused.map((r) => ({
-          campaignId: c.id,
-          subscriptionRowId: r.subscriptionRowId,
-          playerId: r.playerId,
-          appId: r.appId,
-          onesignalNotificationId: sendResult.notificationId,
-          status: "recusado" as const,
-          billingReference: null,
-        })),
-      ]);
+      const logs: WebpushLogRow[] = batch.subscriptionRowIds.map((rowId) => ({
+        campaignId: c.id,
+        subscriptionRowId: rowId,
+        playerId: playerOf.get(rowId) ?? null,
+        appId: batch.appId,
+        onesignalNotificationId: batch.onesignalNotificationId,
+        status: refusedSet.has(rowId) ? "recusado" : "enviado",
+        billingReference: refusedSet.has(rowId) ? null : batch.id,
+      }));
+      await deps.writeLogs(logs);
 
       await deps.markDispatches({
         tenantId: c.tenant_id,
         campaignId: c.id,
-        sentIds: accepted.map((r) => r.subscriptionRowId),
-        failedIds: refused.map((r) => r.subscriptionRowId),
+        sentIds: batch.subscriptionRowIds.filter((id) => !refusedSet.has(id)),
+        failedIds: batch.subscriptionRowIds.filter((id) => refusedSet.has(id)),
         sentAt: deps.now(),
       });
 
-      lastProcessedId = group.rows[group.rows.length - 1].subscriptionRowId;
+      if (refusedSet.size > 0) await deps.deactivate([...refusedSet]);
+
+      await deps.updateBatch(batch.id, { status: "concluido" });
+      return { kind: "concluded", accepted: batch.accepted ?? 0, refused: refusedSet.size };
     }
 
-    if (lastProcessedId) cursor = lastProcessedId;
-    sentCount += batchSent;
-    failedCount += batchFailed;
+    // concluido: a resumed batch that had already finished (defensive; the
+    // outer tick never re-fetches a batch it already saw as concluido).
+    return { kind: "concluded", accepted: batch.accepted ?? 0, refused: (batch.refusedRowIds ?? []).length };
+  }
+}
 
-    if (stopReason === "balance") {
+async function returnWithTotals(
+  campaignId: string,
+  deps: WebpushDispatchDeps,
+  status: string,
+): Promise<WebpushCampaignTickResult> {
+  const totals = await deps.concludedTotals(campaignId);
+  return { status, sent: totals.sent, failed: totals.failed };
+}
+
+/**
+ * Processes one claimed campaign for one tick. Resumes any open batch first
+ * (`listOpenBatches`); only once none are open does it fetch a new page and,
+ * if every one of its app-groups clears the burst guard and the rate budget,
+ * persist a `pendente` batch for each group (all of the page's groups, or
+ * none — a denial on any group aborts the page outright, nothing created,
+ * nothing moved). Each batch is then driven to a terminal state by
+ * `advanceBatch` on a later loop iteration, which may itself stop the tick
+ * (temporary send failure, insufficient balance) — in which case the lock is
+ * released and the campaign stays `enviando` (or becomes `pausada`), to be
+ * resumed by the next scheduled tick.
+ */
+export async function processWebpushCampaignTick(
+  campaignRow: WebpushCampaignRow,
+  deps: WebpushDispatchDeps,
+  opts: { deadline: number; batchSize?: number },
+): Promise<WebpushCampaignTickResult> {
+  const batchSize = opts.batchSize ?? 1000;
+  let c = campaignRow;
+
+  for (;;) {
+    if (deps.now().getTime() >= opts.deadline) {
+      return returnWithTotals(c.id, deps, "enviando");
+    }
+
+    const open = await deps.listOpenBatches(c.id);
+    if (open.length > 0) {
+      const outcome = await advanceBatch(open[0], c, deps);
+      if (outcome.kind === "stop-temporary") {
+        await deps.updateCampaign(c, { status: "enviando", locked_at: null, locked_by: null });
+        return returnWithTotals(c.id, deps, "enviando");
+      }
+      if (outcome.kind === "stop-insufficient-initial") {
+        await deps.updateCampaign(c, {
+          status: "pausada",
+          last_error: WEBPUSH_CAMPAIGN_NO_BALANCE_MESSAGE,
+          locked_at: null,
+          locked_by: null,
+        });
+        return returnWithTotals(c.id, deps, "pausada");
+      }
+      if (outcome.kind === "stop-insufficient-settlement") {
+        await deps.updateCampaign(c, {
+          status: "pausada",
+          last_error: WEBPUSH_SETTLEMENT_NO_BALANCE_MESSAGE,
+          locked_at: null,
+          locked_by: null,
+        });
+        return returnWithTotals(c.id, deps, "pausada");
+      }
+      // Concluded: loop again — `listOpenBatches` no longer returns it.
+      continue;
+    }
+
+    // No open batches: every batch ever created for this campaign is
+    // concluido, so it's safe to flush the cursor/counters now, before
+    // fetching a new page (never past an un-batched row — see module header).
+    const flush = await deps.concludedTotals(c.id);
+    if (flush.maxRowId && flush.maxRowId !== c.sent_cursor) {
       await deps.updateCampaign(c, {
-        status: "pausada",
-        last_error: WEBPUSH_CAMPAIGN_NO_BALANCE_MESSAGE,
-        sent_cursor: cursor,
-        sent_count: sentCount,
-        failed_count: failedCount,
+        sent_cursor: flush.maxRowId,
+        sent_count: flush.sent,
+        failed_count: flush.failed,
+        locked_at: deps.now().toISOString(),
+      });
+      c = { ...c, sent_cursor: flush.maxRowId };
+    }
+
+    const page = await deps.nextBatch(c, c.sent_cursor ?? null, batchSize);
+    if (page.length === 0) {
+      const totals = await deps.concludedTotals(c.id);
+      const finalStatus = totals.sent === 0 && totals.failed > 0 ? "falhou" : "enviado";
+      await deps.updateCampaign(c, {
+        status: finalStatus,
+        sent_count: totals.sent,
+        failed_count: totals.failed,
         locked_at: null,
         locked_by: null,
       });
-      return { status: "pausada", sent: sentCount, failed: failedCount };
+      return { status: finalStatus, sent: totals.sent, failed: totals.failed };
     }
 
-    if (stopReason === "burst" || stopReason === "budget" || stopReason === "temporary") {
-      await deps.updateCampaign(c, {
-        status: "enviando",
-        sent_cursor: cursor,
-        sent_count: sentCount,
-        failed_count: failedCount,
-        ...(stopError ? { last_error: stopError } : {}),
-        locked_at: null,
-        locked_by: null,
+    const groups = groupByApp(page);
+
+    // All-or-nothing admission: a denial on ANY group aborts the whole page
+    // (no batch created for any group), so the page is retried in full on a
+    // later tick — this is what keeps the cursor gap-free (ruling step 5).
+    for (const group of groups) {
+      const stats = await deps.appStats(group.appId);
+      if (!canSendWithinBurstLimit(stats.sentLast15m, group.rows.length, stats.active)) {
+        await deps.updateCampaign(c, { status: "enviando", locked_at: null, locked_by: null });
+        return returnWithTotals(c.id, deps, "enviando");
+      }
+    }
+    for (const group of groups) {
+      if (!(await deps.acquireBudget(c.tenant_id))) {
+        await deps.updateCampaign(c, { status: "enviando", locked_at: null, locked_by: null });
+        return returnWithTotals(c.id, deps, "enviando");
+      }
+    }
+
+    for (const group of groups) {
+      await deps.createBatch({
+        tenantId: c.tenant_id,
+        campaignId: c.id,
+        appId: group.appId,
+        subscriptionRowIds: group.rows.map((r) => r.subscriptionRowId),
+        units: group.rows.length,
       });
-      return { status: "enviando", sent: sentCount, failed: failedCount };
     }
-
-    // Checkpoint after the whole batch; the loop repeats until the deadline
-    // or an empty batch (done). A lost lock (another worker re-claimed the
-    // campaign) stops the tick without touching the row any further.
-    const ok = await deps.updateCampaign(c, {
-      sent_cursor: cursor,
-      sent_count: sentCount,
-      failed_count: failedCount,
-      locked_at: deps.now().toISOString(),
-    });
-    if (!ok) return { status: "enviando", sent: sentCount, failed: failedCount };
-    c = { ...c, sent_cursor: cursor, sent_count: sentCount, failed_count: failedCount };
+    // Loop back: the batches just created are now `open` and get driven to
+    // a terminal state one at a time on the next iterations.
   }
 }
 
@@ -397,6 +543,22 @@ function iconUrlLoader() {
       .then(({ data }: { data: unknown }) => (data as { icon_url: string | null } | null)?.icon_url ?? null);
     cache.set(tenantId, promise);
     return promise;
+  };
+}
+
+function toDispatchBatch(row: Record<string, unknown>): WebpushDispatchBatch {
+  return {
+    id: row.id as string,
+    tenantId: row.tenant_id as string,
+    campaignId: row.campaign_id as string,
+    appId: row.app_id as string,
+    subscriptionRowIds: (row.subscription_row_ids as string[]) ?? [],
+    units: Number(row.units ?? 0),
+    status: row.status as WebpushDispatchBatchStatus,
+    accepted: row.accepted === null || row.accepted === undefined ? null : Number(row.accepted),
+    refusedRowIds: (row.refused_row_ids as string[] | null) ?? null,
+    onesignalNotificationId: (row.onesignal_notification_id as string | null) ?? null,
+    lastError: (row.last_error as string | null) ?? null,
   };
 }
 
@@ -437,6 +599,62 @@ function realWebpushDeps(loadIconUrl: (tenantId: string) => Promise<string | nul
       return { sentLast15m: Number(sentData ?? 0), active: Number(activeData ?? 0) };
     },
     credentials: (appRowId) => loadAppCredentials(webpushDb, appRowId),
+    acquireBudget: async (tenantId) => {
+      const admission = await channelBudget.acquire(tenantId, "webpush", {
+        deadline: Date.now() + WEBPUSH_CAMPAIGN_RUN_BUDGET_MS,
+      });
+      return admission.ok;
+    },
+    async createBatch(input) {
+      const { data, error } = await webpushDb
+        .from("webpush_dispatch_batches")
+        .insert({
+          tenant_id: input.tenantId,
+          campaign_id: input.campaignId,
+          app_id: input.appId,
+          subscription_row_ids: input.subscriptionRowIds,
+          units: input.units,
+        })
+        .select("*")
+        .single();
+      if (error) throw new Error(error.message);
+      return toDispatchBatch(data as Record<string, unknown>);
+    },
+    async listOpenBatches(campaignId) {
+      const { data, error } = await webpushDb
+        .from("webpush_dispatch_batches")
+        .select("*")
+        .eq("campaign_id", campaignId)
+        .in("status", ["pendente", "enviado", "liquidado", "falhou"])
+        .order("created_at", { ascending: true });
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as Record<string, unknown>[]).map(toDispatchBatch);
+    },
+    async updateBatch(batchId, patch) {
+      const { data, error } = await webpushDb
+        .from("webpush_dispatch_batches")
+        .update(patch)
+        .eq("id", batchId)
+        .select("*")
+        .single();
+      if (error) throw new Error(error.message);
+      return toDispatchBatch(data as Record<string, unknown>);
+    },
+    async deleteBatch(batchId) {
+      const { error } = await webpushDb.from("webpush_dispatch_batches").delete().eq("id", batchId);
+      if (error) throw new Error(error.message);
+    },
+    async rowDetails(subscriptionRowIds) {
+      if (subscriptionRowIds.length === 0) return [];
+      const { data, error } = await webpushDb
+        .from("push_subscriptions")
+        .select("id, subscription_id, player_id")
+        .in("id", subscriptionRowIds);
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as Array<{ id: string; subscription_id: string; player_id: string | null }>).map(
+        (r) => ({ subscriptionRowId: r.id, subscriptionId: r.subscription_id, playerId: r.player_id }),
+      );
+    },
     prepareDispatches: (args) => prepareWebpushDispatches(webpushDb, args),
     markDispatches: (args) => markWebpushDispatches(webpushDb, args),
     reserve: (args) => reserveUsage(webpushDb, args),
@@ -493,11 +711,29 @@ function realWebpushDeps(loadIconUrl: (tenantId: string) => Promise<string | nul
       }
       return Array.isArray(data) && data.length > 0;
     },
-    acquireBudget: async (tenantId) => {
-      const admission = await channelBudget.acquire(tenantId, "webpush", {
-        deadline: Date.now() + WEBPUSH_CAMPAIGN_RUN_BUDGET_MS,
-      });
-      return admission.ok;
+    async concludedTotals(campaignId) {
+      const { data, error } = await webpushDb
+        .from("webpush_dispatch_batches")
+        .select("subscription_row_ids, units, accepted")
+        .eq("campaign_id", campaignId)
+        .eq("status", "concluido");
+      if (error) throw new Error(error.message);
+      let maxRowId: string | null = null;
+      let sent = 0;
+      let failed = 0;
+      for (const row of (data ?? []) as Array<{
+        subscription_row_ids: string[];
+        units: number;
+        accepted: number | null;
+      }>) {
+        const accepted = row.accepted ?? 0;
+        sent += accepted;
+        failed += (row.units ?? 0) - accepted;
+        for (const id of row.subscription_row_ids ?? []) {
+          if (maxRowId === null || id > maxRowId) maxRowId = id;
+        }
+      }
+      return { maxRowId, sent, failed };
     },
   };
 }
