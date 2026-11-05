@@ -616,7 +616,7 @@ function CampaignReport({
           }
           className="mb-3"
         />
-        <div {...tourAnchor("relatorio.funil.filtro")}>
+        <div {...tourAnchor("campanha-relatorio.funil.filtro")}>
           <FunnelFilter stages={stages} value={filter} onValueChange={setActiveFilter} />
         </div>
 

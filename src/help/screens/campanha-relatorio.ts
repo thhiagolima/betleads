@@ -2,9 +2,11 @@
 // Uma única tela sem abas, com duas variantes: o relatório comum (SMS/e-mail)
 // e, para voz, um relatório mais simples com o resultado da ligação. Fonte:
 // src/routes/campanhas.$campaignId.relatorio.tsx e a parte de campanha de
-// src/components/conversion-report.tsx (a parte de jornada é a Tarefa 14 —
-// os componentes genuinamente compartilhados, como o filtro do funil, usam o
-// prefixo neutro `relatorio.`; o que é só desta tela usa `campanha-relatorio.`),
+// src/components/conversion-report.tsx (a parte de jornada é a Tarefa 14).
+// Todas as âncoras desta tela usam o prefixo `campanha-relatorio.` — mesmo o
+// FunnelFilter, componente compartilhado com a estrutura, porque hoje ele só
+// é renderizado pelo relatório de campanha (JourneyReport usa TrackedLeadList,
+// não FunnelFilter); revisar se a Tarefa 14 passar a usá-lo também.
 // src/lib/campaign-recipients.ts (motivos de "não enviados") e
 // src/lib/channel-operation-state.ts (selo/motivo de parada).
 import type { HelpScreen } from "../types";
@@ -153,7 +155,7 @@ const screen: HelpScreen = {
       intro: "Escolha uma etapa do funil para filtrar a lista de destinatários abaixo dela.",
       items: [
         {
-          anchor: "relatorio.funil.filtro",
+          anchor: "campanha-relatorio.funil.filtro",
           label: "Etapas do funil",
           what: 'Público, Enviados, Entregues (só quando o canal confirma entrega — nunca em SMS/e-mail), Clicaram, Não clicaram, Cadastros, Login ou jogo, Primeiro depósito, Depositaram e Clicaram e não depositaram. Cada etapa mostra o total da campanha inteira, não só da lista carregada.',
         },
@@ -243,6 +245,12 @@ const screen: HelpScreen = {
       what: "Esta campanha não possui destinatários rastreáveis individualmente.",
     },
     {
+      id: "lista-individual-indisponivel",
+      title: "Os totais estão disponíveis, mas não foi possível carregar a lista individual.",
+      what: "Os indicadores e o funil continuam corretos (vêm de uma busca separada); só a lista de destinatários linha a linha falhou ao carregar.",
+      action: "Atualize a página para tentar carregar a lista de novo.",
+    },
+    {
       id: "funil-sem-ninguem",
       title: "Ninguém nesta etapa na lista",
       what: 'Nenhum destinatário, entre os carregados na tela, chegou à etapa escolhida do funil.',
@@ -253,7 +261,7 @@ const screen: HelpScreen = {
   tours: {
     default: [
       {
-        anchor: "relatorio.funil.filtro",
+        anchor: "campanha-relatorio.funil.filtro",
         title: "Funil da campanha",
         body: "Cada etapa mostra o total da campanha inteira. Clique numa etapa para filtrar a lista de destinatários abaixo.",
         articleSection: "funil",

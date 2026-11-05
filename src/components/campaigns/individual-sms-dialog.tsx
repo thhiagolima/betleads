@@ -348,6 +348,7 @@ export function IndividualSmsDialog({
                     size="sm"
                     variant="ghost"
                     onClick={() => setEmailTemplateId("")}
+                    {...tourAnchor("campanhas.teste.email-usar-manual")}
                   >
                     <X className="mr-1.5 size-3.5" /> Usar como conteúdo manual
                   </Button>
@@ -480,6 +481,7 @@ export function IndividualSmsDialog({
                         size="sm"
                         variant="ghost"
                         onClick={() => setTemplateId("")}
+                        {...tourAnchor("campanhas.teste.sms-usar-manual")}
                       >
                         <X className="mr-1.5 size-3.5" /> Usar como mensagem manual
                       </Button>

@@ -147,6 +147,10 @@ const screen: HelpScreen = {
           what: "Lê números de celular de um arquivo e soma com o que já estiver colado no campo de texto.",
         },
         {
+          label: "Rastreamento automático.",
+          what: "Aviso fixo mostrado em SMS e e-mail (não aparece em voz): envios, cliques, cadastros, login ou jogo, primeiro depósito e depósitos aprovados aparecem sozinhos no relatório da campanha, sem precisar configurar nada.",
+        },
+        {
           anchor: "campanhas.compositor.sms-template",
           label: "Template de SMS",
           what: 'Escolhe um template salvo para preencher a mensagem, ou deixa em "Mensagem manual" para escrever direto.',
@@ -248,7 +252,7 @@ const screen: HelpScreen = {
           label: 'Bloco de avisos ("Falta para enviar:" / "Para continuar, corrija:")',
           what: 'Antes de tentar enviar, o título é "Falta para enviar:"; depois de tentar (e ainda faltar algo), vira "Para continuar, corrija:". Lista tudo que falta para o botão de enviar funcionar.',
           notes:
-            'Mensagens possíveis: "Informe o nome da campanha.", "Cole ou envie uma lista com números de celular válidos." (lista de números vazia), "Escolha um público com destinatários elegíveis." (outros públicos), "A lista aceita até 20.000 números por campanha.", o aviso de variáveis não aceitas na lista de números ("Campanhas para lista de números não aceitam variáveis de jogador (...); use apenas texto e links."), "Escreva ou selecione a mensagem de SMS.", "Selecione um template de e-mail.", "Selecione um roteiro."/"Selecione um áudio da biblioteca.", "Escolha a data e hora do agendamento.", "O agendamento deve ter pelo menos um minuto de antecedência.", "Variáveis não reconhecidas: ...", "Voz aceita até 200 destinatários por campanha.", e, quando nenhum destinatário puder receber, "Nenhum número da lista pode receber: todos já são jogadores ou foram bloqueados." (lista de números) ou "Nenhum destinatário deste público corresponde a um jogador cadastrado." (outros públicos). Abaixo da lista (sem travar o envio) aparecem os avisos de quem fica de fora: números inválidos ou repetidos da lista, jogadores fora do público por cadastro inválido/sem contato/sem consentimento, e — só em SMS para público normal — a verificação do cadastro de cada destinatário: "Verificando o cadastro dos destinatários…", ou, quando concluída, uma linha por motivo (\"sem cadastro não receberão\", \"com telefone inválido não receberão\", \"sem consentimento para SMS não receberão\", \"no grupo de controle de uma jornada não receberão\", \"já são jogadores da casa e não receberão\") seguida de \"Os demais recebem normalmente.\" (ou \"Nenhum destinatário desta lista pode receber.\") e \"A lista fica no relatório da campanha, em “Não enviados”.\"',
+            'Mensagens possíveis: "Informe o nome da campanha.", "Cole ou envie uma lista com números de celular válidos." (lista de números vazia), "Escolha um público com destinatários elegíveis." (outros públicos), "A lista aceita até 20.000 números por campanha.", o aviso de variáveis não aceitas na lista de números ("Campanhas para lista de números não aceitam variáveis de jogador (...); use apenas texto e links."), "Escreva ou selecione a mensagem de SMS.", "Selecione um template de e-mail.", "Selecione um roteiro."/"Selecione um áudio da biblioteca.", "Escolha a data e hora do agendamento.", "O agendamento deve ter pelo menos um minuto de antecedência.", "Variáveis não reconhecidas: ...", "Voz aceita até 200 destinatários por campanha.", e, quando nenhum destinatário puder receber, "Nenhum número da lista pode receber: todos já são jogadores ou foram bloqueados." (lista de números) ou "Nenhum destinatário deste público corresponde a um jogador cadastrado." (outros públicos). Abaixo da lista (sem travar o envio) aparecem os avisos de quem fica de fora: números inválidos ou repetidos da lista, jogadores fora do público por cadastro inválido/sem contato/sem consentimento, e — só em SMS para público normal — a verificação do cadastro de cada destinatário: "Verificando o cadastro dos destinatários…"; se essa verificação falhar, "Não foi possível verificar os cadastros agora; a verificação será refeita no envio." (o envio não é bloqueado — a conferência de quem pode receber é feita de novo na hora de enviar); ou, quando concluída com sucesso, uma linha por motivo (\"sem cadastro não receberão\", \"com telefone inválido não receberão\", \"sem consentimento para SMS não receberão\", \"no grupo de controle de uma jornada não receberão\", \"já são jogadores da casa e não receberão\") seguida de \"Os demais recebem normalmente.\" (ou \"Nenhum destinatário desta lista pode receber.\") e \"A lista fica no relatório da campanha, em “Não enviados”.\"',
         },
         {
           anchor: "campanhas.compositor.resumo",
@@ -310,6 +314,12 @@ const screen: HelpScreen = {
           what: "Abre o editor visual para criar um template e já usá-lo neste teste.",
         },
         {
+          anchor: "campanhas.teste.email-usar-manual",
+          label: "Usar como conteúdo manual",
+          what: "Limpa o template escolhido e volta Assunto e Mensagem para edição manual, sem apagar o texto que já estava preenchido.",
+          notes: "Só aparece depois de escolher um template de e-mail.",
+        },
+        {
           anchor: "campanhas.teste.assunto",
           label: "Assunto (teste de e-mail)",
           what: "O assunto do e-mail de teste.",
@@ -339,6 +349,12 @@ const screen: HelpScreen = {
           anchor: "campanhas.teste.sms-criar-template",
           label: "Criar template (teste de SMS)",
           what: "Abre o diálogo para criar um template de SMS a partir do texto já escrito.",
+        },
+        {
+          anchor: "campanhas.teste.sms-usar-manual",
+          label: "Usar como mensagem manual",
+          what: "Limpa o template escolhido e volta a Mensagem para edição manual, sem apagar o texto que já estava preenchido.",
+          notes: "Só aparece depois de escolher um template de SMS.",
         },
         {
           anchor: "campanhas.teste.mensagem",
