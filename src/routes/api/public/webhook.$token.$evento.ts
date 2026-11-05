@@ -52,7 +52,7 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
 
         const { data: tenantRow, error: tenantLookupError } = await sb
           .from("tenants")
-          .select("id,webhook_secret,webhook_hmac_enforced,is_demo")
+          .select("id,webhook_secret,webhook_hmac_enforced,is_demo,crm_model,moeda")
           .eq("webhook_token", token)
           .maybeSingle();
         // Do not report an infrastructure/credential failure as an invalid token.
@@ -80,10 +80,7 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
         // already fetched above (no second query) — its error path already
         // answers 503.
         if (tenantRow.is_demo) {
-          return Response.json(
-            { ok: false, error: "ambiente de demonstração" },
-            { status: 403 },
-          );
+          return Response.json({ ok: false, error: "ambiente de demonstração" }, { status: 403 });
         }
         if (
           tenantRow.webhook_hmac_enforced &&
@@ -97,7 +94,12 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
           return Response.json({ ok: false, error: "assinatura inválida" }, { status: 401 });
         }
 
-        const response = await processWebhookEvent(sb, tenantId, evento, payload);
+        const response = await processWebhookEvent(sb, tenantId, evento, payload, {
+          tenant: {
+            crm_model: (tenantRow.crm_model as string | null) ?? null,
+            moeda: (tenantRow.moeda as string | null) ?? null,
+          },
+        });
         if (response.ok) {
           invalidateServerResultCache(`dashboard:${tenantId}:`);
           invalidateServerResultCache(`gamification:${tenantId}:`);

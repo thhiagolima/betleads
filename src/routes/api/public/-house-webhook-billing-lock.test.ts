@@ -84,6 +84,8 @@ describe("POST /api/public/webhook/$token/$evento on a house locked for the mont
       TENANT,
       "cadastro",
       payload,
+      // The route hands over the tenant fields it already read (one query less).
+      { tenant: { crm_model: null, moeda: null } },
     );
   });
 });
