@@ -92,7 +92,7 @@ const screen: HelpScreen = {
         },
         {
           label: "Diálogo \"Trocar domínio nos links\" — passo 2 (prévia e seleção)",
-          what: 'A lista encontrada aparece agrupada por tipo (Jornadas, Templates de SMS, Templates de e-mail, URLs rápidas), cada item com uma caixinha marcada por padrão, um "antes → depois" do texto e, quando existir, um aviso de que a troca aumenta o número de partes do SMS (rastreio desligado) por cruzar um limite de caracteres. Um item sem caixinha (travado) tem um motivo escrito ao lado — por exemplo, está fora do alcance desta troca. Uma seção à parte, "Ainda com <domínio> (não trocados aqui)", lista campanhas agendadas, fluxos antigos e links em subdomínio que continuam com o domínio antigo mesmo depois da troca. Os botões são "Voltar" (volta ao passo 1) e "Trocar N itens" (abre a confirmação), onde N conta os itens marcados.',
+          what: 'A lista encontrada aparece agrupada por tipo (Jornadas, Templates de SMS, Templates de e-mail, URLs rápidas), cada item com uma caixinha marcada por padrão, um "antes → depois" do texto e, quando existir, um aviso de que a troca aumenta o número de partes do SMS (rastreio desligado) por cruzar um limite de caracteres. Um item sem caixinha (travado) tem um motivo escrito ao lado — por exemplo, está fora do alcance desta troca. Quando a casa tem uma lista de domínios permitidos para o rastreio de links, aparece também uma seção "Domínios permitidos do rastreio" com uma única caixinha (marcada por padrão) mostrando "domínios atuais → domínios novos" — ela decide se esse domínio também é adicionado à lista de domínios liberados para o rastreio, além de ser trocado nos links; desmarcá-la tira esse domínio da contagem de "Trocar N itens" (a lista de rastreio simplesmente não muda) sem afetar as outras caixinhas. Uma seção à parte, "Ainda com <domínio> (não trocados aqui)", lista campanhas agendadas, fluxos antigos e links em subdomínio que continuam com o domínio antigo mesmo depois da troca. Os botões são "Voltar" (volta ao passo 1) e "Trocar N itens" (abre a confirmação), onde N conta os itens marcados mais a caixinha do rastreio, quando marcada.',
           notes:
             "Sem nenhum item com esse domínio, aparece só o texto \"Nenhum link com <domínio> encontrado.\"",
         },
@@ -166,7 +166,8 @@ const screen: HelpScreen = {
           label: "Verificar agora",
           what: "Checa o DNS na hora, sem esperar a próxima verificação automática.",
           roles: ["admin"],
-          notes: 'Mostra "Verificando…" enquanto checa.',
+          notes:
+            'Mostra "Verificando…" enquanto checa. Se o domínio tiver sido apagado do lado do provedor (Short.io ou Infobip) por fora do CRM, a checagem encontra "Domínio não encontrado no provedor." e esse texto passa a aparecer na faixa de erro do cartão, abaixo do nome do domínio — a mesma faixa onde aparece o motivo de um "Falhou". Nesse caso, remova o domínio aqui e cadastre-o de novo do zero. A mesma checagem (e o mesmo erro) também pode acontecer sozinha, na verificação automática — veja "Próxima verificação automática".',
         },
         {
           anchor: "casa.dominio.send-instructions",
@@ -187,7 +188,7 @@ const screen: HelpScreen = {
         {
           anchor: "casa.dominio.remove",
           label: "Remover",
-          what: 'Abre a confirmação "Remover domínio": o domínio some dos novos envios, mas continua existindo no provedor; campanhas e jornadas já agendadas passam a usar o domínio padrão da casa no lugar. Quando o domínio está em uso, a confirmação lista em quais campanhas/jornadas.',
+          what: 'Abre a confirmação "Remover domínio", com os botões "Cancelar" e "Remover": o domínio some dos novos envios, mas continua existindo no provedor; campanhas e jornadas já agendadas passam a usar o domínio padrão da casa no lugar. Quando o domínio está em uso, a confirmação lista em quais campanhas/jornadas.',
           roles: ["admin"],
           notes:
             "Isso não apaga o domínio do provedor (Short.io) — só para de usá-lo em envios novos. Apagar de fato no provedor é uma ação de super admin, feita a partir da lista de \"Domínios removidos\", fora desta tela.",
@@ -248,7 +249,7 @@ const screen: HelpScreen = {
         {
           anchor: "casa.remetente.remove",
           label: "Remover (remetente)",
-          what: 'Pede confirmação ("Remover remetente?") antes de apagar — o texto explica que o remetente deixa de poder ser usado em novas campanhas e jornadas de e-mail. Repete-se em cada remetente; a âncora marca só o primeiro.',
+          what: 'Pede confirmação ("Remover remetente?", com os botões "Cancelar" e "Remover remetente") antes de apagar — o texto explica que o remetente deixa de poder ser usado em novas campanhas e jornadas de e-mail. Repete-se em cada remetente; a âncora marca só o primeiro.',
           roles: ["admin"],
           notes:
             "Campanhas e jornadas que já foram enviadas com esse remetente não são afetadas; só os envios futuros deixam de poder escolhê-lo.",
