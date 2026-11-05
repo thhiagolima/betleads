@@ -142,12 +142,16 @@ export async function setWebpushAppStatus(
   db: WebpushAppDb,
   input: { tenantId: string; appRowId: string; status: WebpushAppStatus },
 ): Promise<void> {
-  const { error } = await db
+  const { data, error } = await db
     .from("tenant_webpush_apps")
     .update({ status: input.status })
     .eq("id", input.appRowId)
-    .eq("tenant_id", input.tenantId);
+    .eq("tenant_id", input.tenantId)
+    .select("id");
   if (error) throw new Error(error.message);
+  if (!data || (data as unknown[]).length === 0) {
+    throw new Error("App não encontrada para esta casa");
+  }
 }
 
 /** Decrypts and returns the OneSignal app id + API key for a `tenant_webpush_apps` row. */

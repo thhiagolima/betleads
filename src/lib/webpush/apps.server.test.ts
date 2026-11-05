@@ -232,5 +232,37 @@ describe("apps.server", () => {
       const stored = db.rows("tenant_webpush_apps").find((r) => r.id === row.id)!;
       expect(stored.status).toBe("ativo");
     });
+
+    it("rejects an appRowId that belongs to a different tenant", async () => {
+      db.rows("tenants").push({ id: OTHER_TENANT, nome: "Casa Dois", slug: "dois" });
+      const row = await activateWebpushOrigin(db.client, {
+        tenantId: TENANT,
+        origin: "https://bravabet365.com",
+        mode: "manual",
+        appId: "manual-app-id",
+        apiKey: "manual-key",
+      });
+
+      await expect(
+        setWebpushAppStatus(db.client, {
+          tenantId: OTHER_TENANT,
+          appRowId: row.id,
+          status: "ativo",
+        }),
+      ).rejects.toThrow("App não encontrada para esta casa");
+
+      const stored = db.rows("tenant_webpush_apps").find((r) => r.id === row.id)!;
+      expect(stored.status).toBe("instalando");
+    });
+
+    it("rejects an unknown appRowId", async () => {
+      await expect(
+        setWebpushAppStatus(db.client, {
+          tenantId: TENANT,
+          appRowId: "00000000-0000-4000-8000-000000009999",
+          status: "ativo",
+        }),
+      ).rejects.toThrow("App não encontrada para esta casa");
+    });
   });
 });
