@@ -7,15 +7,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { publicAppBaseUrl } from "@/lib/click-tracking.server";
 import { resolveWebpushClick } from "@/lib/webpush/links.server";
-
-function publicAppUrlFallback(): string {
-  return (
-    process.env.PUBLIC_APP_URL ??
-    process.env.VITE_PUBLIC_APP_URL ??
-    "https://betleads.io"
-  ).replace(/\/+$/, "");
-}
 
 const REDIRECT_HEADERS = {
   "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -38,7 +31,7 @@ export const Route = createFileRoute("/api/public/push/c/$campaignId/$key")({
             campaignId: params.campaignId,
             error: error instanceof Error ? error.message : String(error),
           });
-          destination = publicAppUrlFallback();
+          destination = publicAppBaseUrl();
         }
         return new Response(null, {
           status: 302,

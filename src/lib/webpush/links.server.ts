@@ -12,8 +12,8 @@
 // (campaignId, subscriptionRowId).
 import { createHash, randomUUID } from "node:crypto";
 
-import { buildFirstPartyClickUrl } from "@/lib/click-tracking.server";
-import { getOrCreateFirstPartyTrackedLink } from "@/lib/shortio.server";
+import { buildFirstPartyClickUrl, publicAppBaseUrl } from "@/lib/click-tracking.server";
+import { assertDestinationAllowed, getOrCreateFirstPartyTrackedLink } from "@/lib/shortio.server";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- accepts the admin client or a test double (createFakeDb). */
 export type WebpushLinksDb = { from: (table: string) => any };
@@ -21,18 +21,19 @@ export type WebpushLinksDb = { from: (table: string) => any };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CLICK_KEY_PATTERN = /^[0-9a-f]{32}$/;
 
-function publicAppUrl(): string {
-  return (
-    process.env.PUBLIC_APP_URL ??
-    process.env.VITE_PUBLIC_APP_URL ??
-    "https://betleads.io"
-  ).replace(/\/+$/, "");
-}
-
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+/**
+ * `link_dispatches.idempotency_key` for one (campaign, subscription). The
+ * trailing `:0` is `url_position` (`persistDispatch` in shortio.server.ts),
+ * fixed here because a webpush campaign has exactly one URL. Both call
+ * sites below — `prepareWebpushDispatches` (writes it) and
+ * `resolveWebpushClick` (recomputes it from `push_subscriptions.click_key`
+ * to look the row back up, with no dedicated column) — must keep this
+ * format in sync.
+ */
 function webpushIdempotencyKey(campaignId: string, subscriptionRowId: string): string {
   return `webpush:${campaignId}:${subscriptionRowId}:0`;
 }
@@ -63,6 +64,12 @@ export type PrepareWebpushDispatchesInput = {
  * inserts nothing new (`ignoreDuplicates` on the `(tenant_id,
  * idempotency_key)` unique index, same pattern as `persistDispatch` in
  * shortio.server.ts).
+ *
+ * `assertDestinationAllowed` runs in its default (non-strict) mode — the
+ * same policy as other house-configured sends (SMS campaign links): any
+ * public http(s) host unless the house set `allowed_destination_hosts`, and
+ * never a protected (login/signed) URL. Throws before any write when the
+ * campaign's `url` is not allowed.
  */
 export async function prepareWebpushDispatches(
   db: WebpushLinksDb,
@@ -70,8 +77,9 @@ export async function prepareWebpushDispatches(
 ): Promise<void> {
   if (input.recipients.length === 0) return;
 
+  await assertDestinationAllowed({ tenantId: input.tenantId, url: input.url });
   const tracked = await getOrCreateFirstPartyTrackedLink(input.tenantId, input.url);
-  const sentUrl = campaignPushUrl(publicAppUrl(), input.campaignId);
+  const sentUrl = campaignPushUrl(publicAppBaseUrl(), input.campaignId);
 
   const rows = input.recipients.map((recipient) => ({
     tenant_id: input.tenantId,
@@ -151,7 +159,7 @@ export async function resolveWebpushClick(
   db: WebpushLinksDb,
   input: ResolveWebpushClickInput,
 ): Promise<string> {
-  if (!UUID_PATTERN.test(input.campaignId)) return publicAppUrl();
+  if (!UUID_PATTERN.test(input.campaignId)) return publicAppBaseUrl();
 
   const { data: campaignData, error: campaignError } = await db
     .from("webpush_campaigns")
@@ -160,7 +168,7 @@ export async function resolveWebpushClick(
     .maybeSingle();
   if (campaignError) throw new Error(`Falha ao resolver campanha de push: ${campaignError.message}`);
   const campaign = campaignData as CampaignRow | null;
-  if (!campaign) return publicAppUrl();
+  if (!campaign) return publicAppBaseUrl();
 
   if (CLICK_KEY_PATTERN.test(input.key)) {
     const { data: subscriptionData, error: subscriptionError } = await db

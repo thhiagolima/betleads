@@ -135,12 +135,18 @@ export async function verifyClickTokenSignature(
   return difference === 0;
 }
 
-export async function buildFirstPartyClickUrl(token: string, explicitSecret?: string) {
-  const base = (
+/** Our own app's base URL, trailing slash stripped. Shared by every builder
+ * of a first-party public URL (click redirect, webpush click redirect). */
+export function publicAppBaseUrl(): string {
+  return (
     process.env.PUBLIC_APP_URL ??
     process.env.VITE_PUBLIC_APP_URL ??
     "https://betleads.io"
   ).replace(/\/+$/, "");
+}
+
+export async function buildFirstPartyClickUrl(token: string, explicitSecret?: string) {
+  const base = publicAppBaseUrl();
   const signature = await signClickToken(token, explicitSecret);
   return `${base}/api/public/click/${encodeURIComponent(token)}?s=${encodeURIComponent(signature)}`;
 }

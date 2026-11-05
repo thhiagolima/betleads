@@ -15,6 +15,7 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   return { supabaseAdmin: fake.db.client };
 });
 
+import { DestinationNotAllowedError } from "@/lib/shortio.server";
 import {
   campaignPushUrl,
   markWebpushDispatches,
@@ -120,6 +121,19 @@ describe("prepareWebpushDispatches", () => {
 
     expect(fake.db.rows("link_dispatches")).toHaveLength(1);
     expect(fake.db.rows("tracked_links")).toHaveLength(1);
+  });
+
+  it("a disallowed destination throws DestinationNotAllowedError and writes no dispatch", async () => {
+    await expect(
+      prepareWebpushDispatches(fake.db.client, {
+        tenantId: TENANT,
+        campaignId: CAMPAIGN,
+        url: "https://casa.bet/login?token=abc",
+        recipients: [{ subscriptionRowId: SUB_IDENTIFIED, playerId: PLAYER }],
+      }),
+    ).rejects.toBeInstanceOf(DestinationNotAllowedError);
+    expect(fake.db.rows("link_dispatches")).toHaveLength(0);
+    expect(fake.db.rows("tracked_links")).toHaveLength(0);
   });
 
   it("does nothing for an empty recipient list", async () => {
