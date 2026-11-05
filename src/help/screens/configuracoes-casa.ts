@@ -157,7 +157,7 @@ const screen: HelpScreen = {
         {
           anchor: "casa.dominio.next-check",
           label: "Próxima verificação automática / Próxima checagem",
-          what: "Quando o CRM vai checar esse domínio de novo sozinho, sem precisar clicar em nada.",
+          what: 'Quando o CRM vai checar esse domínio de novo sozinho, sem precisar clicar em nada. Mostra só a hora quando é hoje, a data e a hora quando é outro dia, e "em instantes" quando a hora marcada já chegou (a checagem roda na próxima passada automática).',
           notes:
             "O calendário automático: a cada 10 minutos nas primeiras 6 horas depois de cadastrar o domínio; depois, de hora em hora até completar 72 horas; depois disso, uma vez por dia. Um domínio já verificado é checado 1x por dia, só para confirmar que continua certo.",
         },

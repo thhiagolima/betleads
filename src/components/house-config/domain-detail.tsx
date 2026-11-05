@@ -64,6 +64,17 @@ function dnsRecordStatusLabel(verified: boolean | null): string {
   return "—";
 }
 
+/** Text after "Próxima verificação automática:" for a domain not verified
+ * yet: "em instantes" when the scheduled time has already passed (the cron
+ * picks it up on its next run), only the time when it's later today, and the
+ * date plus the time when it's another day. */
+export function formatNextAutoCheck(next: Date, now: Date): string {
+  if (next.getTime() <= now.getTime()) return "em instantes";
+  const time = next.toLocaleTimeString("pt-BR");
+  if (next.toDateString() === now.toDateString()) return time;
+  return `${next.toLocaleDateString("pt-BR")} às ${time}`;
+}
+
 export function DomainDetail({
   domain,
   canEdit,
@@ -126,7 +137,7 @@ export function DomainDetail({
       <p className="text-xs text-muted-foreground" {...tourAnchor("casa.dominio.next-check")}>
         {domain.status === "verified"
           ? `Próxima checagem: ${nextCheckAt.toLocaleDateString("pt-BR")}`
-          : `Próxima verificação automática: ${nextCheckAt.toLocaleTimeString("pt-BR")}`}
+          : `Próxima verificação automática: ${formatNextAutoCheck(nextCheckAt, new Date())}`}
       </p>
 
       <Table {...tourAnchor("casa.dominio.dns-table")}>

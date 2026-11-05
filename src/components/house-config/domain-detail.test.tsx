@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { DnsRecord } from "@/lib/house-config";
-import { DomainDetail, type DomainDetailDomain } from "./domain-detail";
+import { DomainDetail, formatNextAutoCheck, type DomainDetailDomain } from "./domain-detail";
 
 function makeDomain(overrides: Partial<DomainDetailDomain> = {}): DomainDetailDomain {
   const records: DnsRecord[] = [
@@ -147,6 +147,14 @@ describe("DomainDetail", () => {
     expect(html).toContain("Próxima verificação automática");
   });
 
+  it("a pending domain never checked yet says the next check is 'em instantes'", () => {
+    const html = renderToStaticMarkup(
+      <DomainDetail domain={makeDomain({ status: "pending", last_checked_at: null })} canEdit />,
+    );
+
+    expect(html).toContain("Próxima verificação automática: em instantes");
+  });
+
   it("a verified domain shows the 'Próxima checagem' label instead", () => {
     const html = renderToStaticMarkup(
       <DomainDetail
@@ -197,5 +205,27 @@ describe("DomainDetail", () => {
     const buttonAttrs = findButtonOpenTag(html, "Definir como padrão");
     expect(buttonAttrs).not.toContain("aria-describedby");
     expect(html).not.toContain("Disponível depois que o domínio for verificado");
+  });
+});
+
+describe("formatNextAutoCheck", () => {
+  const now = new Date(2026, 10, 5, 14, 0, 0);
+
+  it("says 'em instantes' when the scheduled time is now or already past", () => {
+    expect(formatNextAutoCheck(now, now)).toBe("em instantes");
+    expect(formatNextAutoCheck(new Date(2026, 10, 5, 13, 50, 0), now)).toBe("em instantes");
+  });
+
+  it("shows only the time when it's later today", () => {
+    const next = new Date(2026, 10, 5, 14, 10, 0);
+    expect(formatNextAutoCheck(next, now)).toBe(next.toLocaleTimeString("pt-BR"));
+  });
+
+  it("shows the date and the time when it's another day", () => {
+    const next = new Date(2026, 10, 6, 9, 0, 0);
+    expect(formatNextAutoCheck(next, now)).toBe(
+      `${next.toLocaleDateString("pt-BR")} às ${next.toLocaleTimeString("pt-BR")}`,
+    );
+    expect(formatNextAutoCheck(next, now)).toContain("06/11/2026");
   });
 });
