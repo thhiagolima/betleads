@@ -54,7 +54,7 @@ const screen: HelpScreen = {
           label: "Seletor de casa",
           what: 'Mostra a casa atual (nome e seu papel nela, por exemplo "Gestor") e, quando você tem mais de uma casa ou algum grupo de casas, abre um menu para trocar.',
           notes:
-            'Com uma casa só e nenhum grupo, aparece travado (sem seta, não abre nada) — não há para onde trocar. Com grupos, o menu mostra duas listas: "Grupos" (abre a área do grupo, em "/grupo") e "Suas casas". No celular aparece uma versão compacta do mesmo controle: só o nome da casa (sem o papel), mais estreito. Escolher outra casa no menu pede confirmação no diálogo "Trocar de casa?" (abaixo); escolher um grupo entra direto em "/grupo", sem confirmação, porque não troca os dados carregados — só a navegação.',
+            'Com uma casa só e nenhum grupo, aparece travado (sem seta, não abre nada) — não há para onde trocar. Com grupos, o menu mostra duas listas: "Grupos" (abre a área do grupo, em "/grupo") e "Suas casas" — nesta última, "Nenhuma casa." aparece no lugar da lista quando um gestor de grupo não tem nenhuma casa vinculada à própria conta (só grupos). No celular aparece uma versão compacta do mesmo controle: só o nome da casa (sem o papel), mais estreito. Escolher outra casa no menu pede confirmação no diálogo "Trocar de casa?" (abaixo); escolher um grupo entra direto em "/grupo", sem confirmação, porque não troca os dados carregados — só a navegação.',
         },
         {
           label: 'Diálogo "Trocar de casa?"',
@@ -153,18 +153,21 @@ const screen: HelpScreen = {
         {
           anchor: "shell.mobile.tabbar",
           label: "Barra inferior",
-          what: 'Quatro atalhos fixos (Início, Jogadores, Ações, Resultados — para o expert: Início, Leads, Rendimento, Envios) mais o botão "Menu", sempre visíveis embaixo da tela.',
-          notes: "Repete-se como um grupo de botões; a âncora marca só o primeiro.",
+          what: 'Quatro atalhos fixos (Início, Jogadores, Ações, Resultados) mais o botão "Menu", sempre visíveis embaixo da tela. Para o expert, a barra tem cinco atalhos no lugar desses quatro: Início, Leads, Rendimento, Modelos, Envios.',
+          notes:
+            'Repete-se como um grupo de botões; a âncora marca só o primeiro. A barra do expert não tem o botão "Menu" — as cinco áreas do expert já cabem todas na barra, sem precisar de uma gaveta com mais itens.',
         },
         {
           anchor: "shell.mobile.menu-button",
           label: "Botão Menu",
           what: "Abre a gaveta com a lista completa de áreas (a mesma lista do menu lateral do computador, adaptada ao seu papel).",
+          roles: ["admin", "gestor", "member"],
         },
         {
           anchor: "shell.sidebar.nav",
           label: "Gaveta de navegação",
           what: "A mesma lista de áreas do menu lateral (veja a seção \"Menu lateral\"), aberta em tela cheia. Fecha ao escolher uma área, ao tocar fora ou com o botão de voltar do aparelho.",
+          roles: ["admin", "gestor", "member"],
         },
       ],
     },

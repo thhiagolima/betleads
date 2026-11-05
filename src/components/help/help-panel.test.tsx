@@ -34,6 +34,7 @@ function render(overrides: Partial<HelpPanelViewProps> = {}) {
   const props: HelpPanelViewProps = {
     screen,
     role: "gestor",
+    currentTab: "email",
     glossary: [{ id: "ggr", term: "GGR", short: "Perdas na casa." }],
     query: "",
     results: [],
@@ -114,5 +115,18 @@ describe("HelpPanelView", () => {
   it('shows "Sobre o CRM" below "Nesta tela", with or without a screen (ruling R4)', () => {
     expect(render()).toContain("Sobre o CRM");
     expect(render({ screen: null })).toContain("Sobre o CRM");
+  });
+
+  it('"Fazer o tour desta tela" is tab-aware (ruling R11): hidden on a tab with no tour of its own and no "default"', () => {
+    const tabOnlyTours: HelpScreen = {
+      ...screen,
+      tours: { email: [{ anchor: "casa.email.add-domain", title: "t", body: "b" }] },
+    };
+    expect(render({ screen: tabOnlyTours, currentTab: "email" })).toContain(
+      "Fazer o tour desta tela",
+    );
+    expect(render({ screen: tabOnlyTours, currentTab: "outra-aba" })).not.toContain(
+      "Fazer o tour desta tela",
+    );
   });
 });

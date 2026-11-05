@@ -2,7 +2,20 @@
 // and anything that touches `document` lives in tour-runner.ts, which is
 // only ever loaded via `import()` from a HelpProvider (Task 4).
 import { AUTO_TOURS_OFF_KEY, type HelpProgressMap } from "@/lib/help-progress";
-import type { TourStep } from "./types";
+import type { HelpScreen, TourStep } from "./types";
+
+/** Which tour of `screen` applies to `tab`: the tab's own, else "default".
+ * Pure so both the provider (`startTour`/auto-start) and the panel (ruling
+ * R11: whether "Fazer o tour desta tela" shows for the *current* tab) agree
+ * on the exact same resolution — a tab with no tour of its own, and no
+ * "default", has no tour, even when another tab of the same screen does. */
+export function tourFor(
+  screen: HelpScreen,
+  tab: string | null,
+): { tourTab: string | null; steps: TourStep[] } {
+  if (tab && screen.tours[tab]) return { tourTab: tab, steps: screen.tours[tab] };
+  return { tourTab: null, steps: screen.tours.default ?? [] };
+}
 
 export type ShouldAutoStartInput = {
   /** `tourKey(route, tab)` for the screen/tab in question. */

@@ -25,7 +25,7 @@ import { GUIDES, type GuideStep } from "@/help/guides";
 import { HELP_SCREEN_LOADERS } from "@/help/registry";
 import { resolveHelpScreen } from "@/help/resolve";
 import type { SearchEntry } from "@/help/search";
-import { effectiveOverlayForAutoStart, shouldAutoStart } from "@/help/tour-logic";
+import { effectiveOverlayForAutoStart, shouldAutoStart, tourFor } from "@/help/tour-logic";
 import type { HelpRole, HelpScreen, TourStep } from "@/help/types";
 import {
   AUTO_TOURS_OFF_KEY,
@@ -87,14 +87,10 @@ export function helpRoleFor(role: ShellRole | null): HelpRole {
   return role ?? "member";
 }
 
-/** Which tour of `screen` applies to `tab`: the tab's own, else "default". */
-export function tourFor(
-  screen: HelpScreen,
-  tab: string | null,
-): { tourTab: string | null; steps: TourStep[] } {
-  if (tab && screen.tours[tab]) return { tourTab: tab, steps: screen.tours[tab] };
-  return { tourTab: null, steps: screen.tours.default ?? [] };
-}
+// Re-exported for existing importers (help-provider.test.tsx) — the actual
+// definition moved to tour-logic.ts so help-panel.tsx (ruling R11) can use
+// it too without a circular import between the two help/* components.
+export { tourFor };
 
 function isDialogOpen(): boolean {
   return !!document.querySelector(

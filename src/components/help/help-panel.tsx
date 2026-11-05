@@ -29,6 +29,7 @@ import {
   STATES_SECTION_ID,
   type SearchEntry,
 } from "@/help/search";
+import { tourFor } from "@/help/tour-logic";
 import type { GlossaryTerm, HelpRole, HelpScreen } from "@/help/types";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
@@ -43,6 +44,11 @@ export const GLOSSARY_TARGET_PREFIX = "glossary:";
 export type HelpPanelViewProps = {
   screen: HelpScreen | null;
   role: HelpRole;
+  /** The current tab (URL hash without "#"), or null — which tour "Fazer o
+   * tour desta tela" offers (ruling R11: tab-aware, same resolution as
+   * `startTour`, so a tab with no tour of its own and no "default" never
+   * shows the button, even when another tab of the same screen has one). */
+  currentTab: string | null;
   /** Rendered under "Guias passo a passo" (the guides list ships in Task 6). */
   guidesSlot?: ReactNode;
   glossary: GlossaryTerm[];
@@ -198,9 +204,9 @@ function Article({
 }
 
 export function HelpPanelView(props: HelpPanelViewProps) {
-  const { screen, role, glossary, query, results, highlightTermId } = props;
+  const { screen, role, glossary, query, results, highlightTermId, currentTab } = props;
   const searching = query.trim().length >= 2;
-  const hasTour = !!screen && Object.values(screen.tours).some((steps) => steps.length > 0);
+  const hasTour = !!screen && tourFor(screen, currentTab).steps.length > 0;
 
   return (
     <div className="space-y-6">
@@ -486,6 +492,7 @@ export function HelpPanel(props: HelpPanelProps) {
           <HelpPanelView
             screen={screen}
             role={role}
+            currentTab={currentTab}
             guidesSlot={props.guidesSlot}
             glossary={GLOSSARY}
             query={query}

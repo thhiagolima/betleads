@@ -101,6 +101,11 @@ const screen: HelpScreen = {
       what: 'Mensagem mostrada no cartão "Por canal e origem" quando a casa ainda não enviou nenhum link curto no período.',
     },
     {
+      id: "links-sem-envios-demo",
+      title: "Nenhum dado neste ambiente de demonstração",
+      what: 'A mesma situação acima ("nenhum link enviado"), mas na casa de demonstração: em vez do texto "Nenhum link enviado nos últimos 30 dias.", o cartão "Por canal e origem" mostra este aviso, igual em toda tela do CRM que lista algo vazio num ambiente de demonstração.',
+    },
+    {
       id: "links-nao-admin",
       title: "Não foi possível abrir as configurações de links",
       what: 'Cartão mostrado no lugar do formulário de configuração para quem não é administrador da casa — o servidor só responde a pedidos de admin. Abaixo do título aparece "Esta área é do administrador da casa. Se você é admin, tente de novo em instantes."',

@@ -1,11 +1,13 @@
 // Pure tour-engine logic (brief, Task 3). No DOM: that part lives in
 // tour-runner.ts and isn't unit-tested here (no jsdom in this repo).
 import { describe, expect, it } from "vitest";
+import type { HelpScreen } from "./types";
 import {
   effectiveOverlayForAutoStart,
   filterAvailableSteps,
   pickVisible,
   shouldAutoStart,
+  tourFor,
   tourResultFromReason,
 } from "./tour-logic";
 
@@ -73,6 +75,40 @@ describe("effectiveOverlayForAutoStart", () => {
 
   it("blocks a non-override screen while the panel is open, even without an overlay", () => {
     expect(effectiveOverlayForAutoStart({ ...base, panelOpen: true })).toBe(true);
+  });
+});
+
+describe("tourFor", () => {
+  const step = (anchor: string) => ({ anchor, title: "t", body: "b" });
+  const screen: HelpScreen = {
+    id: "x",
+    route: "/x",
+    title: "X",
+    purpose: "p",
+    roles: ["admin"],
+    sections: [],
+    states: [],
+    tours: { default: [step("x.a.b")], email: [step("x.email.c")] },
+  };
+
+  it("uses the tab's own tour when it has one", () => {
+    expect(tourFor(screen, "email")).toEqual({ tourTab: "email", steps: [step("x.email.c")] });
+  });
+
+  it("falls back to the default tour for a tab with no tour of its own", () => {
+    expect(tourFor(screen, "outra")).toEqual({ tourTab: null, steps: [step("x.a.b")] });
+    expect(tourFor(screen, null)).toEqual({ tourTab: null, steps: [step("x.a.b")] });
+  });
+
+  // Ruling R11: a tab with no tour of its own, on a screen with no "default"
+  // either (e.g. /webhooks#plataforma, with only the "links" tab tour from
+  // Task 15), must resolve to no steps at all — the panel's "Fazer o tour
+  // desta tela" relies on exactly this to stay hidden on that tab, even
+  // though the screen as a whole does have a tour (on another tab).
+  it("has no steps when neither the tab nor \"default\" has a tour", () => {
+    const noDefault: HelpScreen = { ...screen, tours: { links: [step("x.links.a")] } };
+    expect(tourFor(noDefault, "plataforma")).toEqual({ tourTab: null, steps: [] });
+    expect(tourFor({ ...screen, tours: {} }, null)).toEqual({ tourTab: null, steps: [] });
   });
 });
 
