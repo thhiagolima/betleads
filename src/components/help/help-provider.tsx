@@ -27,6 +27,7 @@ import { effectiveTab, resolveHelpScreen } from "@/help/resolve";
 import type { SearchEntry } from "@/help/search";
 import {
   autoStartDecision,
+  claimAutoStart,
   effectiveOverlayForAutoStart,
   filterAvailableSteps,
   isAutoStartSuppressed,
@@ -34,10 +35,12 @@ import {
   pickHelpTarget,
   screenTourKey,
   startAutoStartSuppression,
+  nextFirstVisibleClock,
   nextReadinessClock,
   tourReadiness,
   tourFor,
   type AutoStartSuppression,
+  type AutoStartVisit,
   type HelpTarget,
 } from "@/help/tour-logic";
 import type { HelpRole, HelpScreen, TourStep } from "@/help/types";
@@ -57,6 +60,10 @@ const HelpPanel = lazy(() => import("./help-panel").then((m) => ({ default: m.He
 // Memoized so "is driver.js loaded yet?" is known: stopping a tour on route
 // change must not pull the chunk in when no tour ever ran.
 let tourRunner: Promise<typeof import("@/help/tour-runner")> | null = null;
+
+// Auto-starts claimed on the current page visit (claimAutoStart): module
+// level so a remounted HelpProvider can't auto-start the same tour twice.
+let autoStartVisit: AutoStartVisit | null = null;
 const loadTourRunner = () => (tourRunner ??= import("@/help/tour-runner"));
 
 export const HELP_PROGRESS_QUERY_KEY = ["help-progress"] as const;
@@ -253,6 +260,8 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   // any "wait"): the clock for `tourReadiness`' deadline — see
   // `nextReadinessClock`.
   const autoFirstSeen = useRef(new Map<string, number>());
+  // When each tour key's first anchor became visible (tourReadiness' grace).
+  const autoFirstVisible = useRef(new Map<string, number>());
 
   const runSteps = useCallback(
     (key: string, steps: TourStep[]) => {
@@ -306,6 +315,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     autoChecked.current.clear();
     autoFirstSeen.current.clear();
+    autoFirstVisible.current.clear();
     return () => {
       void tourRunner?.then(({ stopActiveTour }) => stopActiveTour());
     };
@@ -371,11 +381,21 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       void loadTourRunner().then(({ findVisibleAnchor }) => {
         if (cancelled || autoChecked.current.has(key)) return;
         const available = filterAvailableSteps(steps, findVisibleAnchor);
+        const now = Date.now();
+        const firstAvailable = !!steps[0] && findVisibleAnchor(steps[0].anchor) !== null;
+        const visibleSince = nextFirstVisibleClock(
+          autoFirstVisible.current.get(key) ?? null,
+          firstAvailable,
+          now,
+        );
+        if (visibleSince === null) autoFirstVisible.current.delete(key);
+        else autoFirstVisible.current.set(key, visibleSince);
         const readiness = tourReadiness({
           totalSteps: steps.length,
           availableSteps: available.length,
-          firstAvailable: !!steps[0] && findVisibleAnchor(steps[0].anchor) !== null,
-          elapsedMs: Date.now() - (autoFirstSeen.current.get(key) ?? Date.now()),
+          firstAvailable,
+          elapsedMs: now - (autoFirstSeen.current.get(key) ?? now),
+          firstVisibleMs: visibleSince === null ? 0 : now - visibleSince,
         });
         if (readiness === "wait") {
           retry();
@@ -384,7 +404,11 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         // "giveup" marks the key for this visit only (no progress written),
         // so the next visit tries again.
         autoChecked.current.add(key);
-        if (readiness === "start") runSteps(key, steps);
+        if (readiness !== "start") return;
+        // At most one auto-start per key per visit, even across a remount.
+        const claim = claimAutoStart(autoStartVisit, pathname, key);
+        autoStartVisit = claim.visit;
+        if (claim.claimed) runSteps(key, steps);
       });
     };
     timer = window.setTimeout(check, AUTO_START_DELAY_MS);
@@ -401,6 +425,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     override,
     shellOverride,
     urlTarget,
+    pathname,
     queryClient,
     runSteps,
   ]);

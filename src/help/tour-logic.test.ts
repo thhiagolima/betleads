@@ -20,6 +20,10 @@ import {
   shouldAutoStart,
   startAutoStartSuppression,
   TOUR_READY_DEADLINE_MS,
+  TOUR_READY_GRACE_MS,
+  claimAutoStart,
+  finishOnce,
+  nextFirstVisibleClock,
   tourFor,
   tourReadiness,
   tourResultFromReason,
@@ -290,7 +294,14 @@ describe("screenTourKey", () => {
 
 describe("tourReadiness", () => {
   const at = (over: Partial<Parameters<typeof tourReadiness>[0]>) =>
-    tourReadiness({ totalSteps: 6, availableSteps: 6, firstAvailable: true, elapsedMs: 1000, ...over });
+    tourReadiness({
+      totalSteps: 6,
+      availableSteps: 6,
+      firstAvailable: true,
+      elapsedMs: 1000,
+      firstVisibleMs: 0,
+      ...over,
+    });
 
   it('"start" once the first anchor is visible and at least min(3, total) steps are available', () => {
     expect(at({})).toBe("start");
@@ -299,14 +310,24 @@ describe("tourReadiness", () => {
     expect(at({ totalSteps: 1, availableSteps: 1 })).toBe("start");
   });
 
-  it('"wait" while the screen is still rendering its anchors, before the deadline', () => {
-    expect(at({ availableSteps: 0, firstAvailable: false })).toBe("wait");
+  it("first anchor visible but too few steps: waits up to the grace window, then starts with what is visible", () => {
     expect(at({ availableSteps: 2 })).toBe("wait");
-    expect(at({ availableSteps: 5, firstAvailable: false })).toBe("wait");
-    expect(at({ availableSteps: 2, elapsedMs: TOUR_READY_DEADLINE_MS - 1 })).toBe("wait");
+    expect(at({ availableSteps: 2, firstVisibleMs: TOUR_READY_GRACE_MS - 1 })).toBe("wait");
+    expect(at({ availableSteps: 2, firstVisibleMs: TOUR_READY_GRACE_MS })).toBe("start");
+    // A near-empty tab (/automacoes#conflitos: 2 steps, only the first rendered).
+    expect(at({ totalSteps: 2, availableSteps: 1, firstVisibleMs: TOUR_READY_GRACE_MS })).toBe(
+      "start",
+    );
+    // The grace doesn't depend on the 15 s deadline.
+    expect(at({ availableSteps: 1, firstVisibleMs: 2600, elapsedMs: 3000 })).toBe("start");
   });
 
-  it("after the deadline, starts with whatever is visible, or gives up when nothing is", () => {
+  it("first anchor not visible: waits until the deadline, then starts with whatever is visible or gives up", () => {
+    expect(at({ availableSteps: 0, firstAvailable: false })).toBe("wait");
+    expect(at({ availableSteps: 5, firstAvailable: false })).toBe("wait");
+    expect(
+      at({ availableSteps: 2, firstAvailable: false, elapsedMs: TOUR_READY_DEADLINE_MS - 1 }),
+    ).toBe("wait");
     expect(at({ availableSteps: 1, firstAvailable: false, elapsedMs: TOUR_READY_DEADLINE_MS })).toBe(
       "start",
     );
@@ -317,6 +338,49 @@ describe("tourReadiness", () => {
 
   it('a tour with no steps is "giveup"', () => {
     expect(at({ totalSteps: 0, availableSteps: 0, firstAvailable: false })).toBe("giveup");
+  });
+});
+
+describe("nextFirstVisibleClock", () => {
+  it("starts when the first anchor appears, keeps it while visible, drops it when it disappears", () => {
+    expect(nextFirstVisibleClock(null, true, 100)).toBe(100);
+    expect(nextFirstVisibleClock(100, true, 900)).toBe(100);
+    expect(nextFirstVisibleClock(100, false, 900)).toBeNull();
+    expect(nextFirstVisibleClock(null, false, 900)).toBeNull();
+  });
+});
+
+describe("finishOnce", () => {
+  it("records a tour's result exactly once, whichever path ends it", () => {
+    const calls: string[] = [];
+    const finish = finishOnce((r: string) => calls.push(r));
+    finish("skipped"); // "Pular tour"
+    finish("skipped"); // driver's own destroy hook afterwards
+    finish("done");
+    expect(calls).toEqual(["skipped"]);
+  });
+});
+
+describe("claimAutoStart", () => {
+  it("allows one auto-start per key per visit, even when the provider remounts (same module state)", () => {
+    let visit = null as ReturnType<typeof claimAutoStart>["visit"] | null;
+    let claim = claimAutoStart(visit, "/email", "tour:/email#visao-geral");
+    expect(claim.claimed).toBe(true);
+    visit = claim.visit;
+    // A remounted provider on the same visit tries again: refused.
+    claim = claimAutoStart(visit, "/email", "tour:/email#visao-geral");
+    expect(claim.claimed).toBe(false);
+    visit = claim.visit;
+    // Another tab's tour on the same page is its own key.
+    claim = claimAutoStart(visit, "/email", "tour:/email#templates");
+    expect(claim.claimed).toBe(true);
+    visit = claim.visit;
+  });
+
+  it("a new pathname is a new visit", () => {
+    const first = claimAutoStart(null, "/email", "tour:/email#visao-geral").visit;
+    const away = claimAutoStart(first, "/campanhas", "tour:/campanhas").visit;
+    expect(claimAutoStart(away, "/email", "tour:/email#visao-geral").claimed).toBe(true);
   });
 });
 
@@ -339,7 +403,13 @@ describe("nextReadinessClock", () => {
     clock = nextReadinessClock(clock, "start", 61_000); // wizard closed
     expect(clock).toBe(61_000);
     expect(
-      tourReadiness({ totalSteps: 6, availableSteps: 1, firstAvailable: false, elapsedMs: 62_000 - clock! }),
+      tourReadiness({
+        totalSteps: 6,
+        availableSteps: 1,
+        firstAvailable: false,
+        elapsedMs: 62_000 - clock!,
+        firstVisibleMs: 0,
+      }),
     ).toBe("wait");
   });
 });

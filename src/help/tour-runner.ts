@@ -6,7 +6,7 @@
 import "driver.js/dist/driver.css";
 import { driver, type Driver, type DriveStep } from "driver.js";
 import { ANCHOR_ATTR } from "./anchor";
-import { filterAvailableSteps, pickVisible, tourResultFromReason } from "./tour-logic";
+import { filterAvailableSteps, finishOnce, pickVisible, tourResultFromReason } from "./tour-logic";
 import type { TourStep } from "./types";
 import "./tour.css";
 
@@ -23,17 +23,19 @@ export function findVisibleAnchor(anchor: string): HTMLElement | null {
 
 // Only one driver.js instance at a time: a new highlight or tour first
 // destroys the previous one, so rapid calls never stack overlays.
-// `silenceFinish` stops a tour's `onFinish` from recording a result when it
-// is torn down by the app (route change, a new tour) rather than the user.
-let active: { instance: Driver; silenceFinish: () => void } | null = null;
+// A tour's result is recorded only from the user's own end of the tour
+// (see runTour); an app teardown (route change, a new tour) just destroys
+// it, which records nothing. `skip` records "skipped" for that tour.
+let active: { instance: Driver; skip: () => void } | null = null;
 
-/** Destroys the running tour/highlight, if any. With `record: false` (the
- * default) a running tour's `onFinish` is not called. */
+/** Destroys the running tour/highlight, if any. With `record: true` a
+ * running tour records "skipped" first ("Saiba mais"); by default nothing
+ * is recorded. */
 export function stopActiveTour(opts: { record?: boolean } = {}): void {
   const current = active;
   if (!current) return;
   active = null;
-  if (!opts.record) current.silenceFinish();
+  if (opts.record) current.skip();
   current.instance.destroy();
 }
 
@@ -49,7 +51,7 @@ export function highlightAnchor(anchor: string): boolean {
       if (active?.instance === instance) active = null;
     },
   });
-  active = { instance, silenceFinish: () => {} };
+  active = { instance, skip: () => {} };
   instance.highlight({ element: el });
   return true;
 }
@@ -71,7 +73,12 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): boolean {
   const available = filterAvailableSteps(steps, findVisibleAnchor);
   if (available.length === 0) return false;
   stopActiveTour();
-  let silenced = false;
+  // Recorded once, from the user's own end of the tour: driver.js calls
+  // `onDestroyStarted` (with the reason) for "Concluir", ×, Escape and an
+  // overlay click — and never for an app-side `destroy()`. Not relying on
+  // `onDestroyed`, which driver.js skips unless the first step's highlight
+  // transition had fully completed.
+  const finish = finishOnce(opts.onFinish);
 
   const driveSteps: DriveStep[] = available.map((step) => ({
     element: anchorSelector(step.anchor),
@@ -105,7 +112,10 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): boolean {
       skipBtn.type = "button";
       skipBtn.className = `driver-popover-footer-btn ${SKIP_TOUR_CLASS}`;
       skipBtn.textContent = "Pular tour";
-      skipBtn.addEventListener("click", () => instance.destroy());
+      skipBtn.addEventListener("click", () => {
+        finish("skipped");
+        instance.destroy();
+      });
       popover.footerButtons.insertBefore(skipBtn, popover.footerButtons.firstChild);
 
       if (!activeStep) return;
@@ -116,18 +126,16 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): boolean {
       learnMoreBtn.addEventListener("click", () => opts.onLearnMore(activeStep));
       popover.footerButtons.insertBefore(learnMoreBtn, popover.footerButtons.firstChild);
     },
-    onDestroyed: (_element, _step, hookOpts) => {
+    onDestroyStarted: (_element, _step, hookOpts) => {
+      finish(tourResultFromReason(hookOpts.reason));
+      instance.destroy();
+    },
+    onDestroyed: () => {
       if (active?.instance === instance) active = null;
-      if (!silenced) opts.onFinish(tourResultFromReason(hookOpts.reason));
     },
   });
 
-  active = {
-    instance,
-    silenceFinish: () => {
-      silenced = true;
-    },
-  };
+  active = { instance, skip: () => finish("skipped") };
   instance.drive();
   return true;
 }

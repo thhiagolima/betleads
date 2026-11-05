@@ -106,30 +106,84 @@ export function filterAvailableSteps(
   return steps.filter((step) => findVisible(step.anchor) !== null);
 }
 
-/** How long (since the screen's article loaded on this visit) auto-start
- * waits for the screen's data to render the tour's anchors. */
+/** How long (since auto-start first got a "start" decision on this visit)
+ * it waits for the tour's FIRST anchor to render. */
 export const TOUR_READY_DEADLINE_MS = 15_000;
+/** Once the first anchor is visible, how much longer it waits for
+ * min(3, total) steps before starting with what is visible (a near-empty
+ * tab may never render its other anchors). */
+export const TOUR_READY_GRACE_MS = 2_500;
 
 /** Whether a first-visit tour can start now, given how many of its steps
  * currently have a visible anchor. Screens render their anchors as their
  * data arrives, so a tour checked too early would show nothing (runTour
  * drops steps without a visible target):
- * - "start" once the first step's anchor is visible and at least
- *   min(3, total) steps are available;
- * - "wait" (retry shortly) before that, until `TOUR_READY_DEADLINE_MS`;
- * - after the deadline: "start" with whatever is visible (≥1), else
+ * - first step's anchor visible and at least min(3, total) steps available
+ *   → "start";
+ * - first step's anchor visible but fewer steps → "wait" up to
+ *   `TOUR_READY_GRACE_MS` since it became visible (`firstVisibleMs`), then
+ *   "start" with what is visible;
+ * - first step's anchor not visible → "wait" until `TOUR_READY_DEADLINE_MS`
+ *   (`elapsedMs`), then "start" with whatever is visible (≥1), else
  *   "giveup" — without recording progress, so the next visit tries again. */
 export function tourReadiness(input: {
   totalSteps: number;
   availableSteps: number;
   firstAvailable: boolean;
   elapsedMs: number;
+  /** How long the first step's anchor has been visible (0 when it just
+   * appeared or isn't visible). */
+  firstVisibleMs: number;
 }): "start" | "wait" | "giveup" {
-  const { totalSteps, availableSteps, firstAvailable, elapsedMs } = input;
+  const { totalSteps, availableSteps, firstAvailable, elapsedMs, firstVisibleMs } = input;
   if (totalSteps === 0) return "giveup";
-  if (firstAvailable && availableSteps >= Math.min(3, totalSteps)) return "start";
+  if (firstAvailable) {
+    if (availableSteps >= Math.min(3, totalSteps)) return "start";
+    return firstVisibleMs < TOUR_READY_GRACE_MS ? "wait" : "start";
+  }
   if (elapsedMs < TOUR_READY_DEADLINE_MS) return "wait";
   return availableSteps >= 1 ? "start" : "giveup";
+}
+
+/** When the first step's anchor became visible (the origin of
+ * `firstVisibleMs`): kept while it stays visible, dropped when it isn't. */
+export function nextFirstVisibleClock(
+  since: number | null,
+  firstAvailable: boolean,
+  now: number,
+): number | null {
+  if (!firstAvailable) return null;
+  return since ?? now;
+}
+
+/** Wraps a tour's `onFinish` so it runs at most once, whatever path ends
+ * the tour (the user's "Pular tour"/×/Escape/overlay/"Concluir", or
+ * "Saiba mais"). */
+export function finishOnce<T>(onFinish: (result: T) => void): (result: T) => void {
+  let finished = false;
+  return (result) => {
+    if (finished) return;
+    finished = true;
+    onFinish(result);
+  };
+}
+
+/** Auto-starts already claimed on the current page visit, kept outside
+ * React state so a remounted HelpProvider (e.g. the auth gate re-rendering
+ * after login) can't auto-start the same tour a second time on the same
+ * visit. A new pathname starts a new visit. */
+export type AutoStartVisit = { pathname: string; keys: ReadonlySet<string> };
+
+/** Claims `key` for an auto-start on `pathname`: `claimed` is false when it
+ * was already claimed on this same visit. */
+export function claimAutoStart(
+  visit: AutoStartVisit | null,
+  pathname: string,
+  key: string,
+): { visit: AutoStartVisit; claimed: boolean } {
+  const keys = visit && visit.pathname === pathname ? visit.keys : new Set<string>();
+  if (keys.has(key)) return { visit: { pathname, keys }, claimed: false };
+  return { visit: { pathname, keys: new Set(keys).add(key) }, claimed: true };
 }
 
 /** The readiness clock (`tourReadiness`' `elapsedMs` origin) after one
