@@ -64,13 +64,15 @@ const screen: HelpScreen = {
           label: 'Diálogo "Limites de contato" — campos',
           what: '"Máximo em 24 h" e "Máximo em 7 dias": o total de SMS e e-mails já enviados pela casa (por qualquer jornada) que uma pessoa pode receber nessas janelas. Campo em branco = sem limite. Abaixo, a contagem inclui só os envios já realizados; mensagens ainda agendadas não entram no limite.',
           roles: ["admin", "gestor"],
+          notes:
+            '"Máximo em 24 h" aceita de 1 a 1000; "Máximo em 7 dias" aceita de 1 a 5000. Se os dois estiverem preenchidos e o de 7 dias for menor que o de 24 h, o salvamento é bloqueado com o aviso "O limite de 7 dias deve ser igual ou maior que o de 24 horas."',
         },
         {
           label: 'Diálogo "Limites de contato" — Leads mortos',
           what: 'Um interruptor "Leads mortos" liga/desliga a regra, e o campo "Mensagens seguidas sem ação (N)" define depois de quantas mensagens de jornada sem nenhuma ação (depósito, PIX gerado, saque, login, jogo ou clique) um lead sai de todas as jornadas e vai para o público Leads mortos.',
           roles: ["admin", "gestor"],
           notes:
-            'N vai de 2 a 50 (padrão 5); um valor fora da faixa bloqueia o salvamento com o aviso correspondente abaixo do campo. Jornadas de envio imediato disparadas pela ação do próprio jogador continuam valendo mesmo com a regra ligada. Ao ligar a regra pela primeira vez e salvar, o CRM leva você direto para a aba Leads mortos, com o aviso "Regra de leads mortos ligada. Use “Avaliar base atual agora” para marcar quem já se encaixa."; o botão do diálogo é "Salvar limites" ("Salvando…" enquanto grava).',
+            'N vai de 2 a 50 (padrão 5); um valor fora da faixa (ou que não seja um número inteiro) bloqueia o salvamento com o aviso "O limite de leads mortos deve ser um número entre 2 e 50." Jornadas de envio imediato disparadas pela ação do próprio jogador continuam valendo mesmo com a regra ligada. Ao ligar a regra pela primeira vez e salvar, o CRM leva você direto para a aba Leads mortos, com o aviso "Regra de leads mortos ligada. Use “Avaliar base atual agora” para marcar quem já se encaixa."; o botão do diálogo é "Salvar limites" ("Salvando…" enquanto grava).',
         },
         {
           anchor: "automacoes.header.como-contamos",
@@ -374,7 +376,7 @@ const screen: HelpScreen = {
           label: 'Diálogo "Novo fluxo" — Sequência de blocos',
           what: 'A sequência de blocos do fluxo, montada manualmente (sem randomização) com os botões "Ligação" e "Delay", que adicionam um bloco ao final; cada bloco tem botões para mover para cima/para baixo e remover (lixeira).',
           notes:
-            'O botão "Gerar em sequência" abre um segundo diálogo, "Gerar fluxo em sequência": você escolhe, em ordem, os roteiros de ligação (ou clica em "Usar todos os roteiros"), um SMS opcional por etapa, a condição desse SMS, o delay entre etapas e a duração máxima de cada ligação; ao clicar em "Gerar N blocos", o sistema monta e adiciona esses blocos de uma vez à sequência do fluxo (sem apagar o que já existia).',
+            'O botão "Gerar em sequência" abre um segundo diálogo, "Gerar fluxo em sequência": você escolhe, em ordem, os roteiros de ligação (ou clica em "Usar todos os roteiros"), um SMS opcional por etapa, a condição desse SMS, o delay entre etapas e a duração máxima de cada ligação. O botão "+ Etapa" adiciona mais uma linha de roteiro/SMS, e cada etapa tem os mesmos botões de mover para cima/para baixo e remover (lixeira) dos blocos principais. "Usar todos os roteiros" sem nenhum roteiro cadastrado mostra o aviso "Nenhum roteiro disponível"; ao clicar em "Gerar N blocos" sem nenhuma etapa com roteiro escolhido, aparece "Selecione ao menos 1 roteiro". Quando funciona, o sistema monta e adiciona esses blocos de uma vez à sequência do fluxo (sem apagar o que já existia).',
         },
         {
           label: "Bloco Ligação — campos",
@@ -396,7 +398,9 @@ const screen: HelpScreen = {
         },
         {
           label: 'Diálogo "Novo fluxo" — rodapé',
-          what: 'Os botões "Cancelar" e "Salvar fluxo" ("Salvando..." enquanto grava). Salvar exige um nome e pelo menos 1 bloco; um bloco de Ligação sem roteiro escolhido bloqueia o salvamento com o aviso correspondente.',
+          what: 'Os botões "Cancelar" e "Salvar fluxo" ("Salvando..." enquanto grava).',
+          notes:
+            'Salvar bloqueia com um aviso quando: o nome está em branco ("Nome obrigatório"); não há nenhum bloco ("Adicione ao menos 1 bloco (Ligação ou Delay)"); ou um bloco de Ligação ficou sem roteiro escolhido ("Bloco N: selecione um roteiro de ligação", onde N é a posição do bloco na sequência).',
         },
       ],
     },
@@ -461,8 +465,14 @@ const screen: HelpScreen = {
     {
       id: "fluxos-erro",
       title: "Não foi possível carregar os fluxos.",
-      what: "A lista de fluxos não carregou por um erro de rede ou do servidor.",
+      what: 'A lista de fluxos não carregou por um erro de rede ou do servidor. Abaixo do título aparece uma linha com o detalhe técnico do erro (a mensagem exata devolvida pelo servidor, ou "Erro desconhecido ao buscar os fluxos de ligação." quando não há detalhe).',
       action: 'Clique em "Tentar novamente".',
+    },
+    {
+      id: "fluxos-dialogo-vazio",
+      title: "Nenhum bloco. Adicione uma Ligação ou um Delay para começar.",
+      what: 'Texto mostrado dentro do diálogo "Novo fluxo"/"Editar fluxo", na seção "Sequência de blocos", enquanto nenhum bloco foi adicionado ainda.',
+      action: 'Clique em "Ligação" ou "Delay" (ou use "Gerar em sequência").',
     },
   ],
 

@@ -484,7 +484,7 @@ function DeadLeadTableRow({
       <td className="px-3 py-3">
         <span className="tabular-nums">{money(row.totalDepositado, { decimals: 0 })}</span>
         <p className="text-[12px] text-muted-foreground">
-          {row.hasFtd ? "Com FTD" : "Sem FTD"}
+          {row.hasFtd ? <Term id="ftd">Com FTD</Term> : "Sem FTD"}
           {row.ultimoDeposito ? (
             <>
               {" · último "}
