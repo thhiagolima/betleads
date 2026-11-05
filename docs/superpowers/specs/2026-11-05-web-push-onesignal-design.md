@@ -69,10 +69,9 @@ Levantadas na documentação em 2026-10-27:
   A OneSignal **desativa a app** se enviar mais de 10× a base inscrita em 15 minutos.
 - Apps e chaves de app são criadas com a **chave da organização** (`POST /apps`,
   `POST /apps/{id}/auth/tokens`); a chave da app só aparece uma vez.
-- Cobrança da OneSignal: US$ 0,004 por inscrito por mês (Growth), somada em todas as apps; o plano
-  grátis limita 10.000 inscritos por envio. Confirmar com o comercial antes do piloto: plano que
-  libera chave da organização e criação de app por API, como inscritos são contados, contrato de
-  dados (LGPD).
+- Plano contratado: **Growth** (sem o limite de 10.000 inscritos por envio do grátis; 6.000 req/s
+  de envio por app). Ainda confirmar: se o Growth libera chave da organização e criação de app por
+  API (senão vale o caminho manual de 5.1) e o contrato de dados (LGPD).
 
 ## 4. O que foi decidido (pelo usuário)
 
@@ -85,7 +84,7 @@ Levantadas na documentação em 2026-10-27:
 - Composer: título + mensagem + link escolhido pelo tenant em cada campanha.
 - Piloto: **só campanhas**; público **todos os inscritos ou filtros do CRM**.
 - **Cobrança por envio, R$ 0,01**.
-- A conta OneSignal será criada pelo usuário; a Bravabet troca de domínio por bloqueio (hoje
+- A conta OneSignal (plano Growth) será criada pelo usuário; casa cobrada só por disparo; a Bravabet troca de domínio por bloqueio (hoje
   `https://bravabet365.com`).
 
 ## 5. Como funciona
@@ -226,8 +225,8 @@ OneSignal, status `enviado`/`recusado`, cobrança).
 
 Novo item `webpush` no catálogo de preços (`billing_price_book`, constraint e `wallet_reserve`), com
 preço padrão **R$ 0,01**; `reserveUsage` ganha o item. Casas com plano interno continuam isentas.
-O custo real da OneSignal (por inscrito/mês) não entra na carteira da casa; no painel financeiro
-o custo de provedor do push fica 0 por envio no piloto.
+A casa é cobrada **só por disparo**; nenhuma tela da casa mostra custo por inscrito nem o custo da
+OneSignal. No painel financeiro o custo de provedor do push fica 0 por envio.
 
 ### 5.7 Relatório
 
