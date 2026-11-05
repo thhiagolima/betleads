@@ -17,6 +17,7 @@ vi.mock("@/lib/help-progress.functions", () => ({
 vi.mock("@/lib/help-guides.functions", () => ({
   getGuideSignals: () => Promise.resolve({ signals: null }),
 }));
+vi.mock("@/components/auth-gate", () => ({ useAuthSession: () => null }));
 vi.mock("@/components/shell/use-shell-nav", () => ({ useShellNav: () => ({ role: null, tenantId: null }) }));
 
 import type { HelpScreen } from "@/help/types";

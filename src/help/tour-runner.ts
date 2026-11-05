@@ -79,6 +79,12 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): boolean {
   // `onDestroyed`, which driver.js skips unless the first step's highlight
   // transition had fully completed.
   const finish = finishOnce(opts.onFinish);
+  // A user-ended tour drops the `active` reference itself: driver.js's
+  // `onDestroyed` (which also clears it) isn't guaranteed to run.
+  const endByUser = () => {
+    if (active?.instance === instance) active = null;
+    instance.destroy();
+  };
 
   const driveSteps: DriveStep[] = available.map((step) => ({
     element: anchorSelector(step.anchor),
@@ -114,7 +120,7 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): boolean {
       skipBtn.textContent = "Pular tour";
       skipBtn.addEventListener("click", () => {
         finish("skipped");
-        instance.destroy();
+        endByUser();
       });
       popover.footerButtons.insertBefore(skipBtn, popover.footerButtons.firstChild);
 
@@ -128,7 +134,7 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): boolean {
     },
     onDestroyStarted: (_element, _step, hookOpts) => {
       finish(tourResultFromReason(hookOpts.reason));
-      instance.destroy();
+      endByUser();
     },
     onDestroyed: () => {
       if (active?.instance === instance) active = null;

@@ -21,7 +21,9 @@ import {
   startAutoStartSuppression,
   TOUR_READY_DEADLINE_MS,
   TOUR_READY_GRACE_MS,
+  autoStartVisitId,
   claimAutoStart,
+  releaseAutoStart,
   finishOnce,
   nextFirstVisibleClock,
   tourFor,
@@ -361,26 +363,45 @@ describe("finishOnce", () => {
   });
 });
 
-describe("claimAutoStart", () => {
-  it("allows one auto-start per key per visit, even when the provider remounts (same module state)", () => {
-    let visit = null as ReturnType<typeof claimAutoStart>["visit"] | null;
-    let claim = claimAutoStart(visit, "/email", "tour:/email#visao-geral");
-    expect(claim.claimed).toBe(true);
-    visit = claim.visit;
-    // A remounted provider on the same visit tries again: refused.
-    claim = claimAutoStart(visit, "/email", "tour:/email#visao-geral");
-    expect(claim.claimed).toBe(false);
-    visit = claim.visit;
-    // Another tab's tour on the same page is its own key.
-    claim = claimAutoStart(visit, "/email", "tour:/email#templates");
-    expect(claim.claimed).toBe(true);
-    visit = claim.visit;
+describe("claimAutoStart / autoStartVisitId", () => {
+  const key = "tour:/email#visao-geral";
+  const visit = (userId: string | null, locationKey: string | null, pathname = "/email") =>
+    autoStartVisitId({ userId, locationKey, pathname });
+
+  it("refuses a second claim on the same navigation (a remounted provider)", () => {
+    const id = visit("u1", "k1");
+    const first = claimAutoStart(null, id, key);
+    expect(first.claimed).toBe(true);
+    expect(claimAutoStart(first.visit, id, key).claimed).toBe(false);
+    // Another tab's tour on the same navigation is its own key.
+    expect(claimAutoStart(first.visit, id, "tour:/email#templates").claimed).toBe(true);
   });
 
-  it("a new pathname is a new visit", () => {
-    const first = claimAutoStart(null, "/email", "tour:/email#visao-geral").visit;
-    const away = claimAutoStart(first, "/campanhas", "tour:/campanhas").visit;
-    expect(claimAutoStart(away, "/email", "tour:/email#visao-geral").claimed).toBe(true);
+  it("leaving and coming back (a new navigation, even through screens with no claim) is granted", () => {
+    const onEmail = claimAutoStart(null, visit("u1", "k1"), key).visit;
+    // /x makes no claim: the module visit stays as it was.
+    const back = visit("u1", "k3"); // back on /email, new location key
+    expect(claimAutoStart(onEmail, back, key).claimed).toBe(true);
+  });
+
+  it("the same pathname and navigation for another user (logout → login, no reload) is granted", () => {
+    const userA = claimAutoStart(null, visit("u1", "k1"), key).visit;
+    expect(claimAutoStart(userA, visit("u2", "k1"), key).claimed).toBe(true);
+  });
+
+  it("falls back to the pathname without a location key", () => {
+    expect(visit("u1", null)).toBe("u1|/email");
+    expect(visit(null, "k9")).toBe("-|k9");
+  });
+
+  it("releasing a claim (the tour didn't start) lets the same visit claim it again", () => {
+    const id = visit("u1", "k1");
+    const claimed = claimAutoStart(null, id, key).visit;
+    const released = releaseAutoStart(claimed, id, key);
+    expect(claimAutoStart(released, id, key).claimed).toBe(true);
+    // Releasing for another visit or an unclaimed key changes nothing.
+    expect(releaseAutoStart(claimed, visit("u1", "k2"), key)).toBe(claimed);
+    expect(releaseAutoStart(null, id, key)).toBeNull();
   });
 });
 

@@ -20,6 +20,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { useAuthSession } from "@/components/auth-gate";
 import { useShellNav } from "@/components/shell/use-shell-nav";
 import { GUIDES, type GuideStep } from "@/help/guides";
 import { HELP_SCREEN_LOADERS } from "@/help/registry";
@@ -27,12 +28,14 @@ import { effectiveTab, resolveHelpScreen } from "@/help/resolve";
 import type { SearchEntry } from "@/help/search";
 import {
   autoStartDecision,
+  autoStartVisitId,
   claimAutoStart,
   effectiveOverlayForAutoStart,
   filterAvailableSteps,
   isAutoStartSuppressed,
   nextAutoStartSuppression,
   pickHelpTarget,
+  releaseAutoStart,
   screenTourKey,
   startAutoStartSuppression,
   nextFirstVisibleClock,
@@ -61,8 +64,9 @@ const HelpPanel = lazy(() => import("./help-panel").then((m) => ({ default: m.He
 // change must not pull the chunk in when no tour ever ran.
 let tourRunner: Promise<typeof import("@/help/tour-runner")> | null = null;
 
-// Auto-starts claimed on the current page visit (claimAutoStart): module
-// level so a remounted HelpProvider can't auto-start the same tour twice.
+// Auto-starts claimed on the current visit (claimAutoStart): module level so
+// a remounted HelpProvider can't auto-start the same tour twice on one visit
+// (one user + one router navigation — autoStartVisitId).
 let autoStartVisit: AutoStartVisit | null = null;
 const loadTourRunner = () => (tourRunner ??= import("@/help/tour-runner"));
 
@@ -161,6 +165,11 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   // --- Location: pathname + hash (tabs live in the hash; PageTabs navigate
   // through the router, but a plain `hashchange` is also honoured). ---
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const locationKey = useRouterState({
+    select: (s) => s.location.state.__TSR_key ?? s.location.state.key ?? null,
+  });
+  const userId = useAuthSession()?.user.id ?? null;
+  const visitId = autoStartVisitId({ userId, locationKey, pathname });
   const routerHash = useRouterState({ select: (s) => s.location.hash });
   const [hash, setHash] = useState("");
   useEffect(() => {
@@ -264,20 +273,20 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const autoFirstVisible = useRef(new Map<string, number>());
 
   const runSteps = useCallback(
-    (key: string, steps: TourStep[]) => {
-      if (steps.length === 0) return;
+    (key: string, steps: TourStep[]): Promise<boolean> => {
+      if (steps.length === 0) return Promise.resolve(false);
       // A tour running (manual or auto) settles this visit's auto-start, so
       // a pending auto-start can't restart it from step 1.
       autoChecked.current.add(key);
-      void loadTourRunner().then(({ runTour, stopActiveTour }) => {
+      return loadTourRunner().then(({ runTour, stopActiveTour }) =>
         runTour(steps, {
           onFinish: (result) => writeProgress(key, result),
           onLearnMore: (step) => {
             stopActiveTour({ record: true });
             openPanel(step.articleSection);
           },
-        });
-      });
+        }),
+      );
     },
     [openPanel, writeProgress],
   );
@@ -366,6 +375,8 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         hasSteps: steps.length > 0,
       });
       setClock(decision);
+      // Same for the first-anchor grace clock: blocked time doesn't count.
+      if (decision !== "start") autoFirstVisible.current.delete(key);
       if (decision === "wait") {
         // Only an open dialog needs polling: overlay/panel/progress changes
         // already re-run this effect through its deps.
@@ -406,9 +417,13 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         autoChecked.current.add(key);
         if (readiness !== "start") return;
         // At most one auto-start per key per visit, even across a remount.
-        const claim = claimAutoStart(autoStartVisit, pathname, key);
+        const claim = claimAutoStart(autoStartVisit, visitId, key);
         autoStartVisit = claim.visit;
-        if (claim.claimed) runSteps(key, steps);
+        if (!claim.claimed) return;
+        void runSteps(key, steps).then((started) => {
+          // Nothing was visible after all: give the claim back.
+          if (!started) autoStartVisit = releaseAutoStart(autoStartVisit, visitId, key);
+        });
       });
     };
     timer = window.setTimeout(check, AUTO_START_DELAY_MS);
@@ -425,7 +440,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     override,
     shellOverride,
     urlTarget,
-    pathname,
+    visitId,
     queryClient,
     runSteps,
   ]);

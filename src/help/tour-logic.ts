@@ -168,22 +168,48 @@ export function finishOnce<T>(onFinish: (result: T) => void): (result: T) => voi
   };
 }
 
-/** Auto-starts already claimed on the current page visit, kept outside
- * React state so a remounted HelpProvider (e.g. the auth gate re-rendering
- * after login) can't auto-start the same tour a second time on the same
- * visit. A new pathname starts a new visit. */
-export type AutoStartVisit = { pathname: string; keys: ReadonlySet<string> };
+/** Auto-starts already claimed on the current visit, kept outside React
+ * state so a remounted HelpProvider (e.g. the auth gate re-rendering after
+ * login) can't auto-start the same tour a second time on the same visit.
+ * `visitId` identifies one visit: see `autoStartVisitId`. */
+export type AutoStartVisit = { visitId: string; keys: ReadonlySet<string> };
 
-/** Claims `key` for an auto-start on `pathname`: `claimed` is false when it
- * was already claimed on this same visit. */
+/** One visit = one user + one router navigation. The router's location key
+ * is stable across a remount and changes on every navigation (leaving and
+ * coming back is a new visit); the user id makes a logout → login as
+ * someone else (no page reload) a new visit too. Without a location key
+ * (shouldn't happen in the browser) the pathname stands in. */
+export function autoStartVisitId(input: {
+  userId: string | null;
+  locationKey: string | null | undefined;
+  pathname: string;
+}): string {
+  return `${input.userId ?? "-"}|${input.locationKey || input.pathname}`;
+}
+
+/** Claims `key` for an auto-start on visit `visitId`: `claimed` is false
+ * when it was already claimed on this same visit. */
 export function claimAutoStart(
   visit: AutoStartVisit | null,
-  pathname: string,
+  visitId: string,
   key: string,
 ): { visit: AutoStartVisit; claimed: boolean } {
-  const keys = visit && visit.pathname === pathname ? visit.keys : new Set<string>();
-  if (keys.has(key)) return { visit: { pathname, keys }, claimed: false };
-  return { visit: { pathname, keys: new Set(keys).add(key) }, claimed: true };
+  const keys = visit && visit.visitId === visitId ? visit.keys : new Set<string>();
+  if (keys.has(key)) return { visit: { visitId, keys }, claimed: false };
+  return { visit: { visitId, keys: new Set(keys).add(key) }, claimed: true };
+}
+
+/** Gives a claim back (the tour didn't actually start, e.g. no step was
+ * visible when runTour ran), so a later check on the same visit may retry. */
+export function releaseAutoStart(
+  visit: AutoStartVisit | null,
+  visitId: string,
+  key: string,
+): AutoStartVisit | null {
+  if (!visit || visit.visitId !== visitId || !visit.keys.has(key)) return visit;
+  const keys = new Set(visit.keys);
+  keys.delete(key);
+  return { visitId, keys };
 }
 
 /** The readiness clock (`tourReadiness`' `elapsedMs` origin) after one
