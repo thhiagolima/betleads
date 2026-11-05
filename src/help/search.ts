@@ -1,17 +1,25 @@
 // Pure search over the help panel's content (brief, Task 4). No DOM, no
-// React: the panel builds the index with `buildSearchIndex` and filters it
-// with `searchHelp` on every keystroke.
+// React: the panel builds the index with `buildSearchIndex` over every
+// loaded article (spec §4.4) and filters it with `searchHelp`.
 import type { GlossaryTerm, HelpRole, HelpScreen } from "./types";
 
 export type SearchEntry = {
   kind: "item" | "term" | "guide";
   title: string;
   text: string;
+  /** The article's route (a `ROUTE_META` pattern or virtual screen id). */
   route?: string;
+  /** The article's title, to tell results from other screens apart. */
+  screenTitle?: string;
   sectionId?: string;
+  /** The section's tab (hash without "#"), when the screen has tabs. */
+  tab?: string;
   termId?: string;
   guideId?: string;
 };
+
+/** Section id the panel gives an article's states list. */
+export const STATES_SECTION_ID = "situacoes";
 
 /** Lowercase, without accents (NFD minus combining marks), single-spaced. */
 export function normalizeSearchText(value: string): string {
@@ -19,22 +27,34 @@ export function normalizeSearchText(value: string): string {
 }
 
 /** Entries whose title or text contains every word of `query` (accent- and
- * case-insensitive), title matches first. Empty for a query shorter than 2
- * characters. */
-export function searchHelp(index: SearchEntry[], query: string): SearchEntry[] {
+ * case-insensitive). Order: entries of `currentRoute` first, then the rest;
+ * within each group, title matches before text-only matches. Empty for a
+ * query shorter than 2 characters. */
+export function searchHelp(
+  index: SearchEntry[],
+  query: string,
+  currentRoute?: string | null,
+): SearchEntry[] {
   const q = normalizeSearchText(query);
   if (q.length < 2) return [];
   const words = q.split(" ");
-  const titleHits: SearchEntry[] = [];
-  const textHits: SearchEntry[] = [];
+  const buckets: SearchEntry[][] = [[], [], [], []];
   for (const entry of index) {
     const title = normalizeSearchText(entry.title);
     const haystack = `${title} ${normalizeSearchText(entry.text)}`;
     if (!words.every((w) => haystack.includes(w))) continue;
-    if (words.some((w) => title.includes(w))) titleHits.push(entry);
-    else textHits.push(entry);
+    const current = !!currentRoute && entry.route === currentRoute;
+    const titleHit = words.some((w) => title.includes(w));
+    buckets[(current ? 0 : 2) + (titleHit ? 0 : 1)].push(entry);
   }
-  return [...titleHits, ...textHits];
+  return buckets.flat();
+}
+
+/** Whether a search result on another screen can take you there: a real
+ * path without params ("/jornadas/$journeyId" needs an id we don't have)
+ * and not a virtual screen ("onboarding", "shell"). */
+export function canOpenRoute(route: string): boolean {
+  return route.startsWith("/") && !route.includes("$");
 }
 
 /** Whether `role` sees something restricted to `roles` (omitted = everyone). */
@@ -42,27 +62,47 @@ export function roleCanSee(roles: HelpRole[] | undefined, role: HelpRole): boole
   return !roles || roles.includes(role);
 }
 
-/** The current screen's items the role can see, plus every glossary term.
- * (Guides join the index when they exist — Task 6.) */
+function screenEntries(screen: HelpScreen, role: HelpRole): SearchEntry[] {
+  const base = { kind: "item" as const, route: screen.route, screenTitle: screen.title };
+  const entries: SearchEntry[] = [{ ...base, title: screen.title, text: screen.purpose }];
+  for (const section of screen.sections) {
+    const items = section.items.filter((item) => roleCanSee(item.roles, role));
+    if (items.length === 0 && !section.intro) continue;
+    const where = { ...base, sectionId: section.id, ...(section.tab ? { tab: section.tab } : {}) };
+    entries.push({ ...where, title: section.title, text: section.intro ?? "" });
+    for (const item of items) {
+      entries.push({
+        ...where,
+        title: item.label,
+        text: [item.what, item.when, item.notes].filter(Boolean).join(" "),
+      });
+    }
+  }
+  for (const state of screen.states) {
+    entries.push({
+      ...base,
+      sectionId: STATES_SECTION_ID,
+      title: state.title,
+      text: [state.what, state.action].filter(Boolean).join(" "),
+    });
+  }
+  return entries;
+}
+
+/** Every article the role sees (title/purpose, section titles/intros, the
+ * items the role can see, states), plus every glossary term. Duplicate
+ * routes are indexed once. (Guides join the index in Task 6.) */
 export function buildSearchIndex(
-  screen: HelpScreen | null,
+  screens: HelpScreen[],
   role: HelpRole,
   glossary: GlossaryTerm[],
 ): SearchEntry[] {
   const entries: SearchEntry[] = [];
-  if (screen) {
-    for (const section of screen.sections) {
-      for (const item of section.items) {
-        if (!roleCanSee(item.roles, role)) continue;
-        entries.push({
-          kind: "item",
-          title: item.label,
-          text: [item.what, item.when, item.notes].filter(Boolean).join(" "),
-          route: screen.route,
-          sectionId: section.id,
-        });
-      }
-    }
+  const seen = new Set<string>();
+  for (const screen of screens) {
+    if (seen.has(screen.route) || !screen.roles.includes(role)) continue;
+    seen.add(screen.route);
+    entries.push(...screenEntries(screen, role));
   }
   for (const term of glossary) {
     entries.push({

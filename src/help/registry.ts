@@ -12,3 +12,20 @@ import type { HelpScreen } from "./types";
  * each article ships.
  */
 export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpScreen }>> = {};
+
+let allScreens: Promise<HelpScreen[]> | null = null;
+
+/** Loads every registered article once (cached), for the panel's search
+ * across all screens (spec §4.4). An article that fails to load is left
+ * out; a later call retries nothing (the cache keeps what loaded). */
+export function loadAllHelpScreens(): Promise<HelpScreen[]> {
+  allScreens ??= Promise.all(
+    Object.values(HELP_SCREEN_LOADERS).map((load) =>
+      load().then(
+        (mod) => mod.default,
+        () => null,
+      ),
+    ),
+  ).then((screens) => screens.filter((s): s is HelpScreen => s !== null));
+  return allScreens;
+}

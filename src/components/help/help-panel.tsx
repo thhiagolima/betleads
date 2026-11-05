@@ -7,7 +7,7 @@
 // `renderToStaticMarkup` in tests; `HelpPanel` wraps it in the Sheet and
 // owns the panel-local state (query, expanded article, scroll target).
 import { BookOpen, Play, Search } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -19,7 +19,15 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { GLOSSARY } from "@/help/glossary";
-import { buildSearchIndex, roleCanSee, searchHelp, type SearchEntry } from "@/help/search";
+import { loadAllHelpScreens } from "@/help/registry";
+import {
+  buildSearchIndex,
+  canOpenRoute,
+  roleCanSee,
+  searchHelp,
+  STATES_SECTION_ID,
+  type SearchEntry,
+} from "@/help/search";
 import type { GlossaryTerm, HelpRole, HelpScreen } from "@/help/types";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
@@ -60,17 +68,20 @@ function Heading({ children }: { children: ReactNode }) {
   );
 }
 
-const KIND_LABEL: Record<SearchEntry["kind"], string> = {
-  item: "Nesta tela",
-  term: "Glossário",
-  guide: "Guia",
-};
+function resultLabel(entry: SearchEntry, currentRoute: string | null): string {
+  if (entry.kind === "term") return "Glossário";
+  if (entry.kind === "guide") return "Guia";
+  if (entry.route && entry.route !== currentRoute) return entry.screenTitle ?? "Outra tela";
+  return "Nesta tela";
+}
 
 function SearchResults({
   results,
+  currentRoute,
   onSelect,
 }: {
   results: SearchEntry[];
+  currentRoute: string | null;
   onSelect: (entry: SearchEntry) => void;
 }) {
   if (results.length === 0) {
@@ -90,7 +101,7 @@ function SearchResults({
               className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <span className="block text-[11px] text-muted-foreground">
-                {KIND_LABEL[entry.kind]}
+                {resultLabel(entry, currentRoute)}
               </span>
               <span className="block text-sm font-medium">{entry.title}</span>
               <span className="line-clamp-2 block text-xs text-muted-foreground">{entry.text}</span>
@@ -160,7 +171,7 @@ function Article({
         </section>
       ))}
       {screen.states.length > 0 ? (
-        <section id={sectionDomId("situacoes")} className="scroll-mt-4">
+        <section id={sectionDomId(STATES_SECTION_ID)} className="scroll-mt-4">
           <h4 className="text-sm font-semibold">Situações que podem aparecer</h4>
           <ul className="mt-2 space-y-2.5">
             {screen.states.map((state) => (
@@ -205,7 +216,11 @@ export function HelpPanelView(props: HelpPanelViewProps) {
       </div>
 
       {searching ? (
-        <SearchResults results={results} onSelect={props.onSelectResult} />
+        <SearchResults
+          results={results}
+          currentRoute={screen?.route ?? null}
+          onSelect={props.onSelectResult}
+        />
       ) : (
         <>
           <section aria-label="Nesta tela">
@@ -285,6 +300,9 @@ export function HelpPanelView(props: HelpPanelViewProps) {
   );
 }
 
+/** `route` set: the target lives on that screen, applied once it loads. */
+export type HelpPanelFocus = { target?: string; nonce: number; route?: string };
+
 export type HelpPanelProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -295,11 +313,14 @@ export type HelpPanelProps = {
   /** Where `openPanel(sectionId)` asked to go: a section id or
    * "glossary:<termId>". `nonce` changes on every call so the same target
    * can be requested twice. */
-  focus: { target: string; nonce: number } | null;
+  focus: HelpPanelFocus | null;
   autoToursOff: boolean;
   onAutoToursOffChange: (off: boolean) => void;
   onStartTour: () => void;
   onShowAnchor: (anchor: string) => void;
+  /** A search result from another screen: navigate there (the provider then
+   * sends a `focus` with that `route`). */
+  onOpenElsewhere: (entry: SearchEntry) => void;
   guidesSlot?: ReactNode;
 };
 
@@ -328,26 +349,72 @@ export function HelpPanel(props: HelpPanelProps) {
   const [highlightTermId, setHighlightTermId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<{ domId: string; nonce: number } | null>(null);
 
-  const index = useMemo(() => buildSearchIndex(screen, role, GLOSSARY), [screen, role]);
-  const results = useMemo(() => searchHelp(index, query), [index, query]);
-
-  // A different screen starts collapsed.
+  // Search covers every article (spec §4.4): loaded once, lazily, on the
+  // first query of 2+ characters.
+  const [allScreens, setAllScreens] = useState<HelpScreen[] | null>(null);
+  const searching = query.trim().length >= 2;
   useEffect(() => {
-    setArticleOpen(false);
-  }, [screen?.id]);
+    if (!searching || allScreens) return;
+    let cancelled = false;
+    void loadAllHelpScreens().then((screens) => {
+      if (!cancelled) setAllScreens(screens);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [searching, allScreens]);
 
-  // openPanel(sectionId) / openPanel("glossary:<termId>").
-  useEffect(() => {
-    if (!focus) return;
+  const currentRoute = screen?.route ?? null;
+  const index = useMemo(
+    () => buildSearchIndex([...(screen ? [screen] : []), ...(allScreens ?? [])], role, GLOSSARY),
+    [screen, allScreens, role],
+  );
+  const results = useMemo(
+    () =>
+      searchHelp(index, query, currentRoute).filter(
+        (e) => !e.route || e.route === currentRoute || canOpenRoute(e.route),
+      ),
+    [index, query, currentRoute],
+  );
+
+  const applyFocus = (f: HelpPanelFocus) => {
     setQuery("");
-    if (focus.target.startsWith(GLOSSARY_TARGET_PREFIX)) {
-      const termId = focus.target.slice(GLOSSARY_TARGET_PREFIX.length);
+    if (!f.target) return;
+    if (f.target.startsWith(GLOSSARY_TARGET_PREFIX)) {
+      const termId = f.target.slice(GLOSSARY_TARGET_PREFIX.length);
       setHighlightTermId(termId);
-      setScrollTarget({ domId: termDomId(termId), nonce: focus.nonce });
+      setScrollTarget({ domId: termDomId(termId), nonce: f.nonce });
     } else {
       setArticleOpen(true);
-      setScrollTarget({ domId: sectionDomId(focus.target), nonce: focus.nonce });
+      setScrollTarget({ domId: sectionDomId(f.target), nonce: f.nonce });
     }
+  };
+
+  // A focus for another screen waits here until that screen's article loads.
+  const pendingFocus = useRef<HelpPanelFocus | null>(null);
+
+  // A different screen starts collapsed, unless a pending focus targets it.
+  // (Declared before the focus effect so, on mount, a focus isn't undone.)
+  useEffect(() => {
+    const pending = pendingFocus.current;
+    if (pending && pending.route === currentRoute) {
+      pendingFocus.current = null;
+      applyFocus(pending);
+    } else {
+      setArticleOpen(false);
+    }
+  }, [currentRoute]);
+
+  // openPanel(sectionId) / openPanel("glossary:<termId>") / a result elsewhere.
+  useEffect(() => {
+    if (!focus) return;
+    if (focus.route && focus.route !== currentRoute) {
+      pendingFocus.current = focus;
+      setQuery("");
+      return;
+    }
+    applyFocus(focus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus]);
 
   useEffect(() => {
@@ -356,6 +423,10 @@ export function HelpPanel(props: HelpPanelProps) {
   }, [open, scrollTarget]);
 
   const select = (entry: SearchEntry) => {
+    if (entry.kind === "item" && entry.route && entry.route !== currentRoute) {
+      props.onOpenElsewhere(entry);
+      return;
+    }
     setQuery("");
     if (entry.kind === "term" && entry.termId) {
       setHighlightTermId(entry.termId);

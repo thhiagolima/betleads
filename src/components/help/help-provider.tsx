@@ -4,7 +4,7 @@
 // articles via HELP_SCREEN_LOADERS' `import()`, the panel via React.lazy,
 // and tour-runner.ts (driver.js) via `import()` only.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouterState } from "@tanstack/react-router";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   createContext,
@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { useShellNav } from "@/components/shell/use-shell-nav";
 import { HELP_SCREEN_LOADERS } from "@/help/registry";
 import { resolveHelpScreen } from "@/help/resolve";
+import type { SearchEntry } from "@/help/search";
 import { shouldAutoStart } from "@/help/tour-logic";
 import type { HelpRole, HelpScreen, TourStep } from "@/help/types";
 import {
@@ -33,6 +34,7 @@ import {
 } from "@/lib/help-progress";
 import { getHelpProgress, setHelpProgress } from "@/lib/help-progress.functions";
 import type { ShellRole } from "@/lib/navigation";
+import type { HelpPanelFocus } from "./help-panel";
 
 const HelpPanel = lazy(() => import("./help-panel").then((m) => ({ default: m.HelpPanel })));
 
@@ -163,7 +165,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   // --- Panel state ---
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelMounted, setPanelMounted] = useState(false);
-  const [focus, setFocus] = useState<{ target: string; nonce: number } | null>(null);
+  const [focus, setFocus] = useState<HelpPanelFocus | null>(null);
   const [overlayActive, setOverlayActive] = useState(false);
 
   const openPanel = useCallback((sectionId?: string) => {
@@ -252,6 +254,19 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [currentScreen, currentTab, progressReady, overlayActive, panelOpen, queryClient, runSteps]);
 
+  // A search result on another screen: go there (with its tab) and keep the
+  // panel open on that section once the article loads.
+  const navigate = useNavigate();
+  const openElsewhere = useCallback(
+    (entry: SearchEntry) => {
+      if (!entry.route) return;
+      const href = entry.tab ? `${entry.route}#${entry.tab}` : entry.route;
+      void navigate({ href });
+      setFocus({ target: entry.sectionId, nonce: Date.now(), route: entry.route });
+    },
+    [navigate],
+  );
+
   const showAnchor = useCallback((anchor: string) => {
     setPanelOpen(false);
     window.setTimeout(() => {
@@ -286,6 +301,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
             onAutoToursOffChange={(off) => writeProgress(AUTO_TOURS_OFF_KEY, off ? "off" : null)}
             onStartTour={() => startTour()}
             onShowAnchor={showAnchor}
+            onOpenElsewhere={openElsewhere}
           />
         </Suspense>
       ) : null}

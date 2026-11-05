@@ -5,7 +5,10 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({}),
 }));
 vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
-vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/" }));
+vi.mock("@tanstack/react-router", () => ({
+  useRouterState: () => "/",
+  useNavigate: () => () => {},
+}));
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("@/lib/help-progress.functions", () => ({
   getHelpProgress: () => Promise.resolve({ progress: {} }),
