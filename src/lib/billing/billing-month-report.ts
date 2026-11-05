@@ -9,11 +9,15 @@
 //   receitaLiquida  = receitaBruta − custoFornecedor − taxaPixReais
 //   margemPct       = receitaLiquida / receitaBruta × 100, null when receitaBruta is 0
 //                      (avoids a division by zero)
-//   custoFornecedor = shortBrasil.amount + infobip.amount, each the sum over that
-//                      provider's ledger rows of sign × units × provider_unit_cost
+//   custoFornecedor = Σ provider_cost over every item of the house, where each
+//                      item's provider_cost is Σ sign × units × provider_unit_cost
 //                      (sign +1 for usage_reservation, −1 for usage_refund; a null
 //                      provider_unit_cost counts as 0 in the amount, but its units
-//                      are tracked in missingCostUnits so the gap is visible)
+//                      are tracked in missing_cost_units so the gap is visible)
+//   shortBrasil     = item sms; infobip = items voice_30s + email
+//
+// The month's wallet usage arrives already aggregated per house × item
+// (MonthUsageRow, from billing_month_usage — see billing-month-data.server.ts).
 
 export type MonthTenant = {
   id: string;
@@ -23,13 +27,17 @@ export type MonthTenant = {
   exempt: boolean;
 };
 
-export type MonthLedgerRow = {
+/** One house × item of the month's usage_reservation/usage_refund wallet_ledger rows. */
+export type MonthUsageRow = {
   tenant_id: string;
   item: string | null;
   units: number;
-  amount: number;
-  provider_unit_cost: number | null;
-  entry_type: string;
+  /** −Σ amount: what the house was charged for this item (the CSV's consumo). */
+  sale_amount: number;
+  /** Σ sign × units × provider_unit_cost, over rows with a provider_unit_cost. */
+  provider_cost: number;
+  /** Σ sign × units, over rows whose provider_unit_cost is null. */
+  missing_cost_units: number;
 };
 
 export type MonthData = {
@@ -37,7 +45,7 @@ export type MonthData = {
   tenants: MonthTenant[];
   invoicesPaid: Array<{ tenant_id: string; paid_amount_cents: number }>;
   topups: Array<{ tenant_id: string; paid_amount_cents: number }>;
-  ledger: MonthLedgerRow[];
+  usage: MonthUsageRow[];
   pixFees: Array<{ tenant_id: string; fee_cents: number }>;
 };
 
@@ -58,7 +66,7 @@ export type MonthHouseRow = {
   consumoEmail: number;
   shortBrasil: ProviderCost;
   infobip: ProviderCost;
-  custoFornecedor: number; // = shortBrasil.amount + infobip.amount
+  custoFornecedor: number; // = Σ provider_cost of every item (shortBrasil + infobip for sms/voice/e-mail)
   taxaPixReais: number;
   receitaBruta: number;
   receitaLiquida: number;
@@ -74,11 +82,6 @@ function sumCentsBy<T>(
   matchKey: (row: T) => string,
 ): number {
   return rows.filter((row) => matchKey(row) === tenantId).reduce((acc, row) => acc + pick(row), 0);
-}
-
-/** sms ledger rows feed Short Brasil's cost; voice_30s/email rows feed Infobip's. */
-function providerFor(item: string | null): "shortBrasil" | "infobip" {
-  return item === "sms" ? "shortBrasil" : "infobip";
 }
 
 function emptyProviderCost(): ProviderCost {
@@ -98,29 +101,24 @@ function buildRow(tenant: MonthTenant, data: MonthData): MonthHouseRow {
     0,
   );
 
-  const ledgerForTenant = data.ledger.filter((r) => r.tenant_id === tenant.id);
+  const usageForTenant = data.usage.filter((r) => r.tenant_id === tenant.id);
+  const usageOf = (items: string[]) => usageForTenant.filter((r) => items.includes(r.item ?? ""));
+  const saleOf = (item: string) => usageOf([item]).reduce((acc, r) => acc + r.sale_amount, 0);
+  const providerCostOf = (items: string[]): ProviderCost =>
+    usageOf(items).reduce(
+      (acc, r) => ({
+        amount: acc.amount + r.provider_cost,
+        missingCostUnits: acc.missingCostUnits + r.missing_cost_units,
+      }),
+      emptyProviderCost(),
+    );
 
-  const consumoByItem = (item: string) =>
-    -ledgerForTenant
-      .filter((r) => r.item === item)
-      .reduce((acc, r) => acc + Number(r.amount ?? 0), 0);
+  const consumoSms = saleOf("sms");
+  const consumoVoz = saleOf("voice_30s");
+  const consumoEmail = saleOf("email");
 
-  const consumoSms = consumoByItem("sms");
-  const consumoVoz = consumoByItem("voice_30s");
-  const consumoEmail = consumoByItem("email");
-
-  const shortBrasil = emptyProviderCost();
-  const infobip = emptyProviderCost();
-  for (const row of ledgerForTenant) {
-    const bucket = providerFor(row.item) === "shortBrasil" ? shortBrasil : infobip;
-    const sign = row.entry_type === "usage_reservation" ? 1 : -1;
-    const units = Number(row.units ?? 0);
-    if (row.provider_unit_cost == null) {
-      bucket.missingCostUnits += units;
-    } else {
-      bucket.amount += sign * units * Number(row.provider_unit_cost);
-    }
-  }
+  const shortBrasil = providerCostOf(["sms"]);
+  const infobip = providerCostOf(["voice_30s", "email"]);
 
   const taxaPixCents = sumCentsBy(
     data.pixFees,
@@ -132,7 +130,7 @@ function buildRow(tenant: MonthTenant, data: MonthData): MonthHouseRow {
   const mensalidadeReais = mensalidadeCents / 100;
   const topupReais = topupCents / 100;
   const taxaPixReais = taxaPixCents / 100;
-  const custoFornecedor = shortBrasil.amount + infobip.amount;
+  const custoFornecedor = usageForTenant.reduce((acc, r) => acc + r.provider_cost, 0);
   const receitaBruta = mensalidadeReais + consumoSms + consumoVoz + consumoEmail;
   const receitaLiquida = receitaBruta - custoFornecedor - taxaPixReais;
   const margemPct = receitaBruta !== 0 ? (receitaLiquida / receitaBruta) * 100 : null;

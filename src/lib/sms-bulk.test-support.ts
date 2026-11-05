@@ -229,6 +229,17 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
 
   // Read-only RPCs emulated over the in-memory tables, unless a test overrides them.
   const builtinRpcs: Record<string, (args: Row) => Result> = {
+    // public.billing_month_usage (20261203100000) is not "applied" in the fake by
+    // default: reply like PostgREST does for a missing function, so loadMonthData
+    // takes its paged wallet_ledger fallback. Tests override it with onRpc.
+    billing_month_usage: () => ({
+      data: null,
+      error: {
+        code: "PGRST202",
+        message:
+          "Could not find the function public.billing_month_usage(_month) in the schema cache",
+      },
+    }),
     // public.shortio_sync_recent_links: active links of the house created since
     // p_since, least recently synced first (rows without created_at count as recent).
     shortio_sync_recent_links: (args) => {
