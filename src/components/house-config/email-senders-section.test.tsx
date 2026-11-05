@@ -18,6 +18,12 @@ vi.mock("@/lib/house-config.functions", () => ({
   removeEmailSenderForHouse: vi.fn(),
 }));
 vi.mock("@/components/system-dialog-host", () => ({ requestConfirmation: vi.fn() }));
+// Term pulls in HelpProvider's chain (shell nav, active tenant, ...) through
+// useHelp() — out of scope for this pure component test, so it's replaced
+// with a passthrough, the same way every other external dependency here is.
+vi.mock("@/components/help/term", () => ({
+  Term: ({ children }: { children?: ReactNode }) => <>{children}</>,
+}));
 vi.mock("@/components/ui/select", () => {
   const Pass = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   return {

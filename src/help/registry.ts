@@ -11,7 +11,9 @@ import type { HelpScreen } from "./types";
  * remove the matching route from `PENDING_ROUTES` (coverage-config.ts) as
  * each article ships.
  */
-export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpScreen }>> = {};
+export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpScreen }>> = {
+  "/configuracoes/casa": () => import("./screens/configuracoes-casa"),
+};
 
 let allScreens: Promise<HelpScreen[]> | null = null;
 

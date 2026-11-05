@@ -23,6 +23,8 @@ import { DataCard } from "@/components/ui-premium";
 import { Badge } from "@/components/ui/badge";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import {
   getHouseConfig,
@@ -130,7 +132,7 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
 
   const content = (
     <div className="space-y-6">
-      <div className="space-y-2">
+      <div className="space-y-2" {...tourAnchor("casa.remetente.list")}>
         {senders.length === 0 && (
           <p className="text-sm text-muted-foreground">Nenhum remetente cadastrado ainda.</p>
         )}
@@ -139,12 +141,13 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
             type="button"
             onClick={focusSenderForm}
             className="w-full rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3 text-left text-sm text-foreground transition-colors hover:bg-primary/10"
+            {...tourAnchor("casa.remetente.hint")}
           >
             Domínio verificado. Agora crie um remetente para enviar campanhas e jornadas por
             e-mail.
           </button>
         )}
-        {senders.map((s) => (
+        {senders.map((s, index) => (
           <div
             key={s.id}
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/40 bg-background/30 p-3"
@@ -173,6 +176,7 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
                         remove: remove.mutate,
                       })
                     }
+                    {...(index === 0 ? tourAnchor("casa.remetente.remove") : {})}
                   >
                     Remover
                   </Button>
@@ -189,7 +193,7 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
             <div>
               <Label>Domínio de e-mail</Label>
               <Select value={domainId} onValueChange={setDomainId}>
-                <SelectTrigger>
+                <SelectTrigger {...tourAnchor("casa.remetente.domain")}>
                   <SelectValue placeholder="Selecione um domínio" />
                 </SelectTrigger>
                 <SelectContent>
@@ -210,6 +214,7 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
                   onChange={(e) => setLocalPart(e.target.value)}
                   placeholder="promo"
                   className="max-w-[140px]"
+                  {...tourAnchor("casa.remetente.local-part")}
                 />
                 <span className="text-sm text-muted-foreground">
                   @{selectedDomain?.hostname ?? "..."}
@@ -217,11 +222,14 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
               </div>
             </div>
             <div>
-              <Label>Nome do remetente</Label>
+              <Label>
+                Nome do <Term id="remetente">remetente</Term>
+              </Label>
               <Input
                 value={fromName}
                 onChange={(e) => setFromName(e.target.value)}
                 placeholder="Promo SuaCasa"
+                {...tourAnchor("casa.remetente.from-name")}
               />
             </div>
             <div>
@@ -231,11 +239,12 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
                 value={replyTo}
                 onChange={(e) => setReplyTo(e.target.value)}
                 placeholder="atendimento@suacasa.bet.br"
+                {...tourAnchor("casa.remetente.reply-to")}
               />
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Switch checked={isDefault} onCheckedChange={setIsDefault} />
+            <Switch checked={isDefault} onCheckedChange={setIsDefault} {...tourAnchor("casa.remetente.default")} />
             <Label>Remetente padrão</Label>
           </div>
           <DemoDisabledTooltip active={isDemo}>
@@ -244,6 +253,7 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
               size="sm"
               disabled={isDemo || !domainId || !localPart.trim() || !fromName.trim() || save.isPending}
               onClick={() => save.mutate()}
+              {...tourAnchor("casa.remetente.save")}
             >
               {save.isPending ? "Salvando…" : "Salvar remetente"}
             </Button>
