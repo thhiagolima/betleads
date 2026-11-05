@@ -187,7 +187,13 @@ async function rpcAudience(
   tenantId: string,
   criteria: SmsAudienceCriteria,
   affiliateIds?: string[] | null,
-): Promise<ResolvedSmsAudience> {
+  /**
+   * Público com ids de jogadores (campanha de push): pedido fora do critério
+   * normalizado, nunca pelo navegador — passar sempre `false`/ausente mantém
+   * o payload do SMS idêntico ao de hoje.
+   */
+  includePlayerIds?: boolean,
+): Promise<ResolvedSmsAudience & { playerIds?: string[] }> {
   if (
     isSelectionAudience(criteria) ||
     criteria.playerIds !== undefined ||
@@ -197,9 +203,13 @@ async function rpcAudience(
     throw new Error("Público de seleção não pode ser calculado por regras.");
   // `affiliateIds` nunca vem do navegador (o normalizador descarta a chave):
   // só o escopo do expert restrito, montado no servidor, o adiciona.
+  const sentCriteria: Record<string, unknown> = affiliateIds
+    ? { ...criteria, affiliateIds }
+    : { ...criteria };
+  if (includePlayerIds) sentCriteria.includePlayerIds = true;
   const { data, error } = await db.rpc("resolve_sms_audience_v2", {
     _tenant: tenantId,
-    _criteria: affiliateIds ? { ...criteria, affiliateIds } : criteria,
+    _criteria: sentCriteria,
   });
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Sem acesso aos jogadores desta conta.");
@@ -211,7 +221,7 @@ async function rpcAudience(
   // e devolveria a casa inteira. Falha fechado em vez de enviar para todos.
   if (criteria.deadLeads && (data as { deadLeadsFilter?: unknown }).deadLeadsFilter !== true)
     throw new Error("O público Leads mortos ainda não está disponível nesta conta.");
-  return data as ResolvedSmsAudience;
+  return data as ResolvedSmsAudience & { playerIds?: string[] };
 }
 
 /**
@@ -224,7 +234,9 @@ export async function resolvePlayerIdsAudience(
   playerIds: readonly string[],
   /** Expert restrito: só jogadores com estes affiliate_id (sem espaços). */
   affiliateIds?: string[] | null,
-): Promise<ResolvedSmsAudience> {
+  /** Público com ids de jogadores (campanha de push): ver `rpcAudience`. */
+  includePlayerIds?: boolean,
+): Promise<ResolvedSmsAudience & { playerIds?: string[] }> {
   const loaded = await loadTenantPlayersByIds<SelectedPlayer & { affiliate_id?: string | null }>(
     db,
     tenantId,
@@ -239,7 +251,7 @@ export async function resolvePlayerIdsAudience(
     new Set(players.map((p) => phoneDigits(p.telefone)).filter((phone) => phone.length >= 10)),
   ).sort();
   const emailPlayerIds = players.filter((p) => (p.email ?? "").trim() !== "").map((p) => p.id);
-  return {
+  const result: ResolvedSmsAudience & { playerIds?: string[] } = {
     phones,
     total: players.length,
     recipientTotal: phones.length,
@@ -248,6 +260,8 @@ export async function resolvePlayerIdsAudience(
     facets: EMPTY_FACETS,
     settings: DEFAULT_SETTINGS,
   };
+  if (includePlayerIds) result.playerIds = players.map((p) => p.id);
+  return result;
 }
 
 /**
@@ -261,13 +275,21 @@ export async function resolveAudienceForTenant(
   rawCriteria: unknown,
   /** Área do Expert: escopo do dono, sempre recarregado do banco pelo chamador. */
   expertScope?: ExpertAudienceScope,
-): Promise<ResolvedSmsAudience> {
+  /**
+   * `includePlayerIds`: devolve os ids de jogadores casados pelo critério
+   * (campanha de push mapeia para inscrições). Ausente/false mantém o
+   * resultado idêntico ao de hoje — o caminho do SMS nunca passa isto.
+   */
+  opts?: { includePlayerIds?: boolean },
+): Promise<ResolvedSmsAudience & { playerIds?: string[] }> {
   const criteria = normalizeOrPermanent(rawCriteria, "O público desta campanha está inválido");
   const affiliateIds = expertScope ? expertScope.affiliateIds : null;
+  const includePlayerIds = opts?.includePlayerIds ?? false;
   if (!isSelectionAudience(criteria)) {
     // Restrito sem afiliado nenhum: ninguém, sem consultar.
-    if (affiliateIds && affiliateIds.length === 0) return resolvePlayerIdsAudience(db, tenantId, []);
-    return rpcAudience(db, tenantId, criteria, affiliateIds);
+    if (affiliateIds && affiliateIds.length === 0)
+      return resolvePlayerIdsAudience(db, tenantId, [], affiliateIds, includePlayerIds);
+    return rpcAudience(db, tenantId, criteria, affiliateIds, includePlayerIds);
   }
   const playerIds =
     criteria.playerIds ??
@@ -279,7 +301,7 @@ export async function resolveAudienceForTenant(
         ? { expertId: expertScope.expertId, allowHouse: expertScope.affiliateIds === null }
         : undefined,
     ));
-  return resolvePlayerIdsAudience(db, tenantId, playerIds, affiliateIds);
+  return resolvePlayerIdsAudience(db, tenantId, playerIds, affiliateIds, includePlayerIds);
 }
 
 /**
