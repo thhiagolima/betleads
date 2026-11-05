@@ -15,7 +15,7 @@ const screen: HelpScreen = {
   purpose:
     "Monta uma jornada automática: o gatilho que coloca o jogador dentro, quem pode entrar, as etapas de espera e mensagem, quando ela termina para o jogador e os limites que protegem a operação.",
   roles: ["admin", "gestor", "member"],
-  terms: ["gatilho", "reentrada", "grupo-de-controle", "encurtador", "ftd", "familia-de-jornadas", "prioridade-de-jornada", "leads-mortos"],
+  terms: ["gatilho", "reentrada", "grupo-de-controle", "encurtador", "ftd", "familia-de-jornadas", "prioridade-de-jornada"],
   sections: [
     // ---------------------------------------------------------------
     // Cabeçalho e barra de ações
@@ -427,7 +427,7 @@ const screen: HelpScreen = {
       items: [
         {
           label: "Aviso de conflito",
-          what: 'Lista de avisos (aparece só quando há algum): por exemplo "A faixa desta jornada se sobrepõe a \'<nome>\' (...): o mesmo jogador estaria nas duas.", "Já existe uma jornada ativa para este nível: \'<nome>\'." ou "\'<nome>\' usa o mesmo gatilho com a mesma prioridade: quando as duas tiverem mensagem no mesmo momento, não há uma vencedora definida."',
+          what: 'Lista de avisos (aparece só quando há algum): por exemplo "A faixa desta jornada se sobrepõe a \'<nome>\' (<faixa>): o mesmo jogador estaria nas duas. Defina a saída por tempo para encerrar onde a outra começa.", "Já existe uma jornada ativa para este nível: \'<nome>\'." ou "\'<nome>\' usa o mesmo gatilho com a mesma prioridade: quando as duas tiverem mensagem no mesmo momento, não há uma vencedora definida."',
           notes: "São avisos, não bloqueios: a jornada pode ser salva e ativada mesmo com um aviso de conflito.",
         },
         {
@@ -460,13 +460,14 @@ const screen: HelpScreen = {
         {
           label: 'Diálogo "Pausar [nome]?"',
           what: 'Mostra quantos jogadores estão na jornada agora. Com pelo menos um jogador dentro, oferece a escolha "Manter os jogadores" (ao ativar de novo, cada um continua de onde parou) ou "Encerrar a participação de todos" (todos saem agora; ao ativar de novo, só entra quem cumprir o gatilho de novo). Botões "Cancelar" e "Pausar" (ou "Pausar e encerrar", escolhendo a segunda opção).',
-          notes: 'Sem ninguém na jornada, mostra só "Ninguém está nesta jornada agora. Enquanto ela estiver pausada, ninguém novo entra." e não oferece a escolha.',
+          notes:
+            'Sem ninguém na jornada, mostra só "Ninguém está nesta jornada agora. Enquanto ela estiver pausada, ninguém novo entra." e não oferece a escolha. Ao confirmar, aparece um aviso de sucesso: "Jornada pausada" (manteve os jogadores) ou "Jornada pausada · N jogador(es) saíram da jornada" (encerrou a participação de todos).',
         },
         {
           label: 'Diálogo "Ativar [nome]"',
           what: 'Pergunta "Quem pode entrar nesta jornada?": "Só casos novos, a partir de agora" (ninguém da base atual entra; quem já estava sai na próxima verificação) ou "Incluir a base atual" (jogadores que já cumprem o gatilho entram nos próximos minutos, com uma estimativa de quantos e do custo do 1º envio e da jornada completa). Botões "Cancelar" e "Ativar".',
           notes:
-            'Só aparece para gatilhos que fazem sentido perguntar isso (todos, exceto "Mudou de nível" e "Entrada manual ou API") — os outros ativam direto, sem este diálogo. A estimativa mostra "Calculando o impacto…" enquanto carrega.',
+            'Só aparece para gatilhos que fazem sentido perguntar isso (todos, exceto "Mudou de nível" e "Entrada manual ou API") — os outros ativam direto, sem este diálogo. A estimativa mostra "Calculando o impacto…" enquanto carrega. Ao confirmar, aparece o aviso de sucesso "Jornada ativada".',
         },
         {
           label: 'Confirmação "Ativar sem as alterações?"',
@@ -506,6 +507,12 @@ const screen: HelpScreen = {
       title: "Configure e verifique um domínio de e-mail da casa para enviar e-mails.",
       what: "Aviso dentro de uma etapa de e-mail, quando a casa ainda não tem nenhum remetente de e-mail verificado.",
       action: 'Clique em "Configurar" (dentro do aviso) para ir a Configurações → Casa → E-mail.',
+    },
+    {
+      id: "opcoes-de-envio-erro",
+      title: "Não foi possível carregar as opções de envio.",
+      what: 'Aviso dentro de uma etapa de SMS ou e-mail, quando a busca dos domínios do encurtador e dos remetentes falhou (erro de rede ou do servidor) — aparece no lugar dos avisos de "domínio não verificado", porque enquanto a busca não funcionar o editor não sabe se há ou não um domínio/remetente verificado.',
+      action: "Atualize a página para tentar carregar de novo; a etapa pode ser salva mesmo assim, mas confira o remetente e o domínio antes de ativar a jornada.",
     },
     {
       id: "erros-ao-salvar",

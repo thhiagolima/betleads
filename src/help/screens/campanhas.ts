@@ -476,6 +476,12 @@ const screen: HelpScreen = {
         "Seu domínio personalizado ainda não foi verificado — os links estão saindo pelo encurtador padrão do CRM.",
       what: "Aviso no compositor quando a casa não tem domínio próprio do encurtador verificado. O envio continua funcionando; só o domínio do link encurtado muda.",
     },
+    {
+      id: "opcoes-de-envio-erro",
+      title: "Não foi possível carregar as opções de envio.",
+      what: 'Aviso no compositor, na seção Remetente ou Encurtador, quando a busca dos domínios do encurtador e dos remetentes falhou (erro de rede ou do servidor) — aparece no lugar dos avisos de "domínio não verificado"/"remetente bloqueado", porque enquanto a busca não funcionar o compositor não sabe se há ou não um domínio/remetente verificado.',
+      action: "Atualize a página para tentar carregar de novo antes de enviar.",
+    },
   ],
 
   tours: {
