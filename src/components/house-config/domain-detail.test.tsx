@@ -159,11 +159,43 @@ describe("DomainDetail", () => {
     expect(html).not.toContain("Próxima verificação automática");
   });
 
-  it("pending + canEdit: shows the disabled 'Definir como padrão' tooltip explaining why", () => {
+  it("pending + canEdit: the disabled 'Definir como padrão' button is described by a sr-only reason", () => {
     const html = renderToStaticMarkup(
       <DomainDetail domain={makeDomain({ status: "pending" })} canEdit />,
     );
 
-    expect(html).toContain("Disponível depois que o domínio for verificado");
+    // The tooltip itself renders via a real Portal (same pattern as
+    // DemoDisabledTooltip), so it never appears in renderToStaticMarkup
+    // output — this is why the accessible reason is also exposed as a
+    // sr-only span linked via aria-describedby, which IS checkable here.
+    const buttonAttrs = findButtonOpenTag(html, "Definir como padrão");
+    const describedByMatch = buttonAttrs.match(/aria-describedby="([^"]+)"/);
+    expect(describedByMatch).not.toBeNull();
+    const describedById = describedByMatch![1];
+
+    const reasonRe = new RegExp(
+      `<span[^>]*id="${describedById}"[^>]*class="[^"]*sr-only[^"]*"[^>]*>Disponível depois que o domínio for verificado</span>`,
+    );
+    expect(html).toMatch(reasonRe);
+  });
+
+  it("verified + canBeDefault: 'Definir como padrão' has no not-verified reason wired up", () => {
+    const html = renderToStaticMarkup(
+      <DomainDetail domain={makeDomain({ status: "verified" })} canEdit />,
+    );
+
+    const buttonAttrs = findButtonOpenTag(html, "Definir como padrão");
+    expect(buttonAttrs).not.toContain("aria-describedby");
+    expect(html).not.toContain("Disponível depois que o domínio for verificado");
+  });
+
+  it("demo tenant: the not-verified reason is suppressed (the demo tooltip takes precedence)", () => {
+    const html = renderToStaticMarkup(
+      <DomainDetail domain={makeDomain({ status: "pending" })} canEdit isDemo />,
+    );
+
+    const buttonAttrs = findButtonOpenTag(html, "Definir como padrão");
+    expect(buttonAttrs).not.toContain("aria-describedby");
+    expect(html).not.toContain("Disponível depois que o domínio for verificado");
   });
 });

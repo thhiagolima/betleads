@@ -4,9 +4,7 @@
 // DomainsSection owns the mutations, confirmation dialog (with
 // getHouseDomainUsages) and the "send instructions" dialog; this component
 // only renders state and forwards clicks.
-import type { ReactNode } from "react";
 import { Copy } from "lucide-react";
-import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +42,14 @@ const STATUS_BADGE_VARIANT: Record<DomainStatus, "secondary" | "default" | "dest
   failed: "destructive",
 };
 
+/** Why "Definir como padrão" is disabled while the domain isn't verified
+ * yet — shown both as a `DemoDisabledTooltip`-style hover/focus tooltip
+ * (real `Portal`, same pattern as the demo-blocked tooltip) and as a
+ * screen-reader-only reason linked via `aria-describedby`, so the control's
+ * disabled reason doesn't depend on hover/focus for either sighted or
+ * assistive-tech users, and is checkable in a static (non-jsdom) render. */
+const NOT_VERIFIED_REASON_TEXT = "Disponível depois que o domínio for verificado";
+
 function formatLastChecked(lastCheckedAt: string | null): string {
   if (!lastCheckedAt) return "Nunca verificado";
   return new Date(lastCheckedAt).toLocaleString("pt-BR");
@@ -56,38 +62,6 @@ function dnsRecordStatusLabel(verified: boolean | null): string {
   if (verified === true) return "ok";
   if (verified === false) return "pendente";
   return "—";
-}
-
-/**
- * Explains, via a tooltip, why "Definir como padrão" is disabled because the
- * domain isn't verified yet — same focusable-wrapper-span pattern as
- * `DemoDisabledTooltip`, but rendered WITHOUT `TooltipPrimitive.Portal` and
- * with `forceMount`: a portaled node never appears in `renderToStaticMarkup`
- * output (React portals need a real DOM target), so it couldn't be covered
- * by the component test otherwise. `data-[state=closed]:invisible` keeps it
- * out of sight (and out of the way of pointer events) until hovered/focused.
- */
-function NotVerifiedTooltip({ show, children }: { show: boolean; children: ReactNode }) {
-  if (!show) return <>{children}</>;
-
-  return (
-    <TooltipPrimitive.Provider delayDuration={150}>
-      <TooltipPrimitive.Root>
-        <TooltipPrimitive.Trigger asChild>
-          <span tabIndex={0} className="inline-flex">
-            {children}
-          </span>
-        </TooltipPrimitive.Trigger>
-        <TooltipPrimitive.Content
-          forceMount
-          sideOffset={4}
-          className="z-50 overflow-hidden rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground data-[state=closed]:invisible data-[state=closed]:opacity-0 animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
-        >
-          Disponível depois que o domínio for verificado
-        </TooltipPrimitive.Content>
-      </TooltipPrimitive.Root>
-    </TooltipPrimitive.Provider>
-  );
 }
 
 export function DomainDetail({
@@ -115,6 +89,11 @@ export function DomainDetail({
   onRemove?: () => void;
 }) {
   const canBeDefault = domain.status === "verified" && !domain.is_default;
+  // When the domain isn't verified (and the tenant isn't demo — the demo
+  // tooltip takes precedence over this reason), "Definir como padrão" is
+  // disabled because there's nothing to promote yet.
+  const notVerifiedYet = !isDemo && domain.status !== "verified";
+  const setDefaultReasonId = `domain-${domain.id}-set-default-reason`;
   const nextCheckAt = nextDomainCheckAt(
     { status: domain.status, created_at: domain.created_at, last_checked_at: domain.last_checked_at },
     new Date(),
@@ -211,19 +190,25 @@ export function DomainDetail({
             </Button>
           </DemoDisabledTooltip>
           <DemoDisabledTooltip active={isDemo}>
-            <NotVerifiedTooltip show={!isDemo && domain.status !== "verified"}>
+            <DemoDisabledTooltip active={notVerifiedYet} text={NOT_VERIFIED_REASON_TEXT}>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={onSetDefault}
                 disabled={isDemo || !canBeDefault}
+                aria-describedby={notVerifiedYet ? setDefaultReasonId : undefined}
                 {...tourAnchor("casa.dominio.set-default")}
               >
                 Definir como padrão
               </Button>
-            </NotVerifiedTooltip>
+            </DemoDisabledTooltip>
           </DemoDisabledTooltip>
+          {notVerifiedYet && (
+            <span id={setDefaultReasonId} className="sr-only">
+              {NOT_VERIFIED_REASON_TEXT}
+            </span>
+          )}
           <DemoDisabledTooltip active={isDemo}>
             <Button
               type="button"
