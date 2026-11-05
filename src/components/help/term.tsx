@@ -1,5 +1,12 @@
 import { Info } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { GLOSSARY } from "@/help/glossary";
@@ -24,6 +31,15 @@ export function Term({ id, children }: { id: string; children: ReactNode }) {
   const { openPanel } = useHelp();
   const entry = GLOSSARY.find((candidate) => candidate.id === id);
   const closeTimer = useRef<number | null>(null);
+  // Set in handlePointerDown, read (and cleared) in handleClick: tells the
+  // click that immediately follows a pointerdown (mouse/touch) that
+  // handlePointerDown already decided the open state via nextTermOpen, so
+  // Radix's own trigger click handler (`context.onOpenToggle`, composed
+  // after ours — see @radix-ui/react-popover) must be blocked. A click with
+  // no preceding pointerdown is keyboard activation (Enter/Space), which
+  // has no pointerdown at all — that one is left alone so Radix's default
+  // toggle keeps working for keyboard users.
+  const pointerHandledRef = useRef(false);
 
   const clearCloseTimer = () => {
     if (closeTimer.current !== null) {
@@ -46,12 +62,18 @@ export function Term({ id, children }: { id: string; children: ReactNode }) {
       setOpen((current) => nextTermOpen(current, { type: "hover-leave" }));
     }, HOVER_CLOSE_DELAY_MS);
   };
-  const handlePointerDown = (event: PointerEvent) => {
+  const handlePointerDown = (event: ReactPointerEvent) => {
     clearCloseTimer();
     const pointerType = event.pointerType === "touch" || event.pointerType === "pen"
       ? event.pointerType
       : "mouse";
+    pointerHandledRef.current = true;
     setOpen((current) => nextTermOpen(current, { type: "pointerdown", pointerType }));
+  };
+  const handleClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (!pointerHandledRef.current) return; // keyboard activation: let Radix toggle
+    pointerHandledRef.current = false;
+    event.preventDefault();
   };
 
   if (!entry) return <>{children}</>;
@@ -67,6 +89,7 @@ export function Term({ id, children }: { id: string; children: ReactNode }) {
             onMouseEnter={handleHoverEnter}
             onMouseLeave={scheduleHoverLeave}
             onPointerDown={handlePointerDown}
+            onClick={handleClick}
             className="inline-flex align-middle text-muted-foreground hover:text-foreground"
           >
             <Info className="h-3.5 w-3.5" aria-hidden="true" />
