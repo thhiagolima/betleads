@@ -95,14 +95,26 @@ function MetricCell({
 export function HouseHealthTable({
   houses,
   quietHouses,
-  window,
+  range,
+  housesUnavailable,
+  recoveryUnavailable,
   onOpenHouse,
 }: {
   houses: HouseHealthRow[];
   quietHouses: PlatformHealth["quietHouses"];
-  window: PlatformHealth["window"];
+  range: PlatformHealth["window"];
+  housesUnavailable: boolean;
+  recoveryUnavailable: boolean;
   onOpenHouse: (tenantId: string) => void;
 }) {
+  if (housesUnavailable) {
+    return (
+      <p className="text-sm text-muted-foreground" role="status">
+        Não foi possível carregar os números das casas.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <div className="overflow-x-auto">
@@ -170,13 +182,22 @@ export function HouseHealthTable({
                   format={fmtPtsDelta}
                   level={row.level}
                 />
-                <MetricCell
-                  value={formatMoney(row.current.recovered, row.moeda, { decimals: 0 })}
-                  delta={row.deltas.recoveredPct}
-                  threshold={HEALTH_THRESHOLDS.yellowPct}
-                  format={fmtPctDelta}
-                  level={row.level}
-                />
+                {recoveryUnavailable ? (
+                  <TableCell
+                    className="whitespace-nowrap text-right text-muted-foreground"
+                    title="Não foi possível carregar a recuperação"
+                  >
+                    —
+                  </TableCell>
+                ) : (
+                  <MetricCell
+                    value={formatMoney(row.current.recovered, row.moeda, { decimals: 0 })}
+                    delta={row.deltas.recoveredPct}
+                    threshold={HEALTH_THRESHOLDS.yellowPct}
+                    format={fmtPctDelta}
+                    level={row.level}
+                  />
+                )}
               </TableRow>
             ))}
           </TableBody>
@@ -189,7 +210,7 @@ export function HouseHealthTable({
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        Últimos 7 dias até {ddmm(window.to)} contra a média das 4 semanas anteriores. Casas demo
+        Últimos 7 dias até {ddmm(range.to)} contra a média das 4 semanas anteriores. Casas demo
         fora.
       </p>
     </div>

@@ -1,34 +1,44 @@
 // Super-admin "Saúde" tab (Task 4, spec §5.2): the technical-alerts strip on
 // top of the house table. One row per `PlatformAlert`, severity tag first,
 // the whole row clickable (`onOpen`) so it leads straight to the screen that
-// fixes it. With no alerts the strip collapses to a single green line.
+// fixes it — unless the alert has no such screen (`href` null), then the row
+// is plain text. With no alerts the strip collapses to a single green line.
 import type { PlatformAlert } from "@/lib/platform-health/alert-rules";
 import { cn } from "@/lib/utils";
 
-function formatCheckedAt(checkedAt: string): string {
-  return new Date(checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+const TIME_ZONE = "America/Sao_Paulo";
+
+/** "HH:MM" of an ISO instant, in São Paulo. */
+export function formatCheckedAt(checkedAt: string): string {
+  return new Date(checkedAt).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: TIME_ZONE,
+  });
 }
 
 /**
- * "há 3 h" while under 24 h (or "há X min" under one hour), else "desde
- * DD/MM". Uses UTC fields so the result does not depend on the runtime's
- * local timezone.
+ * "há X min" under one hour, "há N h" (whole hours elapsed, floored) under
+ * 24 h, else "desde DD/MM" in São Paulo.
  */
-function formatSince(since: string | null, now: Date): string {
+export function formatSince(since: string | null, now: Date): string {
   if (!since) return "";
   const date = new Date(since);
   const diffMs = now.getTime() - date.getTime();
   const diffHours = diffMs / 3_600_000;
   if (diffHours < 1) {
-    const minutes = Math.max(1, Math.round(diffMs / 60_000));
+    const minutes = Math.max(1, Math.floor(diffMs / 60_000));
     return `há ${minutes} min`;
   }
   if (diffHours < 24) {
-    return `há ${Math.round(diffHours)} h`;
+    return `há ${Math.floor(diffHours)} h`;
   }
-  const dd = String(date.getUTCDate()).padStart(2, "0");
-  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-  return `desde ${dd}/${mm}`;
+  const ddmm = date.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: TIME_ZONE,
+  });
+  return `desde ${ddmm}`;
 }
 
 function SeverityTag({ severity }: { severity: PlatformAlert["severity"] }) {
@@ -46,6 +56,9 @@ function SeverityTag({ severity }: { severity: PlatformAlert["severity"] }) {
   );
 }
 
+const ROW_CLASS =
+  "flex w-full items-center gap-3 rounded-lg bg-muted/60 px-3 py-2 text-left text-sm";
+
 export function HealthAlertsStrip({
   alerts,
   checkedAt,
@@ -53,7 +66,7 @@ export function HealthAlertsStrip({
 }: {
   alerts: PlatformAlert[];
   checkedAt: string;
-  onOpen: (alert: PlatformAlert) => void;
+  onOpen: (alert: PlatformAlert & { href: string }) => void;
 }) {
   if (alerts.length === 0) {
     return (
@@ -66,20 +79,35 @@ export function HealthAlertsStrip({
   const now = new Date();
   return (
     <div className="space-y-1.5">
-      {alerts.map((alert) => (
-        <button
-          key={alert.key}
-          type="button"
-          onClick={() => onOpen(alert)}
-          className="flex w-full items-center gap-3 rounded-lg bg-muted/60 px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
-        >
-          <SeverityTag severity={alert.severity} />
-          <span className="min-w-0 flex-1 truncate">{alert.message}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatSince(alert.since, now)}
-          </span>
-        </button>
-      ))}
+      {alerts.map((alert) => {
+        const content = (
+          <>
+            <SeverityTag severity={alert.severity} />
+            <span className="min-w-0 flex-1 truncate">{alert.message}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {formatSince(alert.since, now)}
+            </span>
+          </>
+        );
+        const href = alert.href;
+        if (href === null) {
+          return (
+            <div key={alert.key} className={ROW_CLASS}>
+              {content}
+            </div>
+          );
+        }
+        return (
+          <button
+            key={alert.key}
+            type="button"
+            onClick={() => onOpen({ ...alert, href })}
+            className={cn(ROW_CLASS, "transition-colors hover:bg-muted")}
+          >
+            {content}
+          </button>
+        );
+      })}
     </div>
   );
 }

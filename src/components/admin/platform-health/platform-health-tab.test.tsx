@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { formatMoney } from "@/lib/currency";
 
@@ -9,6 +9,10 @@ const queryState = {
   isError: false,
 };
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => queryState,
 }));
@@ -17,12 +21,27 @@ vi.mock("@/lib/platform-health/platform-health.functions", () => ({
   adminPlatformHealth: vi.fn(),
 }));
 
-import { PlatformHealthTab } from "./platform-health-tab";
+import { formatSince } from "./health-alerts-strip";
+import { openHref, PlatformHealthTab } from "./platform-health-tab";
 
 function resetQueryState() {
   queryState.data = undefined;
   queryState.isLoading = false;
   queryState.isError = false;
+}
+
+/** checkedAt 12:00 UTC = 09:00 in São Paulo. */
+function healthData(overrides: Record<string, unknown> = {}) {
+  return {
+    checkedAt: "2026-11-04T12:00:00.000Z",
+    window: { from: "2026-10-29", to: "2026-11-04" },
+    alerts: [],
+    houses: [],
+    quietHouses: [],
+    housesUnavailable: false,
+    recoveryUnavailable: false,
+    ...overrides,
+  };
 }
 
 const house = (overrides: Partial<Record<string, unknown>> = {}) => ({
@@ -199,5 +218,124 @@ describe("PlatformHealthTab", () => {
     const html = renderToStaticMarkup(<PlatformHealthTab />);
 
     expect(html).toContain("Não foi possível carregar a saúde das casas.");
+  });
+
+  it("a failed background refetch keeps the last data with a small stale line", () => {
+    resetQueryState();
+    queryState.isError = true;
+    queryState.data = healthData({ houses: [house({ name: "Sorte Alta" })] });
+
+    const html = renderToStaticMarkup(<PlatformHealthTab />);
+
+    expect(html).not.toContain("Não foi possível carregar a saúde das casas.");
+    expect(html).toContain("Sorte Alta");
+    expect(html).toContain("Falha ao atualizar — mostrando dados de 09:00");
+  });
+
+  it("always shows 'verificado às HH:MM' (São Paulo) in the alerts card header", () => {
+    resetQueryState();
+    queryState.data = healthData({
+      alerts: [
+        {
+          key: "provider:shortio",
+          kind: "provider",
+          severity: "warning",
+          message: "Short.io: 25% dos links adiados",
+          tenantId: null,
+          since: null,
+          href: "/admin#canais",
+        },
+      ],
+    });
+
+    const html = renderToStaticMarkup(<PlatformHealthTab />);
+
+    expect(html).toContain("verificado às 09:00");
+    expect(html).not.toContain("Tudo funcionando");
+  });
+
+  it("renders an alert with href null as a non-clickable row", () => {
+    resetQueryState();
+    queryState.data = healthData({
+      alerts: [
+        {
+          key: "source:finance_days",
+          kind: "source",
+          severity: "warning",
+          message: "Não foi possível verificar finance_days",
+          tenantId: null,
+          since: null,
+          href: null,
+        },
+      ],
+    });
+
+    const html = renderToStaticMarkup(<PlatformHealthTab />);
+
+    expect(html).toContain("Não foi possível verificar finance_days");
+    expect(html).not.toContain("<button");
+  });
+
+  it("housesUnavailable shows a load-failure line instead of an empty table", () => {
+    resetQueryState();
+    queryState.data = healthData({ housesUnavailable: true });
+
+    const html = renderToStaticMarkup(<PlatformHealthTab />);
+
+    expect(html).toContain("Não foi possível carregar os números das casas.");
+    expect(html).not.toContain("Recuperação CRM");
+  });
+
+  it("recoveryUnavailable shows — in the recovery cell instead of a value", () => {
+    resetQueryState();
+    queryState.data = healthData({
+      recoveryUnavailable: true,
+      houses: [
+        house({
+          current: { registrations: 100, ftds: 50, recovered: 0, conversion: 50 },
+          deltas: { registrationsPct: 0, ftdsPct: 0, conversionPts: 0, recoveredPct: null },
+        }),
+      ],
+    });
+
+    const html = renderToStaticMarkup(<PlatformHealthTab />);
+
+    expect(html).not.toContain(formatMoney(0, "BRL", { decimals: 0 }));
+  });
+});
+
+describe("formatSince", () => {
+  const now = new Date("2026-11-05T12:00:00.000Z");
+
+  it("floors hours: 23.5 h ago reads 'há 23 h', never 'há 24 h'", () => {
+    const since = new Date(now.getTime() - 23.5 * 3_600_000).toISOString();
+    expect(formatSince(since, now)).toBe("há 23 h");
+  });
+
+  it("formats 'desde DD/MM' in São Paulo (01:00 UTC on 11-03 is 11-02 there)", () => {
+    expect(formatSince("2026-11-03T01:00:00.000Z", now)).toBe("desde 02/11");
+  });
+});
+
+describe("openHref", () => {
+  function stubWindow() {
+    const setItem = vi.fn();
+    const assign = vi.fn();
+    vi.stubGlobal("window", { localStorage: { setItem }, location: { assign } });
+    return { setItem, assign };
+  }
+
+  it("switches the active house for a house screen", () => {
+    const { setItem, assign } = stubWindow();
+    openHref("/webhooks", "t1");
+    expect(setItem).toHaveBeenCalledWith("betleads:active-tenant", "t1");
+    expect(assign).toHaveBeenCalledWith("/webhooks");
+  });
+
+  it("keeps the active house for an /admin screen", () => {
+    const { setItem, assign } = stubWindow();
+    openHref("/admin#saldo", "t1");
+    expect(setItem).not.toHaveBeenCalled();
+    expect(assign).toHaveBeenCalledWith("/admin#saldo");
   });
 });
