@@ -50,7 +50,7 @@ describe("provider_accounts seed", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       provider: "onesignal",
-      label: "OneSignal (padrão)",
+      label: "OneSignal (ambiente)",
       channels: ["webpush"],
       credentials_source: "env",
       status: "active",
