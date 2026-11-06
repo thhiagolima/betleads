@@ -15,6 +15,7 @@ import { AppLayout } from "@/components/app-layout";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthGate } from "@/components/auth-gate";
 import { OnboardingGate } from "@/components/onboarding/onboarding-gate";
+import { ChannelDisabledNoticeGate } from "@/components/channels/channel-disabled-notice-gate";
 import { SystemDialogHost } from "@/components/system-dialog-host";
 import { createClientOnlyFn } from "@tanstack/react-start";
 import { captureClientException } from "@/lib/observability/sentry.client";
@@ -186,7 +187,9 @@ function RootComponent() {
       <AuthGate>
         <AppLayout>
           <OnboardingGate>
-            <Outlet />
+            <ChannelDisabledNoticeGate>
+              <Outlet />
+            </ChannelDisabledNoticeGate>
           </OnboardingGate>
         </AppLayout>
       </AuthGate>
