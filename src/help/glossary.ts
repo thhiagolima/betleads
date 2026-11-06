@@ -217,6 +217,13 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "PIX gerado é o QR Code/código Pix que a casa emitiu para o jogador pagar; PIX pago é quando esse código foi de fato pago e virou depósito. \"PIX pagos\" é a fração dos gerados que foram pagos; \"PIX não pagos\" é quantos ficaram sem pagamento no período.",
   },
+  // --- Jogadores e ficha do jogador (fase 2, Task 2) ---
+  {
+    id: "utm",
+    term: "UTM",
+    short:
+      "Um jeito padrão de marcar de onde veio o clique de um anúncio (meio, campanha, criativo, ID do anúncio). O CRM lê esses parâmetros do link que o jogador clicou e grava na ficha dele.",
+  },
   {
     id: "pp",
     term: "p.p.",

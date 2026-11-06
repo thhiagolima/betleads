@@ -24,6 +24,8 @@ export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpSc
     import("./screens/jornada-editor").then((mod) => ({ default: mod.editScreen })),
   "/jornadas/$journeyId/relatorio": () => import("./screens/jornada-relatorio"),
   "/webhooks": () => import("./screens/webhooks"),
+  "/players": () => import("./screens/jogadores"),
+  "/players/$playerId": () => import("./screens/jogador"),
   onboarding: () => import("./screens/onboarding"),
   shell: () => import("./screens/shell"),
 };

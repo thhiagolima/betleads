@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState, type ReactNode } from "react";
+import { useState, type HTMLAttributes, type ReactNode } from "react";
 import {
   Check,
   Copy,
@@ -41,6 +41,7 @@ import { getPlayerLinkHistory } from "@/lib/shortio.functions";
 import { nextPrecallCopy } from "@/lib/precall-copy";
 import { cn } from "@/lib/utils";
 import { describeEventType } from "@/lib/webhook-events";
+import { tourAnchor } from "@/help/anchor";
 
 export const Route = createFileRoute("/players/$playerId")({
   component: PlayerDetailPage,
@@ -168,6 +169,7 @@ function PlayerDetailPage() {
         actions={
           <>
             <Button
+              {...tourAnchor("jogador.cabecalho.mensagem")}
               variant="outline"
               className={actionClass}
               onClick={() => setMessageOpen(true)}
@@ -178,6 +180,7 @@ function PlayerDetailPage() {
               Mensagem
             </Button>
             <Button
+              {...tourAnchor("jogador.cabecalho.campanha")}
               className={actionClass}
               disabled={campaignBusy}
               onClick={async () => {
@@ -189,7 +192,12 @@ function PlayerDetailPage() {
               <MessageSquareText className="h-4 w-4" />
               Usar na campanha
             </Button>
-            <Button variant="outline" className={actionClass} onClick={() => setHistoryOpen(true)}>
+            <Button
+              {...tourAnchor("jogador.cabecalho.historico")}
+              variant="outline"
+              className={actionClass}
+              onClick={() => setHistoryOpen(true)}
+            >
               <History className="h-4 w-4" />
               Histórico de contatos
             </Button>
@@ -197,7 +205,7 @@ function PlayerDetailPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4" {...tourAnchor("jogador.kpis")}>
         <KpiCard title="Total depositado" value={money(p.total_depositado)} />
         <KpiCard title="Total sacado" value={money(p.total_sacado)} />
         <KpiCard title="Saldo informado" value={money(data.metrics.saldo_total)} />
@@ -209,7 +217,7 @@ function PlayerDetailPage() {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <Section title="Contato">
+        <Section title="Contato" {...tourAnchor("jogador.contato.card")}>
           <MetricRow label="Telefone" value={empty(p.telefone)} />
           <MetricRow label="E-mail" value={<span className="break-all">{empty(p.email)}</span>} />
           <MetricRow
@@ -218,6 +226,7 @@ function PlayerDetailPage() {
               externalId ? (
                 <button
                   type="button"
+                  {...tourAnchor("jogador.contato.copiar-id")}
                   onClick={copyExternalId}
                   className="-my-2 inline-flex min-h-11 items-center gap-1.5 font-medium text-primary hover:underline sm:min-h-0"
                 >
@@ -241,7 +250,7 @@ function PlayerDetailPage() {
           />
         </Section>
 
-        <Section title="Movimento do jogador">
+        <Section title="Movimento do jogador" {...tourAnchor("jogador.movimento.card")}>
           <MetricRow label="Depósitos" value={num(data.metrics.deposit_count)} />
           <MetricRow label="Saques" value={num(data.metrics.withdrawal_count)} />
           <MetricRow label="Último depósito" value={<When value={lastDeposit} />} />
@@ -258,6 +267,7 @@ function PlayerDetailPage() {
         <Section
           title="Pontuação"
           subtitle="Notas de 0 a 100 calculadas pelo CRM. Em risco, quanto maior, mais chance de parar."
+          {...tourAnchor("jogador.pontuacao.card")}
         >
           <MetricRow label="Score geral" value={<Score value={data.metrics.score} />} />
           <MetricRow label="Retenção" value={<Score value={data.metrics.retention_score} />} />
@@ -265,7 +275,7 @@ function PlayerDetailPage() {
           <MetricRow label="Conversão" value={<Score value={data.metrics.conversion_score} />} />
         </Section>
 
-        <Section title="Sinais e alertas">
+        <Section title="Sinais e alertas" {...tourAnchor("jogador.alertas.card")}>
           {data.alerts.length === 0 ? (
             <p className="py-2.5 text-body text-muted-foreground">
               Nenhum alerta ativo para este jogador agora.
@@ -298,7 +308,11 @@ function PlayerDetailPage() {
       <PlayerJourneysCard playerId={playerId} />
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <Section title="Como chegou" subtitle="Atribuição declarada no cadastro ou na importação.">
+        <Section
+          title="Como chegou"
+          subtitle="Atribuição declarada no cadastro ou na importação."
+          {...tourAnchor("jogador.chegou.card")}
+        >
           <MetricRow label="Fonte" value={empty(data.media.source ?? p.origem)} />
           <MetricRow label="Meio" value={empty(data.attribution?.utm_medium ?? p.utm_medium)} />
           <MetricRow
@@ -321,7 +335,11 @@ function PlayerDetailPage() {
           )}
         </Section>
 
-        <Section title="CRM e mídia" subtitle="O que a casa fez com este jogador e quanto custou.">
+        <Section
+          title="CRM e mídia"
+          subtitle="O que a casa fez com este jogador e quanto custou."
+          {...tourAnchor("jogador.crm-midia.card")}
+        >
           <MetricRow
             label="SMS enviados"
             value={
@@ -369,7 +387,11 @@ function PlayerDetailPage() {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <Section title="Cashback" subtitle="O que a casa devolveu e quando pagou.">
+        <Section
+          title="Cashback"
+          subtitle="O que a casa devolveu e quando pagou."
+          {...tourAnchor("jogador.cashback.card")}
+        >
           <MetricRow
             label="Total recebido"
             value={
@@ -420,6 +442,7 @@ function PlayerDetailPage() {
               ? `${num(linkRows.length)} ${linkRows.length === 1 ? "link" : "links"} rastreados, ${num(linkClicks)} ${linkClicks === 1 ? "clique" : "cliques"}.`
               : "Links rastreados enviados a este jogador."
           }
+          {...tourAnchor("jogador.links.card")}
         >
           {links.isLoading ? (
             <Skeleton className="h-12 w-full" />
@@ -466,6 +489,7 @@ function PlayerDetailPage() {
       <Section
         title="Linha do tempo"
         subtitle="Depósitos, saques, acessos e mensagens, do mais recente ao mais antigo."
+        {...tourAnchor("jogador.timeline.card")}
       >
         {data.timeline.length === 0 ? (
           <p className="py-2.5 text-body text-muted-foreground">
@@ -525,13 +549,14 @@ function Section({
   title,
   subtitle,
   children,
+  ...rest
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
-}) {
+} & HTMLAttributes<HTMLElement>) {
   return (
-    <HomeCard className="p-4 sm:p-5">
+    <HomeCard className="p-4 sm:p-5" {...rest}>
       <h2 className="text-section">{title}</h2>
       {subtitle && <p className="mt-0.5 text-label text-muted-foreground">{subtitle}</p>}
       <div className="mt-2">{children}</div>
