@@ -17,6 +17,14 @@ export const PAPEL_EQUIPE_LABEL: Record<NonNullable<ExpertAdminRow["papelEquipe"
 };
 
 /**
+ * "Restrito" only limits someone who signs in as expert: a profile linked to
+ * someone of the team keeps that person's own role, so they still see the
+ * whole house. Shown in the team-link dialog and next to such rows.
+ */
+export const RESTRITO_EQUIPE_AVISO =
+  "Restrito não limita quem é da equipe: a pessoa continua vendo a casa inteira com o papel dela. Para ela ver só os próprios leads, use Convidar em vez de vincular.";
+
+/**
  * `ativo` only matters for `equipe`: a team profile has no "inativo" acesso
  * of its own, so an inactive one gets the usual Inativo badge alongside.
  */
