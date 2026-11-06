@@ -130,6 +130,26 @@ export const GLOSSARY: GlossaryTerm[] = [
       "Cada bloco de até 160 caracteres de uma mensagem. Uma mensagem maior é cobrada em mais de um segmento.",
   },
 
+  // --- Web Push (merge de origin/main, canal OneSignal) ---
+  {
+    id: "web-push",
+    term: "Web Push",
+    short:
+      "Um canal de mensagem que aparece como notificação no navegador (Chrome, Edge, Firefox...) de quem aceitou receber avisos do site da casa. Não precisa de telefone nem e-mail: chega mesmo com o site fechado, enquanto o navegador estiver aberto.",
+  },
+  {
+    id: "notificacao-push",
+    term: "Notificação push",
+    short:
+      "A mensagem curta (título, texto e, se quiser, uma imagem) que surge no canto da tela ou na central de notificações do aparelho. Ao clicar, a pessoa vai para o link da campanha.",
+  },
+  {
+    id: "inscricao-push",
+    term: "Inscrição (inscrito)",
+    short:
+      "Um navegador que aceitou receber notificações do site da casa. Uma mesma pessoa pode ter várias inscrições (um computador e um celular, por exemplo), e uma inscrição pode ser anônima, sem jogador ligado. Se a pessoa bloquear as notificações ou limpar o navegador, a inscrição deixa de valer.",
+  },
+
   // --- Email (Task 11) ---
   {
     id: "cta",

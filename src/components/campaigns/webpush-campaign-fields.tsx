@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { tourAnchor } from "@/help/anchor";
 import { brl, num } from "@/lib/format";
 import type { SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
 import type { WebpushAudienceCount } from "@/lib/webpush/campaigns.server";
@@ -147,6 +148,7 @@ export function WebpushCampaignFields({
           onChange={(event) => onTitleChange(event.target.value)}
           placeholder="Ex.: Seu bônus está liberado"
           aria-invalid={submitAttempted && !title.trim()}
+          {...tourAnchor("campanhas.compositor.webpush-titulo")}
         />
         <p className="text-meta text-muted-foreground">{Array.from(title).length}/64 caracteres</p>
       </div>
@@ -161,6 +163,7 @@ export function WebpushCampaignFields({
           onChange={(event) => onBodyChange(event.target.value)}
           placeholder="Entre agora e aproveite."
           aria-invalid={submitAttempted && !body.trim()}
+          {...tourAnchor("campanhas.compositor.webpush-mensagem")}
         />
         <p className="text-meta text-muted-foreground">{Array.from(body).length}/240 caracteres</p>
       </div>
@@ -173,6 +176,7 @@ export function WebpushCampaignFields({
           onChange={(event) => onUrlChange(event.target.value)}
           placeholder="https://seusite.com/promocao"
           aria-invalid={submitAttempted && !/^https:\/\//i.test(url)}
+          {...tourAnchor("campanhas.compositor.webpush-link")}
         />
       </div>
       <div className="space-y-2">
@@ -183,11 +187,15 @@ export function WebpushCampaignFields({
           value={imageUrl}
           onChange={(event) => onImageUrlChange(event.target.value)}
           placeholder="https://seusite.com/imagem.png"
+          {...tourAnchor("campanhas.compositor.webpush-imagem")}
         />
       </div>
 
       {/* Chrome desktop notification preview. */}
-      <div className="rounded-xl border border-border bg-secondary/40 p-3">
+      <div
+        className="rounded-xl border border-border bg-secondary/40 p-3"
+        {...tourAnchor("campanhas.compositor.webpush-previa")}
+      >
         <p className="mb-2 text-meta text-muted-foreground">Pré-visualização</p>
         <div className="flex items-start gap-3 rounded-lg bg-card p-3 shadow-sm">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -213,15 +221,17 @@ export function WebpushCampaignFields({
 
       <div className="space-y-2">
         <Label>Público</Label>
-        <SegmentedFilter
-          label="Público da campanha de web push"
-          value={audienceKind}
-          onValueChange={onAudienceKindChange}
-          items={[
-            { value: "todos", label: "Todos os inscritos" },
-            { value: "filtro", label: "Filtros do CRM" },
-          ]}
-        />
+        <div {...tourAnchor("campanhas.compositor.webpush-publico")}>
+          <SegmentedFilter
+            label="Público da campanha de web push"
+            value={audienceKind}
+            onValueChange={onAudienceKindChange}
+            items={[
+              { value: "todos", label: "Todos os inscritos" },
+              { value: "filtro", label: "Filtros do CRM" },
+            ]}
+          />
+        </div>
         {audienceKind === "filtro" ? (
           <>
             <Label id={fieldIds.audienceLabel} className="sr-only">

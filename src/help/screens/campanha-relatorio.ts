@@ -1,6 +1,7 @@
 // Help article for the campaign report (/campanhas/$campaignId/relatorio).
-// Uma única tela sem abas, com duas variantes: o relatório comum (SMS/e-mail)
-// e, para voz, um relatório mais simples com o resultado da ligação. Fonte:
+// Uma única tela sem abas, com duas variantes: o relatório comum (SMS/e-mail/
+// Web Push — getCampaignReportDetailsFor em conversion-report.functions.ts
+// devolve channel "webpush" para webpush_campaigns) e, para voz, um relatório mais simples com o resultado da ligação. Fonte:
 // src/routes/campanhas.$campaignId.relatorio.tsx e a parte de campanha de
 // src/components/conversion-report.tsx (a parte de jornada é a Tarefa 14).
 // Todas as âncoras desta tela usam o prefixo `campanha-relatorio.` — mesmo o
@@ -16,7 +17,7 @@ const screen: HelpScreen = {
   route: "/campanhas/$campaignId/relatorio",
   title: "Relatório da campanha",
   purpose:
-    "O resultado completo de uma campanha de SMS, e-mail ou voz: quantos receberam, clicaram e depositaram, o custo e o retorno, e a lista de destinatários com o que cada um fez.",
+    "O resultado completo de uma campanha de SMS, e-mail, voz ou Web Push: quantos receberam, clicaram e depositaram, o custo e o retorno, e a lista de destinatários com o que cada um fez.",
   roles: ["admin", "gestor", "member"],
   terms: ["recuperado-pelo-crm", "retorno-do-envio", "ultimos-7-dias", "grupo-de-controle"],
   sections: [
@@ -27,7 +28,7 @@ const screen: HelpScreen = {
       id: "cartoes",
       title: "Indicadores principais",
       intro:
-        "Topo do relatório comum (SMS e e-mail). Os quatro indicadores somam a campanha inteira, desde o disparo, não só a lista carregada abaixo.",
+        "Topo do relatório comum (SMS, e-mail e Web Push). Os quatro indicadores somam a campanha inteira, desde o disparo, não só a lista carregada abaixo.",
       items: [
         {
           label: "Enviados / Clicaram / Depositaram / Recuperado pelo CRM",
@@ -37,6 +38,10 @@ const screen: HelpScreen = {
           anchor: "campanha-relatorio.voltar",
           label: "Voltar para Campanhas",
           what: "Volta para a lista de campanhas.",
+        },
+        {
+          label: "Título e subtítulo do relatório",
+          what: 'O título é o nome da campanha. O subtítulo diz "Relatório da campanha", o canal e o dia do envio — numa campanha de Web Push, o canal aparece escrito como "webpush".',
         },
         {
           label: 'Aviso de status (quando a campanha parou ou foi bloqueada)',
@@ -56,6 +61,8 @@ const screen: HelpScreen = {
         {
           label: "Custo em SMS / Consumo de e-mail",
           what: 'No SMS, o custo em R$ dos envios. No e-mail, "— envios" (sem custo financeiro calculado para e-mail ainda).',
+          notes:
+            'No Web Push, a linha aparece com o rótulo "Custo em SMS", mas mostra só a quantidade ("N envios") e a frase "Custo financeiro indisponível para este canal." — o custo do Web Push não é calculado neste relatório (ele aparece no extrato de Plano e créditos). Por isso o Retorno fica "—".',
         },
         {
           label: "Retorno",
@@ -143,7 +150,7 @@ const screen: HelpScreen = {
         },
         {
           label: "Texto da mensagem",
-          what: 'O conteúdo original. "O conteúdo original não está disponível para esta campanha." aparece quando ele não foi guardado.',
+          what: 'O conteúdo original. "O conteúdo original não está disponível para esta campanha." aparece quando ele não foi guardado. No Web Push, aparece como "Título — Mensagem" da notificação.',
           notes:
             "Os links que saíram no envio real foram trocados por um link próprio de cada jogador, para contar o clique de cada um — o texto mostrado aqui é o original, antes dessa troca.",
         },
