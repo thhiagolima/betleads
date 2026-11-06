@@ -20,6 +20,15 @@ export function CHANNEL_DISABLED_MESSAGE(channel: ProviderChannel): string {
   return `O canal ${PROVIDER_CHANNEL_LABEL[channel]} está desabilitado para esta casa.`;
 }
 
+/**
+ * `email_campaigns.blocked_reason` of a campaign paused because the house's
+ * e-mail channel was turned off — a raw code, not meant for display (unlike
+ * SMS's `SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE`, already a full sentence).
+ * Client-safe home for it (`email.functions.ts` isn't) so the UI can map it
+ * to a readable sentence without pulling server-only code into the bundle.
+ */
+export const EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON = "channel_disabled";
+
 /** step type -> canal que ele consome (para checar antes de reservar crédito). */
 export const STEP_TYPE_CHANNEL: Partial<Record<string, ProviderChannel>> = {
   sms: "sms",

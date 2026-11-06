@@ -518,10 +518,17 @@ export function ChannelCampaignComposer({
   useEffect(() => {
     if (!open) return;
     if (channel === "webpush") {
-      if (isExpert || (webpushIntegration.isSuccess && !webpushAvailable)) setChannel("sms");
+      if (isExpert || (webpushIntegration.isSuccess && !webpushAvailable)) {
+        // Fall back to a channel still offered; if none is, leave the state
+        // as-is — there is nothing selectable and the content below warns
+        // about it instead of silently picking a disabled channel.
+        if (visibleChannels.length > 0) setChannel(visibleChannels[0]);
+      }
       return;
     }
-    if (!visibleChannels.includes(channel)) setChannel(visibleChannels[0] ?? "sms");
+    if (!visibleChannels.includes(channel) && visibleChannels.length > 0) {
+      setChannel(visibleChannels[0]);
+    }
   }, [open, channel, isExpert, webpushIntegration.isSuccess, webpushAvailable, visibleChannels]);
 
   useEffect(() => {
@@ -1284,6 +1291,11 @@ export function ChannelCampaignComposer({
                     label: channelMeta[item].label,
                   }))}
                 />
+                {visibleChannels.length === 0 && (
+                  <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-[12.5px] text-warning">
+                    Nenhum canal está disponível para campanhas nesta casa.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor={fieldIds.name}>Nome da campanha</Label>
@@ -1916,6 +1928,7 @@ export function ChannelCampaignComposer({
             className="h-auto min-h-9 w-full whitespace-normal py-2 sm:w-auto"
             disabled={
               submit.isPending ||
+              visibleChannels.length === 0 ||
               (channel === "webpush" ? webpushCountQuery.isFetching : audienceMutation.isPending) ||
               smsRecipientPreview.isFetching ||
               // Web push has no draft (controller ruling): the draft gates below

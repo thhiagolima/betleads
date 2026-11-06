@@ -24,6 +24,7 @@ import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import {
   audienceFromSearch,
   campaignStopReason,
+  friendlyChannelReason,
   getChannelOperationState,
   groupVoiceQueueItems,
   isFinishedCampaignStatus,
@@ -700,8 +701,12 @@ export function CampaignRow({
   });
   const reason =
     (campaign.status === "recusada" ? (campaign.rejection_reason ?? null) : null) ??
-    campaignStopReason(campaign.status, campaign.last_error, campaign.updated_at) ??
-    campaign.blocked_reason ??
+    campaignStopReason(
+      campaign.status,
+      campaign.last_error ?? campaign.blocked_reason,
+      campaign.updated_at,
+    ) ??
+    friendlyChannelReason(campaign.blocked_reason) ??
     null;
   const unresolved = Number(campaign.unresolved_count ?? 0);
   const pausedForBalance =
@@ -728,7 +733,7 @@ export function CampaignRow({
       <Badge variant="outline" className={cn("shrink-0", operation.tone)}>
         {operation.label}
       </Badge>
-      <CampaignBlockedBadge reason={campaign.blocked_reason} />
+      <CampaignBlockedBadge reason={friendlyChannelReason(campaign.blocked_reason)} />
       {unresolved > 0 ? (
         <Badge
           variant="outline"

@@ -30,6 +30,7 @@ import {
 } from "./tenant-access.server";
 import { isSendBlockedError } from "./billing/billing-locked-error";
 import { assertChannelEnabled, isChannelEnabled } from "./tenant-channels.server";
+import { EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON } from "./tenant-channels.shared";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
 import { tenantReads } from "@/lib/active-tenant-filter";
@@ -1444,8 +1445,10 @@ export function emailCampaignStatusPatch(
   };
 }
 
-/** blocked_reason of an e-mail campaign paused because the house's e-mail channel was turned off. */
-export const EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON = "channel_disabled";
+/** blocked_reason of an e-mail campaign paused because the house's e-mail channel was turned off.
+ * Defined in tenant-channels.shared.ts (client-safe) and re-exported here for callers already
+ * importing it from this module. */
+export { EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON };
 
 /** blocked_reason of an e-mail campaign paused because the house ran out of balance. */
 export const EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE =
