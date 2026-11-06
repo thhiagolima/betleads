@@ -11,6 +11,8 @@ import { createFakeDb, installCreditLedger } from "./sms-bulk.test-support";
 const fake = vi.hoisted(() => ({
   db: null as unknown as ReturnType<typeof createFakeDb>,
   rpcCalls: [] as Array<{ fn: string; args: Record<string, unknown> }>,
+  /** email_send_logs id findAcceptedEmail returns (null: none accepted). */
+  acceptedLogId: null as string | null,
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -25,12 +27,15 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   const { createFakeDb } = await import("./sms-bulk.test-support");
   fake.db = createFakeDb();
   // findAcceptedEmail filters with PostgREST `.or(...)`, which the fake DB
-  // does not model: no earlier accepted send in these tests.
+  // does not model: it answers `fake.acceptedLogId` (none by default).
   const noAcceptedSend: any = {
     select: () => noAcceptedSend,
     eq: () => noAcceptedSend,
     or: () => noAcceptedSend,
-    limit: async () => ({ data: [], error: null }),
+    limit: async () => ({
+      data: fake.acceptedLogId ? [{ id: fake.acceptedLogId }] : [],
+      error: null,
+    }),
   };
   return {
     supabaseAdmin: {
@@ -94,6 +99,7 @@ const accepted = (key = "k") => ({
 beforeEach(() => {
   fake.db.reset();
   fake.rpcCalls.length = 0;
+  fake.acceptedLogId = null;
   __resetDemoTenantCacheForTests();
   __resetTenantChannelsCacheForTests();
   fake.db.rows("tenants").push(
@@ -288,9 +294,30 @@ describe("sendInfobipEmail wallet reservation", () => {
   });
 
   it("the house only in linkTracking (no tenantId) with the channel on still sends", async () => {
-    fake.db.rows("tenant_channels").push({ tenant_id: LOCKED, channel: "email", enabled: false, disabled_at: null });
+    fake.db.rows("tenant_channels").push({ tenant_id: NORMAL, channel: "email", enabled: true, disabled_at: null });
     const result = await sendInfobipEmail(input({ tenantId: undefined }));
     expect(result.ok).toBe(true);
     expect(mocks.provider).toHaveBeenCalledOnce();
+  });
+
+  it("the house only in linkTracking (no tenantId) is the one checked: channel off refuses", async () => {
+    fake.db.rows("tenant_channels").push({ tenant_id: NORMAL, channel: "email", enabled: false, disabled_at: null });
+    const result = await sendInfobipEmail(input({ tenantId: undefined }));
+    expect(result).toMatchObject({ ok: false, errorKind: "channel_disabled" });
+    expect(mocks.provider).not.toHaveBeenCalled();
+  });
+
+  it("an already-accepted key re-processed after the channel is off returns already-sent, not channel_disabled", async () => {
+    fake.acceptedLogId = "log-1";
+    fake.db.rows("tenant_channels").push({ tenant_id: NORMAL, channel: "email", enabled: false, disabled_at: null });
+    const result = await sendInfobipEmail(input({ idempotencyKey: "journey-key-1" }));
+    expect(result).toMatchObject({
+      ok: true,
+      alreadySent: true,
+      body: { already_sent: true, email_log_id: "log-1" },
+    });
+    expect(result.errorKind).toBeUndefined();
+    expect(wallet.ledger()).toHaveLength(0);
+    expect(mocks.provider).not.toHaveBeenCalled();
   });
 });

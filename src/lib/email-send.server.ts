@@ -197,19 +197,6 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
   const idempotencyKey = input.idempotencyKey || crypto.randomUUID();
   const tenantId = input.tenantId ?? input.linkTracking?.tenantId ?? null;
   await assertTenantNotDemoForSend(tenantId);
-  // E-mail channel turned off for the house (tenant_channels): nothing
-  // checked, tracked nor reserved. Team e-mails (invoice, alerts, invites)
-  // carry no tenantId and go through callInfobipEmail, never here.
-  if (tenantId && !(await isChannelEnabled(tenantId, "email"))) {
-    return {
-      ok: false,
-      status: 0,
-      body: { error: CHANNEL_DISABLED_MESSAGE("email") },
-      idempotencyKey,
-      temporary: false,
-      errorKind: "channel_disabled",
-    };
-  }
   // A caller-supplied key identifies one logical delivery: if it was already
   // accepted (e.g. the worker failed after sending), never send it again.
   if (input.idempotencyKey) {
@@ -239,6 +226,21 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
         alreadySent: true,
       };
     }
+  }
+  // E-mail channel turned off for the house (tenant_channels): nothing
+  // checked, tracked nor reserved. Runs after the accepted-key dedupe (as
+  // SMS and voice do): a delivery already accepted stays "already sent".
+  // Team e-mails (invoice, alerts, invites) carry no tenantId and go
+  // through callInfobipEmail, never here.
+  if (tenantId && !(await isChannelEnabled(tenantId, "email"))) {
+    return {
+      ok: false,
+      status: 0,
+      body: { error: CHANNEL_DISABLED_MESSAGE("email") },
+      idempotencyKey,
+      temporary: false,
+      errorKind: "channel_disabled",
+    };
   }
   try {
     const centralStatus = tenantId
