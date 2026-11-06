@@ -8,6 +8,7 @@ import { evaluateVoiceContactPolicy } from "./consent.server";
 import { logCallHistoryInsertError } from "./voice-history-log";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { assertTenantNotDemoForSend, listDemoTenantIds } from "./tenant-access.server";
+import { isChannelEnabled } from "./tenant-channels.server";
 import { isDemoBlockedError } from "./demo-tenant";
 import { ExpertVoiceGate, loadExpertQueueOwners } from "./expert-voice.server";
 import { loadHouseLinks } from "./house-links.server";
@@ -322,7 +323,13 @@ export function voiceQueueBillingKey(callQueueId: string): string {
 }
 
 export type VoiceDispatchOutcome =
-  "ok" | "insufficient_balance" | "expert_cap" | "expert_inactive" | "transient" | "failed";
+  | "ok"
+  | "insufficient_balance"
+  | "expert_cap"
+  | "expert_inactive"
+  | "channel_disabled"
+  | "transient"
+  | "failed";
 
 /**
  * How a queued call's dispatch result is handled. The wallet refusal
@@ -342,6 +349,8 @@ export function classifyVoiceDispatchResult(result: {
   if (result.errorKind === "insufficient_balance") return "insufficient_balance";
   if (result.errorKind === "expert_cap") return "expert_cap";
   if (result.errorKind === "expert_inactive") return "expert_inactive";
+  // Voice turned off for the house: never dialed nor reserved (status 0).
+  if (result.errorKind === "channel_disabled") return "channel_disabled";
   const body = (result.body ?? {}) as { non_json?: boolean };
   if (
     result.status === 0 ||
@@ -391,9 +400,27 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
   const expertGate = new ExpertVoiceGate();
   let expertCapped = 0;
   let notClaimed = 0;
+  let channelDisabled = 0;
   for (const item of queue ?? []) {
     if (noBalanceTenants.has(item.tenant_id)) {
       skippedNoBalance++;
+      continue;
+    }
+    // Voice turned off for the house (tenant_channels): the item is
+    // cancelled before any claim, dial or reservation; re-enabling the
+    // channel never brings it back.
+    if (!(await isChannelEnabled(item.tenant_id, "voice"))) {
+      const { error: cancelError } = await supabaseAdmin
+        .from("call_queue")
+        .update({ status: "cancelled", provider_status: "channel_disabled" } as never)
+        .eq("id", item.id)
+        .eq("status", "audio_ready");
+      if (cancelError)
+        console.error("[voice-queue] could not cancel an item of a disabled channel", {
+          id: item.id,
+          error: cancelError.message,
+        });
+      channelDisabled++;
       continue;
     }
     const expertOwner = expertOwners.get(item.id);
@@ -543,6 +570,16 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           });
         continue;
       }
+      if (outcome === "channel_disabled") {
+        // Turned off between the check above and the dial: never dialed.
+        channelDisabled++;
+        await supabaseAdmin
+          .from("call_queue")
+          .update({ status: "cancelled", provider_status: "channel_disabled" } as never)
+          .eq("id", item.id)
+          .eq("status", VOICE_QUEUE_CLAIMED_STATUS);
+        continue;
+      }
       if (outcome === "insufficient_balance") {
         // No call was placed and nothing was reserved. Never failed for lack
         // of balance and no attempt consumed: every due audio_ready item of
@@ -667,5 +704,6 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
     skippedNoBalance,
     expertCapped,
     notClaimed,
+    channelDisabled,
   };
 }

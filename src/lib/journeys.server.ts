@@ -43,6 +43,8 @@ import { SmsAccountGates } from "./sms-account-gates.server";
 import { resolveDispatchWorkerConfig } from "./rate-limit/worker-config";
 import { brtDayStart } from "./tz";
 import { listDemoTenantIds } from "./tenant-access.server";
+import { isChannelEnabled } from "./tenant-channels.server";
+import { STEP_TYPE_CHANNEL } from "./tenant-channels.shared";
 import {
   audienceMatches,
   inactivityBandConfig,
@@ -429,6 +431,12 @@ async function waitSecondsBeforePosition(journeyId: string, position: number) {
   );
 }
 
+/** The step sends on a channel the house has turned off. */
+async function stepChannelDisabled(tenantId: string, stepType: string | null | undefined) {
+  const channel = stepType ? STEP_TYPE_CHANNEL[stepType] : undefined;
+  return channel ? !(await isChannelEnabled(tenantId, channel)) : false;
+}
+
 async function executeEnrollment(
   id: string,
   ctx: DispatchContext,
@@ -499,6 +507,26 @@ async function executeEnrollment(
       exit_reason: "finished",
     });
     await event(enrollment, "completed");
+    return;
+  }
+
+  // Channel turned off for the house (tenant_channels): the step is skipped
+  // like a holdout — no send, no charge, not a failure — and the journey
+  // moves on. Re-enabling the channel never resends a skipped step.
+  if (await stepChannelDisabled(enrollment.tenant_id, step.step_type)) {
+    const run = await execution(enrollment, step, step.step_type);
+    await finishExecution(run.id, { status: "skipped", provider: "channel_disabled" });
+    await release(enrollment, ctx, {
+      status: "active",
+      current_position: step.position + 1,
+      next_run_at: new Date().toISOString(),
+      attempts: 0,
+    });
+    await event(enrollment, "step_skipped", {
+      channel: step.step_type,
+      step_position: step.position,
+      reason: "channel_disabled",
+    });
     return;
   }
 
@@ -1735,7 +1763,10 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       handle: async (row) => {
         let gate: ChannelGate | null = null;
         try {
-          const channel = row.step_type && SEND_CHANNELS.has(row.step_type) ? row.step_type : null;
+          let channel = row.step_type && SEND_CHANNELS.has(row.step_type) ? row.step_type : null;
+          // Channel off for the house: no breaker gate nor budget permit;
+          // executeEnrollment marks the step skipped and moves on.
+          if (channel && (await stepChannelDisabled(row.tenant_id, channel))) channel = null;
           if (channel === "sms" && !(await admitSmsItem(row, ctx))) {
             // Provider breaker open: handed back untouched, not part of the batch.
             claimingSource.giveBack();

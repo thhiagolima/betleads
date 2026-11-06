@@ -166,6 +166,8 @@ vi.mock("./template-vars.server", () => ({
 import { runJourneyDispatcher } from "./journeys.server";
 import { MAX_NO_COST_DEFERS } from "./rate-limit/provider-errors.server";
 import { __resetSmsBreakerCacheForTests } from "./sms-provider-breaker.server";
+import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";
+import { __resetProviderAccountsCacheForTests } from "./provider-accounts.server";
 
 const TENANT = "11111111-1111-4111-8111-111111111111";
 const JOURNEY = "33333333-3333-4333-8333-333333333333";
@@ -256,6 +258,8 @@ const rpcNames = () => fake.rpcCalls.map((call) => call.name);
 beforeEach(() => {
   fake.reset();
   __resetSmsBreakerCacheForTests();
+  __resetTenantChannelsCacheForTests();
+  __resetProviderAccountsCacheForTests();
   sentry.captureServerException.mockClear();
   monitor.finish.mockClear();
   sms.sendSmsInternal.mockReset();
@@ -1381,5 +1385,83 @@ describe("runJourneyDispatcher with the dead lead rule (Leads mortos)", () => {
       name: "sweep_dead_lead_revivals",
       args: { p_tenant_id: null },
     });
+  });
+});
+
+describe("runJourneyDispatcher with a channel disabled for the house", () => {
+  function seedVoiceAtPosition2(stepTypeOnClaim: boolean) {
+    seed(["e1"]);
+    fake.tables.journey_steps = [
+      { id: "step-2", journey_id: JOURNEY, position: 2, step_type: "voice", is_enabled: true, config: { asset_id: "a1" } },
+      { id: "step-3", journey_id: JOURNEY, position: 3, step_type: "sms", is_enabled: true, config: { content: "oi" } },
+    ];
+    fake.tables.journey_voice_assets = [{ id: "a1", tenant_id: TENANT, storage_path: "x.mp3" }];
+    fake.tables.journey_enrollments[0].current_position = 2;
+    fake.tables.tenant_channels = [
+      { tenant_id: TENANT, channel: "voice", enabled: false, disabled_at: new Date().toISOString() },
+    ];
+    if (stepTypeOnClaim) {
+      let claimed = false;
+      fake.rpcs.claim_journey_enrollments_leased = (args) => {
+        if (claimed) return [];
+        claimed = true;
+        const row = fake.tables.journey_enrollments[0];
+        row.claimed_at = new Date().toISOString();
+        row.claimed_by = args.p_worker_id;
+        return [{ id: row.id, tenant_id: row.tenant_id, step_type: "voice" }];
+      };
+    }
+  }
+
+  function expectSkipped() {
+    expect(voice.callInfobipVoice).not.toHaveBeenCalled();
+    expect(rpcNames().some((name) => name.startsWith("reserve_journey_delivery"))).toBe(false);
+    // admitClaimedItem never ran: no channel budget nor voice slot.
+    expect(rpcNames()).not.toContain("consume_channel_budget");
+    expect(rpcNames()).not.toContain("acquire_channel_slot");
+    expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 3, attempts: 0 });
+    expect(fake.tables.journey_step_executions).toEqual([
+      expect.objectContaining({ step_id: "step-2", status: "skipped", provider: "channel_disabled" }),
+    ]);
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_skipped",
+      detail: expect.objectContaining({ channel: "voice", step_position: 2, reason: "channel_disabled" }),
+    });
+  }
+
+  it("skips a voice step (claim with step_type) without reserving, admitting or calling", async () => {
+    seedVoiceAtPosition2(true);
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0 });
+    expectSkipped();
+  });
+
+  it("skips it too when the claim has no step_type", async () => {
+    seedVoiceAtPosition2(false);
+    await runJourneyDispatcher(1000);
+    expectSkipped();
+  });
+
+  it("house with its own voice account disabled AND the channel off: skipped, never held as misconfigured", async () => {
+    seedVoiceAtPosition2(true);
+    fake.tables.provider_accounts = [
+      {
+        id: "acc-off",
+        provider: "infobip",
+        name: "Infobip da casa",
+        status: "disabled",
+        channels: ["voice"],
+        credentials_source: "db",
+        credentials: null,
+      },
+    ];
+    fake.tables.tenant_channel_providers = [
+      { tenant_id: TENANT, channel: "voice", provider_account_id: "acc-off" },
+    ];
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0, rescheduled: 0 });
+    expectSkipped();
+    const metadata = (enrollment("e1").metadata ?? {}) as Record<string, unknown>;
+    expect(metadata.platform_holds).toBeUndefined();
   });
 });

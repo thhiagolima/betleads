@@ -119,3 +119,15 @@ describe("classifyProviderFailure — provider_account", () => {
     });
   });
 });
+
+describe("classifyProviderFailure channel_disabled", () => {
+  it("a channel disabled for the house is a final fail (channel_disabled), status 0 included", () => {
+    const error = new ProviderSendError({
+      channel: "voice",
+      message: "O canal Voz está desabilitado para esta casa.",
+      status: 0,
+      errorKind: "channel_disabled",
+    });
+    expect(classifyProviderFailure(error)).toEqual({ kind: "fail", reason: "channel_disabled", retryAfterMs: 0 });
+  });
+});

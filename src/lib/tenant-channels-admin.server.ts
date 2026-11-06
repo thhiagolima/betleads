@@ -7,7 +7,10 @@ import type { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { auditAdminAction } from "@/lib/admin-audit.server";
 import { assertSuperAdmin } from "@/lib/provider-governance.server";
-import { cancelSmsCampaignRow } from "@/lib/sms-campaign-dispatch.server";
+import {
+  cancelSmsCampaignRow,
+  SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE as CHANNEL_DISABLED_SMS_MESSAGE,
+} from "@/lib/sms-campaign-dispatch.server";
 import { invalidateTenantChannelsCache } from "@/lib/tenant-channels.server";
 import {
   DEFAULT_ENABLED_CHANNELS,
@@ -28,7 +31,6 @@ const SMS_CANCELLABLE_STATUSES = ["agendada", "pausada"];
 const WEBPUSH_CANCELLABLE_STATUSES = ["agendada", "pausada"];
 const CALL_QUEUE_CANCELLABLE_STATUSES = ["pending_audio", "audio_ready", "queued", "paused"];
 
-const CHANNEL_DISABLED_SMS_MESSAGE = "Canal SMS desabilitado para a casa.";
 const CHANNEL_DISABLED_EMAIL_REASON = "channel_disabled";
 
 /** Table + status list used to size "scheduled campaigns" impact per channel. */

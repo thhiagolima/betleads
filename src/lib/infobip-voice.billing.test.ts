@@ -15,6 +15,7 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 });
 
 import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
+import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";
 import { callInfobipVoice, voiceReservationUnits } from "./infobip-voice.server";
 
 const NORMAL = "00000000-0000-4000-8000-000000000001";
@@ -30,6 +31,7 @@ const content = { type: "tts" as const, text: "Oi", language: "pt" };
 beforeEach(() => {
   fake.db.reset();
   __resetDemoTenantCacheForTests();
+  __resetTenantChannelsCacheForTests();
   fake.db.rows("tenants").push(
     { id: NORMAL, status: "active", is_demo: false },
     { id: DEMO, status: "active", is_demo: true },
@@ -193,5 +195,22 @@ describe("callInfobipVoice wallet reservation", () => {
     await expect(callInfobipVoice("+5511999999999", content, { tenantId: LOCKED })).rejects.toThrow();
     expect(wallet.ledger()).toHaveLength(0);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("a house with the voice channel disabled: channel_disabled, never reserved nor dialed", async () => {
+    fake.db.rows("tenant_channels").push({ tenant_id: NORMAL, channel: "voice", enabled: false, disabled_at: null });
+    const result = await callInfobipVoice("+5511999999999", content, {
+      tenantId: NORMAL,
+      idempotencyKey: "journey-key-off",
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      status: 0,
+      errorKind: "channel_disabled",
+      body: { error: "O canal Voz está desabilitado para esta casa." },
+      providerCallId: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(wallet.ledger()).toHaveLength(0);
   });
 });

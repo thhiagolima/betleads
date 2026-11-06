@@ -59,6 +59,7 @@ vi.mock("./shortio.server", () => ({
 }));
 
 import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
+import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";
 import { sendInfobipEmail, type SendEmailInput } from "./email-send.server";
 
 const NORMAL = "00000000-0000-4000-8000-000000000001";
@@ -94,6 +95,7 @@ beforeEach(() => {
   fake.db.reset();
   fake.rpcCalls.length = 0;
   __resetDemoTenantCacheForTests();
+  __resetTenantChannelsCacheForTests();
   fake.db.rows("tenants").push(
     { id: NORMAL, status: "active", is_demo: false },
     { id: DEMO, status: "active", is_demo: true },
@@ -268,5 +270,27 @@ describe("sendInfobipEmail wallet reservation", () => {
     ).rejects.toThrow();
     expect(wallet.ledger()).toHaveLength(0);
     expect(mocks.provider).not.toHaveBeenCalled();
+  });
+
+  it("a house with the e-mail channel disabled: channel_disabled, never reserved nor sent", async () => {
+    fake.db.rows("tenant_channels").push({ tenant_id: NORMAL, channel: "email", enabled: false, disabled_at: null });
+    const result = await sendInfobipEmail(input());
+    expect(result).toMatchObject({
+      ok: false,
+      temporary: false,
+      errorKind: "channel_disabled",
+      body: { error: "O canal E-mail está desabilitado para esta casa." },
+    });
+    expect(wallet.ledger()).toHaveLength(0);
+    expect(fake.rpcCalls).toHaveLength(0);
+    expect(mocks.consent).not.toHaveBeenCalled();
+    expect(mocks.provider).not.toHaveBeenCalled();
+  });
+
+  it("the house only in linkTracking (no tenantId) with the channel on still sends", async () => {
+    fake.db.rows("tenant_channels").push({ tenant_id: LOCKED, channel: "email", enabled: false, disabled_at: null });
+    const result = await sendInfobipEmail(input({ tenantId: undefined }));
+    expect(result.ok).toBe(true);
+    expect(mocks.provider).toHaveBeenCalledOnce();
   });
 });

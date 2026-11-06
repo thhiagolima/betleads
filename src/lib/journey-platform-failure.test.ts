@@ -29,4 +29,10 @@ describe("journeyPlatformFailure", () => {
   ])("player-side or unknown errors keep the normal policy: %s", (message) => {
     expect(journeyPlatformFailure(new Error(message), "permanent_error")).toBeNull();
   });
+
+  it("a channel disabled for the house is never held", () => {
+    expect(
+      journeyPlatformFailure(new Error("O canal Voz está desabilitado para esta casa."), "channel_disabled"),
+    ).toBeNull();
+  });
 });

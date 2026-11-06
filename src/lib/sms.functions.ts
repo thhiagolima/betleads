@@ -25,6 +25,8 @@ import {
 } from "./shortio.server";
 import type { Json } from "@/integrations/supabase/types";
 import { isChannelRevoked } from "./consent.server";
+import { isChannelEnabled } from "./tenant-channels.server";
+import { CHANNEL_DISABLED_MESSAGE } from "./tenant-channels.shared";
 import { requireBrazilianPhone } from "./phone-normalization";
 import {
   isShortBrasilRefusal,
@@ -884,6 +886,17 @@ export async function sendSmsInternal(args: {
 
   if (billingTenantId) {
     await assertTenantCanOperate(billingTenantId);
+    // Channel turned off for the house (tenant_channels): before link
+    // tracking and the credit reservation, so nothing is created nor charged.
+    if (!(await isChannelEnabled(billingTenantId, "sms"))) {
+      return {
+        ok: false as const,
+        status: 0,
+        error: CHANNEL_DISABLED_MESSAGE("sms"),
+        temporary: false,
+        errorKind: "channel_disabled" as ProviderErrorKind,
+      };
+    }
     if (await isChannelRevoked(billingTenantId, "sms", normalized)) {
       await logSend({
         to: normalized,

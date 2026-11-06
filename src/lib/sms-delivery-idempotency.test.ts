@@ -119,12 +119,14 @@ vi.mock("@/lib/tenant-access.server", () => ({
   resolveOperationalTenantId: vi.fn(),
 }));
 vi.mock("./consent.server", () => ({ isChannelRevoked: vi.fn(async () => false) }));
+vi.mock("./tenant-channels.server", () => ({ isChannelEnabled: vi.fn(async () => true) }));
 vi.mock("./shortio.server", () => ({
   prepareTrackedText: vi.fn(async (content: string) => ({ content, links: [] })),
   markTrackedDispatchesSent: vi.fn(async () => undefined),
   markTrackedDispatchesFailed: vi.fn(async () => undefined),
 }));
 
+import { isChannelEnabled } from "./tenant-channels.server";
 import {
   reserveSmsCreditForDelivery,
   sendSmsInternal,
@@ -341,5 +343,20 @@ describe("SMS delivery idempotency (ENV-02)", () => {
     const result = await send();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result).toMatchObject({ ok: false, errorKind: "misconfigured" });
+  });
+
+  it("channel SMS disabled for the house: channel_disabled, no reservation, no provider call", async () => {
+    vi.mocked(isChannelEnabled).mockResolvedValueOnce(false);
+    const fetchMock = providerAccepts();
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await send();
+    expect(result).toMatchObject({
+      ok: false,
+      errorKind: "channel_disabled",
+      error: "O canal SMS está desabilitado para esta casa.",
+    });
+    expect(isChannelEnabled).toHaveBeenCalledWith(TENANT, "sms");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.ledger).toHaveLength(0);
   });
 });
