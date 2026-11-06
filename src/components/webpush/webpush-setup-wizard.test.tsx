@@ -23,14 +23,16 @@ vi.mock("@/lib/webpush/webpush.functions", () => ({
 }));
 
 import {
+  buildDownloadUrl,
+  buildSupportTicketText,
   canAdvanceStep,
   initialWizardStep,
+  InstallationStepView,
+  isWizardComplete,
   nextWizardStep,
-  PlayerStepView,
   WebpushNotActivatedView,
   WebpushSetupWizard,
   WORKER_VERIFY_MESSAGES,
-  WorkerFileStepView,
   type AppProgress,
 } from "./webpush-setup-wizard";
 
@@ -60,11 +62,11 @@ describe("initialWizardStep", () => {
     expect(initialWizardStep(progress())).toBe(1);
   });
 
-  it("com worker_verified_at e sem script_seen_at, abre na etapa 2", () => {
-    expect(initialWizardStep(progress({ workerVerifiedAt: "2026-11-05T00:00:00.000Z" }))).toBe(2);
+  it("com worker_verified_at e sem script_seen_at, abre na etapa 1", () => {
+    expect(initialWizardStep(progress({ workerVerifiedAt: "2026-11-05T00:00:00.000Z" }))).toBe(1);
   });
 
-  it("com worker_verified_at e script_seen_at, abre na etapa 3", () => {
+  it("com worker_verified_at e script_seen_at, abre direto na etapa 2 (Teste)", () => {
     expect(
       initialWizardStep(
         progress({
@@ -72,125 +74,208 @@ describe("initialWizardStep", () => {
           scriptSeenAt: "2026-11-05T00:00:00.000Z",
         }),
       ),
-    ).toBe(3);
+    ).toBe(2);
+  });
+});
+
+describe("canAdvanceStep", () => {
+  it("etapa 1 só avança com worker_verified_at e script_seen_at juntos", () => {
+    expect(canAdvanceStep(1, progress())).toBe(false);
+    expect(canAdvanceStep(1, progress({ workerVerifiedAt: "2026-11-05T00:00:00.000Z" }))).toBe(
+      false,
+    );
+    expect(canAdvanceStep(1, progress({ scriptSeenAt: "2026-11-05T00:00:00.000Z" }))).toBe(false);
+    expect(
+      canAdvanceStep(
+        1,
+        progress({
+          workerVerifiedAt: "2026-11-05T00:00:00.000Z",
+          scriptSeenAt: "2026-11-05T00:00:00.000Z",
+        }),
+      ),
+    ).toBe(true);
   });
 
-  it("com tudo preenchido, abre na etapa 4", () => {
+  it("etapa 2 é a última — nunca tem 'Próxima etapa'", () => {
+    expect(canAdvanceStep(2, progress({ testSentAt: "2026-11-05T00:00:00.000Z" }))).toBe(false);
+  });
+});
+
+describe("nextWizardStep", () => {
+  it("avança da etapa 1 para a 2", () => {
+    expect(nextWizardStep(1)).toBe(2);
+  });
+
+  it("não passa da etapa 2", () => {
+    expect(nextWizardStep(2)).toBe(2);
+  });
+});
+
+describe("isWizardComplete", () => {
+  it("precisa de worker + script + teste enviado — jogador não é obrigatório", () => {
     expect(
-      initialWizardStep(
+      isWizardComplete(
+        progress({
+          workerVerifiedAt: "2026-11-05T00:00:00.000Z",
+          scriptSeenAt: "2026-11-05T00:00:00.000Z",
+          testSentAt: "2026-11-05T00:00:00.000Z",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("sem teste enviado, não está completo mesmo com o resto preenchido", () => {
+    expect(
+      isWizardComplete(
         progress({
           workerVerifiedAt: "2026-11-05T00:00:00.000Z",
           scriptSeenAt: "2026-11-05T00:00:00.000Z",
           playerLinkedAt: "2026-11-05T00:00:00.000Z",
         }),
       ),
-    ).toBe(4);
+    ).toBe(false);
   });
 });
 
-describe("canAdvanceStep", () => {
-  it("etapa 1 só avança com worker_verified_at", () => {
-    expect(canAdvanceStep(1, progress())).toBe(false);
-    expect(canAdvanceStep(1, progress({ workerVerifiedAt: "2026-11-05T00:00:00.000Z" }))).toBe(true);
+describe("buildDownloadUrl", () => {
+  it("deriva a origem do CRM a partir do src do loaderSnippet", () => {
+    expect(
+      buildDownloadUrl(
+        '<script src="https://betleads.io/loader.js" async></script>',
+        "https://fallback.example",
+      ),
+    ).toBe("https://betleads.io/api/public/push/worker.js");
   });
 
-  it("etapa 2 só avança com script_seen_at", () => {
-    expect(canAdvanceStep(2, progress())).toBe(false);
-    expect(canAdvanceStep(2, progress({ scriptSeenAt: "2026-11-05T00:00:00.000Z" }))).toBe(true);
-  });
-
-  it("etapa 3 só avança com player_linked_at (fora do 'Pular por enquanto')", () => {
-    expect(canAdvanceStep(3, progress())).toBe(false);
-    expect(canAdvanceStep(3, progress({ playerLinkedAt: "2026-11-05T00:00:00.000Z" }))).toBe(true);
-  });
-
-  it("etapa 4 é a última — nunca tem 'Próxima etapa'", () => {
-    expect(canAdvanceStep(4, progress({ testSentAt: "2026-11-05T00:00:00.000Z" }))).toBe(false);
+  it("sem um src reconhecível, usa a origem de fallback (window.location.origin)", () => {
+    expect(buildDownloadUrl("<script>window.foo=1;</script>", "https://crm.betleads.io")).toBe(
+      "https://crm.betleads.io/api/public/push/worker.js",
+    );
   });
 });
 
-describe("nextWizardStep (wired a 'Pular por enquanto' na etapa 3)", () => {
-  it("'Pular por enquanto' na etapa 3 leva à etapa 4", () => {
-    expect(nextWizardStep(3)).toBe(4);
+describe("buildSupportTicketText", () => {
+  const text = buildSupportTicketText({
+    origin: "https://casa.bet.br",
+    workerUrl: "https://casa.bet.br/push/onesignal/OneSignalSDKWorker.js",
+    downloadUrl: "https://crm.betleads.io/api/public/push/worker.js",
+    loaderSnippet: '<script src="https://betleads.io/loader.js" async></script>',
+    playerSnippet: '<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>',
   });
 
-  it("não passa da etapa 4", () => {
-    expect(nextWizardStep(4)).toBe(4);
+  it("contém a origem, a url do worker, a url de download e os dois snippets", () => {
+    expect(text).toContain("https://casa.bet.br");
+    expect(text).toContain("https://casa.bet.br/push/onesignal/OneSignalSDKWorker.js");
+    expect(text).toContain("https://crm.betleads.io/api/public/push/worker.js");
+    expect(text).toContain('<script src="https://betleads.io/loader.js" async></script>');
+    expect(text).toContain('<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>');
+  });
+
+  it("segue o template exato pt-BR com os 3 passos", () => {
+    expect(text).toBe(
+      `Olá! Precisamos ativar as notificações (web push) no site https://casa.bet.br. São 2 passos obrigatórios e 1 opcional:
+
+1) Arquivo do service worker
+Baixe o arquivo em: https://crm.betleads.io/api/public/push/worker.js
+Coloque-o, sem renomear nem editar, na pasta push/onesignal na raiz do site.
+Ele deve abrir neste endereço (mostrando uma linha de texto): https://casa.bet.br/push/onesignal/OneSignalSDKWorker.js
+O servidor precisa entregar o arquivo como JavaScript (Content-Type application/javascript).
+
+2) Script
+Cole este código no <head> de todas as páginas do site:
+<script src="https://betleads.io/loader.js" async></script>
+
+3) Jogador logado (opcional, recomendado)
+Quando o jogador estiver logado, defina antes do script acima, com o mesmo ID de jogador enviado nos webhooks:
+<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>
+
+Obrigado!`,
+    );
   });
 });
 
-describe("WorkerFileStepView", () => {
-  it("mostra a etapa 1 com 'Próxima etapa' desabilitado quando não verificado", () => {
-    const html = renderToStaticMarkup(
-      <WorkerFileStepView
+describe("InstallationStepView (etapa 1 — Instalação no site)", () => {
+  function render(overrides: Partial<Parameters<typeof InstallationStepView>[0]> = {}) {
+    return renderToStaticMarkup(
+      <InstallationStepView
+        origin="https://casa.bet.br"
         workerUrl="https://casa.bet.br/push/onesignal/OneSignalSDKWorker.js"
+        downloadUrl="https://crm.betleads.io/api/public/push/worker.js"
+        loaderSnippet='<script src="https://betleads.io/loader.js" async></script>'
+        playerSnippet='<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>'
         canAdvance={false}
-        verifying={false}
-        verifyResult={null}
-        onVerify={() => {}}
+        verifyingWorker={false}
+        workerVerifyResult={null}
+        onVerifyWorker={() => {}}
+        scriptSeen={false}
+        checkingScript={false}
+        onCheckScript={() => {}}
+        playerLinked={false}
         onNext={() => {}}
+        {...overrides}
       />,
     );
+  }
 
-    expect(html).toContain("push/onesignal");
+  it("mostra o botão de copiar instruções e os três blocos (arquivo, script, jogador)", () => {
+    const html = render();
+
+    expect(html).toContain("Copiar instruções para o suporte");
+    expect(html).toContain("Envie as instruções abaixo para o suporte da plataforma do site em um único chamado.");
+    expect(html).toContain("1. Arquivo");
     expect(html).toContain("Baixar OneSignalSDKWorker.js");
-    expect(html).toContain("Verificar agora");
-    expect(isDisabled(findButtonOpenTag(html, "Próxima etapa"))).toBe(true);
+    expect(html).toContain("push/onesignal");
+    expect(html).toContain("2. Script");
+    expect(html).toContain("betleads.io/loader.js");
+    expect(html).toContain("3. Jogador logado");
+    expect(html).toContain("ID_DO_JOGADOR");
   });
 
-  it("resposta 'html' mostra a mensagem de html", () => {
-    const html = renderToStaticMarkup(
-      <WorkerFileStepView
-        workerUrl="https://casa.bet.br/push/onesignal/OneSignalSDKWorker.js"
-        canAdvance={false}
-        verifying={false}
-        verifyResult={{ ok: false, reason: "html" }}
-        onVerify={() => {}}
-        onNext={() => {}}
-      />,
-    );
+  it("linha de status: arquivo com 'Verificar agora', script aguardando com botão 'Verificar', jogador informativo", () => {
+    const html = render();
+
+    expect(html).toContain("Verificar agora");
+    expect(html).toContain("Aguardando o primeiro acesso ao site");
+    expect(html).toContain("Verificar");
+    expect(html).toContain("Ainda não identificado (opcional)");
+  });
+
+  it("resposta 'html' do worker ainda mostra a mensagem verbatim", () => {
+    const html = render({ workerVerifyResult: { ok: false, reason: "html" } });
 
     expect(html).toContain(WORKER_VERIFY_MESSAGES.html);
   });
 
-  it("cada motivo de falha tem sua própria mensagem em pt-BR", () => {
-    expect(WORKER_VERIFY_MESSAGES.nao_encontrado).toContain("Não encontramos o arquivo");
-    expect(WORKER_VERIFY_MESSAGES.tipo_errado).toContain("application/javascript");
-    expect(WORKER_VERIFY_MESSAGES.conteudo_errado).toContain("Baixe de novo");
-    expect(WORKER_VERIFY_MESSAGES.inacessivel).toContain("Tente de novo");
+  it("worker verificado com sucesso mostra 'Arquivo encontrado'", () => {
+    const html = render({ workerVerifyResult: { ok: true } });
+
+    expect(html).toContain("Arquivo encontrado");
   });
 
-  it("'Próxima etapa' habilitado quando canAdvance é true", () => {
-    const html = renderToStaticMarkup(
-      <WorkerFileStepView
-        workerUrl="https://casa.bet.br/push/onesignal/OneSignalSDKWorker.js"
-        canAdvance={true}
-        verifying={false}
-        verifyResult={{ ok: true }}
-        onVerify={() => {}}
-        onNext={() => {}}
-      />,
-    );
+  it("script detectado mostra 'Script detectado' e não mostra o botão 'Verificar' do script", () => {
+    const html = render({ scriptSeen: true });
 
-    expect(isDisabled(findButtonOpenTag(html, "Próxima etapa"))).toBe(false);
+    expect(html).toContain("Script detectado");
+    expect(html).not.toContain("Aguardando o primeiro acesso ao site");
   });
-});
 
-describe("PlayerStepView (etapa 3 — Jogador)", () => {
-  it("mostra o snippet do jogador e o botão 'Pular por enquanto'", () => {
-    const html = renderToStaticMarkup(
-      <PlayerStepView
-        playerSnippet='<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>'
-        canAdvance={false}
-        onCopy={() => {}}
-        onSkip={() => {}}
-        onNext={() => {}}
-      />,
-    );
+  it("jogador identificado mostra a mensagem de identificado", () => {
+    const html = render({ playerLinked: true });
 
-    expect(html).toContain("ID_DO_JOGADOR");
-    expect(html).toContain("Pular por enquanto");
+    expect(html).toContain("Jogador identificado");
+  });
+
+  it("'Próxima etapa' fica desabilitado até canAdvance ser true", () => {
+    const html = render({ canAdvance: false });
     expect(isDisabled(findButtonOpenTag(html, "Próxima etapa"))).toBe(true);
+
+    const htmlEnabled = render({ canAdvance: true });
+    expect(isDisabled(findButtonOpenTag(htmlEnabled, "Próxima etapa"))).toBe(false);
+  });
+
+  it("botão 'Verificar' do script fica desabilitado enquanto checkingScript é true", () => {
+    const html = render({ checkingScript: true });
+    expect(isDisabled(findButtonOpenTag(html, "Verificando…"))).toBe(true);
   });
 });
 
@@ -213,21 +298,23 @@ describe("WebpushSetupWizard (render inicial a partir do progresso do app)", () 
     };
   }
 
-  it("sem worker_verified_at, renderiza a etapa 1 com 'Próxima etapa' desabilitado", () => {
+  it("sem worker_verified_at nem script_seen_at, renderiza a etapa 1 (instalação) com 'Próxima etapa' desabilitado", () => {
     const html = renderToStaticMarkup(
       <WebpushSetupWizard
         app={app()}
         loaderSnippet={'<script src="https://betleads.io/loader.js" async></script>'}
         playerSnippet='<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>'
         onProgress={() => {}}
+        onCheckScript={() => Promise.resolve()}
       />,
     );
 
     expect(html).toContain("Baixar OneSignalSDKWorker.js");
+    expect(html).toContain("Copiar instruções para o suporte");
     expect(isDisabled(findButtonOpenTag(html, "Próxima etapa"))).toBe(true);
   });
 
-  it("com worker_verified_at e script_seen_at, abre direto na etapa 3 (Jogador)", () => {
+  it("com worker_verified_at e script_seen_at, abre direto na etapa 2 (Teste)", () => {
     const html = renderToStaticMarkup(
       <WebpushSetupWizard
         app={app({
@@ -237,11 +324,12 @@ describe("WebpushSetupWizard (render inicial a partir do progresso do app)", () 
         loaderSnippet={'<script src="https://betleads.io/loader.js" async></script>'}
         playerSnippet='<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>'
         onProgress={() => {}}
+        onCheckScript={() => Promise.resolve()}
       />,
     );
 
-    expect(html).toContain("ID_DO_JOGADOR");
-    expect(html).toContain("Pular por enquanto");
     expect(html).not.toContain("Baixar OneSignalSDKWorker.js");
+    expect(html).not.toContain("Copiar instruções para o suporte");
+    expect(html).toContain("Abra o site da casa neste navegador e aceite as notificações.");
   });
 });
