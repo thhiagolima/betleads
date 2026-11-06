@@ -2442,7 +2442,7 @@ function PlayersPage() {
                   />
                 </div>
               </div>
-              {advancedFilterGroups.map((group) => (
+              {advancedFilterGroups.map((group, groupIndex) => (
                 <ChipGroup key={group.title} label={group.title}>
                   {group.ids.map((id, i) => {
                     const item = filters.find((candidate) => candidate.id === id);
@@ -2451,7 +2451,7 @@ function PlayersPage() {
                       <FilterChip
                         key={item.id}
                         {...(i === 0
-                          ? group.title === "Atividade e depósitos"
+                          ? groupIndex === 0
                             ? tourAnchor("jogadores.filtros.comportamento-atividade")
                             : tourAnchor("jogadores.filtros.comportamento-risco")
                           : {})}

@@ -17,7 +17,6 @@ const screen: HelpScreen = {
   purpose:
     "A base de jogadores da casa: busca, filtros por situação/nível/comportamento/período, seleção para campanha e a fila de acompanhamento de quem já recebeu contato.",
   roles: ["admin", "gestor", "member", "expert"],
-  terms: ["grupo-de-controle"],
   sections: [
     // ---------------------------------------------------------------
     // Cabeçalho e KPIs — aparecem nas duas abas
@@ -33,7 +32,7 @@ const screen: HelpScreen = {
           label: "Usar na campanha",
           what: "Leva para /campanhas já com o público atual pronto: todos os jogadores que combinam com a busca e os filtros ligados agora (não só os da página visível).",
           notes:
-            "Fica desabilitado quando o filtro atual não encontra nenhum jogador. Com filtros de \"Oportunidades\" (os sinais calculados no navegador), o público usa a lista completa já carregada.",
+            'Fica desabilitado quando o filtro atual não encontra nenhum jogador. Com filtros de "Oportunidades" (os sinais calculados no navegador), o público usa a lista completa já carregada. Erro "Não foi possível montar o público" se a busca dos IDs do filtro falhar; "Nenhum jogador selecionado." se a lista ficar vazia nessa hora; "Não foi possível preparar o público da campanha." se a gravação do público falhar no servidor.',
         },
         {
           anchor: "jogadores.cabecalho.mais-acoes",
@@ -45,14 +44,14 @@ const screen: HelpScreen = {
           label: "Exportar CSV",
           what: "Baixa em CSV todos os jogadores do filtro atual (não só a página visível).",
           notes:
-            'Erro "Nenhum jogador para exportar nesse filtro." quando o filtro não encontra ninguém. Quando o filtro é grande, o texto de sucesso avisa um limite e pede para refinar o filtro para exportar o resto ("Limite de N de M jogadores atingido; refine o filtro para exportar o resto.").',
+            'Erro "Nenhum jogador para exportar nesse filtro." quando o filtro não encontra ninguém, ou "Não foi possível exportar o CSV" se a busca falhar. Quando o filtro é grande, o texto de sucesso avisa um limite e pede para refinar o filtro para exportar o resto ("Limite de N de M jogadores atingido; refine o filtro para exportar o resto.").',
         },
         {
           anchor: "jogadores.cabecalho.copiar-ids",
           label: "Copiar IDs da plataforma",
           what: "Copia para a área de transferência o ID na plataforma (player_external_id) de todos os jogadores do filtro atual, um por linha, sem repetir.",
           notes:
-            'Erro "Nenhum ID da plataforma neste filtro." quando nenhum jogador do filtro tem ID cadastrado. Quando alguns têm e outros não, o texto de sucesso avisa quantos ficaram de fora ("N IDs copiados. M jogadores sem ID da plataforma ficaram de fora.").',
+            'Erro "Nenhum ID da plataforma neste filtro." quando nenhum jogador do filtro tem ID cadastrado, ou "Não foi possível copiar os IDs" se a busca falhar. Quando alguns têm e outros não, o texto de sucesso avisa quantos ficaram de fora ("N IDs copiados. M jogadores sem ID da plataforma ficaram de fora.").',
         },
         {
           anchor: "jogadores.kpis",
@@ -130,6 +129,7 @@ const screen: HelpScreen = {
           anchor: "jogadores.lista.usar-selecionados",
           label: "Usar selecionados na campanha",
           what: "Leva para /campanhas com o público formado só pelos jogadores marcados.",
+          notes: 'Erro "Nenhum jogador selecionado." (não deveria ocorrer aqui, pois o botão só aparece com ao menos 1 marcado) ou "Não foi possível preparar o público da campanha." se a gravação falhar no servidor.',
         },
         {
           anchor: "jogadores.lista.copiar-selecionados",
@@ -161,6 +161,7 @@ const screen: HelpScreen = {
           anchor: "jogadores.lista.copiar-id-linha",
           label: "Copiar ID (sob o nome do jogador)",
           what: "Copia o ID na plataforma daquele jogador. Troca para \"ID copiado\" por 1,5 segundo depois de copiar. Só aparece quando o jogador tem ID cadastrado. Repete-se em cada linha; a âncora marca só a primeira.",
+          notes: 'Erro "Este jogador não tem ID da plataforma." se o jogador perder o ID entre a tela carregar e você clicar.',
         },
         {
           anchor: "jogadores.lista.abrir-ficha",
@@ -281,11 +282,13 @@ const screen: HelpScreen = {
           anchor: "jogadores.acompanhamento.converteu",
           label: "Converteu",
           what: 'Marca o contato como convertido e move o jogador da fila "Aguardando conversão" para "Converteu". Só aparece na fila "Aguardando conversão". Repete-se em cada linha; a âncora marca só a primeira.',
+          notes: 'Erro "Não foi possível registrar o desfecho" se a gravação falhar.',
         },
         {
           anchor: "jogadores.acompanhamento.nao-converteu",
           label: "Não converteu",
           what: 'Marca o contato como não convertido e move o jogador para "Não converteu". Só aparece na fila "Aguardando conversão". Repete-se em cada linha; a âncora marca só a primeira.',
+          notes: 'Erro "Não foi possível registrar o desfecho" se a gravação falhar.',
         },
         {
           label: "Estados vazios da fila",

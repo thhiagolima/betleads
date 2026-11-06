@@ -32,6 +32,7 @@ const screen: HelpScreen = {
           anchor: "jogador.cabecalho.campanha",
           label: "Usar na campanha",
           what: "Leva para /campanhas com o público já pronto, contendo só este jogador.",
+          notes: 'Erro "Não foi possível preparar o público da campanha." se a gravação falhar no servidor.',
         },
         {
           anchor: "jogador.cabecalho.historico",
@@ -124,13 +125,14 @@ const screen: HelpScreen = {
           label: "Gerar link",
           what: "Cria o link rastreado. Fica desabilitado até os dois campos acima estarem preenchidos.",
           roles: ["member", "expert"],
-          notes: 'Depois de gerado, aparece o aviso "Encurtador não configurado; o link é rastreado mesmo assim." quando a casa não tem domínio de encurtador próprio.',
+          notes: 'Depois de gerado, aparece o aviso "Encurtador não configurado; o link é rastreado mesmo assim." quando a casa não tem domínio de encurtador próprio. Erro "Não foi possível gerar o link." se a geração falhar.',
         },
         {
           anchor: "jogador.link-equipe.copiar",
           label: "Copiar (link gerado)",
           what: "Copia o link gerado para a área de transferência.",
           roles: ["member", "expert"],
+          notes: 'Erro "Não foi possível copiar." se a área de transferência não puder ser usada.',
         },
         {
           anchor: "jogador.link-equipe.whatsapp",
