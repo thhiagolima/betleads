@@ -188,6 +188,7 @@ describe("createOneSignalApp", () => {
     expect(headers.Authorization).toBe("Key org-test-key");
     expect(headers["OneSignal-Usage"]).toBe("Betleads | Partner Integration");
     const body = JSON.parse(init.body as string);
+    expect(body.name).toBe("Casa X");
     expect(body.site_name).toBe("Casa X");
     expect(body.chrome_web_origin).toBe("https://x.com");
     expect(body.organization_id).toBe("org-test-id");

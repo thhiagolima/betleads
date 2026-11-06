@@ -36,7 +36,10 @@ export async function createOneSignalApp(input: {
 }): Promise<{ appId: string }> {
   const apiKey = assertConfigured(input.credentials.orgApiKey);
 
+  // `name` is the app's (required) name; `site_name` is only the label of the
+  // Chrome web prompt.
   const body: Record<string, unknown> = {
+    name: input.siteName,
     site_name: input.siteName,
     chrome_web_origin: input.origin,
   };
