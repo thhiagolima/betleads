@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Bell,
   Building2,
   FileText,
   Home,
@@ -111,6 +112,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
       link("SMS", "/sms", MessageSquare, { channel: "sms" }),
       link("Email", "/email", Mail, { channel: "email" }),
       link("Voz", "/ligacoes", Phone, { channel: "voice" }),
+      link("Web Push", "/webpush", Bell, { channel: "webpush" }),
       link("Consentimentos", "/consentimentos", ShieldQuestion),
       {
         kind: "group",
@@ -283,6 +285,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/plano-e-creditos": { section: "Configurações", title: "Plano e créditos" },
   "/email": { section: "Canais", title: "Email" },
   "/ligacoes": { section: "Canais", title: "Voz" },
+  "/webpush": { section: "Canais", title: "Web Push" },
   "/whatsapp": { section: "Canais", title: "WhatsApp" },
   "/links": { section: "Integrações", title: "Links curtos" },
   "/links/configuracoes": { section: "Integrações", title: "Links curtos" },

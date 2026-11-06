@@ -143,7 +143,22 @@ describe("visible sections", () => {
   it("keeps Consentimentos with the channels", () => {
     const canais = visibleSections("gestor", false).find((section) => section.label === "Canais");
     const titles = canais?.items.map((item) => item.title) ?? [];
-    expect(titles.indexOf("Consentimentos")).toBe(titles.indexOf("Voz") + 1);
+    expect(titles.indexOf("Web Push")).toBe(titles.indexOf("Voz") + 1);
+    expect(titles.indexOf("Consentimentos")).toBe(titles.indexOf("Web Push") + 1);
+  });
+
+  it("shows Web Push only when the house has the channel enabled", () => {
+    const canaisTitles = (channels: Parameters<typeof visibleSections>[4]) =>
+      visibleSections("gestor", false, false, false, channels)
+        .find((section) => section.label === "Canais")
+        ?.items.map((item) => item.title) ?? [];
+    expect(canaisTitles(["sms", "email", "voice"])).not.toContain("Web Push");
+    expect(canaisTitles(["webpush"])).toContain("Web Push");
+    expect(
+      visibleSections("expert", false, false, false, ["webpush"])
+        .flatMap((section) => section.items)
+        .map((item) => item.title),
+    ).not.toContain("Web Push");
   });
 
   it("hides a disabled channel's link and its template/áudio child, keeps the rest of Canais", () => {
@@ -341,6 +356,7 @@ describe("expert role", () => {
       "/sms",
       "/email",
       "/ligacoes",
+      "/webpush",
       "/jornadas",
       "/automacoes",
       "/plano-e-creditos",

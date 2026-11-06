@@ -65,3 +65,49 @@ describe("ChannelPage — canal desligado", () => {
     expect(html).not.toContain("Canal SMS desabilitado");
   });
 });
+
+describe("ChannelPage — Web Push", () => {
+  it("shows the Web Push disabled state when the channel is off", () => {
+    enabledChannels.isEnabled = (channel) => channel !== "webpush";
+    const html = renderToStaticMarkup(
+      <ChannelPage
+        channel="webpush"
+        subtitle="Web Push da casa"
+        notReady={<div>nao-instalado</div>}
+      >
+        {() => <div>conteudo-de-webpush</div>}
+      </ChannelPage>,
+    );
+    expect(html).toContain("Canal Web push desabilitado");
+    expect(html).not.toContain("nao-instalado");
+    expect(html).not.toContain("conteudo-de-webpush");
+  });
+
+  it("shows only the notReady block, without Nova campanha or tabs, while not installed", () => {
+    enabledChannels.isEnabled = () => true;
+    const html = renderToStaticMarkup(
+      <ChannelPage
+        channel="webpush"
+        subtitle="Web Push da casa"
+        notReady={<div>nao-instalado</div>}
+      >
+        {() => <div>conteudo-de-webpush</div>}
+      </ChannelPage>,
+    );
+    expect(html).toContain("nao-instalado");
+    expect(html).not.toContain("Nova campanha");
+    expect(html).not.toContain("conteudo-de-webpush");
+  });
+
+  it("renders the tabs and Nova campanha once installed", () => {
+    enabledChannels.isEnabled = () => true;
+    const html = renderToStaticMarkup(
+      <ChannelPage channel="webpush" subtitle="Web Push da casa">
+        {() => <div>conteudo-de-webpush</div>}
+      </ChannelPage>,
+    );
+    expect(html).toContain("conteudo-de-webpush");
+    expect(html).toContain("Nova campanha");
+    expect(html).toContain("Histórico");
+  });
+});

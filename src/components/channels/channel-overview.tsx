@@ -154,44 +154,56 @@ function hourLabel(iso: string) {
   return `${hour.padStart(2, "0")}h`;
 }
 
+type HourlyPoint = { t: string; count: number };
+
 /**
  * "Envios por dia". For a single day (Hoje, Ontem, one date) the dashboards
  * only have one daily bucket, so the chart switches to attempts per hour in
  * Brasília time from the history timeline (all attempts, one series).
+ * A channel outside the history timeline (web push) passes `hourly` itself.
  */
 export function ChannelSendsChart({
   historyChannel,
   period,
   daily,
   series,
+  hourly: ownHourly,
 }: {
-  historyChannel: ChannelKey;
+  historyChannel: ChannelKey | "webpush";
   period: ChannelPeriod;
   daily: DailyRow[] | undefined;
   series: ChartSeries[];
+  /** Hourly points from the channel's own query; skips the history timeline. */
+  hourly?: { points: HourlyPoint[] | undefined };
 }) {
   const { query } = period;
   const timelineFn = useServerFn(getChannelDispatchTimeline);
-  const hourly = useQuery({
+  const timeline = useQuery({
     queryKey: ["channel-hourly", historyChannel, query.from, query.to],
     queryFn: () => {
       const { from, to } = historyWindow(period.range);
-      return timelineFn({ data: { channel: historyChannel, from, to, bucket: "hour" } });
+      return timelineFn({
+        data: { channel: historyChannel as ChannelKey, from, to, bucket: "hour" },
+      });
     },
-    enabled: query.sameDay,
+    enabled: query.sameDay && !ownHourly,
     refetchInterval: query.includesToday ? 60_000 : false,
     placeholderData: (previous) => previous,
   });
 
   const byHour = query.sameDay;
-  const hourlyPoints = hourly.data?.points ?? [];
+  const hourlyPoints = (ownHourly ? ownHourly.points : timeline.data?.points) ?? [];
   const data: Array<Record<string, unknown>> = byHour
     ? hourlyPoints.map((point) => ({ label: hourLabel(point.t), disparos: point.count }))
     : (daily ?? []).map((row) => ({ ...row, label: dayLabel(row.date) }));
   const shownSeries: ChartSeries[] = byHour
     ? [{ key: "disparos", label: "Disparos", color: "var(--color-chart-1)" }]
     : series;
-  const loading = byHour ? hourly.isLoading : daily === undefined;
+  const loading = byHour
+    ? ownHourly
+      ? ownHourly.points === undefined
+      : timeline.isLoading
+    : daily === undefined;
   const total = byHour ? hourlyPoints.reduce((sum, point) => sum + point.count, 0) : null;
 
   return (

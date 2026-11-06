@@ -1,17 +1,18 @@
 /**
- * Tabs of the three channel pages (SMS, Email, Voz) and how an URL hash maps
+ * Tabs of the channel pages (SMS, Email, Voz, Web Push) and how an URL hash maps
  * to them. Old hashes keep working: they open the tab that replaced them, or
  * send the user to the page that now owns that content.
  */
 import type { ProviderChannel } from "@/lib/tenant-channels.shared";
 
-export type ChannelId = "sms" | "email" | "voz";
+export type ChannelId = "sms" | "email" | "voz" | "webpush";
 
 /** `ChannelId` ("voz") -> `ProviderChannel` ("voice"), for the channel-enabled check. */
 export const CHANNEL_ID_TO_PROVIDER_CHANNEL: Record<ChannelId, ProviderChannel> = {
   sms: "sms",
   email: "email",
   voz: "voice",
+  webpush: "webpush",
 };
 
 export type ChannelTabItem = { value: string; label: string };
@@ -33,14 +34,19 @@ export const CHANNEL_TABS = {
     { value: "audios", label: "Áudios e roteiros" },
     { value: "historico", label: "Histórico" },
   ],
+  webpush: [
+    { value: "visao-geral", label: "Visão geral" },
+    { value: "historico", label: "Histórico" },
+  ],
 } as const satisfies Record<ChannelId, readonly ChannelTabItem[]>;
 
 export type ChannelTab<C extends ChannelId> = (typeof CHANNEL_TABS)[C][number]["value"];
 
 /** Where an old hash now lives outside the channel page. */
 export type ChannelRedirect = {
-  to: "/campanhas" | "/automacoes";
+  to: "/campanhas" | "/automacoes" | "/webhooks";
   search?: Record<string, string>;
+  hash?: string;
 };
 
 const TAB_ALIASES: Record<ChannelId, Record<string, string>> = {
@@ -63,6 +69,8 @@ const TAB_ALIASES: Record<ChannelId, Record<string, string>> = {
     roteiros: "audios",
     fila: "historico",
   },
+  // New page: no old hashes to keep.
+  webpush: {},
 };
 
 const REDIRECTS: Record<ChannelId, Record<string, ChannelRedirect>> = {
@@ -77,6 +85,10 @@ const REDIRECTS: Record<ChannelId, Record<string, ChannelRedirect>> = {
   voz: {
     // Fluxos de voz agora ficam em Automações.
     fluxos: { to: "/automacoes" },
+  },
+  webpush: {
+    // Instalação e mensagem de permissão ficam na aba Web Push de Integrações.
+    configuracoes: { to: "/webhooks", hash: "webpush" },
   },
 };
 
