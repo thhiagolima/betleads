@@ -55,6 +55,7 @@ import { reserveUsage } from "@/lib/billing/wallet.server";
 import { channelBudget } from "@/lib/rate-limit/channel-budget.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { startJobRun } from "@/lib/observability/job-monitor.server";
+import { isChannelEnabled } from "@/lib/tenant-channels.server";
 import { loadAppCredentials } from "./apps.server";
 import { campaignPushUrl, markWebpushDispatches, prepareWebpushDispatches } from "./links.server";
 import { deterministicUuid, sendOneSignalPush, type OneSignalSendResult } from "./onesignal.server";
@@ -198,6 +199,8 @@ export type WebpushDispatchDeps = {
   updateCampaign(campaign: WebpushCampaignRow, patch: Record<string, unknown>): Promise<boolean>;
   /** SUM over `concluido` batches: authoritative sent/failed + the cursor ceiling. Recomputed, never incremented. */
   concludedTotals(campaignId: string): Promise<WebpushConcludedTotals>;
+  /** Web push channel on for the house (tenant_channels); absent = always on. */
+  channelEnabled?(tenantId: string): Promise<boolean>;
 };
 
 export type WebpushCampaignTickResult = {
@@ -228,6 +231,59 @@ function groupByApp(rows: WebpushBatchRow[]): Array<{ appId: string; rows: Webpu
 export const WEBPUSH_CAMPAIGN_NO_BALANCE_MESSAGE = "Saldo insuficiente";
 /** last_error of a campaign paused because settling an already-sent batch (the `:ajuste` reserve) found no balance. */
 export const WEBPUSH_SETTLEMENT_NO_BALANCE_MESSAGE = "Saldo insuficiente para liquidar envio";
+/** last_error of a campaign cancelled because the house's web push channel was turned off. */
+export const WEBPUSH_CAMPAIGN_CHANNEL_DISABLED_MESSAGE = "Canal Web push desabilitado para a casa.";
+
+/**
+ * Channel turned off for the house while the campaign was `enviando` (Task 5
+ * only cancels agendada/pausada ones). A `pendente` batch never reaches
+ * OneSignal: its reservation (if any) is refunded through `deps.refund`
+ * (refundOrThrow — `reservation_not_found` when nothing was reserved) and it
+ * goes `falhou`, all rows refused. Batches OneSignal already accepted
+ * (`enviado`/`liquidado`/`falhou`) are settled normally — the pushes went
+ * out. Once nothing is open the campaign is `cancelada`; if a settlement
+ * stops (no balance for the `:ajuste`), the lock is released and the next
+ * tick tries again.
+ */
+async function cancelForDisabledChannel(
+  c: WebpushCampaignRow,
+  deps: WebpushDispatchDeps,
+): Promise<WebpushCampaignTickResult> {
+  for (const open of await deps.listOpenBatches(c.id)) {
+    let batch = open;
+    if (batch.status === "pendente") {
+      await deps.refund({
+        tenantId: c.tenant_id,
+        referenceId: batch.id,
+        idempotencyKey: `${batch.id}:refund`,
+        reason: "channel_disabled",
+      });
+      batch = await deps.updateBatch(batch.id, {
+        status: "falhou",
+        accepted: 0,
+        refused_row_ids: batch.subscriptionRowIds,
+        last_error: WEBPUSH_CAMPAIGN_CHANNEL_DISABLED_MESSAGE,
+      });
+    }
+    const outcome = await advanceBatch(batch, c, deps);
+    if (outcome.kind !== "concluded") {
+      await deps.updateCampaign(c, { status: "enviando", locked_at: null, locked_by: null });
+      return returnWithTotals(c.id, deps, "enviando");
+    }
+  }
+  const totals = await deps.concludedTotals(c.id);
+  await deps.updateCampaign(c, {
+    status: "cancelada",
+    last_error: WEBPUSH_CAMPAIGN_CHANNEL_DISABLED_MESSAGE,
+    sent_count: totals.sent,
+    failed_count: totals.failed,
+    ...(totals.maxRowId ? { sent_cursor: totals.maxRowId } : {}),
+    locked_at: null,
+    locked_by: null,
+    updated_at: deps.now().toISOString(),
+  });
+  return { status: "cancelada", sent: totals.sent, failed: totals.failed };
+}
 
 type AdvanceOutcome =
   | { kind: "concluded"; accepted: number; refused: number }
@@ -471,6 +527,10 @@ export async function processWebpushCampaignTick(
 ): Promise<WebpushCampaignTickResult> {
   const batchSize = opts.batchSize ?? 1000;
   let c = campaignRow;
+
+  if (deps.channelEnabled && !(await deps.channelEnabled(c.tenant_id))) {
+    return cancelForDisabledChannel(c, deps);
+  }
 
   for (;;) {
     if (deps.now().getTime() >= opts.deadline) {
@@ -759,6 +819,7 @@ function realWebpushDeps(loadIconUrl: (tenantId: string) => Promise<string | nul
     markDispatches: (args) => markWebpushDispatches(webpushDb, args),
     reserve: (args) => reserveUsage(webpushDb, args),
     refund: (args) => refundOrThrow(webpushDb, args),
+    channelEnabled: (tenantId) => isChannelEnabled(tenantId, "webpush"),
     async send(input) {
       const iconUrl = await loadIconUrl(input.tenantId);
       return sendOneSignalPush({

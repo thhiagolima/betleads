@@ -8,6 +8,7 @@ import { toast } from "sonner";
 
 import { ChannelCampaignComposer } from "@/components/campaigns/channel-campaign-composer";
 import { IndividualSmsDialog } from "@/components/campaigns/individual-sms-dialog";
+import { tourAnchor } from "@/help/anchor";
 import { HomeCard, KpiCard } from "@/components/home/home-cards";
 import { SegmentedFilter } from "@/components/players/segmented-filter";
 import { requestConfirmation } from "@/components/system-dialog-host";
@@ -20,9 +21,11 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { num } from "@/lib/format";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import {
   audienceFromSearch,
   campaignStopReason,
+  friendlyChannelReason,
   getChannelOperationState,
   groupVoiceQueueItems,
   isFinishedCampaignStatus,
@@ -145,6 +148,7 @@ type WebpushCampaignSummaryRow = {
 
 export function CampaignsHub() {
   const queryClient = useQueryClient();
+  const { isEnabled } = useEnabledChannels();
   const listCampaigns = useServerFn(listScheduledSmsCampaigns);
   const listEmailCampaignsFn = useServerFn(listEmailCampaigns);
   const listCallQueueFn = useServerFn(listCallQueue);
@@ -170,10 +174,11 @@ export function CampaignsHub() {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get("newChannel");
     if (
-      requested === "email" ||
-      requested === "voice" ||
-      requested === "sms" ||
-      requested === "webpush"
+      (requested === "email" ||
+        requested === "voice" ||
+        requested === "sms" ||
+        requested === "webpush") &&
+      isEnabled(requested)
     ) {
       setInitialChannel(requested);
       setComposerOpen(true);
@@ -184,6 +189,9 @@ export function CampaignsHub() {
       setInitialAudienceId(audienceFromSearch(params.get("audience")));
       setComposerOpen(true);
     }
+    // Only on mount, like the URL params it reads; isEnabled already falls
+    // back to the right defaults the first time it's called.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const campaigns = useQuery({
@@ -340,9 +348,9 @@ export function CampaignsHub() {
     cancellable: campaign.status === "agendada" || campaign.status === "pausada",
     resumable: campaign.status === "pausada",
   }));
-  const all: Campaign[] = [...smsCampaigns, ...emailRows, ...voiceRows, ...webpushRows].sort(
-    (a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
-  );
+  const all: Campaign[] = [...smsCampaigns, ...emailRows, ...voiceRows, ...webpushRows]
+    .filter((campaign) => isEnabled(campaign.channel))
+    .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
   const normalizedSearch = search.trim().toLowerCase();
   const rows = all.filter(
     (campaign) =>
@@ -390,10 +398,16 @@ export function CampaignsHub() {
         subtitle="Envie SMS, e-mail ou voz para um público e acompanhe o resultado de cada envio."
         actions={
           <>
-            <Button variant="outline" onClick={() => setIndividualOpen(true)}>
-              <Send /> Envio de teste
-            </Button>
-            <Button onClick={openNewCampaign}>
+            {(isEnabled("sms") || isEnabled("email") || isEnabled("voice")) && (
+              <Button
+                variant="outline"
+                onClick={() => setIndividualOpen(true)}
+                {...tourAnchor("campanhas.hub.envio-teste")}
+              >
+                <Send /> Envio de teste
+              </Button>
+            )}
+            <Button onClick={openNewCampaign} {...tourAnchor("campanhas.hub.nova-campanha")}>
               <Plus /> Nova campanha
             </Button>
           </>
@@ -430,15 +444,17 @@ export function CampaignsHub() {
       />
 
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-        <SegmentedFilter
-          label="Status da campanha"
-          value={status}
-          onValueChange={setStatus}
-          items={STATUS_FILTERS.map((item) => ({
-            ...item,
-            count: firstLoad ? null : statusCounts[item.value],
-          }))}
-        />
+        <div {...tourAnchor("campanhas.hub.status-filtro")}>
+          <SegmentedFilter
+            label="Status da campanha"
+            value={status}
+            onValueChange={setStatus}
+            items={STATUS_FILTERS.map((item) => ({
+              ...item,
+              count: firstLoad ? null : statusCounts[item.value],
+            }))}
+          />
+        </div>
         <div className="relative w-full lg:w-72">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -451,6 +467,7 @@ export function CampaignsHub() {
             aria-label="Buscar campanha pelo nome"
             placeholder="Buscar campanha"
             className="h-10 bg-card pl-9 pr-10"
+            {...tourAnchor("campanhas.hub.busca")}
           />
           {search && (
             <button
@@ -528,10 +545,11 @@ export function CampaignsHub() {
 
             {!firstLoad && rows.length > 0 && (
               <ul>
-                {rows.map((campaign) => (
+                {rows.map((campaign, index) => (
                   <CampaignRow
                     key={`${campaign.channel}-${campaign.id}`}
                     campaign={campaign}
+                    isFirst={index === 0}
                     cancelPending={cancel.isPending || cancelWebpush.isPending}
                     resumePending={resume.isPending || resumeEmail.isPending || resumeWebpush.isPending}
                     onCancel={async () => {
@@ -611,7 +629,7 @@ export function CampaignDraftsCard({
         </p>
       </div>
       <ul>
-        {items.map((draft) => {
+        {items.map((draft, index) => {
           const draftName = draft.name || "Campanha sem nome";
           return (
             <li
@@ -630,13 +648,18 @@ export function CampaignDraftsCard({
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <Button variant="outline" onClick={() => onContinue(draft)}>
+                <Button
+                  variant="outline"
+                  onClick={() => onContinue(draft)}
+                  {...(index === 0 ? tourAnchor("campanhas.hub.rascunho-continuar") : {})}
+                >
                   Continuar
                 </Button>
                 <IconButton
                   label={`Excluir rascunho ${draftName}`}
                   icon={<Trash2 />}
                   disabled={deleting}
+                  {...(index === 0 ? tourAnchor("campanhas.hub.rascunho-excluir") : {})}
                   onClick={async () => {
                     const confirmed = await requestConfirmation({
                       title: "Excluir rascunho?",
@@ -666,6 +689,7 @@ export function CampaignRow({
   onCancel,
   onResume,
   variant = "house",
+  isFirst = false,
 }: {
   campaign: Campaign;
   cancelPending: boolean;
@@ -674,6 +698,8 @@ export function CampaignRow({
   onResume: () => void;
   /** "expert": no campaign report, resume or wallet links (house-only pages/actions). */
   variant?: "house" | "expert";
+  /** First row of the list: carries the help-tour anchors (repeated controls anchor once). */
+  isFirst?: boolean;
 }) {
   const isExpertRow = variant === "expert";
   const total = Number(campaign.total_count ?? 0);
@@ -692,8 +718,12 @@ export function CampaignRow({
   });
   const reason =
     (campaign.status === "recusada" ? (campaign.rejection_reason ?? null) : null) ??
-    campaignStopReason(campaign.status, campaign.last_error, campaign.updated_at) ??
-    campaign.blocked_reason ??
+    campaignStopReason(
+      campaign.status,
+      campaign.last_error ?? campaign.blocked_reason,
+      campaign.updated_at,
+    ) ??
+    friendlyChannelReason(campaign.blocked_reason) ??
     null;
   const unresolved = Number(campaign.unresolved_count ?? 0);
   const pausedForBalance =
@@ -716,11 +746,14 @@ export function CampaignRow({
   ].filter(Boolean);
 
   const status = (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div
+      className="flex flex-wrap items-center gap-1.5"
+      {...(isFirst ? tourAnchor("campanhas.hub.selo-status") : {})}
+    >
       <Badge variant="outline" className={cn("shrink-0", operation.tone)}>
         {operation.label}
       </Badge>
-      <CampaignBlockedBadge reason={campaign.blocked_reason} />
+      <CampaignBlockedBadge reason={friendlyChannelReason(campaign.blocked_reason)} />
       {unresolved > 0 ? (
         <Badge
           variant="outline"
@@ -768,7 +801,12 @@ export function CampaignRow({
       </dl>
       <div className="flex flex-wrap gap-2 xl:justify-end">
         {campaign.has_report === false || isExpertRow ? null : (
-          <Button size="sm" variant="outline" asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            asChild
+            {...(isFirst ? tourAnchor("campanhas.hub.relatorio") : {})}
+          >
             <Link to="/campanhas/$campaignId/relatorio" params={{ campaignId: campaign.id }}>
               Relatório
             </Link>
@@ -779,17 +817,34 @@ export function CampaignRow({
         (campaign.channel === "sms" ||
           campaign.channel === "email" ||
           campaign.channel === "webpush") ? (
-          <Button size="sm" variant="outline" disabled={resumePending} onClick={onResume}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={resumePending}
+            onClick={onResume}
+            {...(isFirst ? tourAnchor("campanhas.hub.retomar") : {})}
+          >
             Retomar
           </Button>
         ) : null}
         {pausedForBalance ? (
-          <Button size="sm" variant="ghost" asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            asChild
+            {...(isFirst ? tourAnchor("campanhas.hub.ver-saldo") : {})}
+          >
             <Link to="/plano-e-creditos">Ver saldo</Link>
           </Button>
         ) : null}
         {campaign.cancellable ? (
-          <Button size="sm" variant="ghost" disabled={cancelPending} onClick={onCancel}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={cancelPending}
+            onClick={onCancel}
+            {...(isFirst ? tourAnchor("campanhas.hub.cancelar") : {})}
+          >
             Cancelar
           </Button>
         ) : null}

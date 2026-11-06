@@ -50,6 +50,7 @@ import { requestConfirmation } from "@/components/system-dialog-host";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 
 export const Route = createFileRoute("/webhooks")({
   component: IntegrationsPage,
@@ -63,14 +64,19 @@ const TABS = [
 ] as const;
 type IntegrationTab = (typeof TABS)[number]["value"];
 
-function integrationTabFromHash(hash: string): IntegrationTab {
-  return TABS.some((tab) => tab.value === hash) ? (hash as IntegrationTab) : "plataforma";
+function integrationTabFromHash(hash: string, visibleTabs: ReadonlyArray<{ value: string }>) {
+  const fromHash = TABS.find((tab) => tab.value === hash)?.value;
+  return fromHash && visibleTabs.some((tab) => tab.value === fromHash)
+    ? (fromHash as IntegrationTab)
+    : "plataforma";
 }
 
 function IntegrationsPage() {
   const hash = useLocation({ select: (l) => l.hash });
   const navigate = useNavigate();
-  const tab = integrationTabFromHash(hash);
+  const { isEnabled } = useEnabledChannels();
+  const visibleTabs = TABS.filter((tab) => tab.value !== "webpush" || isEnabled("webpush"));
+  const tab = integrationTabFromHash(hash, visibleTabs);
 
   return (
     <Page>
@@ -80,7 +86,7 @@ function IntegrationsPage() {
         value={tab}
         // Sem replace: cada aba vira uma entrada no histórico (o voltar do navegador funciona).
         onValueChange={(value) => void navigate({ to: "/webhooks", hash: value })}
-        items={TABS}
+        items={visibleTabs}
       />
       <div role="tabpanel" aria-labelledby={`tab-${tab}`} className="space-y-4 sm:space-y-5">
         {tab === "plataforma" && <PlatformSection />}
@@ -91,7 +97,7 @@ function IntegrationsPage() {
           </>
         )}
         {tab === "meta" && <MetaConnectionPanel />}
-        {tab === "webpush" && <WebpushIntegrationPanel />}
+        {tab === "webpush" && isEnabled("webpush") && <WebpushIntegrationPanel />}
       </div>
     </Page>
   );

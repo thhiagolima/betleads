@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { tourAnchor } from "@/help/anchor";
 import {
   AlertTriangle,
   ChevronLeft,
@@ -90,7 +91,14 @@ const ptLabel = (map: Record<string, string>, value?: string | null) =>
 /** The single way out of a report: back to the list it was opened from. */
 function BackLink({ sourceType }: { sourceType: "campaign" | "journey" }) {
   return (
-    <Button variant="outline" size="sm" asChild>
+    <Button
+      variant="outline"
+      size="sm"
+      asChild
+      {...(sourceType === "campaign"
+        ? tourAnchor("campanha-relatorio.voltar")
+        : tourAnchor("jornada-relatorio.voltar"))}
+    >
       {sourceType === "campaign" ? (
         <Link to="/campanhas">Voltar para Campanhas</Link>
       ) : (
@@ -258,7 +266,7 @@ function VoiceCampaignReport({
           <MetricRow label="Criada em" value={dateTime(campaign.createdAt)} />
           <MetricRow label="Agendada para" value={dateTime(campaign.scheduledAt)} />
           <MetricRow label="Ligação iniciada" value={dateTime(voice.attemptedAt)} />
-          <div className="mt-3">
+          <div className="mt-3" {...tourAnchor("campanha-relatorio.voz.detalhes-tecnicos")}>
             <TechnicalDetails>
               <div className="rounded-lg border border-border/70 px-3">
                 <MetricRow label="Provedor de voz" value={voice.provider ?? "Infobip"} />
@@ -563,8 +571,15 @@ function CampaignReport({
           title="A mensagem que foi enviada"
           actions={
             <>
-              <CopyMessageButton text={campaign?.content} />
-              <Button size="sm" variant="ghost" asChild>
+              <span {...tourAnchor("campanha-relatorio.mensagem.copiar")}>
+                <CopyMessageButton text={campaign?.content} />
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                asChild
+                {...tourAnchor("campanha-relatorio.mensagem.nova-campanha")}
+              >
                 <Link to="/campanhas" search={{ newCampaign: 1 } as never}>
                   <Plus className="mr-1.5 size-4" aria-hidden="true" />
                   Nova campanha
@@ -596,13 +611,16 @@ function CampaignReport({
                 data.canViewSensitive ? undefined : "Disponível para administradores da operação"
               }
               onClick={() => void downloadRecipients(sourceId)}
+              {...tourAnchor("campanha-relatorio.funil.csv")}
             >
               <Download className="mr-1.5 size-4" aria-hidden="true" /> Baixar CSV
             </Button>
           }
           className="mb-3"
         />
-        <FunnelFilter stages={stages} value={filter} onValueChange={setActiveFilter} />
+        <div {...tourAnchor("campanha-relatorio.funil.filtro")}>
+          <FunnelFilter stages={stages} value={filter} onValueChange={setActiveFilter} />
+        </div>
 
         {detailsError ? (
           <p className="mt-4 text-body text-muted-foreground">
@@ -635,7 +653,7 @@ function CampaignReport({
               />
             ) : (
               <>
-                <div className="mt-2">
+                <div className="mt-2" {...tourAnchor("campanha-relatorio.funil.lista")}>
                   <RecipientList rows={visible} showDelivered={showDelivered} />
                 </div>
                 {pages > 1 ? (
@@ -644,7 +662,10 @@ function CampaignReport({
                       {number(firstRow)}–{number(lastRow)} de {number(filtered.length)} · página{" "}
                       {page} de {pages}
                     </span>
-                    <div className="flex gap-2">
+                    <div
+                      className="flex gap-2"
+                      {...tourAnchor("campanha-relatorio.funil.paginacao")}
+                    >
                       <Button
                         size="sm"
                         variant="outline"
@@ -728,6 +749,7 @@ function UnresolvedRecipientsCard({
                   setExporting(false);
                 }
               }}
+              {...tourAnchor("campanha-relatorio.nao-enviados.csv")}
             >
               <Download className="mr-1.5 size-4" aria-hidden="true" />
               {exporting ? "Gerando…" : "Baixar CSV"}
@@ -749,7 +771,7 @@ function UnresolvedRecipientsCard({
           ))}
         </ul>
         {unresolved.sample.length > 0 ? (
-          <details className="mt-3 text-meta">
+          <details className="mt-3 text-meta" {...tourAnchor("campanha-relatorio.nao-enviados.exemplos")}>
             <summary className="cursor-pointer text-label text-muted-foreground hover:text-foreground">
               Ver os primeiros {number(unresolved.sample.length)}
             </summary>
@@ -871,7 +893,12 @@ function JourneyReport({
         actions={
           <>
             {journeyId ? (
-              <Button variant="outline" size="sm" asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                {...tourAnchor("jornada-relatorio.editar")}
+              >
                 <Link to="/jornadas/$journeyId" params={{ journeyId }}>
                   <Pencil className="mr-1.5 size-4" aria-hidden="true" />
                   Editar jornada
@@ -1096,6 +1123,7 @@ function JourneyReport({
               variant="outline"
               disabled={drilldownLoading}
               onClick={onLoadDrilldown}
+              {...tourAnchor("jornada-relatorio.carregar-jogadores")}
             >
               {drilldownLoading ? "Carregando…" : "Carregar jogadores"}
             </Button>

@@ -46,6 +46,7 @@ import {
 } from "./sms-campaign-dispatch.server";
 import { PLATFORM_SMS_BREAKER_KEY, smsBreakerKey } from "./sms-provider-breaker.server";
 import { SmsAccountGates } from "./sms-account-gates.server";
+import { isChannelEnabled } from "./tenant-channels.server";
 import { ProviderAccountUnavailableError, resolveSmsAccount } from "./provider-accounts.server";
 import { PROVIDER_ACCOUNT_DEFER_MS } from "./rate-limit/provider-errors.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
@@ -1027,6 +1028,7 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
         insufficientBalance: errorKind === "insufficient_balance",
         expertCap: errorKind === "expert_cap",
         expertInactive: errorKind === "expert_inactive",
+        channelDisabled: errorKind === "channel_disabled",
         error: r.ok ? undefined : (r as { error?: string }).error,
       };
     },
@@ -1070,6 +1072,7 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
               retryable: o.retryable,
               providerAccount: o.errorKind === "provider_account",
               insufficientBalance: o.errorKind === "insufficient_balance",
+              channelDisabled: o.errorKind === "channel_disabled",
               error: o.ok && o.status !== "pending_confirmation" ? undefined : o.error,
             }));
           },
@@ -1178,6 +1181,7 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
       const deps = {
         ...scoped,
         providerGate: () => campaignProviderGate(gates, c),
+        channelEnabled: (tenantId: string) => isChannelEnabled(tenantId, "sms"),
       };
       const r = await processSmsCampaignTick(c, deps, {
         deadline,

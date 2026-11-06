@@ -37,6 +37,9 @@ vi.mock("@/lib/webpush/campaigns.functions", () => ({
   listWebpushCampaignsFn: vi.fn(),
   resumeWebpushCampaignFn: vi.fn(),
 }));
+vi.mock("@/hooks/use-enabled-channels", () => ({
+  useEnabledChannels: () => ({ isEnabled: () => true }),
+}));
 
 import { CampaignRow, type Campaign } from "./campaigns-hub";
 import { expertCampaignToRow } from "@/lib/expert-campaign-rows";

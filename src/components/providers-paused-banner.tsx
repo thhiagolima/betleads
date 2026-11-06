@@ -10,6 +10,7 @@ import {
 } from "@/lib/dispatch-pause.functions";
 import { tenantSafeChannelError } from "@/lib/channel-error";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { tourAnchor } from "@/help/anchor";
 
 const LABEL: Record<DispatchChannel, string> = {
   sms: "SMS",
@@ -94,6 +95,7 @@ export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel })
           onClick={() => void resume()}
           disabled={mut.isPending}
           className="bg-warning text-primary-foreground hover:bg-warning/90"
+          {...tourAnchor("canal.pausado.retomar")}
         >
           <Play className="h-3.5 w-3.5 mr-1.5" /> Retomar disparos
         </Button>

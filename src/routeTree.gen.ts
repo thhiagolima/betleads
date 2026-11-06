@@ -40,6 +40,7 @@ import { Route as SmsRouteImport } from './routes/sms'
 import { Route as TenantsRouteImport } from './routes/tenants'
 import { Route as TreinoIaRouteImport } from './routes/treino-ia'
 import { Route as WebhooksRouteImport } from './routes/webhooks'
+import { Route as WebpushRouteImport } from './routes/webpush'
 import { Route as WhatsappRouteImport } from './routes/whatsapp'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known/oauth-authorization-server'
 import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known/oauth-protected-resource'
@@ -268,6 +269,11 @@ const TreinoIaRoute = TreinoIaRouteImport.update({
 const WebhooksRoute = WebhooksRouteImport.update({
   id: '/webhooks',
   path: '/webhooks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WebpushRoute = WebpushRouteImport.update({
+  id: '/webpush',
+  path: '/webpush',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WhatsappRoute = WhatsappRouteImport.update({
@@ -707,6 +713,7 @@ export interface FileRoutesByFullPath {
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
+  '/webpush': typeof WebpushRoute
   '/whatsapp': typeof WhatsappRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
@@ -814,6 +821,7 @@ export interface FileRoutesByTo {
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
+  '/webpush': typeof WebpushRoute
   '/whatsapp': typeof WhatsappRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
@@ -922,6 +930,7 @@ export interface FileRoutesById {
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
+  '/webpush': typeof WebpushRoute
   '/whatsapp': typeof WhatsappRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
@@ -1031,6 +1040,7 @@ export interface FileRouteTypes {
     | '/tenants'
     | '/treino-ia'
     | '/webhooks'
+    | '/webpush'
     | '/whatsapp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
@@ -1138,6 +1148,7 @@ export interface FileRouteTypes {
     | '/tenants'
     | '/treino-ia'
     | '/webhooks'
+    | '/webpush'
     | '/whatsapp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
@@ -1245,6 +1256,7 @@ export interface FileRouteTypes {
     | '/tenants'
     | '/treino-ia'
     | '/webhooks'
+    | '/webpush'
     | '/whatsapp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
@@ -1353,6 +1365,7 @@ export interface RootRouteChildren {
   TenantsRoute: typeof TenantsRoute
   TreinoIaRoute: typeof TreinoIaRoute
   WebhooksRoute: typeof WebhooksRoute
+  WebpushRoute: typeof WebpushRoute
   WhatsappRoute: typeof WhatsappRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   DotwellKnownOauthProtectedResourceRoute: typeof DotwellKnownOauthProtectedResourceRouteWithChildren
@@ -1628,6 +1641,13 @@ declare module '@tanstack/react-router' {
       path: '/webhooks'
       fullPath: '/webhooks'
       preLoaderRoute: typeof WebhooksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/webpush': {
+      id: '/webpush'
+      path: '/webpush'
+      fullPath: '/webpush'
+      preLoaderRoute: typeof WebpushRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/whatsapp': {
@@ -2334,6 +2354,7 @@ const rootRouteChildren: RootRouteChildren = {
   TenantsRoute: TenantsRoute,
   TreinoIaRoute: TreinoIaRoute,
   WebhooksRoute: WebhooksRoute,
+  WebpushRoute: WebpushRoute,
   WhatsappRoute: WhatsappRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,

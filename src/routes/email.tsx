@@ -60,6 +60,7 @@ import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { TemplateEditorDialog } from "@/components/email/template-editor-dialog";
 import { QuickEditorDialog } from "@/components/email/quick-editor-dialog";
 import { emailPreviewText } from "@/lib/email-preview";
+import { tourAnchor } from "@/help/anchor";
 
 export const Route = createFileRoute("/email")({
   component: EmailPage,
@@ -121,7 +122,7 @@ function EmailPage() {
       channel="email"
       subtitle="Envios, templates e histórico do canal de email."
       actions={
-        <Button asChild variant="outline" className="h-9">
+        <Button asChild variant="outline" className="h-9" {...tourAnchor("email.header.automacoes")}>
           <Link to="/automacoes">
             <Workflow className="size-4" aria-hidden="true" />
             Automações
@@ -146,7 +147,9 @@ function EmailPage() {
 // Visão geral
 // ============================================================
 
-function DashboardTab() {
+// Exported so the "Domínio do remetente" health row (with its "Configurar"
+// link when unset) is directly testable without the channel shell.
+export function DashboardTab() {
   const period = useChannelPeriod();
   const { query } = period;
   const fn = useServerFn(getEmailDashboard);
@@ -217,10 +220,27 @@ function DashboardTab() {
     >
       <ChannelBlock title="Saúde do envio" description="Remetente, capacidade e últimos envios.">
         <div className="grid gap-x-8 md:grid-cols-2">
-          <div>
+          <div {...tourAnchor("email.saude.dominio")}>
             <MetricRow
               label="Domínio do remetente"
-              value={!health ? "—" : health.sender_configured ? "Configurado" : "Não configurado"}
+              value={
+                !health ? (
+                  "—"
+                ) : health.sender_configured ? (
+                  "Configurado"
+                ) : (
+                  <>
+                    Não configurado{" "}
+                    <Link
+                      to="/configuracoes/casa"
+                      hash="email"
+                      className="text-[12px] font-normal underline"
+                    >
+                      Configurar
+                    </Link>
+                  </>
+                )
+              }
               valueClassName={
                 !health ? undefined : health.sender_configured ? "text-success" : "text-warning"
               }
@@ -238,7 +258,7 @@ function DashboardTab() {
               value={num(totals?.conversions ?? 0)}
             />
           </div>
-          <div className="mt-4 md:mt-0">
+          <div className="mt-4 md:mt-0" {...tourAnchor("email.saude.ultimos-envios")}>
             <p className="py-2.5 text-[13.5px] text-muted-foreground">Últimos envios</p>
             {events.length === 0 ? (
               <p className="py-4 text-sm text-muted-foreground">
@@ -418,7 +438,7 @@ function TemplatesTab() {
         <p className="text-body text-muted-foreground">
           Modelos reutilizáveis para campanhas e automações.
         </p>
-        <Button onClick={novo} className="h-9">
+        <Button onClick={novo} className="h-9" {...tourAnchor("email.templates.novo")}>
           <Plus className="size-4" aria-hidden="true" /> Novo template
         </Button>
       </div>
@@ -438,10 +458,11 @@ function TemplatesTab() {
         </HomeCard>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {items.map((t) => (
+          {items.map((t, i) => (
             <HomeCard
               key={t.id}
               className={cn("flex flex-col p-4 sm:p-5", !t.ativo && "opacity-70")}
+              {...(i === 0 ? tourAnchor("email.templates.card") : {})}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -518,6 +539,7 @@ function TemplatesTab() {
                       setEditing(t);
                       setOpen(true);
                     }}
+                    {...(i === 0 ? tourAnchor("email.templates.editar") : {})}
                   >
                     <Pencil className="size-3.5" aria-hidden="true" />
                     Editar
@@ -527,6 +549,7 @@ function TemplatesTab() {
                       <IconButton
                         label={`Mais ações de ${t.nome || "template"}`}
                         icon={<MoreHorizontal className="size-4" />}
+                        {...(i === 0 ? tourAnchor("email.templates.menu") : {})}
                       />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">

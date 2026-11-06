@@ -4,6 +4,7 @@ import { Brand } from "@/components/app-sidebar";
 import { useShellNav } from "@/components/shell/use-shell-nav";
 import { NavSections } from "@/components/shell/nav-list";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { tourAnchor } from "@/help/anchor";
 import { EXPERT_MOBILE_TABS, MOBILE_TABS, activeMobileTab } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
@@ -25,7 +26,7 @@ export function MobileTabBar({
       aria-label="Atalhos"
       className="fixed inset-x-0 bottom-0 z-40 flex border-t border-sidebar-border bg-sidebar/95 px-1.5 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
     >
-      {tabs.map((tab) => {
+      {tabs.map((tab, i) => {
         const Icon = tab.icon;
         const classes =
           "flex h-[60px] flex-1 flex-col items-center justify-center gap-1 text-[10.5px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -36,6 +37,7 @@ export function MobileTabBar({
               type="button"
               onClick={onOpenMenu}
               aria-expanded={menuOpen}
+              {...tourAnchor("shell.mobile.menu-button")}
               className={cn(classes, menuOpen ? "text-primary" : "text-muted-foreground")}
             >
               <Icon className="size-[21px]" strokeWidth={1.75} aria-hidden="true" />
@@ -52,6 +54,7 @@ export function MobileTabBar({
             // The router would also mark parents and hash siblings as current;
             // only our single active item should be.
             activeOptions={{ exact: true, includeHash: true }}
+            {...(i === 0 ? tourAnchor("shell.mobile.tabbar") : {})}
             className={cn(classes, active ? "text-primary" : "text-muted-foreground")}
           >
             <Icon className="size-[21px]" strokeWidth={1.75} aria-hidden="true" />
@@ -87,6 +90,7 @@ export function MobileMenu({
         </div>
         <nav
           aria-label="Navegação principal"
+          {...tourAnchor("shell.sidebar.nav")}
           className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-[calc(0.75rem+env(safe-area-inset-bottom))]"
         >
           <NavSections sections={sections} collapsed={false} onNavigate={close} />

@@ -17,6 +17,10 @@ describe("CHANNEL_TABS", () => {
       "historico",
     ]);
   });
+
+  it("gives Web Push only overview and history", () => {
+    expect(CHANNEL_TABS.webpush.map((tab) => tab.value)).toEqual(["visao-geral", "historico"]);
+  });
 });
 
 describe("resolveChannelHash", () => {
@@ -83,6 +87,17 @@ describe("resolveChannelHash", () => {
     expect(resolveChannelHash("email", "fluxos")).toMatchObject({
       kind: "tab",
       tab: "visao-geral",
+    });
+  });
+
+  it("sends Web Push settings to the Web Push tab of Integrações", () => {
+    expect(resolveChannelHash("webpush", "configuracoes")).toEqual({
+      kind: "redirect",
+      redirect: { to: "/webhooks", hash: "webpush" },
+    });
+    expect(resolveChannelHash("webpush", "historico")).toMatchObject({
+      tab: "historico",
+      canonical: true,
     });
   });
 });

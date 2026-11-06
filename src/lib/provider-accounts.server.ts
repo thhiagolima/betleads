@@ -11,6 +11,15 @@
 //
 // Falha ao LER as tabelas (erro de banco) não é falha da conta: o resolver usa
 // o último snapshot carregado e, sem nenhum, a conta padrão.
+//
+// A partir de public.platform_channel_defaults, a "conta padrão" de cada
+// canal é escolhível pelo super admin (docs/superpowers/specs/
+// 2026-11-05-contas-padrao-canais-por-casa-design.md). Os ids
+// DEFAULT_*_ACCOUNT_ID continuam exportados, mas passam a significar "conta
+// env" (credentials_source='env'), não "a padrão": os usos em
+// email-automations.server.ts, email-send.server.ts, tenant-domains*.server.ts
+// e sms-provider-breaker.server.ts identificam a conta env e ficam como
+// estão.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { decryptProviderCredentials } from "./secret-box.server";
@@ -22,6 +31,13 @@ export type ProviderChannel = "sms" | "email" | "voice" | "webpush";
 export const DEFAULT_SHORT_BRASIL_ACCOUNT_ID = "00000000-0000-4000-a000-00000000a001";
 export const DEFAULT_INFOBIP_ACCOUNT_ID = "00000000-0000-4000-a000-00000000a002";
 export const DEFAULT_ONESIGNAL_ACCOUNT_ID = "00000000-0000-4000-a000-00000000a003";
+
+/** As três contas env (credentials_source='env'); nunca a "padrão" agora. */
+export const ENV_ACCOUNT_IDS: ReadonlySet<string> = new Set([
+  DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+  DEFAULT_INFOBIP_ACCOUNT_ID,
+  DEFAULT_ONESIGNAL_ACCOUNT_ID,
+]);
 
 const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/single-sms.php";
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
@@ -166,10 +182,14 @@ type AccountRow = {
 
 type OverrideRow = { tenant_id: string; channel: string; provider_account_id: string };
 
+type DefaultRow = { channel: string; provider_account_id: string };
+
 type Snapshot = {
   accounts: Map<string, AccountRow>;
   /** `${tenantId}:${channel}` -> provider_account_id */
   overrides: Map<string, string>;
+  /** channel -> provider_account_id (public.platform_channel_defaults). */
+  defaults: Map<ProviderChannel, string>;
   loadedAt: number;
 };
 
@@ -194,20 +214,30 @@ export const __resetProviderAccountsCacheForTests = invalidateProviderAccountsCa
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 async function loadSnapshot(): Promise<Snapshot> {
-  const [accounts, overrides] = await Promise.all([
+  const [accounts, overrides, defaults] = await Promise.all([
     db()
       .from("provider_accounts")
       .select(
         "id, provider, label, channels, credentials_source, credentials_encrypted, config, status",
       ),
     db().from("tenant_channel_providers").select("tenant_id, channel, provider_account_id"),
+    db().from("platform_channel_defaults").select("channel, provider_account_id"),
   ]);
   if (accounts?.error) throw new Error(accounts.error.message);
   if (overrides?.error) throw new Error(overrides.error.message);
-  const next: Snapshot = { accounts: new Map(), overrides: new Map(), loadedAt: Date.now() };
+  if (defaults?.error) throw new Error(defaults.error.message);
+  const next: Snapshot = {
+    accounts: new Map(),
+    overrides: new Map(),
+    defaults: new Map(),
+    loadedAt: Date.now(),
+  };
   for (const row of (accounts?.data ?? []) as AccountRow[]) next.accounts.set(row.id, row);
   for (const row of (overrides?.data ?? []) as OverrideRow[]) {
     next.overrides.set(`${row.tenant_id}:${row.channel}`, row.provider_account_id);
+  }
+  for (const row of (defaults?.data ?? []) as DefaultRow[]) {
+    next.defaults.set(row.channel as ProviderChannel, row.provider_account_id);
   }
   return next;
 }
@@ -309,6 +339,19 @@ function defaultAccountFor(channel: ProviderChannel): ProviderAccount {
   return channel === "sms" ? envShortBrasilAccount() : envInfobipAccount();
 }
 
+/** Conta env do canal (webpush incluso) — a padrão de hoje, sem escolha. */
+function envDefaultAccountFor(channel: ProviderChannel): AnyProviderAccount {
+  if (channel === "webpush") return envOneSignalAccount();
+  return defaultAccountFor(channel);
+}
+
+/** Id da conta env do canal (webpush incluso). */
+function envDefaultAccountId(channel: ProviderChannel): string {
+  if (channel === "sms") return DEFAULT_SHORT_BRASIL_ACCOUNT_ID;
+  if (channel === "webpush") return DEFAULT_ONESIGNAL_ACCOUNT_ID;
+  return DEFAULT_INFOBIP_ACCOUNT_ID;
+}
+
 async function accountFromRow(
   row: AccountRow,
   channel: ProviderChannel,
@@ -335,9 +378,47 @@ async function accountFromRow(
 }
 
 /**
- * Conta que envia pelo canal para a casa. Sem casa (e-mails da plataforma) ou
- * sem configuração, a conta padrão. Lança ProviderAccountUnavailableError
- * quando a conta configurada para a casa não pode ser usada.
+ * A conta padrão da plataforma do canal: a escolhida pelo super admin em
+ * platform_channel_defaults, ou a conta env quando não há snapshot (falha de
+ * leitura sem nenhum anterior) ou não há linha para o canal (comportamento
+ * de hoje). A linha aponta para uma conta que não existe mais ou está
+ * desativada/fora do canal: ProviderAccountUnavailableError (sem fallback
+ * para a conta env — trocar a padrão e algo dar errado deve falhar visível,
+ * não voltar silenciosamente para o env).
+ */
+async function tenantDefaultAccount(
+  snap: Snapshot | null,
+  channel: ProviderChannel,
+): Promise<AnyProviderAccount> {
+  const accountId = snap?.defaults.get(channel);
+  if (!snap || !accountId) return envDefaultAccountFor(channel);
+  const row = snap.accounts.get(accountId);
+  if (!row) {
+    throw new ProviderAccountUnavailableError(
+      `A conta padrão escolhida para o canal ${channel} não existe mais.`,
+    );
+  }
+  return accountFromRow(row, channel);
+}
+
+/**
+ * Id da conta padrão do canal (a escolhida pelo super admin, ou a conta env
+ * quando não há snapshot/linha). Não resolve credenciais nem valida status —
+ * só para exibir qual conta é a padrão hoje.
+ */
+export async function platformDefaultAccountId(channel: ProviderChannel): Promise<string> {
+  const snap = await currentSnapshot();
+  const accountId = snap?.defaults.get(channel);
+  return snap && accountId ? accountId : envDefaultAccountId(channel);
+}
+
+/**
+ * Conta que envia pelo canal para a casa. Sem casa (e-mails da plataforma),
+ * a conta env (não a padrão escolhida — chamada do usuário: envios sem casa
+ * continuam na conta env de hoje). Sem configuração própria da casa, a
+ * padrão escolhida pelo super admin. Lança ProviderAccountUnavailableError
+ * quando a conta configurada para a casa (ou a padrão escolhida) não pode
+ * ser usada.
  */
 export async function resolveChannelAccount(
   tenantId: string | null | undefined,
@@ -345,39 +426,46 @@ export async function resolveChannelAccount(
 ): Promise<ProviderAccount> {
   if (!tenantId) return defaultAccountFor(channel);
   const snap = await currentSnapshot();
-  const accountId = snap?.overrides.get(`${tenantId}:${channel}`);
-  if (!snap || !accountId) return defaultAccountFor(channel);
-  const row = snap.accounts.get(accountId);
-  if (!row) {
-    throw new ProviderAccountUnavailableError(
-      `A conta de provedor configurada para a casa (${channel}) não existe mais.`,
-    );
+  const overrideId = snap?.overrides.get(`${tenantId}:${channel}`);
+  if (overrideId) {
+    const row = snap!.accounts.get(overrideId);
+    if (!row) {
+      throw new ProviderAccountUnavailableError(
+        `A conta de provedor configurada para a casa (${channel}) não existe mais.`,
+      );
+    }
+    // channel is never "webpush" here: the account it resolves to is always
+    // Short Brasil or Infobip (OneSignal accounts only ever serve "webpush").
+    return accountFromRow(row, channel) as Promise<ProviderAccount>;
   }
-  // channel is never "webpush" here: the account it resolves to is always
-  // Short Brasil or Infobip (OneSignal accounts only ever serve "webpush").
-  return accountFromRow(row, channel) as Promise<ProviderAccount>;
+  return tenantDefaultAccount(snap, channel) as Promise<ProviderAccount>;
 }
 
 /**
- * Conta que envia web push (OneSignal) da casa. Sem casa ou sem conta
- * própria, a conta padrão (env). Mesma semântica de resolveInfobipAccount:
- * sem fallback — uma conta própria desativada/ilegível lança
- * ProviderAccountUnavailableError, nunca cai na conta padrão.
+ * Conta que envia web push (OneSignal) da casa. Sem casa, a conta env. Sem
+ * conta própria, a padrão escolhida pelo super admin. Mesma semântica de
+ * resolveInfobipAccount: sem fallback — uma conta própria (ou a padrão
+ * escolhida) desativada/ilegível lança ProviderAccountUnavailableError, nunca
+ * cai na conta env.
  */
 export async function resolveOneSignalAccount(
   tenantId: string | null | undefined,
 ): Promise<OneSignalAccount> {
   if (!tenantId) return envOneSignalAccount();
   const snap = await currentSnapshot();
-  const accountId = snap?.overrides.get(`${tenantId}:webpush`);
-  if (!snap || !accountId) return envOneSignalAccount();
-  const row = snap.accounts.get(accountId);
-  if (!row) {
-    throw new ProviderAccountUnavailableError(
-      "A conta de provedor configurada para a casa (webpush) não existe mais.",
-    );
+  const overrideId = snap?.overrides.get(`${tenantId}:webpush`);
+  let account: AnyProviderAccount;
+  if (overrideId) {
+    const row = snap!.accounts.get(overrideId);
+    if (!row) {
+      throw new ProviderAccountUnavailableError(
+        "A conta de provedor configurada para a casa (webpush) não existe mais.",
+      );
+    }
+    account = await accountFromRow(row, "webpush");
+  } else {
+    account = await tenantDefaultAccount(snap, "webpush");
   }
-  const account = await accountFromRow(row, "webpush");
   if (account.provider !== "onesignal") {
     throw new ProviderAccountUnavailableError(`A conta "${account.label}" não é OneSignal.`);
   }

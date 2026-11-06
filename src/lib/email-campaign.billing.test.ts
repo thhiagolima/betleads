@@ -44,6 +44,7 @@ import {
   runCampaignSend,
 } from "./email.functions";
 import { sendInfobipEmail } from "./email-send.server";
+import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";
 
 const A = "00000000-0000-4000-8000-00000000000a";
 
@@ -87,6 +88,7 @@ const noBalance = {
 
 beforeEach(() => {
   vi.mocked(sendInfobipEmail).mockReset();
+  __resetTenantChannelsCacheForTests();
 });
 
 describe("runCampaignSend without balance", () => {
@@ -395,5 +397,49 @@ describe("claimEmailCampaignForSendNow", () => {
     camp().status = "cancelada";
     expect(await claimEmailCampaignForSendNow("camp-a", A)).toBeNull();
     expect(camp().status).toBe("cancelada");
+  });
+});
+
+describe("runCampaignSend with the e-mail channel disabled for the house", () => {
+  it("pauses with blocked_reason 'channel_disabled' and sends nothing", async () => {
+    seed(["a@x.com", "b@x.com"]);
+    fake.db.rows("tenant_channels").push({ tenant_id: A, channel: "email", enabled: false, disabled_at: null });
+    vi.mocked(sendInfobipEmail).mockResolvedValue(ok(1) as never);
+
+    const result = await runCampaignSend("camp-a");
+
+    expect(sendInfobipEmail).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ enviados: 0, continuaEmLotes: false });
+    expect(fake.db.rows("email_campaigns")[0]).toMatchObject({
+      status: "pausada",
+      blocked_reason: "channel_disabled",
+      locked_at: null,
+      locked_by: null,
+    });
+    expect(fake.db.rows("email_send_logs")).toHaveLength(0);
+  });
+
+  it("a send refused mid-run as channel_disabled pauses the same way, not logged as a failure", async () => {
+    seed(["a@x.com", "b@x.com", "c@x.com"]);
+    vi.mocked(sendInfobipEmail)
+      .mockResolvedValueOnce(ok(1) as never)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 0,
+        body: { error: "O canal E-mail está desabilitado para esta casa." },
+        idempotencyKey: "k-off",
+        temporary: false,
+        errorKind: "channel_disabled",
+      } as never);
+
+    const result = await runCampaignSend("camp-a");
+
+    expect(sendInfobipEmail).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ enviados: 1, falhas: 0, continuaEmLotes: false });
+    expect(fake.db.rows("email_campaigns")[0]).toMatchObject({
+      status: "pausada",
+      blocked_reason: "channel_disabled",
+    });
+    expect(fake.db.rows("email_send_logs")).toHaveLength(1);
   });
 });

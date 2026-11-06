@@ -39,6 +39,10 @@
 //                     the monthly cap (or was deactivated). Nothing was sent
 //                     nor charged. Only that expert's campaign/items pause;
 //                     never the house's no-balance alert or backoff.
+//   channel_disabled: the super admin turned the channel off for the house
+//                     (tenant_channels). Checked before any reservation:
+//                     nothing was sent nor charged. Final for the item; never
+//                     a platform hold (re-enabling never resends).
 //
 // Pure module (no I/O): imported by the SMS, voice and e-mail adapters.
 
@@ -49,7 +53,8 @@ export type ProviderErrorKind =
   | "provider_account"
   | "insufficient_balance"
   | "expert_cap"
-  | "expert_inactive";
+  | "expert_inactive"
+  | "channel_disabled";
 
 // Failures that happen before a TCP connection exists (nothing was written).
 const NOT_SENT_CODES = new Set([
@@ -106,7 +111,12 @@ export function transportErrorKind(
   error: unknown,
 ): Exclude<
   ProviderErrorKind,
-  "misconfigured" | "provider_account" | "insufficient_balance" | "expert_cap" | "expert_inactive"
+  | "misconfigured"
+  | "provider_account"
+  | "insufficient_balance"
+  | "expert_cap"
+  | "expert_inactive"
+  | "channel_disabled"
 > {
   const codes = codesOf(error);
   if (codes.some((code) => NOT_SENT_CODES.has(code))) return "not_sent";
@@ -121,7 +131,8 @@ export function isProviderErrorKind(value: unknown): value is ProviderErrorKind 
     value === "not_sent" ||
     value === "outcome_unknown" ||
     value === "provider_account" ||
-    value === "insufficient_balance"
+    value === "insufficient_balance" ||
+    value === "channel_disabled"
   );
 }
 

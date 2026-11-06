@@ -6,6 +6,8 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { TRIGGER_NAMES } from "@/lib/triggers";
 import { tenantReads } from "@/lib/active-tenant-filter";
+import { resolveOperationalTenantId } from "./tenant-access.server";
+import { assertChannelEnabled } from "./tenant-channels.server";
 
 const EtapaSchema = z.discriminatedUnion("tipo", [
   z.object({ tipo: z.literal("sms"), mensagem: z.string().max(480).default(""), trackLinks: z.boolean().default(true) }),
@@ -181,10 +183,16 @@ export const saveSmsFlow = createServerFn({ method: "POST" })
       nome: data.nome,
       etapas: data.etapas.length,
     });
+    const isActive = data.status === "ativo";
+    // Um fluxo de SMS ativo recusa canal de SMS desligado para a casa (Task 7).
+    if (isActive) {
+      const tenantId = await resolveOperationalTenantId(supabase);
+      await assertChannelEnabled(tenantId, "sms");
+    }
     const payload = {
       name: data.nome,
       trigger_name: data.gatilho || null,
-      is_active: data.status === "ativo",
+      is_active: isActive,
       exit_conditions: saidaArrayToObject(data.saida),
       daily_limit: data.dailyLimit,
       cooldown_hours: data.cooldownHours,

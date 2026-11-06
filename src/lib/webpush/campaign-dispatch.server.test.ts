@@ -3,6 +3,7 @@ import {
   canSendWithinBurstLimit,
   processWebpushCampaignTick,
   refundOrThrow,
+  WEBPUSH_CAMPAIGN_CHANNEL_DISABLED_MESSAGE,
   WEBPUSH_CAMPAIGN_NO_BALANCE_MESSAGE,
   WEBPUSH_SETTLEMENT_NO_BALANCE_MESSAGE,
   type WebpushBatchRow,
@@ -807,5 +808,83 @@ describe("refundOrThrow (fix round 2 — the real wallet_refund wiring must neve
   it("resolves on a genuine success", async () => {
     const db = fakeDb({ data: { ok: true, idempotent: false, amount: 0.02, balance: 10 } });
     await expect(refundOrThrow(db, args)).resolves.toBeUndefined();
+  });
+});
+
+describe("processWebpushCampaignTick with the web push channel disabled for the house", () => {
+  function pendingReservedBatch(state: ReturnType<typeof world>["state"]) {
+    state.subs = [sub(1), sub(2)];
+    const batch: WebpushDispatchBatch = {
+      id: "batch-off-1",
+      tenantId: campaign().tenant_id,
+      campaignId: campaign().id,
+      appId: "app-1",
+      subscriptionRowIds: [rowId(1), rowId(2)],
+      units: 2,
+      status: "pendente",
+      accepted: null,
+      refusedRowIds: null,
+      onesignalNotificationId: null,
+      lastError: null,
+    };
+    state.batches.set(batch.id, batch);
+    // Reserved by an earlier tick that then failed temporarily.
+    state.ledger.set(batch.id, { referenceId: batch.id, units: 2, refunded: false });
+    return batch;
+  }
+
+  it("an 'enviando' campaign with a reserved pendente batch: not sent, refunded, campaign cancelled", async () => {
+    const { state, deps } = world();
+    const batch = pendingReservedBatch(state);
+    const seen: string[] = [];
+    deps.channelEnabled = async (tenantId) => {
+      seen.push(tenantId);
+      return false;
+    };
+
+    const r = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
+
+    expect(seen).toEqual([campaign().tenant_id]);
+    expect(state.sendCalls).toHaveLength(0);
+    expect(state.reserveCalls).toHaveLength(0);
+    expect(state.refundCalls).toEqual([{ referenceId: batch.id, idempotencyKey: `${batch.id}:refund` }]);
+    expect(netCharge(state)).toBe(0);
+    expect(state.batches.get(batch.id)).toMatchObject({ status: "concluido", accepted: 0 });
+    expect(r.status).toBe("cancelada");
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "cancelada",
+      last_error: WEBPUSH_CAMPAIGN_CHANNEL_DISABLED_MESSAGE,
+      locked_at: null,
+      locked_by: null,
+    });
+    expect(WEBPUSH_CAMPAIGN_CHANNEL_DISABLED_MESSAGE).toBe("Canal Web push desabilitado para a casa.");
+  });
+
+  it("a batch OneSignal already accepted ('enviado') is still settled before cancelling", async () => {
+    const { state, deps } = world();
+    const batch = pendingReservedBatch(state);
+    state.batches.set(batch.id, { ...batch, status: "enviado", accepted: 2, refusedRowIds: [] });
+    deps.channelEnabled = async () => false;
+
+    const r = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
+
+    expect(state.sendCalls).toHaveLength(0);
+    expect(state.refundCalls).toHaveLength(0);
+    expect(netCharge(state)).toBeCloseTo(2 * UNIT_PRICE);
+    expect(state.batches.get(batch.id)?.status).toBe("concluido");
+    expect(r).toMatchObject({ status: "cancelada", sent: 2 });
+  });
+
+  it("with the channel on, nothing changes (the check is asked once per tick)", async () => {
+    const { state, deps } = world();
+    state.subs = [sub(1)];
+    let asked = 0;
+    deps.channelEnabled = async () => {
+      asked++;
+      return true;
+    };
+    const r = await processWebpushCampaignTick(campaign(), deps, { deadline: 1_000_000 });
+    expect(asked).toBe(1);
+    expect(r.status).toBe("enviado");
   });
 });

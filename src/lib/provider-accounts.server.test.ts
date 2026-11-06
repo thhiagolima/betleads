@@ -3,14 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 
 const state = vi.hoisted(() => ({
-  tables: { provider_accounts: [] as Row[], tenant_channel_providers: [] as Row[] },
+  tables: {
+    provider_accounts: [] as Row[],
+    tenant_channel_providers: [] as Row[],
+    platform_channel_defaults: [] as Row[],
+  },
   failReads: false,
   reads: 0,
 }));
 
 vi.mock("@/integrations/supabase/client.server", () => ({
   supabaseAdmin: {
-    from(table: "provider_accounts" | "tenant_channel_providers") {
+    from(table: "provider_accounts" | "tenant_channel_providers" | "platform_channel_defaults") {
       return {
         select: async () => {
           state.reads++;
@@ -27,7 +31,9 @@ import {
   DEFAULT_INFOBIP_ACCOUNT_ID,
   DEFAULT_ONESIGNAL_ACCOUNT_ID,
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+  ENV_ACCOUNT_IDS,
   oneSignalAccountById,
+  platformDefaultAccountId,
   PROVIDER_ACCOUNTS_CACHE_MS,
   ProviderAccountUnavailableError,
   resolveChannelAccount,
@@ -109,6 +115,10 @@ function assign(tenantId: string, channel: string, accountId: string) {
   });
 }
 
+function setDefault(channel: string, accountId: string) {
+  state.tables.platform_channel_defaults.push({ channel, provider_account_id: accountId });
+}
+
 beforeEach(() => {
   for (const key of ENV_KEYS) {
     savedEnv[key] = process.env[key];
@@ -121,7 +131,11 @@ beforeEach(() => {
   process.env.INFOBIP_VOICE_FROM = "5511999990000";
   process.env.ONESIGNAL_ORG_API_KEY = "platform-org-key";
   process.env.ONESIGNAL_ORG_ID = "platform-org-id";
-  state.tables = { provider_accounts: [], tenant_channel_providers: [] };
+  state.tables = {
+    provider_accounts: [],
+    tenant_channel_providers: [],
+    platform_channel_defaults: [],
+  };
   state.failReads = false;
   state.reads = 0;
   __resetProviderAccountsCacheForTests();
@@ -221,13 +235,13 @@ describe("resolveChannelAccount", () => {
     assign(TENANT, "sms", OWN_SMS);
     await resolveSmsAccount(TENANT);
     await resolveSmsAccount(TENANT);
-    expect(state.reads).toBe(2); // one snapshot = two table reads
+    expect(state.reads).toBe(3); // one snapshot = three table reads
 
     // A change made by the super admin shows up after the cache expires.
     state.tables.tenant_channel_providers = [];
     vi.advanceTimersByTime(PROVIDER_ACCOUNTS_CACHE_MS + 1);
     expect((await resolveSmsAccount(TENANT)).id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
-    expect(state.reads).toBe(4);
+    expect(state.reads).toBe(6);
   });
 
   it("keeps the last snapshot when the tables cannot be read, else the platform account", async () => {
@@ -262,6 +276,65 @@ describe("resolveChannelAccount", () => {
       label: "Infobip espelho",
       apiKey: "platform-key",
     });
+  });
+});
+
+describe("platform_channel_defaults: tenant without an override uses the chosen default", () => {
+  it("webpush: uses the chosen default (a db OneSignal account)", async () => {
+    state.tables.provider_accounts.push(await ownOneSignalAccount());
+    setDefault("webpush", OWN_ONESIGNAL);
+    expect(await resolveOneSignalAccount(TENANT)).toMatchObject({ id: OWN_ONESIGNAL });
+  });
+
+  it("sms: the chosen default can be a db Infobip account", async () => {
+    state.tables.provider_accounts.push(
+      await ownInfobipAccount({ channels: ["email", "voice", "sms"] }),
+    );
+    setDefault("sms", OWN_INFOBIP);
+    expect((await resolveChannelAccount(TENANT, "sms")).provider).toBe("infobip");
+  });
+
+  it("a send without a house ignores the chosen default", async () => {
+    state.tables.provider_accounts.push(await ownInfobipAccount());
+    setDefault("email", OWN_INFOBIP);
+    expect((await resolveChannelAccount(null, "email")).id).toBe(DEFAULT_INFOBIP_ACCOUNT_ID);
+  });
+
+  it("a disabled chosen default never falls back to the env account", async () => {
+    state.tables.provider_accounts.push(await ownInfobipAccount({ status: "disabled" }));
+    setDefault("email", OWN_INFOBIP);
+    await expect(resolveChannelAccount(TENANT, "email")).rejects.toBeInstanceOf(
+      ProviderAccountUnavailableError,
+    );
+  });
+
+  it("a read failure with no snapshot yet uses the env account", async () => {
+    state.failReads = true;
+    expect((await resolveChannelAccount(TENANT, "sms")).id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
+  });
+
+  it("the house's own override wins over the chosen default", async () => {
+    state.tables.provider_accounts.push(
+      await ownSmsAccount(),
+      await ownInfobipAccount({ channels: ["email", "voice", "sms"] }),
+    );
+    setDefault("sms", OWN_INFOBIP);
+    assign(TENANT, "sms", OWN_SMS);
+    expect((await resolveChannelAccount(TENANT, "sms")).id).toBe(OWN_SMS);
+  });
+});
+
+describe("platformDefaultAccountId", () => {
+  it("returns the env id without a snapshot or a row for the channel", async () => {
+    expect(await platformDefaultAccountId("sms")).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
+    expect(ENV_ACCOUNT_IDS.has(await platformDefaultAccountId("webpush"))).toBe(true);
+  });
+
+  it("returns the chosen default's id once there is a snapshot and a row", async () => {
+    state.tables.provider_accounts.push(await ownOneSignalAccount());
+    setDefault("webpush", OWN_ONESIGNAL);
+    // Prime the snapshot (platformDefaultAccountId itself also triggers a load).
+    expect(await platformDefaultAccountId("webpush")).toBe(OWN_ONESIGNAL);
   });
 });
 

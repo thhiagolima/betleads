@@ -60,6 +60,7 @@ import { historyWindow } from "@/components/channels/channel-period";
 import { PeriodPicker } from "@/components/home/period-picker";
 import { periodRange, type PeriodPreset } from "@/lib/home-dashboard";
 import { brtDayKey } from "@/lib/tz";
+import { tourAnchor } from "@/help/anchor";
 
 import { StatusBadge } from "./status-badge";
 
@@ -277,14 +278,16 @@ export function HistoryShell({
     <div className="space-y-5">
       {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <PeriodPicker
-          preset={preset}
-          range={range}
-          onChange={(nextPreset, nextRange) => {
-            setPreset(nextPreset);
-            setRange(nextRange);
-          }}
-        />
+        <div {...tourAnchor("historico.filtros.periodo")}>
+          <PeriodPicker
+            preset={preset}
+            range={range}
+            onChange={(nextPreset, nextRange) => {
+              setPreset(nextPreset);
+              setRange(nextRange);
+            }}
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <p className="text-xs text-muted-foreground">
             {options.subtitle ? `${options.subtitle} · ` : ""}
@@ -292,7 +295,12 @@ export function HistoryShell({
             <span className="text-foreground">{formatRelative(stats.data?.lastDispatchAt)}</span>
           </p>
           <UpdatedAgo ts={stats.dataUpdatedAt} className="hidden sm:inline" />
-          <Button variant="outline" onClick={refresh} className="h-9 gap-1.5">
+          <Button
+            variant="outline"
+            onClick={refresh}
+            className="h-9 gap-1.5"
+            {...tourAnchor("historico.atualizar")}
+          >
             <RefreshCw className={`h-3.5 w-3.5 ${stats.isFetching ? "animate-spin" : ""}`} />
             Atualizar
           </Button>
@@ -301,7 +309,7 @@ export function HistoryShell({
       {options.title && <h2 className="text-section">{options.title}</h2>}
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5" {...tourAnchor("historico.cards")}>
         <StatCard
           icon={<Send className="h-4 w-4" />}
           label={cards.total}
@@ -333,7 +341,7 @@ export function HistoryShell({
 
       {/* Sparkline */}
       {(timeline.data?.points?.length ?? 0) > 1 && (
-        <Card>
+        <Card {...tourAnchor("historico.grafico")}>
           <CardContent className="p-3">
             <div className="mb-1 flex items-center justify-between px-1">
               <p className="text-label text-muted-foreground">
@@ -373,7 +381,7 @@ export function HistoryShell({
 
       {/* Top fluxos */}
       {showFlow && (
-        <Card>
+        <Card {...tourAnchor("historico.jornadas")}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <div>
               <CardTitle>Jornadas com mais envios</CardTitle>
@@ -409,7 +417,7 @@ export function HistoryShell({
         <CardContent className="grid grid-cols-1 gap-2 p-3 md:grid-cols-5">
           {showFlow ? (
             <Select value={flowId} onValueChange={setFlowId}>
-              <SelectTrigger>
+              <SelectTrigger {...tourAnchor("historico.filtros.jornada")}>
                 <SelectValue placeholder="Jornada" />
               </SelectTrigger>
               <SelectContent>
@@ -455,7 +463,7 @@ export function HistoryShell({
             <div className="hidden md:block" />
           )}
           <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger>
+            <SelectTrigger {...tourAnchor("historico.filtros.status")}>
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -474,13 +482,14 @@ export function HistoryShell({
               placeholder="Buscar nome, telefone, email…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              {...tourAnchor("historico.filtros.busca")}
             />
           </div>
         </CardContent>
       </Card>
 
       {/* Table */}
-      <Card>
+      <Card {...tourAnchor("historico.tabela")}>
         <CardContent className="overflow-x-auto p-0">
           {hist.isLoading && rows.length === 0 ? (
             <p className="p-10 text-center text-sm text-muted-foreground">Carregando…</p>

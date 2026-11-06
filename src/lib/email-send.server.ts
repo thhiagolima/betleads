@@ -6,6 +6,8 @@ import { augmentEmailHtml, isSuppressed } from "./email-deliverability.server";
 import { callInfobipEmail } from "./infobip-email.server";
 import { getChannelConsentStatus } from "./consent.server";
 import { assertTenantNotDemoForSend } from "./tenant-access.server";
+import { isChannelEnabled } from "./tenant-channels.server";
+import { CHANNEL_DISABLED_MESSAGE } from "./tenant-channels.shared";
 import {
   markTrackedDispatchesFailed,
   markTrackedDispatchesSent,
@@ -224,6 +226,21 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
         alreadySent: true,
       };
     }
+  }
+  // E-mail channel turned off for the house (tenant_channels): nothing
+  // checked, tracked nor reserved. Runs after the accepted-key dedupe (as
+  // SMS and voice do): a delivery already accepted stays "already sent".
+  // Team e-mails (invoice, alerts, invites) carry no tenantId and go
+  // through callInfobipEmail, never here.
+  if (tenantId && !(await isChannelEnabled(tenantId, "email"))) {
+    return {
+      ok: false,
+      status: 0,
+      body: { error: CHANNEL_DISABLED_MESSAGE("email") },
+      idempotencyKey,
+      temporary: false,
+      errorKind: "channel_disabled",
+    };
   }
   try {
     const centralStatus = tenantId

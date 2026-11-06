@@ -22,6 +22,7 @@ import { num } from "@/lib/format";
 import { getChannelDispatchTimeline, type ChannelKey } from "@/lib/history.functions";
 import { periodRange, type PeriodPreset } from "@/lib/home-dashboard";
 import { brtDayKey } from "@/lib/tz";
+import { tourAnchor } from "@/help/anchor";
 
 import { historyWindow, periodQuery, type ChannelPeriodQuery } from "./channel-period";
 
@@ -92,7 +93,10 @@ export function ChannelOverview({
   const updatedAgo = useUpdatedAgo(updatedAt || undefined);
   return (
     <div className="space-y-4 sm:space-y-5" aria-busy={isFetching}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div
+        className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+        {...tourAnchor("canal.periodo")}
+      >
         <PeriodPicker preset={period.preset} range={period.range} onChange={period.setPeriod} />
         {updatedAt ? (
           <p className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
@@ -111,7 +115,10 @@ export function ChannelOverview({
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+        <div
+          className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4"
+          {...tourAnchor("canal.kpis")}
+        >
           {kpis.map((kpi) => (
             <KpiCard
               key={kpi.title}
@@ -147,48 +154,60 @@ function hourLabel(iso: string) {
   return `${hour.padStart(2, "0")}h`;
 }
 
+type HourlyPoint = { t: string; count: number };
+
 /**
  * "Envios por dia". For a single day (Hoje, Ontem, one date) the dashboards
  * only have one daily bucket, so the chart switches to attempts per hour in
  * Brasília time from the history timeline (all attempts, one series).
+ * A channel outside the history timeline (web push) passes `hourly` itself.
  */
 export function ChannelSendsChart({
   historyChannel,
   period,
   daily,
   series,
+  hourly: ownHourly,
 }: {
-  historyChannel: ChannelKey;
+  historyChannel: ChannelKey | "webpush";
   period: ChannelPeriod;
   daily: DailyRow[] | undefined;
   series: ChartSeries[];
+  /** Hourly points from the channel's own query; skips the history timeline. */
+  hourly?: { points: HourlyPoint[] | undefined };
 }) {
   const { query } = period;
   const timelineFn = useServerFn(getChannelDispatchTimeline);
-  const hourly = useQuery({
+  const timeline = useQuery({
     queryKey: ["channel-hourly", historyChannel, query.from, query.to],
     queryFn: () => {
       const { from, to } = historyWindow(period.range);
-      return timelineFn({ data: { channel: historyChannel, from, to, bucket: "hour" } });
+      return timelineFn({
+        data: { channel: historyChannel as ChannelKey, from, to, bucket: "hour" },
+      });
     },
-    enabled: query.sameDay,
+    enabled: query.sameDay && !ownHourly,
     refetchInterval: query.includesToday ? 60_000 : false,
     placeholderData: (previous) => previous,
   });
 
   const byHour = query.sameDay;
-  const hourlyPoints = hourly.data?.points ?? [];
+  const hourlyPoints = (ownHourly ? ownHourly.points : timeline.data?.points) ?? [];
   const data: Array<Record<string, unknown>> = byHour
     ? hourlyPoints.map((point) => ({ label: hourLabel(point.t), disparos: point.count }))
     : (daily ?? []).map((row) => ({ ...row, label: dayLabel(row.date) }));
   const shownSeries: ChartSeries[] = byHour
     ? [{ key: "disparos", label: "Disparos", color: "var(--color-chart-1)" }]
     : series;
-  const loading = byHour ? hourly.isLoading : daily === undefined;
+  const loading = byHour
+    ? ownHourly
+      ? ownHourly.points === undefined
+      : timeline.isLoading
+    : daily === undefined;
   const total = byHour ? hourlyPoints.reduce((sum, point) => sum + point.count, 0) : null;
 
   return (
-    <HomeCard className="p-4 sm:p-5">
+    <HomeCard className="p-4 sm:p-5" {...tourAnchor("canal.grafico.envios")}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[15px] font-semibold">
           {byHour ? "Envios por hora" : "Envios por dia"}

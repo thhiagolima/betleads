@@ -3442,6 +3442,27 @@ export type Database = {
           },
         ];
       };
+      help_progress: {
+        Row: {
+          key: string;
+          status: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          key: string;
+          status: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          key?: string;
+          status?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       journey_contact_limits: {
         Row: {
           dead_lead_enabled: boolean;
@@ -5058,6 +5079,27 @@ export type Database = {
           raw_body?: string | null;
           received_at?: string;
           signature_valid?: boolean | null;
+        };
+        Relationships: [];
+      };
+      platform_channel_defaults: {
+        Row: {
+          channel: string;
+          provider_account_id: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          channel: string;
+          provider_account_id: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          channel?: string;
+          provider_account_id?: string;
+          updated_at?: string;
+          updated_by?: string | null;
         };
         Relationships: [];
       };
@@ -6734,6 +6776,73 @@ export type Database = {
             foreignKeyName: "tenant_billing_tenant_id_fkey";
             columns: ["tenant_id"];
             isOneToOne: true;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      tenant_channel_notice_acks: {
+        Row: {
+          acked_at: string;
+          channel: string;
+          disabled_at: string;
+          tenant_id: string;
+          user_id: string;
+        };
+        Insert: {
+          acked_at?: string;
+          channel: string;
+          disabled_at: string;
+          tenant_id: string;
+          user_id: string;
+        };
+        Update: {
+          acked_at?: string;
+          channel?: string;
+          disabled_at?: string;
+          tenant_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "tenant_channel_notice_acks_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      tenant_channels: {
+        Row: {
+          channel: string;
+          disabled_at: string | null;
+          enabled: boolean;
+          tenant_id: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          channel: string;
+          disabled_at?: string | null;
+          enabled: boolean;
+          tenant_id: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          channel?: string;
+          disabled_at?: string | null;
+          enabled?: boolean;
+          tenant_id?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "tenant_channels_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
             referencedRelation: "tenants";
             referencedColumns: ["id"];
           },

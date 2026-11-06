@@ -1,0 +1,102 @@
+/*
+ * Guided-tour theme (brief, Task 3). The CRM only has a dark theme
+ * (constraints.md "Tour": "visual escuro"), so this overrides driver.js's
+ * default light popover with the same CSS variables the app itself uses
+ * (src/styles.css, .dark block) rather than hard-coded colors.
+ *
+ * On screens under 768px the popover docks to the bottom, full width, with
+ * 16px gutters (constraints.md "no celular, o balão fica embaixo em largura
+ * total").
+ */
+
+.driver-popover {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 0.625rem);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 45%);
+  max-width: 340px;
+}
+
+.driver-popover-title {
+  color: var(--popover-foreground);
+  font-size: 1rem;
+}
+
+.driver-popover-description {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.driver-popover-close-btn {
+  color: var(--muted-foreground);
+}
+
+.driver-popover-close-btn:hover,
+.driver-popover-close-btn:focus-visible {
+  color: var(--popover-foreground);
+}
+
+.driver-popover-arrow {
+  border-color: var(--popover);
+}
+
+.driver-popover-progress-text {
+  color: var(--muted-foreground);
+}
+
+.driver-popover-footer-btn {
+  background-color: var(--secondary);
+  color: var(--secondary-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 0.375rem);
+  padding: 4px 10px;
+}
+
+.driver-popover-footer-btn:hover,
+.driver-popover-footer-btn:focus {
+  background-color: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.driver-popover-footer-btn.driver-popover-btn-disabled {
+  opacity: 0.5;
+}
+
+.driver-popover-next-btn,
+.driver-popover-next-btn.driver-popover-done-btn {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+
+.driver-popover-next-btn:hover,
+.driver-popover-next-btn.driver-popover-done-btn:hover {
+  background-color: var(--primary);
+  opacity: 0.9;
+}
+
+.tour-learn-more-btn {
+  margin-right: auto;
+}
+
+.driver-overlay {
+  fill: #000;
+  opacity: 0.6;
+}
+
+@media (width < 768px) {
+  .driver-popover {
+    position: fixed !important;
+    left: 16px !important;
+    right: 16px !important;
+    bottom: 16px !important;
+    top: auto !important;
+    max-width: none;
+    width: auto;
+  }
+
+  .driver-popover-arrow {
+    display: none;
+  }
+}

@@ -3,6 +3,8 @@ import { refundForDelivery, reserveForDelivery } from "./billing/wallet.server";
 import { requireBrazilianPhone } from "./phone-normalization";
 import { transportErrorKind, type ProviderErrorKind } from "./rate-limit/transport-errors";
 import { assertTenantNotDemoForSend } from "./tenant-access.server";
+import { isChannelEnabled } from "./tenant-channels.server";
+import { CHANNEL_DISABLED_MESSAGE } from "./tenant-channels.shared";
 import {
   ProviderAccountUnavailableError,
   resolveInfobipAccount,
@@ -153,6 +155,18 @@ export async function callInfobipVoice(
         errorKind: "not_sent",
       };
     }
+  }
+  // Voice channel turned off for the house (tenant_channels): before the
+  // account is resolved (no misconfigured error) and before any reservation.
+  if (!(await isChannelEnabled(options.tenantId ?? null, "voice"))) {
+    return {
+      ok: false,
+      status: 0,
+      body: { error: CHANNEL_DISABLED_MESSAGE("voice") },
+      idempotencyKey,
+      providerCallId: null,
+      errorKind: "channel_disabled",
+    };
   }
   let account: InfobipAccount;
   try {

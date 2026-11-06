@@ -12,11 +12,21 @@ export function useShellNav() {
   const isSuperAdmin = role === "super_admin";
   return {
     role,
+    /** The active house's id (null while loading / without a house). */
+    tenantId: active?.id ?? null,
     /** True while the switcher query that resolves `role` is still loading. */
     roleLoading: isLoading,
     isSuperAdmin,
     sections: isGroupPath(pathname)
       ? GROUP_SECTIONS
-      : visibleSections(role, isSuperAdmin, active?.can_view_finance, active?.has_team_profile),
+      : visibleSections(
+          role,
+          isSuperAdmin,
+          active?.can_view_finance,
+          active?.has_team_profile,
+          // undefined (still loading) falls back to visibleSections' own
+          // default (every channel shown) so nothing flashes hidden.
+          active?.enabled_channels,
+        ),
   };
 }

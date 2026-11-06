@@ -25,6 +25,10 @@ vi.mock("./tenant-access.server", () => ({
   resolveCurrentTenantId: vi.fn(),
   resolveOperationalTenantId: vi.fn(async () => "00000000-0000-4000-8000-000000000001"),
 }));
+const channels = vi.hoisted(() => ({ assertChannelEnabled: vi.fn(async () => undefined) }));
+vi.mock("./tenant-channels.server", () => ({
+  assertChannelEnabled: channels.assertChannelEnabled,
+}));
 
 import { bulkDispatchCallsFor } from "./calls-bulk.server";
 
@@ -37,6 +41,25 @@ beforeEach(async () => {
   await import("@/integrations/supabase/client.server");
   fake.db.reset();
   calls.runVoiceQueueDispatcher.mockReset();
+  channels.assertChannelEnabled.mockReset().mockResolvedValue(undefined);
+});
+
+// Task 7: a disabled voice channel is rejected before any queue item or dial
+// (clear error at entry, not just at the dispatcher's own choke point).
+describe("bulkDispatchCalls with the voice channel disabled", () => {
+  it("rejects before creating any queue item or dialing", async () => {
+    channels.assertChannelEnabled.mockRejectedValue(
+      new Error("O canal Voz está desabilitado para esta casa."),
+    );
+    await expect(
+      bulkDispatchCallsFor(fake.db.client as never, {
+        script_id: "00000000-0000-4000-8000-0000000000aa",
+        targets,
+      }),
+    ).rejects.toThrow("O canal Voz está desabilitado para esta casa.");
+    expect(fake.db.rows("call_queue")).toHaveLength(0);
+    expect(calls.runVoiceQueueDispatcher).not.toHaveBeenCalled();
+  });
 });
 
 describe("bulkDispatchCalls without balance", () => {

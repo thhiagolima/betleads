@@ -16,6 +16,7 @@ import {
 } from "@/lib/tenant-access.server";
 import {
   buildQuickLinkUrl,
+  computeHasVerifiedSender,
   computeSetupChecklist,
   normalizeSiteUrl,
   planQuickLinksSave,
@@ -35,6 +36,7 @@ import {
 } from "@/lib/tenant-domains.server";
 import { renderDnsInstructionsEmail, sendPlatformEmail } from "@/lib/platform-email.server";
 import { invalidateHouseLinks } from "@/lib/house-links.server";
+import { isChannelEnabled } from "@/lib/tenant-channels.server";
 
 // ============ Pure helpers (exported for unit tests) ============
 
@@ -250,7 +252,7 @@ async function fetchQuickLinks(tenantId: string): Promise<QuickLinkRow[]> {
   return (data ?? []) as QuickLinkRow[];
 }
 
-type SenderRow = {
+export type SenderRow = {
   id: string;
   from_name: string | null;
   from_email: string;
@@ -260,7 +262,7 @@ type SenderRow = {
   tenant_id: string;
 };
 
-async function fetchSenders(tenantId: string): Promise<SenderRow[]> {
+export async function fetchSenders(tenantId: string): Promise<SenderRow[]> {
   const { data, error } = await supabaseAdmin
     .from("email_senders")
     .select("id,from_name,from_email,reply_to,domain_id,is_default,tenant_id")
@@ -391,14 +393,16 @@ export const getHouseSetupStatus = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
 
-    const [tenant, domains, senderRows, isAdmin, isSuperAdmin, noticeRows] = await Promise.all([
-      fetchTenantRow(tenantId),
-      listTenantDomains(tenantId),
-      fetchSenders(tenantId),
-      checkTenantAdmin(context.supabase, tenantId),
-      checkSuperAdmin(context.supabase, context.userId),
-      fetchNoticeRows(tenantId),
-    ]);
+    const [tenant, domains, senderRows, isAdmin, isSuperAdmin, noticeRows, emailChannelEnabled] =
+      await Promise.all([
+        fetchTenantRow(tenantId),
+        listTenantDomains(tenantId),
+        fetchSenders(tenantId),
+        checkTenantAdmin(context.supabase, tenantId),
+        checkSuperAdmin(context.supabase, context.userId),
+        fetchNoticeRows(tenantId),
+        isChannelEnabled(tenantId, "email"),
+      ]);
 
     const shortenerStatuses = domains.filter((d) => d.kind === "shortener").map((d) => d.status);
     const emailDomains = domains.filter((d) => d.kind === "email");
@@ -407,15 +411,14 @@ export const getHouseSetupStatus = createServerFn({ method: "GET" })
     const verifiedEmailDomainIds = new Set(
       emailDomains.filter((d) => d.status === "verified").map((d) => d.id),
     );
-    const hasVerifiedSender = senderRows.some(
-      (s) => s.domain_id !== null && verifiedEmailDomainIds.has(s.domain_id),
-    );
+    const hasVerifiedSender = computeHasVerifiedSender(senderRows, verifiedEmailDomainIds);
 
     const checklist = computeSetupChecklist({
       siteUrl: tenant.site_url,
       shortenerStatuses,
       emailStatuses,
       hasVerifiedSender,
+      emailChannelEnabled,
     });
 
     const showWizard = computeShowWizard({

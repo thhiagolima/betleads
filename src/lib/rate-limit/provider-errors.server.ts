@@ -22,7 +22,9 @@
 //             Journeys hold the step on the same position and retry it in
 //             15 min (`saldo_insuficiente`), no attempt consumed, so a
 //             recharge resumes them.
-//   fail    : definitely not accepted (invalid recipient, 4xx, request never
+//   fail    : channel turned off for the house (errorKind
+//             `channel_disabled`, reason `channel_disabled`; final, nothing
+//             sent nor charged), or definitely not accepted (invalid recipient, 4xx, request never
 //             left: DNS/ECONNREFUSED) or provider misconfigured (missing
 //             credentials) -> the caller's normal attempts/backoff policy.
 //
@@ -58,6 +60,7 @@ export type ProviderFailureDecision = {
     | "provider_misconfigured"
     | "not_sent"
     | "tenant_blocked"
+    | "channel_disabled"
     | "permanent_error";
   /** Delay before the item becomes due again (defer/unknown only). */
   retryAfterMs: number;
@@ -138,6 +141,12 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
     // status 0, which voice uses for it): skip, never retried.
     if (error.errorKind === "insufficient_balance") {
       return { kind: "skip", reason: "insufficient_balance", retryAfterMs: 0 };
+    }
+    // Channel turned off for the house (tenant_channels): checked before any
+    // reservation, nothing sent nor charged. Final, and never a platform
+    // hold (journeyPlatformFailure ignores it): re-enabling never resends.
+    if (error.errorKind === "channel_disabled") {
+      return { kind: "fail", reason: "channel_disabled", retryAfterMs: 0 };
     }
     if (error.errorKind === "misconfigured") {
       return { kind: "fail", reason: "provider_misconfigured", retryAfterMs: 0 };

@@ -115,6 +115,19 @@ vi.mock("@/components/system-dialog-host", () => ({
   requestConfirmation: vi.fn(),
   requestTextInput: vi.fn(),
 }));
+// Term pulls in HelpProvider's chain (shell nav, active tenant, ...) through
+// useHelp() — out of scope for this pure component test, so it's replaced
+// with a passthrough, the same way every other external dependency here is.
+vi.mock("@/components/help/term", () => ({
+  Term: ({ children }: { children?: ReactNode }) => <>{children}</>,
+}));
+
+const enabledChannels: { isEnabled: (channel: string) => boolean } = {
+  isEnabled: () => true,
+};
+vi.mock("@/hooks/use-enabled-channels", () => ({
+  useEnabledChannels: () => enabledChannels,
+}));
 
 import { ChannelCampaignComposer, EXPERT_APPROVAL_NOTICE } from "./channel-campaign-composer";
 
@@ -143,6 +156,7 @@ const expertOptions = (envioModo: "livre" | "aprovacao") => ({
 
 beforeEach(() => {
   for (const key of Object.keys(queryData)) delete queryData[key];
+  enabledChannels.isEnabled = () => true;
 });
 
 describe("ChannelCampaignComposer — house", () => {
@@ -182,6 +196,21 @@ describe("ChannelCampaignComposer — house", () => {
     const html = render("webpush");
     expect(html).toContain("Título da notificação");
     expect(html).toContain("Pré-visualização");
+  });
+
+  it("webpush fields stay hidden when the integration is enabled but the channel is disabled", () => {
+    enabledChannels.isEnabled = (channel) => channel !== "webpush";
+    queryData["webpush-integration"] = { enabled: true };
+    const html = render("webpush");
+    expect(html).not.toContain("Título da notificação");
+  });
+
+  it("não lista Voz no seletor de canal quando voz está desligada", () => {
+    enabledChannels.isEnabled = (channel) => channel !== "voice";
+    const html = render("sms");
+    expect(html).not.toContain(">Voz<");
+    expect(html).toContain(">SMS<");
+    expect(html).toContain(">E-mail<");
   });
 });
 

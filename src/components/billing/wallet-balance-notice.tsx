@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { WALLET_PAGE_LINK_LABEL, walletBalanceNotice } from "@/lib/billing/wallet-notice";
 import { cn } from "@/lib/utils";
+import { tourAnchor } from "@/help/anchor";
 
 /** Empty/low balance warning for paying houses; renders nothing otherwise. */
 export function WalletBalanceNotice({
@@ -32,6 +33,7 @@ export function WalletBalanceNotice({
           : "border-amber-500/40 bg-amber-500/10 text-amber-100 [&>svg]:text-amber-400",
         className,
       )}
+      {...tourAnchor("canal.carteira.aviso")}
     >
       <AlertTriangle className="h-4 w-4" />
       <AlertTitle>{notice.title}</AlertTitle>

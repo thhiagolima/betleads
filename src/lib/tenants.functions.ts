@@ -25,6 +25,8 @@ import {
 } from "@/lib/house-member-roles";
 import { assertTenantNotDemo, isBillingEnforcementEnabled } from "@/lib/tenant-access.server";
 import { auditTenant } from "@/lib/tenant-audit.server";
+import { getTenantChannels } from "@/lib/tenant-channels.server";
+import { PROVIDER_CHANNELS } from "@/lib/provider-accounts.shared";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type DbError = { message: string };
@@ -160,13 +162,13 @@ async function canManageTenant(ctx: ServerContext, tenantId: string) {
 
 async function requireTenantManager(ctx: ServerContext, tenantId: string) {
   const allowed = await canManageTenant(ctx, tenantId);
-  if (!allowed) throw new Error("Sem permissão para gerenciar este tenant");
+  if (!allowed) throw new Error("Sem permissão para gerenciar esta casa");
 }
 
 /** House settings stay limited to super admin and house admin (no group-manager path). */
 async function requireTenantSettingsManager(ctx: ServerContext, tenantId: string) {
   const allowed = await isSuperAdminOrTenantAdmin(ctx, tenantId);
-  if (!allowed) throw new Error("Sem permissão para gerenciar este tenant");
+  if (!allowed) throw new Error("Sem permissão para gerenciar esta casa");
 }
 
 /** Super admin, or a manager of a group containing the house, may name/change/remove admins. */
@@ -646,8 +648,10 @@ export async function getTenantSwitcherFor(ctx: ServerContext) {
   }));
   // The switcher is on every page: a failing finance/group lookup must only
   // hide those entries, never break navigation. A super admin sees every
-  // house's finance, so no per-house RPC is needed.
-  const [canViewFinance, groups] = await Promise.all([
+  // house's finance, so no per-house RPC is needed. Channels: super admin
+  // also gets the HOUSE's own channels here (not "all") — entering a house
+  // from the switcher shows it the way the house sees it (design §4).
+  const [canViewFinance, groups, enabledChannels] = await Promise.all([
     Promise.all(
       options.map((tenant) =>
         superAdmin
@@ -662,6 +666,12 @@ export async function getTenantSwitcherFor(ctx: ServerContext) {
       console.warn("[tenant-switcher] managed groups lookup failed", error);
       return [] as GroupOption[];
     }),
+    Promise.all(
+      options.map(async (tenant) => {
+        const channels = await getTenantChannels(tenant.id);
+        return PROVIDER_CHANNELS.filter((channel) => channels[channel].enabled);
+      }),
+    ),
   ]);
   const activeTenantId = options.some((tenant) => tenant.id === ctx.activeTenantId)
     ? ctx.activeTenantId
@@ -672,6 +682,7 @@ export async function getTenantSwitcherFor(ctx: ServerContext) {
     tenants: options.map((tenant, index) => ({
       ...tenant,
       can_view_finance: canViewFinance[index],
+      enabled_channels: enabledChannels[index],
     })),
     groups,
   };

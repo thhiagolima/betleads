@@ -53,6 +53,8 @@ import { variablesForChannel } from "@/lib/message-variables";
 import { getComposerOptions } from "@/lib/house-config.functions";
 import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
 import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 
 export type EditorTemplate = {
   id: string;
@@ -308,6 +310,7 @@ export function TemplateEditorDialog({
                 variant="outline"
                 className="gap-1.5"
                 onClick={() => setPresetsOpen(true)}
+                {...tourAnchor("email.avancado.templates-prontos")}
               >
                 <LayoutTemplate className="h-3.5 w-3.5" /> Templates prontos
               </Button>
@@ -316,6 +319,7 @@ export function TemplateEditorDialog({
                 variant="outline"
                 className="gap-1.5"
                 onClick={() => setAiOpen(true)}
+                {...tourAnchor("email.avancado.gerar-ia")}
               >
                 <Sparkles className="h-3.5 w-3.5" /> Gerar com IA
               </Button>
@@ -325,7 +329,10 @@ export function TemplateEditorDialog({
                   setLifecycleStatus(value)
                 }
               >
-                <SelectTrigger className="w-[140px] h-8 text-xs">
+                <SelectTrigger
+                  className="w-[140px] h-8 text-xs"
+                  {...tourAnchor("email.avancado.status")}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -346,6 +353,7 @@ export function TemplateEditorDialog({
                     "h-6 w-10 rounded-full transition-colors relative",
                     advanced ? "bg-primary" : "bg-muted",
                   )}
+                  {...tourAnchor("email.avancado.toggle-html")}
                 >
                   <span
                     className={cn(
@@ -357,18 +365,23 @@ export function TemplateEditorDialog({
               </div>
             </div>
 
-            <LinkTrackingToggle
-              value={trackLinks}
-              onChange={setTrackLinks}
-              content={htmlPreview}
-              channel="email"
-            />
+            <div {...tourAnchor("email.avancado.rastreio")}>
+              <LinkTrackingToggle
+                value={trackLinks}
+                onChange={setTrackLinks}
+                content={htmlPreview}
+                channel="email"
+              />
+            </div>
 
             {!advanced && (
               <>
                 {/* 1. Objetivo */}
                 <Section step={1} title="Objetivo do email" desc="O que esse email precisa fazer?">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                  <div
+                    className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2"
+                    {...tourAnchor("email.avancado.objetivo")}
+                  >
                     {OBJETIVOS.map((o) => (
                       <button
                         key={o.id}
@@ -392,7 +405,10 @@ export function TemplateEditorDialog({
 
                 {/* 2. Modelo visual */}
                 <Section step={2} title="Modelo visual" desc="Como o email deve parecer?">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div
+                    className="grid grid-cols-2 sm:grid-cols-3 gap-2"
+                    {...tourAnchor("email.avancado.modelo")}
+                  >
                     {MODELOS.map((m) => (
                       <button
                         key={m.id}
@@ -423,7 +439,7 @@ export function TemplateEditorDialog({
                   title="Imagens do e-mail"
                   desc="Logo, banner principal e imagens opcionais. Faça upload ou cole uma URL."
                 >
-                  <div className="space-y-4">
+                  <div className="space-y-4" {...tourAnchor("email.avancado.imagens")}>
                     <ImageField
                       label="Logo do e-mail"
                       hint="Exibida no topo, centralizada. Largura máxima 220px."
@@ -432,7 +448,11 @@ export function TemplateEditorDialog({
                       previewMaxWidth={220}
                     />
                     <ImageField
-                      label="Banner principal (Hero)"
+                      label={
+                        <>
+                          Banner principal (<Term id="hero">Hero</Term>)
+                        </>
+                      }
                       hint="Imagem grande abaixo da logo. Responsiva, largura 100% até 600px."
                       value={fields.hero_image_url || ""}
                       onChange={(v) => setFields((f) => ({ ...f, hero_image_url: v }))}
@@ -473,7 +493,10 @@ export function TemplateEditorDialog({
                   title="Campos rápidos"
                   desc="Edite o conteúdo. Clique nas variáveis abaixo para inserir."
                 >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div
+                    className="grid grid-cols-1 sm:grid-cols-2 gap-3"
+                    {...tourAnchor("email.avancado.campos")}
+                  >
                     {QUICK_FIELDS.map((qf) => {
                       const isLong = qf.key === "texto";
                       const val =
@@ -550,7 +573,7 @@ export function TemplateEditorDialog({
 
                 {/* Variáveis clicáveis */}
                 <Section step={5} title="Variáveis" desc="Clique para inserir no campo ativo.">
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1.5" {...tourAnchor("email.avancado.variaveis")}>
                     {VARIAVEIS.map((variable) => (
                       <button
                         key={variable.token}
@@ -577,7 +600,10 @@ export function TemplateEditorDialog({
                 title="HTML avançado"
                 desc="Edite o HTML diretamente. Variáveis {token} são substituídas no envio."
               >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div
+                  className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3"
+                  {...tourAnchor("email.avancado.meta")}
+                >
                   <div className="space-y-1">
                     <Label className="text-meta text-muted-foreground">Nome</Label>
                     <Input
@@ -613,6 +639,7 @@ export function TemplateEditorDialog({
                   rows={20}
                   className="font-mono text-xs"
                   placeholder="<!doctype html>..."
+                  {...tourAnchor("email.avancado.html")}
                 />
               </Section>
             )}
@@ -688,7 +715,7 @@ export function TemplateEditorDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button onClick={salvar} className="gap-2">
+          <Button onClick={salvar} className="gap-2" {...tourAnchor("email.avancado.salvar")}>
             <CheckCircle2 className="h-4 w-4" /> Salvar template
           </Button>
         </div>
@@ -756,7 +783,7 @@ function ImageField({
   toggleValue,
   onToggleChange,
 }: {
-  label: string;
+  label: React.ReactNode;
   hint?: string;
   value: string;
   onChange: (v: string) => void;
@@ -882,7 +909,7 @@ function ImageField({
           <div className="rounded-md border border-border/60 bg-background p-2 flex justify-center">
             <img
               src={value}
-              alt={altValue || label}
+              alt={altValue || "Imagem do e-mail"}
               style={{ maxWidth: previewMaxWidth, width: "100%", height: "auto", display: "block" }}
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.opacity = "0.3";

@@ -40,9 +40,13 @@ export type WalletMonthUsageRow = {
 export function MonthUsageCard({
   monthUsage,
   prices,
+  visibleItems = BILLING_ITEMS,
 }: {
   monthUsage: WalletMonthUsageRow[];
   prices: Partial<Record<BillingItem, WalletPriceRow>>;
+  /** Itens a mostrar — o chamador filtra pelos canais ligados da casa
+   * quando souber qual é (default: todos, sem filtro). */
+  visibleItems?: readonly BillingItem[];
 }) {
   return (
     <Card>
@@ -50,7 +54,7 @@ export function MonthUsageCard({
         <CardTitle>Consumo do mês</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-3 md:grid-cols-3">
-        {BILLING_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const usage = monthUsage.find((row) => row.item === item);
           const freeUnits = Number(prices[item]?.free_monthly_units ?? 0);
           return (
@@ -78,8 +82,12 @@ export function MonthUsageCard({
 /** "Preços vigentes": unit price (up to 3 decimals) and monthly franchise per channel. */
 export function CurrentPricesCard({
   prices,
+  visibleItems = BILLING_ITEMS,
 }: {
   prices: Partial<Record<BillingItem, WalletPriceRow>>;
+  /** Itens a mostrar — o chamador filtra pelos canais ligados da casa
+   * quando souber qual é (default: todos, sem filtro). */
+  visibleItems?: readonly BillingItem[];
 }) {
   return (
     <Card>
@@ -96,7 +104,7 @@ export function CurrentPricesCard({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {BILLING_ITEMS.map((item) => (
+            {visibleItems.map((item) => (
               <TableRow key={item}>
                 <TableCell>{BILLING_ITEM_LABEL[item]}</TableCell>
                 <TableCell className="text-right">

@@ -5,6 +5,7 @@ import { Bot } from "lucide-react";
 
 import { NavSections } from "@/components/shell/nav-list";
 import { useShellNav } from "@/components/shell/use-shell-nav";
+import { tourAnchor } from "@/help/anchor";
 import { getMyMcpStatus } from "@/lib/mcp/mcp.functions";
 import type { NavSection } from "@/lib/navigation";
 
@@ -58,6 +59,7 @@ export function AppSidebar({ collapsed }: { collapsed: boolean }) {
       </div>
       <nav
         aria-label="Navegação principal"
+        {...tourAnchor("shell.sidebar.nav")}
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2.5 pb-3"
       >
         <NavSections sections={allSections} collapsed={collapsed} />

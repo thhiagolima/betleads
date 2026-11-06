@@ -44,6 +44,7 @@ import {
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
 } from "./provider-accounts.server";
 import { encryptProviderCredentials } from "./secret-box.server";
+import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 const CAMPAIGN = "11111111-1111-4111-8111-111111111111";
@@ -139,6 +140,7 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
   beforeEach(() => {
     fake.db.reset();
     __resetShortenerDomainCacheForTests();
+    __resetTenantChannelsCacheForTests();
     credits = installCreditLedger(fake.db);
     budgetCalls = [];
     fake.db.onRpc("consume_channel_budget", (args) => {
@@ -241,6 +243,27 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     } finally {
       guard.mockImplementation(async () => undefined);
     }
+  });
+
+  it("a house with the SMS channel disabled: its items fail final (channel_disabled) before any reservation; other houses still send", async () => {
+    settings("block");
+    const OFF = "00000000-0000-4000-8000-0000000000ee";
+    fake.db.rows("tenant_channels").push({ tenant_id: OFF, channel: "sms", enabled: false, disabled_at: null });
+    const r = await sendSmsBatch([item(1, { tenantId: OFF }), item(2)]);
+
+    expect(r.outcomes[0]).toMatchObject({
+      status: "failed",
+      ok: false,
+      retryable: false,
+      errorKind: "channel_disabled",
+      error: "O canal SMS está desabilitado para esta casa.",
+    });
+    expect(r.outcomes[1]).toMatchObject({ status: "accepted", ok: true });
+    expect(smsCalls).toHaveLength(1);
+    expect(smsCalls[0].bulk.map((b) => b.parceiroId)).toEqual([key(2)]);
+    expect(logFor(key(1))).toHaveLength(0);
+    expect(credits.ledger().some((l) => l.tenant_id === OFF)).toBe(false);
+    expect(credits.charged()).toBe(1);
   });
 
   it("a whole batch of a locked house: nothing is sent and no item is retryable", async () => {

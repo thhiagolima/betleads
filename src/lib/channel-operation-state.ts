@@ -1,3 +1,5 @@
+import { EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON } from "@/lib/tenant-channels.shared";
+
 export type ChannelOperation = "sms" | "email" | "voice" | "webpush";
 
 export type ChannelOperationState = {
@@ -23,6 +25,21 @@ const HISTORY_DESTINATION: Record<ChannelOperation, string> = {
   webpush: "/campanhas",
 };
 
+/**
+ * Raw, non-display codes that end up in `last_error`/`blocked_reason` mapped
+ * to a readable sentence — today just the e-mail channel's, which (unlike
+ * SMS's `SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE`) is stored as the bare code
+ * `EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON` instead of a full sentence. Single
+ * point used by every screen that shows a campaign's stop/block reason
+ * (house and expert).
+ */
+export function friendlyChannelReason<T extends string | null | undefined>(reason: T): T | string {
+  if (reason === EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON) {
+    return "Canal E-mail desabilitado para a casa.";
+  }
+  return reason;
+}
+
 /** Reason shown for a cancelled, failed or paused campaign (null for any other status). */
 export function campaignStopReason(
   status: string | null | undefined,
@@ -31,14 +48,14 @@ export function campaignStopReason(
 ): string | null {
   const normalized = (status ?? "").trim().toLowerCase();
   if (["cancelada", "cancelled", "canceled"].includes(normalized)) {
-    if (lastError) return lastError;
+    if (lastError) return friendlyChannelReason(lastError);
     // Cancelled before the reason was recorded: only the time is known.
     return updatedAt
       ? `Cancelada manualmente em ${new Date(updatedAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" })}.`
       : "Cancelada manualmente.";
   }
   if (["falhou", "failed", "error", "rejected", "pausada"].includes(normalized))
-    return lastError || null;
+    return friendlyChannelReason(lastError) || null;
   return null;
 }
 

@@ -4,6 +4,7 @@ import {
   computeSetupChecklist,
   isDomainDueForCheck,
   isReservedPlatformHostname,
+  nextDomainCheckAt,
   normalizeHostname,
   normalizeSiteUrl,
   planQuickLinksSave,
@@ -217,6 +218,53 @@ describe("isDomainDueForCheck", () => {
   });
 });
 
+describe("nextDomainCheckAt", () => {
+  const now = new Date("2026-10-21T12:00:00.000Z");
+  const hoursAgo = (h: number) => new Date(now.getTime() - h * 60 * 60 * 1000).toISOString();
+  const minutesAgo = (m: number) => new Date(now.getTime() - m * 60 * 1000).toISOString();
+
+  it("pending created 1h ago, checked 4 min ago: next check is last + 10 min", () => {
+    const lastCheckedAt = minutesAgo(4);
+    const result = nextDomainCheckAt(
+      { status: "pending", created_at: hoursAgo(1), last_checked_at: lastCheckedAt },
+      now,
+    );
+    expect(result.toISOString()).toBe(
+      new Date(new Date(lastCheckedAt).getTime() + 10 * 60 * 1000).toISOString(),
+    );
+  });
+
+  it("pending created 10h ago: next check is last + 60 min", () => {
+    const lastCheckedAt = minutesAgo(5);
+    const result = nextDomainCheckAt(
+      { status: "pending", created_at: hoursAgo(10), last_checked_at: lastCheckedAt },
+      now,
+    );
+    expect(result.toISOString()).toBe(
+      new Date(new Date(lastCheckedAt).getTime() + 60 * 60 * 1000).toISOString(),
+    );
+  });
+
+  it("verified: next check is last + 24h", () => {
+    const lastCheckedAt = hoursAgo(1);
+    const result = nextDomainCheckAt(
+      { status: "verified", created_at: hoursAgo(100), last_checked_at: lastCheckedAt },
+      now,
+    );
+    expect(result.toISOString()).toBe(
+      new Date(new Date(lastCheckedAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    );
+  });
+
+  it("without last_checked_at: returns now", () => {
+    const result = nextDomainCheckAt(
+      { status: "pending", created_at: hoursAgo(1), last_checked_at: null },
+      now,
+    );
+    expect(result.toISOString()).toBe(now.toISOString());
+  });
+});
+
 describe("computeSetupChecklist", () => {
   it("is all todo and incomplete with nothing set up", () => {
     expect(
@@ -272,6 +320,30 @@ describe("computeSetupChecklist", () => {
       hasVerifiedSender: true,
     });
     expect(result.complete).toBe(true);
+  });
+
+  it("drops the email item when the e-mail channel is disabled for the house", () => {
+    const result = computeSetupChecklist({
+      siteUrl: "https://suacasa.bet.br",
+      shortenerStatuses: ["verified"],
+      emailStatuses: [],
+      hasVerifiedSender: false,
+      emailChannelEnabled: false,
+    });
+    expect(result.items.map((i) => i.id)).toEqual(["house", "shortener"]);
+    expect(result.complete).toBe(true);
+  });
+
+  it("keeps the email item when the channel is enabled (explicit or default)", () => {
+    const result = computeSetupChecklist({
+      siteUrl: "https://suacasa.bet.br",
+      shortenerStatuses: ["verified"],
+      emailStatuses: [],
+      hasVerifiedSender: false,
+      emailChannelEnabled: true,
+    });
+    expect(result.items.map((i) => i.id)).toEqual(["house", "shortener", "email"]);
+    expect(result.complete).toBe(false);
   });
 });
 

@@ -65,6 +65,7 @@ import {
   saveExpertSmsCampaignFor,
   saveExpertVoiceCampaignFor,
 } from "./expert-campaigns.server";
+import { __resetTenantChannelsCacheForTests } from "@/lib/tenant-channels.server";
 
 const TENANT = "00000000-0000-4000-8000-0000000000a1";
 const OTHER_TENANT = "00000000-0000-4000-8000-0000000000a2";
@@ -180,6 +181,10 @@ beforeEach(() => {
   seedPlayers();
   fake.admin.rows("tenants").push({ id: TENANT, site_url: "https://casa.bet" });
   setExpert();
+  // tenant-channels.server keeps an in-process snapshot (Task 7 guards in
+  // expert-campaigns.server): reset so a test's tenant_channels row never
+  // leaks into the next one.
+  __resetTenantChannelsCacheForTests();
 });
 
 const rulesCriteria = { level: null, timing: "any" };
@@ -384,6 +389,22 @@ describe("campanha de SMS do expert", () => {
       saveExpertSmsCampaignFor(CTX, { id: r.id, campaignName: "P", content: "x", audienceCriteria: rulesCriteria }),
     ).rejects.toThrow(/não pode mais ser editada/);
   });
+
+  // Task 7: canal de SMS desligado para a casa do expert recusa antes de
+  // qualquer leitura de público ou escrita de campanha.
+  it("canal de SMS desligado para a casa recusa (CHANNEL_DISABLED_MESSAGE), nada gravado", async () => {
+    __resetTenantChannelsCacheForTests();
+    fake.admin.rows("tenant_channels").push({
+      tenant_id: TENANT,
+      channel: "sms",
+      enabled: false,
+      disabled_at: "2026-11-05T00:00:00Z",
+    });
+    await expect(
+      saveExpertSmsCampaignFor(CTX, { campaignName: "P", content: "oi", audienceCriteria: rulesCriteria }),
+    ).rejects.toThrow("O canal SMS está desabilitado para esta casa.");
+    expect(fake.admin.rows("sms_campaigns")).toHaveLength(0);
+  });
 });
 
 describe("teto mensal: pré-checagem", () => {
@@ -531,6 +552,26 @@ describe("campanha de e-mail do expert", () => {
       }),
     ).rejects.toThrow(/Link não permitido/);
   });
+
+  it("canal de e-mail desligado para a casa recusa ao agendar (rascunho continua permitido)", async () => {
+    __resetTenantChannelsCacheForTests();
+    fake.admin.rows("tenant_channels").push({
+      tenant_id: TENANT,
+      channel: "email",
+      enabled: false,
+      disabled_at: "2026-11-05T00:00:00Z",
+    });
+    await expect(
+      saveExpertEmailCampaignFor(CTX, {
+        nome: "News",
+        assunto: "Oi",
+        html: "<p>Oi</p>",
+        audienceCriteria: rulesCriteria,
+        status: "agendada",
+      }),
+    ).rejects.toThrow("O canal E-mail está desabilitado para esta casa.");
+    expect(fake.admin.rows("email_campaigns")).toHaveLength(0);
+  });
 });
 
 describe("campanha de voz do expert", () => {
@@ -558,6 +599,20 @@ describe("campanha de voz do expert", () => {
     const approved = await approveExpertCampaignCore(TENANT, ADMIN, { channel: "voice", id: r.id });
     expect(approved.status).toBe("enfileirada");
     expect(fake.admin.rows("call_queue")).toHaveLength(2);
+  });
+
+  it("canal de voz desligado para a casa recusa antes de enfileirar qualquer item", async () => {
+    __resetTenantChannelsCacheForTests();
+    fake.admin.rows("tenant_channels").push({
+      tenant_id: TENANT,
+      channel: "voice",
+      enabled: false,
+      disabled_at: "2026-11-05T00:00:00Z",
+    });
+    await expect(
+      saveExpertVoiceCampaignFor(CTX, { campaign_name: "Voz", script_id: SCRIPT, audienceCriteria: rulesCriteria }),
+    ).rejects.toThrow("O canal Voz está desabilitado para esta casa.");
+    expect(fake.admin.rows("call_queue")).toHaveLength(0);
   });
 });
 

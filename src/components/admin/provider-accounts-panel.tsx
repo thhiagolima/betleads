@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { KeyRound, Pencil, Plug, Plus, Power } from "lucide-react";
+import { KeyRound, Pencil, Plug, Plus, Power, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -37,10 +38,14 @@ import {
 } from "@/components/ui/table";
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import {
+  adminDeleteProviderAccount,
   adminListProviderAccounts,
   adminSaveProviderAccount,
+  adminSetPlatformDefault,
   adminSetProviderAccountStatus,
+  adminSetTenantChannel,
   adminSetTenantChannelProvider,
+  adminTenantChannelImpact,
   adminTestProviderAccount,
 } from "@/lib/provider-accounts.functions";
 import {
@@ -55,6 +60,8 @@ import type { ProviderAccountView } from "@/lib/provider-accounts-admin.server";
 
 const QUERY_KEY = ["admin", "provider-accounts"] as const;
 const PLATFORM = "platform";
+/** Valor do item "Re-sincronizar domínios de e-mail" no menu "Tornar padrão". */
+const RESYNC_EMAIL = "resync-email";
 
 type Provider = ProviderAccountView["provider"];
 
@@ -124,6 +131,8 @@ export function ProviderAccountsPanel() {
     <div className="space-y-4">
       <AccountsCard
         accounts={data?.accounts ?? []}
+        tenants={data?.tenants ?? []}
+        verifiedEmailDomainsOnDefault={data?.verifiedEmailDomainsOnDefault ?? 0}
         loading={isLoading}
         onCreate={() => setEditing("new")}
         onEdit={setEditing}
@@ -131,6 +140,7 @@ export function ProviderAccountsPanel() {
       <TenantProvidersCard
         accounts={data?.accounts ?? []}
         tenants={data?.tenants ?? []}
+        defaults={data?.defaults ?? ({} as Record<ProviderChannelName, string>)}
         loading={isLoading}
       />
       {editing && (
@@ -147,11 +157,15 @@ export function ProviderAccountsPanel() {
 
 function AccountsCard({
   accounts,
+  tenants,
+  verifiedEmailDomainsOnDefault,
   loading,
   onCreate,
   onEdit,
 }: {
   accounts: ProviderAccountView[];
+  tenants: TenantRow[];
+  verifiedEmailDomainsOnDefault: number;
   loading: boolean;
   onCreate: () => void;
   onEdit: (account: ProviderAccountView) => void;
@@ -159,6 +173,8 @@ function AccountsCard({
   const qc = useQueryClient();
   const statusFn = useServerFn(adminSetProviderAccountStatus);
   const testFn = useServerFn(adminTestProviderAccount);
+  const setDefaultFn = useServerFn(adminSetPlatformDefault);
+  const deleteFn = useServerFn(adminDeleteProviderAccount);
 
   const status = useMutation({
     mutationFn: (input: { id: string; status: "active" | "disabled" }) => statusFn({ data: input }),
@@ -169,6 +185,37 @@ function AccountsCard({
     mutationFn: (input: { id: string; phone?: string }) => testFn({ data: input }),
     onSuccess: (result) =>
       result.ok ? toast.success(result.message) : toast.error(result.message),
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+  const setDefault = useMutation({
+    mutationFn: (input: { channel: ProviderChannelName; accountId: string; resync?: boolean }) =>
+      setDefaultFn({ data: { channel: input.channel, accountId: input.accountId } }),
+    onSuccess: (result, input) => {
+      void qc.invalidateQueries({ queryKey: QUERY_KEY });
+      if (input.resync) {
+        toast.success(
+          result.emailDomains.length > 0
+            ? "Domínios de e-mail re-sincronizados com a conta padrão."
+            : "Todos os domínios de e-mail já estão na conta padrão.",
+        );
+      } else {
+        toast.success(`Conta agora é a padrão de ${PROVIDER_CHANNEL_LABEL[input.channel]}.`);
+      }
+      if (result.emailDomains.length > 0) {
+        const pending = result.emailDomains.filter((d) => d.status !== "verified");
+        toast.warning(
+          `${result.emailDomains.length} domínio(s) de e-mail recadastrado(s) na conta nova; ${pending.length} aguardam a casa publicar os DNS novos.`,
+        );
+      }
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+  const remove = useMutation({
+    mutationFn: (input: { id: string }) => deleteFn({ data: input }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: QUERY_KEY });
+      toast.success("Conta excluída");
+    },
     onError: (error) => toast.error(errorMessage(error)),
   });
 
@@ -188,6 +235,53 @@ function AccountsCard({
       if (!ok) return;
     }
     status.mutate({ id: account.id, status: disabling ? "disabled" : "active" });
+  }
+
+  /** Salvar de novo a mesma padrão de e-mail retoma uma troca que parou no
+   * meio: só os domínios que ainda não estão nesta conta são recadastrados. */
+  async function resyncEmailDomains(account: ProviderAccountView) {
+    const ok = await requestConfirmation({
+      title: "Re-sincronizar domínios de e-mail?",
+      description: `Os domínios de e-mail das casas sem conta própria que ainda não estão em "${account.label}" serão recadastrados nela e voltam a pendente até a casa publicar os DNS novos.`,
+      confirmLabel: "Re-sincronizar",
+    });
+    if (!ok) return;
+    setDefault.mutate({ channel: "email", accountId: account.id, resync: true });
+  }
+
+  async function makeDefault(account: ProviderAccountView, channel: ProviderChannelName) {
+    // Computed client-side from the tenants list already in the query cache
+    // (no conta própria no canal + canal ligado) — same data the server
+    // used to build `houses`, no extra round-trip needed.
+    const n = tenants.filter((t) => !t.accounts[channel] && t.channels[channel]).length;
+    const ok = await requestConfirmation({
+      title: `Tornar "${account.label}" a padrão de ${PROVIDER_CHANNEL_LABEL[channel]}?`,
+      description: `"${account.label}" passa a ser a padrão de ${PROVIDER_CHANNEL_LABEL[channel]} para ${n} casa(s) sem conta própria.`,
+      confirmLabel: "Tornar padrão",
+    });
+    if (!ok) return;
+    if (channel === "email" && verifiedEmailDomainsOnDefault > 0) {
+      const ok2 = await requestConfirmation({
+        title: "Trocar a padrão de e-mail?",
+        description: `${verifiedEmailDomainsOnDefault} domínios de e-mail voltam a pendente e essas casas ficam sem enviar e-mail até o DNS ser revalidado na conta nova. E-mails da plataforma (faturas, convites) continuam na conta do ambiente.`,
+        confirmLabel: "Trocar mesmo assim",
+        destructive: true,
+      });
+      if (!ok2) return;
+    }
+    setDefault.mutate({ channel, accountId: account.id });
+  }
+
+  async function deleteAccount(account: ProviderAccountView) {
+    const ok = await requestConfirmation({
+      title: `Excluir "${account.label}"?`,
+      description:
+        "Esta ação não pode ser desfeita. Só é possível excluir uma conta que não é padrão de nenhum canal e que nenhuma casa usa.",
+      confirmLabel: "Excluir",
+      destructive: true,
+    });
+    if (!ok) return;
+    remove.mutate({ id: account.id });
   }
 
   async function runTest(account: ProviderAccountView) {
@@ -215,8 +309,8 @@ function AccountsCard({
             <KeyRound className="h-5 w-5 text-primary" /> Contas de provedor
           </CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            Contas da BetLeads que as casas podem usar. As duas contas padrão vêm das variáveis de
-            ambiente do servidor.
+            Contas da BetLeads que as casas podem usar. Contas do ambiente usam as credenciais do
+            servidor; escolha a padrão de cada canal com "Tornar padrão".
           </p>
         </div>
         <Button size="sm" onClick={onCreate}>
@@ -247,14 +341,27 @@ function AccountsCard({
               const houses = PROVIDER_CHANNELS.filter((c) => account.houses[c] > 0)
                 .map((c) => `${PROVIDER_CHANNEL_LABEL[c]}: ${account.houses[c]}`)
                 .join(" · ");
+              const eligibleForDefault = account.channels.filter(
+                (c) => !account.defaultFor.includes(c),
+              );
+              const canToggleOff = !(account.status === "active" && account.defaultFor.length > 0);
               return (
                 <TableRow key={account.id}>
                   <TableCell>
                     <div className="font-medium">{account.label}</div>
                     <div className="text-meta text-muted-foreground">
                       {PROVIDER_LABEL[account.provider]}
-                      {account.platformDefault ? " · padrão da plataforma" : ""}
+                      {account.envAccount ? " · conta do ambiente" : ""}
                     </div>
+                    {account.defaultFor.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {account.defaultFor.map((c) => (
+                          <Badge key={c} variant="default">
+                            padrão de {PROVIDER_CHANNEL_LABEL[c]}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -277,7 +384,7 @@ function AccountsCard({
                     )}
                   </TableCell>
                   <TableCell className="text-meta">
-                    {account.platformDefault ? "todas sem conta própria" : houses || "—"}
+                    {account.defaultFor.length > 0 ? "todas sem conta própria" : houses || "—"}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col items-start gap-1">
@@ -288,7 +395,7 @@ function AccountsCard({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className="flex justify-end gap-1">
+                    <div className="flex flex-wrap justify-end gap-1">
                       <Button
                         variant="outline"
                         size="sm"
@@ -297,21 +404,58 @@ function AccountsCard({
                       >
                         <Plug className="h-4 w-4" /> Testar
                       </Button>
-                      {!account.platformDefault && (
-                        <>
-                          <Button variant="outline" size="sm" onClick={() => onEdit(account)}>
-                            <Pencil className="h-4 w-4" /> Editar
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => toggle(account)}
-                            disabled={status.isPending}
-                          >
-                            <Power className="h-4 w-4" />
-                            {account.status === "active" ? "Desativar" : "Ativar"}
-                          </Button>
-                        </>
+                      <Button variant="outline" size="sm" onClick={() => onEdit(account)}>
+                        <Pencil className="h-4 w-4" /> Editar
+                      </Button>
+                      {account.status === "active" &&
+                        (eligibleForDefault.length > 0 || account.defaultFor.includes("email")) && (
+                        <Select
+                          value=""
+                          onValueChange={(value) =>
+                            value === RESYNC_EMAIL
+                              ? void resyncEmailDomains(account)
+                              : void makeDefault(account, value as ProviderChannelName)
+                          }
+                          disabled={setDefault.isPending}
+                        >
+                          <SelectTrigger className="h-8 w-auto gap-1 px-2 text-meta">
+                            <Star className="h-3.5 w-3.5" />
+                            <SelectValue placeholder="Tornar padrão" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {eligibleForDefault.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                Tornar padrão de {PROVIDER_CHANNEL_LABEL[c]}
+                              </SelectItem>
+                            ))}
+                            {account.defaultFor.includes("email") && (
+                              <SelectItem value={RESYNC_EMAIL}>
+                                Re-sincronizar domínios de e-mail
+                              </SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      {canToggleOff && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => toggle(account)}
+                          disabled={status.isPending}
+                        >
+                          <Power className="h-4 w-4" />
+                          {account.status === "active" ? "Desativar" : "Ativar"}
+                        </Button>
+                      )}
+                      {!account.envAccount && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => deleteAccount(account)}
+                          disabled={remove.isPending}
+                        >
+                          <Trash2 className="h-4 w-4" /> Excluir
+                        </Button>
                       )}
                     </div>
                   </TableCell>
@@ -334,6 +478,7 @@ function AccountDialog({
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(adminSaveProviderAccount);
+  const isEnv = Boolean(account?.envAccount);
   const [provider, setProvider] = useState<Provider>(account?.provider ?? "infobip");
   const [label, setLabel] = useState(account?.label ?? "");
   const [channels, setChannels] = useState<ProviderChannelName[]>(
@@ -377,8 +522,9 @@ function AccountDialog({
             {account ? `Editar "${account.label}"` : "Nova conta de provedor"}
           </DialogTitle>
           <DialogDescription>
-            As credenciais ficam cifradas no banco e nunca voltam para a tela. Deixe um campo em
-            branco para manter o valor atual.
+            {isEnv
+              ? "Esta conta usa as credenciais das variáveis de ambiente do servidor: edite aqui só o nome e os canais."
+              : "As credenciais ficam cifradas no banco e nunca voltam para a tela. Deixe um campo em branco para manter o valor atual."}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -437,46 +583,50 @@ function AccountDialog({
             </div>
           </div>
 
-          {CONFIG_FIELDS[provider]
-            .filter(
-              (field) =>
-                (field.key !== "voice_from" || channels.includes("voice")) &&
-                (field.key !== "sms_from" || channels.includes("sms")),
-            )
-            .map((field) => (
+          {!isEnv &&
+            CONFIG_FIELDS[provider]
+              .filter(
+                (field) =>
+                  (field.key !== "voice_from" || channels.includes("voice")) &&
+                  (field.key !== "sms_from" || channels.includes("sms")),
+              )
+              .map((field) => (
+                <div key={field.key} className="space-y-1">
+                  <Label htmlFor={`cfg-${field.key}`}>{field.label}</Label>
+                  <Input
+                    id={`cfg-${field.key}`}
+                    value={config[field.key] ?? ""}
+                    onChange={(e) =>
+                      setConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                    placeholder={field.placeholder}
+                    className="font-mono text-meta"
+                  />
+                </div>
+              ))}
+
+          {!isEnv &&
+            CREDENTIAL_FIELDS[provider].map((field) => (
               <div key={field.key} className="space-y-1">
-                <Label htmlFor={`cfg-${field.key}`}>{field.label}</Label>
+                <Label htmlFor={`cred-${field.key}`}>{field.label}</Label>
                 <Input
-                  id={`cfg-${field.key}`}
-                  value={config[field.key] ?? ""}
-                  onChange={(e) => setConfig((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                  placeholder={field.placeholder}
+                  id={`cred-${field.key}`}
+                  type="password"
+                  autoComplete="off"
+                  value={credentials[field.key] ?? ""}
+                  onChange={(e) =>
+                    setCredentials((prev) => ({ ...prev, [field.key]: e.target.value }))
+                  }
+                  placeholder={
+                    account?.credentialHints[field.key]
+                      ? `atual: ${account.credentialHints[field.key]}`
+                      : ""
+                  }
                   className="font-mono text-meta"
                 />
               </div>
             ))}
-
-          {CREDENTIAL_FIELDS[provider].map((field) => (
-            <div key={field.key} className="space-y-1">
-              <Label htmlFor={`cred-${field.key}`}>{field.label}</Label>
-              <Input
-                id={`cred-${field.key}`}
-                type="password"
-                autoComplete="off"
-                value={credentials[field.key] ?? ""}
-                onChange={(e) =>
-                  setCredentials((prev) => ({ ...prev, [field.key]: e.target.value }))
-                }
-                placeholder={
-                  account?.credentialHints[field.key]
-                    ? `atual: ${account.credentialHints[field.key]}`
-                    : ""
-                }
-                className="font-mono text-meta"
-              />
-            </div>
-          ))}
-          {provider === "short_brasil" && (
+          {!isEnv && provider === "short_brasil" && (
             <p className="text-meta text-muted-foreground">
               Informe o token da API Short Code ou o usuário e a chave da API legada. O envio em
               lote só funciona com a API legada.
@@ -503,19 +653,24 @@ type TenantRow = {
   id: string;
   nome: string;
   accounts: Record<ProviderChannelName, string | null>;
+  channels: Record<ProviderChannelName, boolean>;
 };
 
 function TenantProvidersCard({
   accounts,
   tenants,
+  defaults,
   loading,
 }: {
   accounts: ProviderAccountView[];
   tenants: TenantRow[];
+  defaults: Record<ProviderChannelName, string>;
   loading: boolean;
 }) {
   const qc = useQueryClient();
   const setFn = useServerFn(adminSetTenantChannelProvider);
+  const impactFn = useServerFn(adminTenantChannelImpact);
+  const setChannelFn = useServerFn(adminSetTenantChannel);
   const [search, setSearch] = useState("");
 
   const optionsByChannel = useMemo(() => {
@@ -523,7 +678,6 @@ function TenantProvidersCard({
     for (const channel of PROVIDER_CHANNELS) {
       out[channel] = accounts.filter(
         (a) =>
-          !a.platformDefault &&
           a.status === "active" &&
           a.channels.includes(channel) &&
           SUPPORTED_CHANNELS[a.provider].includes(channel),
@@ -532,7 +686,8 @@ function TenantProvidersCard({
     return out;
   }, [accounts]);
   const labelOf = (id: string | null) =>
-    id ? (accounts.find((a) => a.id === id)?.label ?? "conta removida") : "Padrão da plataforma";
+    id ? (accounts.find((a) => a.id === id)?.label ?? "conta removida") : "a conta padrão";
+  const defaultLabelOf = (channel: ProviderChannelName) => labelOf(defaults[channel] ?? null);
 
   const assign = useMutation({
     mutationFn: (input: {
@@ -573,6 +728,40 @@ function TenantProvidersCard({
     assign.mutate({ tenantId: tenant.id, channel, accountId });
   }
 
+  const setChannel = useMutation({
+    mutationFn: (input: { tenantId: string; channel: ProviderChannelName; enabled: boolean }) =>
+      setChannelFn({ data: input }),
+    onSuccess: (result, input) => {
+      void qc.invalidateQueries({ queryKey: QUERY_KEY });
+      toast.success(
+        input.enabled
+          ? `${PROVIDER_CHANNEL_LABEL[input.channel]} ligado.`
+          : `${PROVIDER_CHANNEL_LABEL[input.channel]} desligado${result.cancelled > 0 ? ` (${result.cancelled} envio(s) cancelado(s))` : ""}.`,
+      );
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+
+  async function toggleChannel(tenant: TenantRow, channel: ProviderChannelName, enabled: boolean) {
+    if (!enabled) {
+      let impact: { activeJourneys: number; scheduledCampaigns: number };
+      try {
+        impact = await impactFn({ data: { tenantId: tenant.id, channel } });
+      } catch (error) {
+        toast.error(errorMessage(error));
+        return;
+      }
+      const ok = await requestConfirmation({
+        title: `Desligar ${PROVIDER_CHANNEL_LABEL[channel]} para ${tenant.nome}?`,
+        description: `${impact.activeJourneys} jornada(s) ativa(s) vão pular esses passos e ${impact.scheduledCampaigns} envio(s) agendado(s) serão cancelados. O pessoal da casa verá um aviso.`,
+        confirmLabel: "Desligar",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    setChannel.mutate({ tenantId: tenant.id, channel, enabled });
+  }
+
   const visible = tenants.filter((t) => t.nome.toLowerCase().includes(search.trim().toLowerCase()));
 
   return (
@@ -604,8 +793,15 @@ function TenantProvidersCard({
           <TableBody>
             {loading && (
               <TableRow>
-                <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">
                   Carregando…
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && visible.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">
+                  Nenhuma casa encontrada.
                 </TableCell>
               </TableRow>
             )}
@@ -615,20 +811,33 @@ function TenantProvidersCard({
                 {PROVIDER_CHANNELS.map((channel) => {
                   const current = tenant.accounts[channel];
                   const options = optionsByChannel[channel];
+                  const enabled = tenant.channels[channel];
                   // Keep a now-disabled current account visible in its own select.
                   const currentMissing = current && !options.some((a) => a.id === current);
                   return (
-                    <TableCell key={channel} className="min-w-48">
+                    <TableCell key={channel} className="min-w-52">
+                      <div className="mb-1.5 flex items-center gap-2">
+                        <Switch
+                          checked={enabled}
+                          onCheckedChange={(checked) =>
+                            void toggleChannel(tenant, channel, checked)
+                          }
+                          disabled={setChannel.isPending}
+                        />
+                        <span className="text-meta text-muted-foreground">
+                          {enabled ? "ligado" : "desligado"}
+                        </span>
+                      </div>
                       <Select
                         value={current ?? PLATFORM}
                         onValueChange={(value) => void change(tenant, channel, value)}
-                        disabled={assign.isPending}
+                        disabled={assign.isPending || !enabled}
                       >
                         <SelectTrigger className={current ? "border-primary/60" : undefined}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={PLATFORM}>Padrão da plataforma</SelectItem>
+                          <SelectItem value={PLATFORM}>Padrão ({defaultLabelOf(channel)})</SelectItem>
                           {currentMissing && (
                             <SelectItem value={current}>{labelOf(current)} (desativada)</SelectItem>
                           )}

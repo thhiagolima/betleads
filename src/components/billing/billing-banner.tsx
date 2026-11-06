@@ -3,6 +3,7 @@ import { AlertTriangle } from "lucide-react";
 
 import { useTenantAccessStatus } from "@/components/tenant-status-gate";
 import { Button } from "@/components/ui/button";
+import { tourAnchor } from "@/help/anchor";
 import { billingView } from "@/lib/billing/billing-view";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ export function BillingBanner() {
   return (
     <div
       role="status"
+      {...tourAnchor("shell.faixa.mensalidade")}
       className={cn(
         "flex flex-wrap items-center gap-3 border-b px-4 py-2.5 text-sm sm:px-6",
         tone === "yellow"

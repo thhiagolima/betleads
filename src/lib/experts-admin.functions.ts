@@ -146,11 +146,7 @@ async function expertHasCredits(tenantId: string, expertId: string): Promise<boo
  * créditos: é o fluxo normal (admin cria o perfil com IDs de afiliado, o
  * cron credita os depósitos, só depois a pessoa é convidada/vinculada).
  */
-async function assertProfileHasNoCredits(
-  tenantId: string,
-  expertId: string,
-  jaVinculado: boolean,
-) {
+async function assertProfileHasNoCredits(tenantId: string, expertId: string, jaVinculado: boolean) {
   if (!jaVinculado) return;
   if (await expertHasCredits(tenantId, expertId)) throw new Error(PROFILE_HAS_OTHER_CREDITS);
 }
@@ -421,7 +417,13 @@ export async function saveExpertFor(
 const inviteExpertInput = z.object({
   expertId: dbUuid(),
   email: z.string().trim().email().max(255),
+  /** Temporary password: creates a confirmed login (no e-mail) that must be
+   * changed on first sign-in. Never applied to an e-mail that already has an
+   * auth account. Never logged. */
+  password: z.string().min(8).max(200).optional().nullable(),
 });
+
+export type ExpertInviteMode = "convite" | "senha";
 
 export const inviteExpert = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -440,10 +442,16 @@ export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof i
   // An invite is only sent for an e-mail with no auth user yet, and such a
   // user can be neither a super admin nor have a role here — so checking
   // after the lookup never leaves an invite behind a refusal.
+  const password = input.password || null;
+  const mode: ExpertInviteMode = password ? "senha" : "convite";
+  // With a password, a NEW user is created confirmed with it (no e-mail). An
+  // existing account is only linked: its password is never changed.
   const { userId, created, pendingInvite } = await findOrInviteUserByEmail(email, {
     invitedBy: ctx.userId,
     tenantId,
+    password,
   });
+  const passwordIgnored = mode === "senha" && !created;
 
   const { data: superAdmin, error: superErr } = await db().rpc("is_super_admin", {
     _user_id: userId,
@@ -517,9 +525,9 @@ export async function inviteExpertFor(ctx: ServerContext, data: z.input<typeof i
     entityId: expert.id,
     before: expert,
     after: { ...expert, user_id: userId, email },
-    metadata: { auth_user_created: created },
+    metadata: { auth_user_created: created, mode, password_ignored: passwordIgnored },
   });
-  return { ok: true, created };
+  return { ok: true as const, created, mode, passwordIgnored, invitedAgain: pendingInvite };
 }
 
 const expertIdInput = z.object({ expertId: dbUuid() });

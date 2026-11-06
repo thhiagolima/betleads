@@ -49,6 +49,7 @@ import { listTenantAudiences, toClientAudience } from "@/lib/sms-audience-crud.f
 import { countSmsSegments, toGsm7Text } from "@/lib/sms-segments";
 import { voiceReservationUnits } from "@/lib/infobip-voice.server";
 import { assertTenantNotDemoForSend } from "@/lib/tenant-access.server";
+import { assertChannelEnabled } from "@/lib/tenant-channels.server";
 import type { BlockReason } from "@/lib/channel-eligibility.server";
 import type { z } from "zod";
 import {
@@ -523,6 +524,7 @@ export async function saveExpertSmsCampaignFor(
 ): Promise<ExpertCampaignSubmitResult> {
   const { expert, scope } = await requireExpert(ctx);
   await assertTenantNotDemoForSend(expert.tenantId);
+  await assertChannelEnabled(expert.tenantId, "sms");
   const scheduled = parseSchedule(data.scheduledAt);
   await assertExpertContentLinksAllowed(expert.tenantId, data.content);
   const { criteria, resolution, estimatedCost } = await prepareAudience(
@@ -652,6 +654,7 @@ export async function saveExpertEmailCampaignFor(
   const { expert, scope } = await requireExpert(ctx);
   await assertTenantNotDemoForSend(expert.tenantId);
   const submit = data.status === "agendada";
+  if (submit) await assertChannelEnabled(expert.tenantId, "email");
   const scheduled = submit ? parseSchedule(data.agendadoPara) : null;
   const snapshot = await emailSnapshot(expert.tenantId, data);
   await assertExpertContentLinksAllowed(expert.tenantId, snapshot.subject, snapshot.body_html, snapshot.preheader);
@@ -811,6 +814,7 @@ export async function saveExpertVoiceCampaignFor(
 ): Promise<ExpertCampaignSubmitResult> {
   const { expert, scope } = await requireExpert(ctx);
   await assertTenantNotDemoForSend(expert.tenantId);
+  await assertChannelEnabled(expert.tenantId, "voice");
   if (Boolean(data.script_id) === Boolean(data.asset_id))
     throw new Error("Selecione um script TTS ou um áudio fixo da biblioteca.");
   const scheduled = parseSchedule(data.scheduled_at);
