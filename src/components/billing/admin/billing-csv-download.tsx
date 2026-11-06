@@ -16,11 +16,11 @@ import { brtDayKey } from "@/lib/tz";
 
 /** YYYY-MM of "today" in Brasília (m10, fix round 1) — `new Date()`'s local getters would drift
  * a calendar day/month off from Brasília between 21:00 and 00:00 BRT on month boundaries. */
-function currentYyyyMmBrt() {
+export function currentYyyyMmBrt() {
   return brtDayKey(new Date()).slice(0, 7);
 }
 
-function downloadCsv(month: string, csv: string) {
+export function downloadCsv(month: string, csv: string) {
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
