@@ -22,7 +22,19 @@ const channels = vi.hoisted(() => ({
 }));
 vi.mock("./tenant-channels.server", () => ({ getTenantChannels: channels.getTenantChannels }));
 
-import { assertNoNewDisabledChannelSteps, disabledChannelsFor } from "./journeys.functions";
+const fake = vi.hoisted(() => ({ admin: null as unknown as ReturnType<typeof createFakeDb> }));
+vi.mock("@/integrations/supabase/client.server", async () => {
+  const { createFakeDb } = await import("@/lib/sms-bulk.test-support");
+  fake.admin = createFakeDb();
+  return { supabaseAdmin: fake.admin.client };
+});
+
+import type { createFakeDb } from "@/lib/sms-bulk.test-support";
+import {
+  assertNoNewDisabledChannelSteps,
+  channelBaselineSteps,
+  disabledChannelsFor,
+} from "./journeys.functions";
 import type { StepLike } from "./tenant-channels.shared";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
@@ -56,6 +68,7 @@ function smsOff() {
 
 beforeEach(() => {
   allOn();
+  fake.admin.reset();
 });
 
 describe("disabledChannelsFor", () => {
@@ -80,8 +93,9 @@ describe("assertNoNewDisabledChannelSteps (usado por saveJourney/setJourneyStatu
 
   it("jornada antiga com passo de canal desligado inalterado continua salvável", async () => {
     voiceOff();
+    // Armazenado vem do banco com id; o editor manda o passo sem id.
     const stored: StepLike[] = [{ id: "s1", step_type: "voice", config: { asset_id: "a1" } }];
-    const incoming: StepLike[] = [{ id: "s1", step_type: "voice", config: { asset_id: "a1" } }];
+    const incoming: StepLike[] = [{ step_type: "voice", config: { asset_id: "a1" } }];
     await expect(
       assertNoNewDisabledChannelSteps(TENANT, stored, incoming),
     ).resolves.toBeUndefined();
@@ -135,7 +149,6 @@ describe("assertNoNewDisabledChannelSteps (usado por saveJourney/setJourneyStatu
     // re-resolvido com o conteúdo atual do template (editado em outro lugar).
     const incoming: StepLike[] = [
       {
-        id: "s1",
         step_type: "email",
         config: {
           template_id: "t1",
@@ -182,10 +195,97 @@ describe("assertNoNewDisabledChannelSteps (usado por saveJourney/setJourneyStatu
       "O canal SMS está desabilitado para esta casa.",
     );
     // A versão publicada já tinha o mesmo passo: continua publicável.
+    // Rascunho e publicada têm ids de passo diferentes.
     const stored: StepLike[] = [{ id: "p1", step_type: "sms", config: { content: "Oi" } }];
-    const incomingSame: StepLike[] = [{ id: "p1", step_type: "sms", config: { content: "Oi" } }];
+    const incomingSame: StepLike[] = [{ id: "d1", step_type: "sms", config: { content: "Oi" } }];
     await expect(
       assertNoNewDisabledChannelSteps(TENANT, stored, incomingSame),
     ).resolves.toBeUndefined();
+  });
+
+  // Final review #1: o shape real de saveJourney — passos armazenados lidos
+  // do banco (com id, config com chaves reordenadas pelo jsonb e com
+  // template_snapshot) contra o payload do editor (sem id).
+  it("saveJourney: jornada antiga inalterada (stored com id e chaves reordenadas, incoming sem id) continua salvável", async () => {
+    smsOff();
+    const stored: StepLike[] = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        step_type: "sms",
+        config: {
+          variants: [{ weight: 50, content: "B {{link}}" }],
+          template_snapshot: { id: "t1", content: "velho" },
+          link_url: "https://casa.bet",
+          content: "Oi {{link}}",
+        },
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        step_type: "wait",
+        config: { delay_seconds: 3600 },
+      },
+    ];
+    const incoming: StepLike[] = [
+      {
+        step_type: "sms",
+        config: {
+          content: "Oi {{link}}",
+          link_url: "https://casa.bet",
+          template_snapshot: { content: "novo", id: "t1" },
+          variants: [{ content: "B {{link}}", weight: 50 }],
+        },
+      },
+      { step_type: "wait", config: { delay_seconds: 3600 } },
+    ];
+    await expect(
+      assertNoNewDisabledChannelSteps(TENANT, stored, incoming),
+    ).resolves.toBeUndefined();
+    // Mudar o texto ainda é recusado.
+    const changed: StepLike[] = [
+      { ...incoming[0], config: { ...incoming[0].config, content: "Outro {{link}}" } },
+    ];
+    await expect(assertNoNewDisabledChannelSteps(TENANT, stored, changed)).rejects.toThrow(
+      "O canal SMS está desabilitado para esta casa.",
+    );
+  });
+});
+
+describe("channelBaselineSteps (setJourneyStatus: publicar/reativar)", () => {
+  const JOURNEY = "33333333-3333-4333-8333-333333333333";
+  const PUBLISHED = "44444444-4444-4444-8444-444444444444";
+
+  it("reativar jornada pausada sem revision_of compara contra os próprios passos: passo de canal desligado inalterado é permitido", async () => {
+    voiceOff();
+    fake.admin.rows("journey_steps").push(
+      { id: "s-voice", journey_id: JOURNEY, tenant_id: TENANT, step_type: "voice", config: { asset_id: "a1", label: "x" }, is_enabled: true },
+      { id: "s-other", journey_id: "outra", tenant_id: TENANT, step_type: "voice", config: { asset_id: "zz" }, is_enabled: true },
+    );
+    const baseline = await channelBaselineSteps(TENANT, { id: JOURNEY, revision_of: null });
+    expect(baseline.map((s) => s.id)).toEqual(["s-voice"]);
+    // `actionable` lido do banco pelo setJourneyStatus, com chaves em outra ordem.
+    const actionable: StepLike[] = [
+      { id: "s-voice", step_type: "voice", config: { label: "x", asset_id: "a1" } },
+    ];
+    await expect(
+      assertNoNewDisabledChannelSteps(TENANT, baseline, actionable),
+    ).resolves.toBeUndefined();
+  });
+
+  it("publicar rascunho com revision_of compara contra a versão publicada (ids diferentes)", async () => {
+    voiceOff();
+    fake.admin.rows("journey_steps").push(
+      { id: "pub-1", journey_id: PUBLISHED, tenant_id: TENANT, step_type: "voice", config: { asset_id: "a1" }, is_enabled: true },
+      { id: "draft-1", journey_id: JOURNEY, tenant_id: TENANT, step_type: "voice", config: { asset_id: "a1" }, is_enabled: true },
+      { id: "draft-2", journey_id: JOURNEY, tenant_id: TENANT, step_type: "voice", config: { asset_id: "a2" }, is_enabled: true },
+    );
+    const baseline = await channelBaselineSteps(TENANT, { id: JOURNEY, revision_of: PUBLISHED });
+    expect(baseline.map((s) => s.id)).toEqual(["pub-1"]);
+    const draft = fake.admin
+      .rows("journey_steps")
+      .filter((r) => r.journey_id === JOURNEY) as unknown as StepLike[];
+    await expect(assertNoNewDisabledChannelSteps(TENANT, baseline, [draft[0]])).resolves.toBeUndefined();
+    await expect(assertNoNewDisabledChannelSteps(TENANT, baseline, draft)).rejects.toThrow(
+      "O canal Voz está desabilitado para esta casa.",
+    );
   });
 });

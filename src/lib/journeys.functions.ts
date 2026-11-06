@@ -156,6 +156,26 @@ export async function assertNoNewDisabledChannelSteps(
   if (channel) throw new Error(CHANNEL_DISABLED_MESSAGE(channel));
 }
 
+/**
+ * Passos contra os quais `setJourneyStatus` compara ao publicar/reativar:
+ * a versão publicada da qual este rascunho é revisão; sem `revision_of`
+ * (primeira publicação ou reativar uma jornada pausada), os próprios passos
+ * armazenados da jornada — eles já passaram pela checagem do `saveJourney`,
+ * então reativar uma jornada inalterada continua permitido.
+ */
+export async function channelBaselineSteps(
+  tenantId: string,
+  journey: { id: string; revision_of: string | null },
+): Promise<StepLike[]> {
+  const { data, error } = await db
+    .from("journey_steps")
+    .select("id, step_type, config")
+    .eq("journey_id", journey.revision_of ?? journey.id)
+    .eq("tenant_id", tenantId);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as StepLike[];
+}
+
 async function requireJourneyPublisher(userId: string, tenantId: string) {
   const role = await journeyRole(userId, tenantId);
   if (role !== "admin" && role !== "super_admin") {
@@ -771,18 +791,11 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
           if (!asset) throw new Error("Há uma etapa de voz sem áudio ativo deste tenant.");
         }
       }
-      // Publicar compara contra a última versão publicada (a jornada da qual
-      // esta é revisão); sem versão publicada, contra uma lista vazia (Task 7).
-      const { data: publishedSteps } = journey.revision_of
-        ? await db
-            .from("journey_steps")
-            .select("id, step_type, config")
-            .eq("journey_id", journey.revision_of)
-            .eq("tenant_id", tenantId)
-        : { data: [] };
+      // Publicar compara contra a versão publicada (revision_of); sem ela,
+      // contra os próprios passos armazenados (Task 7 / final review #1).
       await assertNoNewDisabledChannelSteps(
         tenantId,
-        (publishedSteps ?? []) as StepLike[],
+        await channelBaselineSteps(tenantId, journey),
         actionable as StepLike[],
       );
     }

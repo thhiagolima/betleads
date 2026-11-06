@@ -52,51 +52,57 @@ export type StepLike = {
 };
 
 /**
+ * JSON com as chaves dos objetos ordenadas (recursivo): o jsonb do Postgres
+ * reordena as chaves, então `JSON.stringify` puro não serve para comparar o
+ * config armazenado com o que chega do editor. Arrays mantêm a ordem.
+ */
+export function stableStringify(value: unknown): string {
+  return JSON.stringify(sortKeysDeep(value)) ?? "undefined";
+}
+
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = sortKeysDeep((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function stepContentKey(step: StepLike): string {
+  return `${step.step_type}:${stableStringify(step.config)}`;
+}
+
+/**
  * Passos de canal desligado em `incoming` que não existem idênticos em
  * `stored` (jornada antiga com passo de canal desligado continua salvável
  * sem mudar o passo; só passos novos/alterados do canal são recusados).
  *
- * Identidade: quando o passo armazenado e o de entrada têm `id`, casam por
- * `id` e são idênticos só se o `step_type`/`config` também baterem (um
- * `id` igual com conteúdo diferente conta como alterado). Sem `id` dos dois
- * lados, casam por `step_type` + `JSON.stringify(config)` como multiconjunto
- * (uma entrada é consumida por correspondência, não reusada).
+ * Identidade só por conteúdo (`step_type` + config com chaves ordenadas),
+ * ignorando `id`: os passos armazenados vêm do banco com id, os de entrada
+ * chegam do editor sem id (e rascunho/publicada têm ids diferentes). O
+ * casamento é por multiconjunto — cada passo armazenado casa com no máximo
+ * um de entrada.
  */
 export function newDisabledChannelSteps(
   stored: StepLike[],
   incoming: StepLike[],
   disabled: Set<ProviderChannel>,
 ): StepLike[] {
-  const storedById = new Map<string, StepLike>();
   const storedByKey = new Map<string, number>();
   for (const step of stored) {
-    if (step.id) {
-      storedById.set(step.id, step);
-    } else {
-      const key = `${step.step_type}:${JSON.stringify(step.config)}`;
-      storedByKey.set(key, (storedByKey.get(key) ?? 0) + 1);
-    }
+    const key = stepContentKey(step);
+    storedByKey.set(key, (storedByKey.get(key) ?? 0) + 1);
   }
 
   const result: StepLike[] = [];
   for (const step of incoming) {
     const channel = STEP_TYPE_CHANNEL[step.step_type];
     if (!channel || !disabled.has(channel)) continue;
-
-    if (step.id && storedById.has(step.id)) {
-      const match = storedById.get(step.id)!;
-      const identical =
-        match.step_type === step.step_type &&
-        JSON.stringify(match.config) === JSON.stringify(step.config);
-      if (identical) {
-        storedById.delete(step.id);
-        continue;
-      }
-      result.push(step);
-      continue;
-    }
-
-    const key = `${step.step_type}:${JSON.stringify(step.config)}`;
+    const key = stepContentKey(step);
     const count = storedByKey.get(key) ?? 0;
     if (count > 0) {
       storedByKey.set(key, count - 1);
