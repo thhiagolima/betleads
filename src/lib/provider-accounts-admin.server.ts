@@ -109,11 +109,12 @@ async function assertNoHouseUsesRemovedChannels(
  * conta própria). */
 async function moveEmailDomains(
   tenantIds: string[],
+  opts: { skipOnAccountId?: string } = {},
 ): Promise<Array<{ tenantId: string; hostname: string; status: string; error: string | null }>> {
   if (!tenantIds.length) return [];
   const { data: domains, error: domainsError } = await db()
     .from("tenant_domains")
-    .select("id, tenant_id, hostname")
+    .select("id, tenant_id, hostname, provider_account_id")
     .in("tenant_id", tenantIds)
     .eq("kind", "email")
     .is("removed_at", null);
@@ -121,7 +122,22 @@ async function moveEmailDomains(
   const { refreshTenantDomain } = await import("@/lib/tenant-domains.server");
   const results: Array<{ tenantId: string; hostname: string; status: string; error: string | null }> =
     [];
-  for (const domain of (domains ?? []) as Array<{ id: string; tenant_id: string; hostname: string }>) {
+  const pending = (
+    (domains ?? []) as Array<{
+      id: string;
+      tenant_id: string;
+      hostname: string;
+      provider_account_id: string | null;
+    }>
+  ).filter(
+    // Resume mode: a domain already registered on the target account
+    // (no account stored = the env Infobip account, as refreshTenantDomain
+    // reads it) has nothing left to move.
+    (domain) =>
+      !opts.skipOnAccountId ||
+      (domain.provider_account_id ?? DEFAULT_INFOBIP_ACCOUNT_ID) !== opts.skipOnAccountId,
+  );
+  for (const domain of pending) {
     try {
       const refreshed = await refreshTenantDomain(domain.id, { requestVerify: true });
       results.push({
@@ -794,7 +810,17 @@ export async function adminSetPlatformDefaultFor(
 
   const defaults = await currentDefaults();
   const before = defaults[data.channel];
-  if (before === data.accountId) return { emailDomains: [] };
+  if (before === data.accountId) {
+    // Same default saved again: for e-mail it works as "re-sincronizar" —
+    // an earlier move that died midway is resumed for the domains not yet
+    // on this account. Nothing else changes (no upsert, no audit).
+    return {
+      emailDomains:
+        data.channel === "email"
+          ? await moveDefaultEmailDomains({ skipOnAccountId: data.accountId })
+          : [],
+    };
+  }
 
   const { error: upsertError } = await db()
     .from("platform_channel_defaults")
@@ -819,38 +845,39 @@ export async function adminSetPlatformDefaultFor(
     after: { channel: data.channel, provider_account_id: data.accountId },
   });
 
-  let emailDomains: Array<{
-    tenantId: string;
-    tenantNome: string;
-    hostname: string;
-    status: string;
-    error: string | null;
-  }> = [];
-  if (data.channel === "email") {
-    const { data: overrideRows, error: overrideError } = await db()
-      .from("tenant_channel_providers")
-      .select("tenant_id")
-      .eq("channel", "email");
-    if (overrideError) throw new Error(overrideError.message);
-    const overridden = new Set(
-      ((overrideRows ?? []) as Array<{ tenant_id: string }>).map((r) => r.tenant_id),
-    );
-    const { data: tenantRows, error: tenantsError } = await db().from("tenants").select("id, nome");
-    if (tenantsError) throw new Error(tenantsError.message);
-    const targets = ((tenantRows ?? []) as Array<{ id: string; nome: string }>).filter(
-      (t) => !overridden.has(t.id),
-    );
-    const tenantNomeById = new Map(targets.map((t) => [t.id, t.nome]));
-    const moved = await moveEmailDomains(targets.map((t) => t.id));
-    emailDomains = moved.map((m) => ({
-      tenantId: m.tenantId,
-      tenantNome: tenantNomeById.get(m.tenantId) ?? "",
-      hostname: m.hostname,
-      status: m.status,
-      error: m.error,
-    }));
-  }
-  return { emailDomains };
+  return { emailDomains: data.channel === "email" ? await moveDefaultEmailDomains() : [] };
+}
+
+/** Move os domínios de e-mail das casas sem conta própria de e-mail para a
+ * padrão corrente (`skipOnAccountId`: retomar, pulando os que já estão nela). */
+async function moveDefaultEmailDomains(opts: { skipOnAccountId?: string } = {}): Promise<
+  Array<{ tenantId: string; tenantNome: string; hostname: string; status: string; error: string | null }>
+> {
+  const { data: overrideRows, error: overrideError } = await db()
+    .from("tenant_channel_providers")
+    .select("tenant_id")
+    .eq("channel", "email");
+  if (overrideError) throw new Error(overrideError.message);
+  const overridden = new Set(
+    ((overrideRows ?? []) as Array<{ tenant_id: string }>).map((r) => r.tenant_id),
+  );
+  const { data: tenantRows, error: tenantsError } = await db().from("tenants").select("id, nome");
+  if (tenantsError) throw new Error(tenantsError.message);
+  const targets = ((tenantRows ?? []) as Array<{ id: string; nome: string }>).filter(
+    (t) => !overridden.has(t.id),
+  );
+  const tenantNomeById = new Map(targets.map((t) => [t.id, t.nome]));
+  const moved = await moveEmailDomains(
+    targets.map((t) => t.id),
+    opts,
+  );
+  return moved.map((m) => ({
+    tenantId: m.tenantId,
+    tenantNome: tenantNomeById.get(m.tenantId) ?? "",
+    hostname: m.hostname,
+    status: m.status,
+    error: m.error,
+  }));
 }
 
 // ---------------------------------------------------------------------------

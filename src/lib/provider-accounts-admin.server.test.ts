@@ -714,6 +714,62 @@ describe("provider accounts admin", () => {
       ]);
     });
 
+    it("saving the same e-mail default again resumes the move: only domains not yet on it are moved", async () => {
+      const HOUSE_A = "cccccccc-1111-4ccc-8ccc-cccccccccccc";
+      const HOUSE_B = "dddddddd-1111-4ddd-8ddd-dddddddddddd";
+      const HOUSE_C = "eeeeeeee-1111-4eee-8eee-eeeeeeeeeeee";
+      fake.db
+        .rows("tenants")
+        .push({ id: HOUSE_A, nome: "Casa A" }, { id: HOUSE_B, nome: "Casa B" }, { id: HOUSE_C, nome: "Casa C" });
+      const newDefault = await create(
+        {
+          provider: "infobip",
+          label: "Infobip Betleads",
+          channels: ["email"],
+          config: { base_url: "https://nova.api.infobip.test" },
+          credentials: { api_key: "k-nova" },
+        },
+        "ffffffff-1111-4fff-8fff-ffffffffffff",
+      );
+      const ownAccount = await create(
+        {
+          provider: "infobip",
+          label: "Infobip Casa C",
+          channels: ["email"],
+          config: { base_url: "https://c.api.infobip.test" },
+          credentials: { api_key: "k-c" },
+        },
+        "abababab-1111-4aba-8aba-abababababab",
+      );
+      // The default was already switched; the earlier move died midway:
+      // Casa A's domain moved, Casa B's is still on the old (env) account.
+      fake.db.rows("platform_channel_defaults").push({ channel: "email", provider_account_id: newDefault });
+      fake.db
+        .rows("tenant_channel_providers")
+        .push({ tenant_id: HOUSE_C, channel: "email", provider_account_id: ownAccount });
+      fake.db.rows("tenant_domains").push(
+        { id: "da", tenant_id: HOUSE_A, kind: "email", hostname: "mail.a.bet", removed_at: null, provider_account_id: newDefault },
+        { id: "db", tenant_id: HOUSE_B, kind: "email", hostname: "mail.b.bet", removed_at: null, provider_account_id: DEFAULT_INFOBIP_ACCOUNT_ID },
+        { id: "dc", tenant_id: HOUSE_C, kind: "email", hostname: "mail.c.bet", removed_at: null, provider_account_id: ownAccount },
+      );
+      domains.refreshTenantDomain.mockResolvedValue({
+        hostname: "mail.b.bet",
+        status: "pending",
+        last_error: null,
+      });
+      const auditsBefore = audit.calls.length;
+
+      const result = await adminSetPlatformDefaultFor(ADMIN, { channel: "email", accountId: newDefault });
+
+      expect(domains.refreshTenantDomain).toHaveBeenCalledTimes(1);
+      expect(domains.refreshTenantDomain).toHaveBeenCalledWith("db", { requestVerify: true });
+      expect(result.emailDomains).toEqual([
+        { tenantId: HOUSE_B, tenantNome: "Casa B", hostname: "mail.b.bet", status: "pending", error: null },
+      ]);
+      // Nothing changed in the default itself: no new audit entry.
+      expect(audit.calls.length).toBe(auditsBefore);
+    });
+
     it("cannot disable an account while it is the default of some channel", async () => {
       await expect(
         adminSetProviderAccountStatusFor(ADMIN, { id: DEFAULT_SHORT_BRASIL_ACCOUNT_ID, status: "disabled" }),

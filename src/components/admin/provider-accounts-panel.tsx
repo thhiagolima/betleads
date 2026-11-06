@@ -60,6 +60,8 @@ import type { ProviderAccountView } from "@/lib/provider-accounts-admin.server";
 
 const QUERY_KEY = ["admin", "provider-accounts"] as const;
 const PLATFORM = "platform";
+/** Valor do item "Re-sincronizar domínios de e-mail" no menu "Tornar padrão". */
+const RESYNC_EMAIL = "resync-email";
 
 type Provider = ProviderAccountView["provider"];
 
@@ -186,11 +188,19 @@ function AccountsCard({
     onError: (error) => toast.error(errorMessage(error)),
   });
   const setDefault = useMutation({
-    mutationFn: (input: { channel: ProviderChannelName; accountId: string }) =>
-      setDefaultFn({ data: input }),
+    mutationFn: (input: { channel: ProviderChannelName; accountId: string; resync?: boolean }) =>
+      setDefaultFn({ data: { channel: input.channel, accountId: input.accountId } }),
     onSuccess: (result, input) => {
       void qc.invalidateQueries({ queryKey: QUERY_KEY });
-      toast.success(`Conta agora é a padrão de ${PROVIDER_CHANNEL_LABEL[input.channel]}.`);
+      if (input.resync) {
+        toast.success(
+          result.emailDomains.length > 0
+            ? "Domínios de e-mail re-sincronizados com a conta padrão."
+            : "Todos os domínios de e-mail já estão na conta padrão.",
+        );
+      } else {
+        toast.success(`Conta agora é a padrão de ${PROVIDER_CHANNEL_LABEL[input.channel]}.`);
+      }
       if (result.emailDomains.length > 0) {
         const pending = result.emailDomains.filter((d) => d.status !== "verified");
         toast.warning(
@@ -225,6 +235,18 @@ function AccountsCard({
       if (!ok) return;
     }
     status.mutate({ id: account.id, status: disabling ? "disabled" : "active" });
+  }
+
+  /** Salvar de novo a mesma padrão de e-mail retoma uma troca que parou no
+   * meio: só os domínios que ainda não estão nesta conta são recadastrados. */
+  async function resyncEmailDomains(account: ProviderAccountView) {
+    const ok = await requestConfirmation({
+      title: "Re-sincronizar domínios de e-mail?",
+      description: `Os domínios de e-mail das casas sem conta própria que ainda não estão em "${account.label}" serão recadastrados nela e voltam a pendente até a casa publicar os DNS novos.`,
+      confirmLabel: "Re-sincronizar",
+    });
+    if (!ok) return;
+    setDefault.mutate({ channel: "email", accountId: account.id, resync: true });
   }
 
   async function makeDefault(account: ProviderAccountView, channel: ProviderChannelName) {
@@ -385,11 +407,14 @@ function AccountsCard({
                       <Button variant="outline" size="sm" onClick={() => onEdit(account)}>
                         <Pencil className="h-4 w-4" /> Editar
                       </Button>
-                      {account.status === "active" && eligibleForDefault.length > 0 && (
+                      {account.status === "active" &&
+                        (eligibleForDefault.length > 0 || account.defaultFor.includes("email")) && (
                         <Select
                           value=""
                           onValueChange={(value) =>
-                            void makeDefault(account, value as ProviderChannelName)
+                            value === RESYNC_EMAIL
+                              ? void resyncEmailDomains(account)
+                              : void makeDefault(account, value as ProviderChannelName)
                           }
                           disabled={setDefault.isPending}
                         >
@@ -403,6 +428,11 @@ function AccountsCard({
                                 Tornar padrão de {PROVIDER_CHANNEL_LABEL[c]}
                               </SelectItem>
                             ))}
+                            {account.defaultFor.includes("email") && (
+                              <SelectItem value={RESYNC_EMAIL}>
+                                Re-sincronizar domínios de e-mail
+                              </SelectItem>
+                            )}
                           </SelectContent>
                         </Select>
                       )}
