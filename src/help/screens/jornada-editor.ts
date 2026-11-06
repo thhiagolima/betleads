@@ -325,6 +325,7 @@ const screen: HelpScreen = {
           anchor: "jornada.etapas.adicionar",
           label: "Adicionar etapa",
           what: "Abre o menu para escolher o tipo da nova etapa: Espera, SMS, E-mail ou Ligação (voz) — os 4 tipos de etapa da jornada.",
+          notes: "Um canal desabilitado para a casa pela BetLeads não aparece no menu.",
         },
         {
           anchor: "jornada.etapas.loop-maximo",
@@ -501,6 +502,12 @@ const screen: HelpScreen = {
         "Seu domínio personalizado ainda não foi verificado — os links estão saindo pelo encurtador padrão do CRM.",
       what: "Aviso dentro de uma etapa de SMS ou e-mail, quando a casa não tem (ainda) um domínio do encurtador verificado.",
       action: "Verifique um domínio do encurtador em Configurações → Casa → Encurtador.",
+    },
+    {
+      id: "canal-desabilitado",
+      title: "Canal desabilitado — será pulado",
+      what: "Selo numa etapa já existente cujo canal (SMS, E-mail ou Ligação) foi desabilitado para a casa pela BetLeads. A etapa não envia nem cobra: o jogador passa direto para a próxima. Se o canal voltar a ser habilitado, a etapa volta a enviar daí em diante, sem reenviar o que foi pulado.",
+      action: "Não é preciso mexer na etapa; a jornada continua salvando normalmente. Para usar o canal de novo, fale com a BetLeads.",
     },
     {
       id: "email-bloqueado-aviso",
