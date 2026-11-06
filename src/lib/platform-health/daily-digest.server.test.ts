@@ -95,6 +95,24 @@ describe("runDailyDigest", () => {
     errorSpy.mockRestore();
   });
 
+  it("a retry after a released claim uses new idempotency keys", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.sendPlatformEmail.mockResolvedValueOnce({ ok: false, status: 503 });
+    await runDailyDigest(NOW);
+    const RETRY = new Date(NOW.getTime() + 30 * 60_000);
+
+    const retry = await runDailyDigest(RETRY);
+
+    expect(retry).toEqual({ sent: true, recipients: 1 });
+    const keys = mocks.sendPlatformEmail.mock.calls.map(([input]) => input.idempotencyKey);
+    expect(keys).toEqual([
+      `platform-digest:2026-11-05:${NOW.getTime()}:0`,
+      `platform-digest:2026-11-05:${RETRY.getTime()}:0`,
+    ]);
+    errorSpy.mockRestore();
+  });
+
   it("records the accepted count, not the recipient count", async () => {
     vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -161,8 +179,8 @@ describe("runDailyDigest", () => {
     const calls = mocks.sendPlatformEmail.mock.calls.map(([input]) => input);
     expect(calls.map((c) => c.to).sort()).toEqual(["root1@betleads.io", "root2@betleads.io"]);
     expect(calls.map((c) => c.idempotencyKey).sort()).toEqual([
-      "platform-digest:2026-11-05:0",
-      "platform-digest:2026-11-05:1",
+      `platform-digest:2026-11-05:${NOW.getTime()}:0`,
+      `platform-digest:2026-11-05:${NOW.getTime()}:1`,
     ]);
     const [row] = fake.admin.rows("platform_digest_log");
     expect(row).toMatchObject({ digest_day: "2026-11-05", recipients: 2 });

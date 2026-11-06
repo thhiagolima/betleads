@@ -69,6 +69,38 @@ describe("POST /api/public/hooks/platform-digest", () => {
     expect(mocks.run.fail).not.toHaveBeenCalled();
   });
 
+  it.each(["failed", "no_recipients"] as const)(
+    "fails the run and answers 500 when the digest reports %s",
+    async (reason) => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      mocks.runDailyDigest.mockResolvedValue({ sent: false, reason, recipients: 0 });
+
+      const response = await post("cron-secret-test");
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ ok: false, sent: false, reason, recipients: 0 });
+      expect(mocks.run.fail).toHaveBeenCalledWith(
+        expect.objectContaining({ message: `daily digest not sent: ${reason}` }),
+      );
+      expect(mocks.run.finish).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    },
+  );
+
+  it.each(["disabled", "already_sent"] as const)(
+    "a %s digest finishes the run as a success",
+    async (reason) => {
+      mocks.runDailyDigest.mockResolvedValue({ sent: false, reason, recipients: 0 });
+
+      const response = await post("cron-secret-test");
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, sent: false, reason, recipients: 0 });
+      expect(mocks.run.finish).toHaveBeenCalledWith({ sent: 0 });
+      expect(mocks.run.fail).not.toHaveBeenCalled();
+    },
+  );
+
   it("fails the run and answers 500 when the digest throws", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const error = new Error("db down");

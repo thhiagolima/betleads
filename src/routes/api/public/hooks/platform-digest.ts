@@ -22,6 +22,14 @@ export const Route = createFileRoute("/api/public/hooks/platform-digest")({
         const run = await startJobRun("platform_digest", { kind: "sync" });
         try {
           const result = await runDailyDigest(new Date());
+          // "failed" / "no_recipients" released the day for a retry; surface
+          // them as a failed run. "disabled" / "already_sent" are fine.
+          if (result.reason === "failed" || result.reason === "no_recipients") {
+            const failure = new Error(`daily digest not sent: ${result.reason}`);
+            console.error("[platform-digest]", failure.message);
+            await run.fail(failure);
+            return Response.json({ ok: false, ...result }, { status: 500 });
+          }
           await run.finish({ sent: result.recipients });
           return Response.json({ ok: true, ...result });
         } catch (error) {

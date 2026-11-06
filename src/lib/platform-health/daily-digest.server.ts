@@ -144,7 +144,9 @@ async function deliverDigest(day: string, now: Date): Promise<number | null> {
 
   let accepted = 0;
   for (const [index, to] of recipients.entries()) {
-    const idempotencyKey = `platform-digest:${day}:${index}`;
+    // Per claim (this run's stamp): a retry after a released claim is not
+    // deduped by the provider; the sends of one claim share their keys.
+    const idempotencyKey = `platform-digest:${day}:${now.getTime()}:${index}`;
     try {
       const result = await sendPlatformEmail({ to, subject, html, idempotencyKey });
       if (result.ok) accepted += 1;
@@ -167,8 +169,8 @@ async function deliverDigest(day: string, now: Date): Promise<number | null> {
 /**
  * One daily digest run. Off by default (`PLATFORM_ALERTS_EMAIL_ENABLED`);
  * when on, claims the Brasília day in `platform_digest_log` and e-mails
- * every super admin once (`idempotencyKey` `platform-digest:<day>:<index>`).
- * No recipients, a throw or no accepted send releases the day
+ * every super admin once (`idempotencyKey`
+ * `platform-digest:<day>:<claim stamp ms>:<index>`). No recipients, a throw or no accepted send releases the day
  * (`no_recipients` / `failed`) so a retry the same day can send.
  */
 export async function runDailyDigest(now: Date): Promise<DigestResult> {
