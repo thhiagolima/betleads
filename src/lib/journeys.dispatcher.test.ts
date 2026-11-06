@@ -1465,3 +1465,39 @@ describe("runJourneyDispatcher with a channel disabled for the house", () => {
     expect(metadata.platform_holds).toBeUndefined();
   });
 });
+
+describe("runJourneyDispatcher: channel turned off between the skip check and the send", () => {
+  it("send refused with channel_disabled skips the step like the pre-send check, without consuming an attempt", async () => {
+    seed(["e1"]);
+    fake.tables.journey_steps.push({
+      id: "step-1",
+      journey_id: JOURNEY,
+      position: 1,
+      step_type: "sms",
+      is_enabled: true,
+      config: { content: "depois" },
+    });
+    fake.tables.journey_enrollments[0].attempts = 1;
+    // The dispatcher's own check saw the channel on (no tenant_channels row);
+    // the house turned it off before sendSmsInternal's guard ran.
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "O canal SMS está desabilitado para esta casa.",
+      errorKind: "channel_disabled",
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0, rescheduled: 0 });
+    expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 1, attempts: 0 });
+    expect(fake.tables.journey_step_executions).toEqual([
+      // The execution reserved by reserve_journey_delivery_v2 (its fake
+      // row carries no step_id).
+      expect.objectContaining({ enrollment_id: "e1", status: "skipped", provider: "channel_disabled" }),
+    ]);
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_skipped",
+      detail: expect.objectContaining({ channel: "sms", step_position: 0, reason: "channel_disabled" }),
+    });
+  });
+});

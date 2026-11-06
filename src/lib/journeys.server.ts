@@ -1360,6 +1360,32 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     return;
   }
 
+  // The channel was turned off for the house between executeEnrollment's
+  // stepChannelDisabled check and the send's own guard (checked before any
+  // reservation: nothing sent nor charged). Same outcome as the pre-send
+  // skip: the step is skipped, the journey moves on, no attempt consumed.
+  if (decision.reason === "channel_disabled") {
+    const position = Number(enrollment.current_position ?? 0);
+    await finishOwnExecution(ctx, row.id, {
+      status: "skipped",
+      provider: "channel_disabled",
+      completed_at: nowIso(),
+    });
+    await release(enrollment, ctx, {
+      status: "active",
+      current_position: position + 1,
+      next_run_at: nowIso(),
+      attempts: 0,
+    });
+    await event(enrollment, "step_skipped", {
+      channel: error instanceof ProviderSendError ? error.channel : (row.step_type ?? null),
+      step_position: position,
+      reason: "channel_disabled",
+    });
+    ctx.counters.processed++;
+    return;
+  }
+
   if (decision.kind === "skip") {
     await holdForBalance(
       enrollment,
