@@ -26,6 +26,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { PROVIDER_CHANNELS } from "./provider-accounts.shared";
+import type { ProviderChannel } from "./tenant-channels.shared";
+
 /**
  * Single source for the app shell: sidebar sections, mobile tabs and the
  * breadcrumb/title of every route. Routes left out of the menu on purpose
@@ -43,6 +46,8 @@ export type ShellRole = "admin" | "gestor" | "member" | "super_admin" | "expert"
 export type NavAccess = {
   /** Who sees the item. Defaults to everyone. */
   requires?: "tenant_admin" | "super_admin" | "not_super_admin" | "finance" | "team_profile";
+  /** Only when the active house has this channel enabled (tenant-channels.shared.ts). */
+  channel?: ProviderChannel;
 };
 
 export type NavLink = NavAccess & {
@@ -103,18 +108,18 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
   {
     label: "Canais",
     items: [
-      link("SMS", "/sms", MessageSquare),
-      link("Email", "/email", Mail),
-      link("Voz", "/ligacoes", Phone),
+      link("SMS", "/sms", MessageSquare, { channel: "sms" }),
+      link("Email", "/email", Mail, { channel: "email" }),
+      link("Voz", "/ligacoes", Phone, { channel: "voice" }),
       link("Consentimentos", "/consentimentos", ShieldQuestion),
       {
         kind: "group",
         title: "Templates e áudios",
         icon: FileText,
         children: [
-          link("Templates de SMS", "/sms", undefined, { hash: "templates" }),
-          link("Templates de email", "/email", undefined, { hash: "templates" }),
-          link("Áudios e scripts", "/ligacoes", undefined, { hash: "audios" }),
+          link("Templates de SMS", "/sms", undefined, { hash: "templates", channel: "sms" }),
+          link("Templates de email", "/email", undefined, { hash: "templates", channel: "email" }),
+          link("Áudios e scripts", "/ligacoes", undefined, { hash: "audios", channel: "voice" }),
         ],
       },
     ],
@@ -364,7 +369,12 @@ export function canSee(
   isSuperAdmin: boolean,
   canViewFinance = false,
   hasTeamProfile = false,
+  enabledChannels: readonly ProviderChannel[] = PROVIDER_CHANNELS,
 ) {
+  // Channel items disappear entirely for a house that turned the channel
+  // off, super admin included (super admin "enters" the house and sees it
+  // the way the house sees it — design §4).
+  if (access.channel && !enabledChannels.includes(access.channel)) return false;
   if (!access.requires) return true;
   if (access.requires === "super_admin") return isSuperAdmin;
   // The expert never gets house-admin links either, including the ones
@@ -383,16 +393,21 @@ export function visibleSections(
   isSuperAdmin: boolean,
   canViewFinance = false,
   hasTeamProfile = false,
+  enabledChannels: readonly ProviderChannel[] = PROVIDER_CHANNELS,
 ): NavSection[] {
   if (role === "expert") return EXPERT_SECTIONS;
-  return SIDEBAR_SECTIONS.filter((section) =>
-    canSee(section, role, isSuperAdmin, canViewFinance, hasTeamProfile),
-  )
+  const visible = (access: NavAccess) =>
+    canSee(access, role, isSuperAdmin, canViewFinance, hasTeamProfile, enabledChannels);
+  return SIDEBAR_SECTIONS.filter(visible)
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) =>
-        canSee(item, role, isSuperAdmin, canViewFinance, hasTeamProfile),
-      ),
+      items: section.items
+        .filter(visible)
+        .map((item) =>
+          item.kind === "group" ? { ...item, children: item.children.filter(visible) } : item,
+        )
+        // A group that lost every child (all its channels are off) disappears too.
+        .filter((item) => item.kind !== "group" || item.children.length > 0),
     }))
     .filter((section) => section.items.length > 0);
 }

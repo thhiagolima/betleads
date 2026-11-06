@@ -17,6 +17,14 @@ export function useShellNav() {
     isSuperAdmin,
     sections: isGroupPath(pathname)
       ? GROUP_SECTIONS
-      : visibleSections(role, isSuperAdmin, active?.can_view_finance, active?.has_team_profile),
+      : visibleSections(
+          role,
+          isSuperAdmin,
+          active?.can_view_finance,
+          active?.has_team_profile,
+          // undefined (still loading) falls back to visibleSections' own
+          // default (every channel shown) so nothing flashes hidden.
+          active?.enabled_channels,
+        ),
   };
 }

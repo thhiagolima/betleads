@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 
 import { getTenantSwitcher } from "@/lib/tenants.functions";
 import type { ShellRole } from "@/lib/navigation";
+import type { ProviderChannel } from "@/lib/tenant-channels.shared";
 
 export type TenantOption = {
   id: string;
@@ -15,6 +16,8 @@ export type TenantOption = {
   can_view_finance?: boolean;
   /** Papel na casa (HOUSE_MEMBER_ROLES) + perfil de rendimento ativo vinculado a este usuário ali. */
   has_team_profile?: boolean;
+  /** Canais ligados desta casa (tenant_channels); sem linha = DEFAULT_ENABLED_CHANNELS. */
+  enabled_channels?: ProviderChannel[];
 };
 
 /**

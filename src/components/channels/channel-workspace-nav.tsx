@@ -1,4 +1,7 @@
-export type ChannelWorkspaceChannel = "sms" | "email" | "voice";
+import type { ProviderChannel } from "@/lib/tenant-channels.shared";
+
+/** The three channels with a workspace page (webpush has none yet). */
+export type ChannelWorkspaceChannel = Extract<ProviderChannel, "sms" | "email" | "voice">;
 export type ChannelWorkspaceSection =
   "overview" | "create" | "library" | "campaigns" | "history" | "settings";
 type Destination = { to: string; hash?: string; search?: Record<string, string> };

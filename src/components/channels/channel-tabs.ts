@@ -3,8 +3,16 @@
  * to them. Old hashes keep working: they open the tab that replaced them, or
  * send the user to the page that now owns that content.
  */
+import type { ProviderChannel } from "@/lib/tenant-channels.shared";
 
 export type ChannelId = "sms" | "email" | "voz";
+
+/** `ChannelId` ("voz") -> `ProviderChannel` ("voice"), for the channel-enabled check. */
+export const CHANNEL_ID_TO_PROVIDER_CHANNEL: Record<ChannelId, ProviderChannel> = {
+  sms: "sms",
+  email: "email",
+  voz: "voice",
+};
 
 export type ChannelTabItem = { value: string; label: string };
 

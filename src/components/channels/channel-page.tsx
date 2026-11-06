@@ -9,8 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { PageTabs } from "@/components/ui-premium/page-tabs";
 import type { DispatchChannel } from "@/lib/dispatch-pause.functions";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 
-import { CHANNEL_TABS, resolveChannelHash, type ChannelId, type ChannelTab } from "./channel-tabs";
+import { ChannelDisabledState } from "./channel-disabled-state";
+import {
+  CHANNEL_ID_TO_PROVIDER_CHANNEL,
+  CHANNEL_TABS,
+  resolveChannelHash,
+  type ChannelId,
+  type ChannelTab,
+} from "./channel-tabs";
 
 const CHANNEL_ROUTE = { sms: "/sms", email: "/email", voz: "/ligacoes" } as const;
 const PAUSE_CHANNEL: Record<ChannelId, DispatchChannel> = {
@@ -68,6 +76,19 @@ export function ChannelPage<C extends ChannelId>({
   const setTab = (next: ChannelTab<C>) => {
     void navigate({ to: route, hash: next });
   };
+
+  const { isEnabled } = useEnabledChannels();
+  const providerChannel = CHANNEL_ID_TO_PROVIDER_CHANNEL[channel];
+  if (!isEnabled(providerChannel)) {
+    // Direct route hit (link, bookmark, old automation) on a channel the
+    // super admin turned off: no tabs, no actions, just the guard.
+    return (
+      <Page>
+        <PageHeader subtitle={subtitle} />
+        <ChannelDisabledState channel={providerChannel} />
+      </Page>
+    );
+  }
 
   return (
     <Page>
