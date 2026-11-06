@@ -136,8 +136,9 @@ export async function activateWebpushOrigin(
       })
     ).apiKey;
   } else {
-    onesignalAppId = input.appId;
-    apiKey = input.apiKey;
+    onesignalAppId = input.appId.trim();
+    apiKey = input.apiKey.trim();
+    if (!onesignalAppId || !apiKey) throw new Error("Informe o App ID e a API key do OneSignal");
   }
 
   const apiKeyEncrypted = await encryptProviderCredentials({ apiKey });
@@ -157,7 +158,12 @@ export async function activateWebpushOrigin(
       "id,tenant_id,origin,onesignal_app_id,status,created_via,worker_verified_at,script_seen_at,player_linked_at,test_sent_at",
     )
     .single();
-  if (insertErr) throw new Error(insertErr.message);
+  if (insertErr) {
+    if (insertErr.code === "23505" && insertErr.message?.includes("onesignal_app_id")) {
+      throw new Error("Este app OneSignal já está cadastrado em outro endereço");
+    }
+    throw new Error(insertErr.message);
+  }
 
   return toWebpushAppRow(inserted as WebpushAppDbRow);
 }

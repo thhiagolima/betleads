@@ -51,8 +51,15 @@ export async function createOneSignalApp(input: {
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
 
-  const json = (await response.json()) as { id?: string };
-  return { appId: String(json.id ?? "") };
+  const json = (await response.json().catch(() => ({}))) as { id?: string; errors?: unknown };
+  // A rejected request (bad org key/org id, plan limit…) has no id: never
+  // hand back "" — it would be stored as the app id and collide on the
+  // unique onesignal_app_id for every later activation.
+  const appId = typeof json.id === "string" ? json.id.trim() : "";
+  if (!response.ok || !appId) {
+    throw new Error(`OneSignal recusou a criação do app (${response.status}): ${JSON.stringify(json.errors ?? json)}`);
+  }
+  return { appId };
 }
 
 export async function createOneSignalAppKey(
@@ -68,8 +75,11 @@ export async function createOneSignalAppKey(
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
 
-  const json = (await response.json()) as Record<string, unknown>;
+  const json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   const apiKey = await readApiKeyField(json);
+  if (!response.ok || !apiKey) {
+    throw new Error(`OneSignal recusou a criação da chave do app (${response.status}): ${JSON.stringify(json.errors ?? json)}`);
+  }
   return { apiKey };
 }
 

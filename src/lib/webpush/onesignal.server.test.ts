@@ -216,6 +216,24 @@ describe("createOneSignalApp", () => {
     const body = JSON.parse(init.body as string);
     expect(body.organization_id).toBeUndefined();
   });
+
+  it("throws instead of returning an empty appId when OneSignal rejects the request", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse(400, { errors: ["Organization not found"] }),
+    ) as unknown as typeof fetch;
+
+    const { createOneSignalApp } = await import("./onesignal.server");
+
+    await expect(createOneSignalApp(input)).rejects.toThrow(/OneSignal recusou.*400.*Organization not found/);
+  });
+
+  it("throws when a 200 response carries no id", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse(200, {})) as unknown as typeof fetch;
+
+    const { createOneSignalApp } = await import("./onesignal.server");
+
+    await expect(createOneSignalApp(input)).rejects.toThrow("OneSignal recusou");
+  });
 });
 
 describe("createOneSignalAppKey", () => {
@@ -265,6 +283,14 @@ describe("createOneSignalAppKey", () => {
     const result = await createOneSignalAppKey("app-1", ORG_CREDENTIALS);
 
     expect(result).toEqual({ apiKey: "key-ghi" });
+  });
+
+  it("throws instead of returning an empty key when OneSignal rejects the request", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse(404, { errors: ["not found"] })) as unknown as typeof fetch;
+
+    const { createOneSignalAppKey } = await import("./onesignal.server");
+
+    await expect(createOneSignalAppKey("app-1", ORG_CREDENTIALS)).rejects.toThrow(/OneSignal recusou.*404/);
   });
 });
 
