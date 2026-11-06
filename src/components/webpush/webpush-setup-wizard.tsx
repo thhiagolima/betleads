@@ -159,9 +159,25 @@ function StepIndicator({ step }: { step: WizardStepId }) {
   );
 }
 
-function copyToClipboard(text: string, message: string) {
-  navigator.clipboard.writeText(text);
-  toast.success(message);
+export const CLIPBOARD_ERROR_MESSAGE =
+  "Não foi possível copiar. Selecione o texto e copie manualmente.";
+
+/** Copies to the clipboard and only reports success once the browser
+ * confirms it — `navigator.clipboard.writeText` is async and can reject
+ * (permission denied, insecure context) or be entirely absent (older
+ * browsers, non-HTTPS), and this now backs the step's primary button
+ * ("Copiar instruções para o suporte"), so a silent failure there would
+ * tell the house's support contact instructions were sent when they
+ * weren't. */
+export function copyToClipboard(text: string, message: string) {
+  if (!navigator.clipboard) {
+    toast.error(CLIPBOARD_ERROR_MESSAGE);
+    return;
+  }
+  navigator.clipboard.writeText(text).then(
+    () => toast.success(message),
+    () => toast.error(CLIPBOARD_ERROR_MESSAGE),
+  );
 }
 
 // ============================================================================

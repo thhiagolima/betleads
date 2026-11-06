@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // This repo's component tests render plain-HTML components with
 // `renderToStaticMarkup` (no @testing-library/react, no jsdom — see
@@ -21,11 +21,15 @@ vi.mock("@/lib/webpush/webpush.functions", () => ({
   listRecentWebpushSubscriptionsFn: vi.fn(),
   sendWebpushTestFn: vi.fn(),
 }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+import { toast } from "sonner";
 import {
   buildDownloadUrl,
   buildSupportTicketText,
   canAdvanceStep,
+  CLIPBOARD_ERROR_MESSAGE,
+  copyToClipboard,
   initialWizardStep,
   InstallationStepView,
   isWizardComplete,
@@ -56,6 +60,47 @@ function findButtonOpenTag(html: string, label: string): string {
 function isDisabled(buttonOpenTagAttrs: string): boolean {
   return /(^|\s)disabled(=|\s|$)/.test(buttonOpenTagAttrs);
 }
+
+describe("copyToClipboard", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("só mostra sucesso depois que o clipboard confirma a cópia", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+
+    copyToClipboard("texto a copiar", "Copiado");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(writeText).toHaveBeenCalledWith("texto a copiar");
+    expect(toast.success).toHaveBeenCalledWith("Copiado");
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("mostra erro (sem sucesso) quando o clipboard rejeita — permissão negada, por exemplo", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("permission denied"));
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+
+    copyToClipboard("texto a copiar", "Copiado");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(toast.error).toHaveBeenCalledWith(CLIPBOARD_ERROR_MESSAGE);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("mostra erro quando navigator.clipboard não existe (contexto não seguro, browser antigo)", () => {
+    vi.stubGlobal("navigator", {});
+
+    copyToClipboard("texto a copiar", "Copiado");
+
+    expect(toast.error).toHaveBeenCalledWith(CLIPBOARD_ERROR_MESSAGE);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+});
 
 describe("initialWizardStep", () => {
   it("sem worker_verified_at, abre na etapa 1", () => {
