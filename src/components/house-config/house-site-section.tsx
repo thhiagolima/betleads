@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { DataCard } from "@/components/ui-premium";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { tourAnchor } from "@/help/anchor";
 import { getHouseConfig, saveHouseSite, saveQuickLinks } from "@/lib/house-config.functions";
 import { normalizeSiteUrl, suggestedQuickLinks } from "@/lib/house-config";
 import { normalizeLinkDomain } from "@/lib/link-domain";
@@ -217,6 +218,7 @@ export function HouseSiteSection({
             placeholder="https://suacasa.bet.br"
             disabled={!canEdit}
             className="max-w-sm"
+            {...tourAnchor("casa.site.url")}
           />
           {canEdit && (
             <DemoDisabledTooltip active={isDemo}>
@@ -225,6 +227,7 @@ export function HouseSiteSection({
                 size="sm"
                 disabled={isDemo || saveSite.isPending}
                 onClick={() => saveSite.mutate()}
+                {...tourAnchor("casa.site.save")}
               >
                 {saveSite.isPending ? "Salvando…" : "Salvar"}
               </Button>
@@ -238,6 +241,7 @@ export function HouseSiteSection({
                 size="sm"
                 disabled={isDemo}
                 onClick={() => setLinkDomainDialogOpen(true)}
+                {...tourAnchor("casa.site.troca-dominio")}
               >
                 Trocar domínio nos links
               </Button>
@@ -250,7 +254,7 @@ export function HouseSiteSection({
         <div className="flex items-center justify-between">
           <Label>URLs rápidas</Label>
           {canEdit && (
-            <Button type="button" variant="outline" size="sm" onClick={addLink}>
+            <Button type="button" variant="outline" size="sm" onClick={addLink} {...tourAnchor("casa.quick-links.add")}>
               <Plus className="h-4 w-4" /> Adicionar
             </Button>
           )}
@@ -265,6 +269,7 @@ export function HouseSiteSection({
                 placeholder="Login"
                 disabled={!canEdit}
                 className="max-w-[160px]"
+                {...(index === 0 ? tourAnchor("casa.quick-links.label") : {})}
               />
               <Input
                 value={l.path}
@@ -272,6 +277,7 @@ export function HouseSiteSection({
                 placeholder="/login"
                 disabled={!canEdit}
                 className="max-w-[200px]"
+                {...(index === 0 ? tourAnchor("casa.quick-links.path") : {})}
               />
               {canEdit && (
                 <Button
@@ -280,6 +286,7 @@ export function HouseSiteSection({
                   size="icon"
                   aria-label={`Remover ${l.label || "URL rápida"}`}
                   onClick={() => removeLink(index)}
+                  {...(index === 0 ? tourAnchor("casa.quick-links.remove") : {})}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -296,6 +303,7 @@ export function HouseSiteSection({
               variant="outline"
               disabled={isDemo || saveLinks.isPending}
               onClick={() => saveLinks.mutate()}
+              {...tourAnchor("casa.quick-links.save")}
             >
               {saveLinks.isPending ? "Salvando…" : "Salvar URLs rápidas"}
             </Button>

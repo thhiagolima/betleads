@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Clock, MoonStar, SunMedium } from "lucide-react";
 import { toast } from "sonner";
+import { tourAnchor } from "@/help/anchor";
 
 const WEEKDAYS = [
   { v: 1, l: "Seg" },
@@ -84,7 +85,10 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card/80 px-4 py-2.5">
+      <div
+        className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card/80 px-4 py-2.5"
+        {...tourAnchor("canal.janela.card")}
+      >
         <div className="flex items-center gap-3 min-w-0">
           {within ? (
             <SunMedium className="h-4 w-4 text-success shrink-0" />

@@ -3442,6 +3442,27 @@ export type Database = {
           },
         ];
       };
+      help_progress: {
+        Row: {
+          key: string;
+          status: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          key: string;
+          status: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          key?: string;
+          status?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       journey_contact_limits: {
         Row: {
           dead_lead_enabled: boolean;

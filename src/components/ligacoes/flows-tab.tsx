@@ -11,6 +11,7 @@ import { deleteCallFlow, listCallFlows, toggleCallFlow } from "@/lib/call-flows.
 import { TRIGGER_OPTIONS } from "./shared";
 import { FlowFormDialog } from "./flow-form-dialog";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { tourAnchor } from "@/help/anchor";
 
 const triggerLabel = (v?: string | null) =>
   TRIGGER_OPTIONS.find((t) => t.value === v)?.label ?? v ?? "—";
@@ -63,6 +64,7 @@ export function FlowsTab() {
             setEditing(null);
             setDialogOpen(true);
           }}
+          {...tourAnchor("automacoes.fluxos.novo")}
         >
           <Plus className="mr-2 h-4 w-4" /> Novo fluxo
         </Button>
@@ -92,7 +94,7 @@ export function FlowsTab() {
           </div>
         ) : (
           <div className="grid gap-3">
-            {flows.map((f: any) => {
+            {flows.map((f: any, flowIndex: number) => {
               const blocks = ((f.call_flow_blocks ?? []) as any[]).sort(
                 (a, b) => (a.order_index ?? 0) - (b.order_index ?? 0),
               );
@@ -102,10 +104,12 @@ export function FlowsTab() {
                 (acc, b) => acc + ((b.call_flow_block_sms ?? []) as any[]).length,
                 0,
               );
+              const isFirst = flowIndex === 0;
               return (
                 <div
                   key={f.id}
                   className="flex items-center gap-4 rounded-lg border border-border bg-card/40 p-4 transition-colors hover:bg-card/60"
+                  {...(isFirst ? tourAnchor("automacoes.fluxos.linha") : {})}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 flex items-center gap-2">
@@ -139,6 +143,7 @@ export function FlowsTab() {
                   <Switch
                     checked={!!f.is_active}
                     onCheckedChange={(c) => toggleMut.mutate({ id: f.id, is_active: c })}
+                    {...(isFirst ? tourAnchor("automacoes.fluxos.ativo") : {})}
                   />
                   <Button
                     size="icon"
@@ -148,6 +153,7 @@ export function FlowsTab() {
                       setEditing(f);
                       setDialogOpen(true);
                     }}
+                    {...(isFirst ? tourAnchor("automacoes.fluxos.editar") : {})}
                   >
                     <Pencil className="h-4 w-4" />
                   </Button>
@@ -155,6 +161,7 @@ export function FlowsTab() {
                     size="icon"
                     variant="ghost"
                     aria-label={`Excluir fluxo ${f.name}`}
+                    {...(isFirst ? tourAnchor("automacoes.fluxos.excluir") : {})}
                     onClick={async () => {
                       const confirmed = await requestConfirmation({
                         title: `Excluir fluxo “${f.name}”?`,

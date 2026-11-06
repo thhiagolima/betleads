@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
+import { tourAnchor } from "@/help/anchor";
 import { ACCOUNT_LINKS, canSee, type ShellRole } from "@/lib/navigation";
 
 export function AccountMenu({ role }: { role: ShellRole | null }) {
@@ -26,6 +27,7 @@ export function AccountMenu({ role }: { role: ShellRole | null }) {
         <button
           type="button"
           aria-label="Menu da conta"
+          {...tourAnchor("shell.header.conta")}
           className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary outline-none transition-colors hover:bg-primary/25 focus-visible:ring-2 focus-visible:ring-ring"
         >
           {initials}

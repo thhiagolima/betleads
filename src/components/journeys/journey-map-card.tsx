@@ -2,6 +2,8 @@ import { Link } from "@tanstack/react-router";
 import { ArrowRight, Route } from "lucide-react";
 
 import { EmptyState } from "@/components/ui-premium/empty-state";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,8 +37,11 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
           pausadas ou em rascunho aparecem esmaecidas.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-x-6 gap-y-5 lg:grid-cols-2">
-        {lanes.map((lane) => (
+      <CardContent
+        className="grid gap-x-6 gap-y-5 lg:grid-cols-2"
+        {...tourAnchor("automacoes.mapa.lanes")}
+      >
+        {lanes.map((lane, laneIndex) => (
           <section key={lane.key} aria-label={lane.title}>
             <div className="mb-2">
               <h3 className="text-sm font-semibold">{lane.title}</h3>
@@ -54,6 +59,9 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
                       className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted/40 ${
                         inactive ? "border-dashed opacity-60" : ""
                       }`}
+                      {...(laneIndex === 0 && index === 0
+                        ? tourAnchor("automacoes.mapa.item")
+                        : {})}
                     >
                       <span
                         className={`size-1.5 shrink-0 rounded-full ${
@@ -69,7 +77,7 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
                       {inactive && <span className="sr-only">({STATUS_LABEL[item.status]})</span>}
                       {Number(item.holdout_percent ?? 0) > 0 && (
                         <Badge variant="outline" className="px-1 py-0 text-meta">
-                          controle {item.holdout_percent}%
+                          <Term id="grupo-de-controle">controle</Term> {item.holdout_percent}%
                         </Badge>
                       )}
                     </Link>

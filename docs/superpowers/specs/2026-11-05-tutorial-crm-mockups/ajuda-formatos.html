@@ -1,0 +1,109 @@
+<h2>Como a ajuda aparece para o gestor</h2>
+<p class="subtitle">Três peças que trabalham juntas. Exemplo real: a tela Configuração da casa → E-mail, onde o gestor travou. Clique nas que fazem sentido e diga no chat o que mudar.</p>
+
+<style>
+  .crm { background:#0f1115; color:#e6e8ee; border-radius:10px; font-family:system-ui,sans-serif; font-size:13px; position:relative; overflow:hidden; }
+  .crm .top { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid #23262e; color:#9aa0ad; }
+  .crm .help-btn { background:#1c2030; border:1px solid #3a4160; color:#c9d2ff; border-radius:999px; padding:3px 10px; font-size:12px; }
+  .crm .body { padding:14px; }
+  .crm .card { background:#161922; border:1px solid #262a35; border-radius:8px; padding:12px; margin-bottom:10px; }
+  .crm .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:#3a2f12; color:#f3c969; }
+  .crm table { width:100%; border-collapse:collapse; font-size:12px; margin-top:8px; }
+  .crm td, .crm th { text-align:left; padding:5px 6px; border-top:1px solid #23262e; }
+  .crm th { color:#8a90a0; font-weight:500; }
+  .crm .hl { outline:2px solid #7c8cff; outline-offset:2px; border-radius:6px; position:relative; z-index:2; background:#161922; }
+  .crm .dim { position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:1; }
+  .crm .bubble { position:absolute; z-index:3; background:#f5f6ff; color:#151826; border-radius:10px; padding:12px; width:250px; box-shadow:0 8px 30px rgba(0,0,0,.5); font-size:12.5px; line-height:1.45; }
+  .crm .bubble b { display:block; margin-bottom:4px; font-size:13px; }
+  .crm .bubble .foot { display:flex; justify-content:space-between; align-items:center; margin-top:10px; font-size:11.5px; color:#5a6078; }
+  .crm .bubble .next { background:#4f5dff; color:white; padding:4px 10px; border-radius:6px; }
+  .crm .drawer { position:absolute; top:0; right:0; bottom:0; width:56%; background:#12141b; border-left:1px solid #2b3040; z-index:3; padding:14px; overflow:hidden; }
+  .crm .drawer h4 { margin:0 0 4px; font-size:14px; }
+  .crm .drawer .muted, .crm .muted { color:#8a90a0; font-size:12px; }
+  .crm .item { border-top:1px solid #23262e; padding:8px 0; }
+  .crm .item b { color:#e6e8ee; }
+  .crm .pill { display:inline-block; background:#1c2030; color:#c9d2ff; border-radius:6px; padding:4px 8px; font-size:11.5px; margin:6px 6px 0 0; }
+  .crm .grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .crm .search { background:#161922; border:1px solid #2b3040; border-radius:8px; padding:8px 10px; color:#8a90a0; margin-bottom:10px; }
+  .crm .step { display:flex; gap:8px; align-items:flex-start; padding:6px 0; }
+  .crm .dot { width:18px; height:18px; border-radius:50%; background:#1f6f43; color:#d6ffe6; font-size:11px; display:flex; align-items:center; justify-content:center; flex:none; }
+  .crm .dot.off { background:#2b3040; color:#8a90a0; }
+</style>
+
+<div class="options" data-multiselect>
+
+  <div class="option" data-choice="tour" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>Tour guiado na tela</h3>
+      <p>Escurece a tela, destaca um elemento por vez e explica em linguagem simples. Roda sozinho na primeira visita e pode ser repetido pelo botão "?". Passos curtos (5 a 8 por tela), cada um com "Saiba mais" que abre o artigo completo.</p>
+      <div class="crm" style="height:300px;margin-top:10px">
+        <div class="top"><span>Configuração da casa › E-mail</span><span class="help-btn">? Ajuda</span></div>
+        <div class="body">
+          <div class="card">mail.suacasa.bet.br &nbsp;<span class="badge">Aguardando DNS</span></div>
+          <div class="card hl">
+            <div class="muted">Registros DNS</div>
+            <table><tr><th>Tipo</th><th>Nome</th><th>Valor</th></tr>
+              <tr><td>TXT</td><td>@</td><td>v=spf1 include:…</td></tr>
+              <tr><td>TXT</td><td>s1._domainkey</td><td>k=rsa; p=MIGf…</td></tr></table>
+          </div>
+        </div>
+        <div class="dim"></div>
+        <div class="bubble" style="left:18px; bottom:14px">
+          <b>3 de 6 · Copie estes registros</b>
+          Eles provam que o domínio é seu. Copie cada linha (ícone ao lado) e cole no site onde você comprou o domínio — Registro.br, Cloudflare, GoDaddy… A verificação roda sozinha a cada 10 minutos.
+          <div class="foot"><span>Saiba mais · Pular tour</span><span class="next">Próximo</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="painel" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>Painel de ajuda da tela (botão "?")</h3>
+      <p>Abre ao lado, sem sair da tela. Mostra o artigo daquela tela: para que serve, e cada seção com <em>todos</em> os botões e campos explicados. Atalhos para refazer o tour e para os guias passo a passo relacionados.</p>
+      <div class="crm" style="height:300px;margin-top:10px">
+        <div class="top"><span>Configuração da casa › E-mail</span><span class="help-btn">? Ajuda</span></div>
+        <div class="body"><div class="card" style="width:38%">mail.suacasa…</div><div class="card" style="width:38%">Remetentes…</div></div>
+        <div class="drawer">
+          <h4>Configuração da casa · E-mail</h4>
+          <div class="muted">Onde você conecta o domínio que envia os e-mails da casa.</div>
+          <span class="pill">▶ Refazer tour</span><span class="pill">Guia: enviar o 1º e-mail</span>
+          <div class="item"><b>Adicionar domínio</b><br><span class="muted">Digite um subdomínio, ex.: mail.suacasa.bet.br. Não use o domínio principal do site.</span></div>
+          <div class="item"><b>Status "Aguardando DNS"</b><br><span class="muted">Normal nas primeiras horas. Vira "Verificado" sozinho quando os registros estiverem certos.</span></div>
+          <div class="item"><b>Definir como padrão</b><br><span class="muted">Só libera depois de verificado…</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="central" onclick="toggleSelect(this)">
+    <div class="letter">3</div>
+    <div class="content">
+      <h3>Central de ajuda (página própria)</h3>
+      <p>Uma área "Ajuda" no menu com busca, guias passo a passo por tarefa, todos os artigos por tela (filtrados pelo perfil de quem está logado) e um glossário (GGR, FTD, ROAS…). Os guias têm checklist que marca sozinho o que já foi feito na casa.</p>
+      <div class="crm" style="height:300px;margin-top:10px">
+        <div class="top"><span>Ajuda</span><span class="muted">Você é: Gestor</span></div>
+        <div class="body">
+          <div class="search">🔎 Buscar: "domínio", "jornada", "GGR"…</div>
+          <div class="grid">
+            <div class="card"><b>Guia · Enviar seu 1º e-mail</b>
+              <div class="step"><span class="dot">✓</span><span>Adicionar domínio</span></div>
+              <div class="step"><span class="dot off">2</span><span>Colar registros DNS</span></div>
+              <div class="step"><span class="dot off">3</span><span>Criar remetente</span></div>
+              <div class="step"><span class="dot off">4</span><span>Montar a campanha</span></div>
+            </div>
+            <div class="card"><b>Guia · Criar sua 1ª jornada</b>
+              <div class="step"><span class="dot off">1</span><span>Escolher o gatilho</span></div>
+              <div class="step"><span class="dot off">2</span><span>Adicionar etapas</span></div>
+              <div class="step"><span class="dot off">3</span><span>Ativar</span></div>
+            </div>
+          </div>
+          <div class="muted" style="margin-top:6px">Todas as telas (38) · Glossário · Perguntas frequentes</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>

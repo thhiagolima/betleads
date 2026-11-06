@@ -18,6 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { tourAnchor } from "@/help/anchor";
 import { getShortioSettings, saveShortioSettings } from "@/lib/shortio.functions";
 
 /** Configuração do Short.io da casa. O servidor só responde ao admin da casa. */
@@ -77,12 +78,21 @@ export function LinksSettings() {
       </p>
       <form action={save} className="mt-5 space-y-5">
         <div className="flex items-center gap-3">
-          <Switch id="shortio-enabled" name="enabled" defaultChecked={s.enabled} />
+          <Switch
+            id="shortio-enabled"
+            name="enabled"
+            defaultChecked={s.enabled}
+            {...tourAnchor("webhooks.links.enabled")}
+          />
           <Label htmlFor="shortio-enabled">Ativar links curtos</Label>
         </div>
         <p className="text-sm text-muted-foreground">
           O domínio dos links curtos fica em{" "}
-          <Link to="/configuracoes/casa" className="text-primary underline underline-offset-4">
+          <Link
+            to="/configuracoes/casa"
+            {...tourAnchor("webhooks.links.dominio-link")}
+            className="text-primary underline underline-offset-4"
+          >
             Configuração da casa
           </Link>
           .
@@ -94,6 +104,7 @@ export function LinksSettings() {
             name="hosts"
             defaultValue={(s.allowed_destination_hosts ?? []).join(", ")}
             placeholder="site.com, app.site.com"
+            {...tourAnchor("webhooks.links.hosts")}
           />
           <p className="text-meta text-muted-foreground">
             Só links para estes sites são encurtados. Separe por vírgula. Em branco, vale para
@@ -109,13 +120,14 @@ export function LinksSettings() {
             min="1"
             max="3650"
             defaultValue={s.default_ttl_days ?? ""}
+            {...tourAnchor("webhooks.links.ttl")}
           />
           <p className="text-meta text-muted-foreground">Em branco, o link não expira.</p>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="shortio-fallback">Se o encurtador falhar</Label>
           <Select name="fallback" defaultValue={s.fallback_mode}>
-            <SelectTrigger id="shortio-fallback">
+            <SelectTrigger id="shortio-fallback" {...tourAnchor("webhooks.links.fallback")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -125,7 +137,9 @@ export function LinksSettings() {
           </Select>
         </div>
         <DemoDisabledTooltip active={isDemo}>
-          <Button disabled={isDemo || saving}>{saving ? "Salvando…" : "Salvar"}</Button>
+          <Button disabled={isDemo || saving} {...tourAnchor("webhooks.links.save")}>
+            {saving ? "Salvando…" : "Salvar"}
+          </Button>
         </DemoDisabledTooltip>
       </form>
     </HomeCard>

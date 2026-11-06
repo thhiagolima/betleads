@@ -1,5 +1,6 @@
 import { Sparkles } from "lucide-react";
 
+import { tourAnchor } from "@/help/anchor";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_ENVIRONMENT_BANNER_TEXT } from "@/lib/demo-tenant";
 
@@ -8,7 +9,10 @@ export function DemoBanner() {
   if (!isDemo) return null;
 
   return (
-    <div className="mt-3 flex items-start gap-3 rounded-lg border border-primary/40 bg-primary/10 p-3 text-body">
+    <div
+      {...tourAnchor("shell.faixa.demo")}
+      className="mt-3 flex items-start gap-3 rounded-lg border border-primary/40 bg-primary/10 p-3 text-body"
+    >
       <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
       <p className="font-medium text-foreground">{DEMO_ENVIRONMENT_BANNER_TEXT}</p>
     </div>

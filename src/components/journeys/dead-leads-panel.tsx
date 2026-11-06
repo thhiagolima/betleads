@@ -17,6 +17,8 @@ import {
 import { timeAgo } from "@/lib/format";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { HomeCard, KpiCard } from "@/components/home/home-cards";
 import { Badge } from "@/components/ui/badge";
@@ -159,7 +161,10 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div
+        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+        {...tourAnchor("automacoes.leads-mortos.kpis")}
+      >
         <KpiCard
           title="Leads mortos agora"
           value={summary ? summary.dead.toLocaleString("pt-BR") : "—"}
@@ -195,7 +200,12 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
               automaticamente.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={onOpenSettings}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onOpenSettings}
+            {...tourAnchor("automacoes.leads-mortos.ligar-regra")}
+          >
             Ligar em Limites de contato
           </Button>
         </HomeCard>
@@ -220,7 +230,12 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
               </p>
             )}
           </div>
-          <Button size="sm" disabled={backfillRunning} onClick={() => void startBackfill()}>
+          <Button
+            size="sm"
+            disabled={backfillRunning}
+            onClick={() => void startBackfill()}
+            {...tourAnchor("automacoes.leads-mortos.avaliar-base")}
+          >
             {backfillRunning ? "Avaliando…" : "Avaliar base atual agora"}
           </Button>
         </HomeCard>
@@ -231,6 +246,7 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
           role="group"
           aria-label="Filtrar leads mortos"
           className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+          {...tourAnchor("automacoes.leads-mortos.filtro")}
         >
           {STATUS_OPTIONS.map((item) => (
             <button
@@ -265,6 +281,7 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Nome, telefone, e-mail ou ID externo"
+            {...tourAnchor("automacoes.leads-mortos.busca")}
           />
         </div>
       </div>
@@ -273,7 +290,7 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
         <div className="border-b border-border px-4 py-3 sm:px-5">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="text-section">
-              {status === "dead" ? "Leads mortos" : "Leads reativados"}
+              {status === "dead" ? <Term id="leads-mortos">Leads mortos</Term> : "Leads reativados"}
             </h2>
             <span className="text-meta text-muted-foreground">
               {total.toLocaleString("pt-BR")} lead(s)
@@ -349,11 +366,12 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rows.map((row) => (
+                {rows.map((row, i) => (
                   <DeadLeadTableRow
                     key={row.playerId}
                     row={row}
                     status={status}
+                    isFirst={i === 0}
                     reviveBusy={revive.isPending}
                     onRevive={() => void confirmRevive(row)}
                   />
@@ -363,7 +381,10 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
           </div>
         )}
         {pageCount > 1 && (
-          <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-meta text-muted-foreground sm:px-5">
+          <div
+            className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-meta text-muted-foreground sm:px-5"
+            {...tourAnchor("automacoes.leads-mortos.paginacao")}
+          >
             <span>
               Página {(page + 1).toLocaleString("pt-BR")} de {pageCount.toLocaleString("pt-BR")}
             </span>
@@ -395,11 +416,13 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
 function DeadLeadTableRow({
   row,
   status,
+  isFirst,
   reviveBusy,
   onRevive,
 }: {
   row: DeadLeadRow;
   status: DeadLeadStatus;
+  isFirst: boolean;
   reviveBusy: boolean;
   onRevive: () => void;
 }) {
@@ -461,7 +484,7 @@ function DeadLeadTableRow({
       <td className="px-3 py-3">
         <span className="tabular-nums">{money(row.totalDepositado, { decimals: 0 })}</span>
         <p className="text-[12px] text-muted-foreground">
-          {row.hasFtd ? "Com FTD" : "Sem FTD"}
+          {row.hasFtd ? <Term id="ftd">Com FTD</Term> : "Sem FTD"}
           {row.ultimoDeposito ? (
             <>
               {" · último "}
@@ -492,6 +515,7 @@ function DeadLeadTableRow({
             disabled={reviveBusy}
             onClick={onRevive}
             aria-label={`Reativar ${row.nome ?? "jogador"}`}
+            {...(isFirst ? tourAnchor("automacoes.leads-mortos.reativar") : {})}
           >
             <RotateCcw className="mr-1 h-4 w-4" aria-hidden="true" /> Reativar
           </Button>

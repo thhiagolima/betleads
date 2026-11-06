@@ -327,6 +327,32 @@ export function buildQuickLinkUrl(siteUrl: string, path: string): string {
 const MS_PER_MINUTE = 60 * 1000;
 const MS_PER_HOUR = 60 * MS_PER_MINUTE;
 
+/** How long to wait between automatic DNS checks for a domain, given its
+ * status and age. Verified domains are checked once a day; pending/failed
+ * domains are checked more often while young, tapering off as they age.
+ * Shared by `isDomainDueForCheck` and `nextDomainCheckAt` so the intervals
+ * stay in one place. */
+export function domainCheckInterval(
+  d: { status: DomainStatus; created_at: string },
+  now: Date,
+): number {
+  if (d.status === "verified") {
+    return 24 * MS_PER_HOUR;
+  }
+
+  // pending / failed: interval depends on domain age.
+  const created = new Date(d.created_at).getTime();
+  const age = now.getTime() - created;
+
+  if (age < 6 * MS_PER_HOUR) {
+    return 10 * MS_PER_MINUTE;
+  }
+  if (age < 72 * MS_PER_HOUR) {
+    return 60 * MS_PER_MINUTE;
+  }
+  return 24 * MS_PER_HOUR;
+}
+
 export function isDomainDueForCheck(
   d: { status: DomainStatus; created_at: string; last_checked_at: string | null },
   now: Date,
@@ -336,24 +362,19 @@ export function isDomainDueForCheck(
   const lastChecked = new Date(d.last_checked_at).getTime();
   const elapsedSinceCheck = now.getTime() - lastChecked;
 
-  if (d.status === "verified") {
-    return elapsedSinceCheck >= 24 * MS_PER_HOUR;
-  }
+  return elapsedSinceCheck >= domainCheckInterval(d, now);
+}
 
-  // pending / failed: interval depends on domain age.
-  const created = new Date(d.created_at).getTime();
-  const age = now.getTime() - created;
+/** When the next automatic DNS check is due, for display in the domain card.
+ * Without a previous check, it's due right away (`now`). */
+export function nextDomainCheckAt(
+  d: { status: DomainStatus; created_at: string; last_checked_at: string | null },
+  now: Date,
+): Date {
+  if (!d.last_checked_at) return now;
 
-  let interval: number;
-  if (age < 6 * MS_PER_HOUR) {
-    interval = 10 * MS_PER_MINUTE;
-  } else if (age < 72 * MS_PER_HOUR) {
-    interval = 60 * MS_PER_MINUTE;
-  } else {
-    interval = 24 * MS_PER_HOUR;
-  }
-
-  return elapsedSinceCheck >= interval;
+  const lastChecked = new Date(d.last_checked_at).getTime();
+  return new Date(lastChecked + domainCheckInterval(d, now));
 }
 
 export type SetupItemState = "done" | "pending_dns" | "todo";
@@ -362,6 +383,17 @@ function statusesState(statuses: DomainStatus[]): SetupItemState {
   if (statuses.some((s) => s === "verified")) return "done";
   if (statuses.length > 0) return "pending_dns";
   return "todo";
+}
+
+/** A tenant has a usable verified sender when at least one of its e-mail
+ * senders points at a domain that is currently verified. Shared by
+ * `getHouseSetupStatus` (house-config.functions.ts) and `getGuideSignals`
+ * (help-guides.functions.ts) so the rule is defined once. */
+export function computeHasVerifiedSender(
+  senders: { domain_id: string | null }[],
+  verifiedEmailDomainIds: Set<string>,
+): boolean {
+  return senders.some((s) => s.domain_id !== null && verifiedEmailDomainIds.has(s.domain_id));
 }
 
 export function computeSetupChecklist(input: {

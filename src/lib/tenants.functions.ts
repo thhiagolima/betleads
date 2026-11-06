@@ -162,13 +162,13 @@ async function canManageTenant(ctx: ServerContext, tenantId: string) {
 
 async function requireTenantManager(ctx: ServerContext, tenantId: string) {
   const allowed = await canManageTenant(ctx, tenantId);
-  if (!allowed) throw new Error("Sem permissão para gerenciar este tenant");
+  if (!allowed) throw new Error("Sem permissão para gerenciar esta casa");
 }
 
 /** House settings stay limited to super admin and house admin (no group-manager path). */
 async function requireTenantSettingsManager(ctx: ServerContext, tenantId: string) {
   const allowed = await isSuperAdminOrTenantAdmin(ctx, tenantId);
-  if (!allowed) throw new Error("Sem permissão para gerenciar este tenant");
+  if (!allowed) throw new Error("Sem permissão para gerenciar esta casa");
 }
 
 /** Super admin, or a manager of a group containing the house, may name/change/remove admins. */

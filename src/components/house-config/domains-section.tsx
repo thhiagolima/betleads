@@ -33,6 +33,8 @@ import { Label } from "@/components/ui/label";
 import { DataCard } from "@/components/ui-premium";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import {
   addHouseDomain,
   computeShortenerPending,
@@ -188,6 +190,7 @@ export function DomainsSection({
             onChange={(e) => setNewHostname(e.target.value)}
             placeholder={meta.placeholder}
             className="max-w-xs"
+            {...(kind === "shortener" ? tourAnchor("casa.encurtador.hostname") : tourAnchor("casa.email.hostname"))}
           />
           <DemoDisabledTooltip active={isDemo}>
             <Button
@@ -195,6 +198,9 @@ export function DomainsSection({
               size="sm"
               disabled={isDemo || !newHostname.trim() || addDomain.isPending}
               onClick={() => addDomain.mutate()}
+              {...(kind === "shortener"
+                ? tourAnchor("casa.encurtador.add-domain")
+                : tourAnchor("casa.email.add-domain"))}
             >
               <Plus className="h-4 w-4" /> {addDomain.isPending ? "Adicionando…" : "Adicionar domínio"}
             </Button>
@@ -364,7 +370,10 @@ export function DomainsSection({
   if (variant === "wizard") return content;
 
   return (
-    <DataCard title={meta.title} icon={<meta.icon className="h-4 w-4" />}>
+    <DataCard
+      title={kind === "shortener" ? <Term id="encurtador">{meta.title}</Term> : meta.title}
+      icon={<meta.icon className="h-4 w-4" />}
+    >
       {content}
     </DataCard>
   );

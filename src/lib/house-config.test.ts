@@ -4,6 +4,7 @@ import {
   computeSetupChecklist,
   isDomainDueForCheck,
   isReservedPlatformHostname,
+  nextDomainCheckAt,
   normalizeHostname,
   normalizeSiteUrl,
   planQuickLinksSave,
@@ -214,6 +215,53 @@ describe("isDomainDueForCheck", () => {
     expect(
       isDomainDueForCheck({ status: "pending", created_at: hoursAgo(1), last_checked_at: null }, now),
     ).toBe(true);
+  });
+});
+
+describe("nextDomainCheckAt", () => {
+  const now = new Date("2026-10-21T12:00:00.000Z");
+  const hoursAgo = (h: number) => new Date(now.getTime() - h * 60 * 60 * 1000).toISOString();
+  const minutesAgo = (m: number) => new Date(now.getTime() - m * 60 * 1000).toISOString();
+
+  it("pending created 1h ago, checked 4 min ago: next check is last + 10 min", () => {
+    const lastCheckedAt = minutesAgo(4);
+    const result = nextDomainCheckAt(
+      { status: "pending", created_at: hoursAgo(1), last_checked_at: lastCheckedAt },
+      now,
+    );
+    expect(result.toISOString()).toBe(
+      new Date(new Date(lastCheckedAt).getTime() + 10 * 60 * 1000).toISOString(),
+    );
+  });
+
+  it("pending created 10h ago: next check is last + 60 min", () => {
+    const lastCheckedAt = minutesAgo(5);
+    const result = nextDomainCheckAt(
+      { status: "pending", created_at: hoursAgo(10), last_checked_at: lastCheckedAt },
+      now,
+    );
+    expect(result.toISOString()).toBe(
+      new Date(new Date(lastCheckedAt).getTime() + 60 * 60 * 1000).toISOString(),
+    );
+  });
+
+  it("verified: next check is last + 24h", () => {
+    const lastCheckedAt = hoursAgo(1);
+    const result = nextDomainCheckAt(
+      { status: "verified", created_at: hoursAgo(100), last_checked_at: lastCheckedAt },
+      now,
+    );
+    expect(result.toISOString()).toBe(
+      new Date(new Date(lastCheckedAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    );
+  });
+
+  it("without last_checked_at: returns now", () => {
+    const result = nextDomainCheckAt(
+      { status: "pending", created_at: hoursAgo(1), last_checked_at: null },
+      now,
+    );
+    expect(result.toISOString()).toBe(now.toISOString());
   });
 });
 

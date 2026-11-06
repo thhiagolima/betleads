@@ -12,6 +12,8 @@ export function useShellNav() {
   const isSuperAdmin = role === "super_admin";
   return {
     role,
+    /** The active house's id (null while loading / without a house). */
+    tenantId: active?.id ?? null,
     /** True while the switcher query that resolves `role` is still loading. */
     roleLoading: isLoading,
     isSuperAdmin,

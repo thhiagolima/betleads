@@ -337,7 +337,10 @@ function splitPath(path: string) {
   return path.split("/").filter(Boolean);
 }
 
-function patternMatches(pattern: string, pathname: string) {
+/** Exported for the help system (src/help/resolve.ts), which matches a
+ * pathname against `HELP_SCREEN_LOADERS`' route keys the same way this file
+ * matches it against `ROUTE_META`'s. */
+export function patternMatches(pattern: string, pathname: string) {
   const want = splitPath(pattern);
   const got = splitPath(pathname);
   if (want.length !== got.length) return false;

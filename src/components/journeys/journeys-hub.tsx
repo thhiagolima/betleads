@@ -18,6 +18,8 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import {
   convertLegacyJourney,
   deleteJourney,
@@ -404,7 +406,7 @@ export function JourneysHub() {
         subtitle="Jornadas entram por gatilho e seguem jogador a jogador, com SMS, e-mail, voz e esperas."
         actions={
           <Button asChild>
-            <Link to="/jornadas/nova">
+            <Link to="/jornadas/nova" {...tourAnchor("automacoes.header.nova-jornada")}>
               <Plus className="mr-2 h-4 w-4" aria-hidden="true" /> Nova jornada
             </Link>
           </Button>
@@ -425,11 +427,21 @@ export function JourneysHub() {
         />
         {view !== "flows" && view !== "map" && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => void openContactSettings()}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void openContactSettings()}
+              {...tourAnchor("automacoes.header.limites-contato")}
+            >
               Limites de contato
             </Button>
             {view === "journeys" && (
-              <Button variant="outline" size="sm" onClick={() => setInfoOpen(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setInfoOpen(true)}
+                {...tourAnchor("automacoes.header.como-contamos")}
+              >
                 Como contamos
               </Button>
             )}
@@ -440,7 +452,10 @@ export function JourneysHub() {
         <>
           {/* Period selector (Hoje/7/30 dias) hidden: list_journey_metrics has no
               date filter, so totals below are all-time. Restore with REP-02. */}
-          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <div
+            className="grid grid-cols-2 gap-3 xl:grid-cols-4"
+            {...tourAnchor("automacoes.jornadas.kpis")}
+          >
             <KpiCard
               title="Recuperado pelo CRM"
               value={money(overview.recovered, { decimals: 0 })}
@@ -467,6 +482,7 @@ export function JourneysHub() {
               role="group"
               aria-label="Filtrar por status"
               className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+              {...tourAnchor("automacoes.jornadas.filtro")}
             >
               {STATUS_FILTERS.map((item) => (
                 <button
@@ -498,6 +514,7 @@ export function JourneysHub() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Buscar por nome ou gatilho"
+                {...tourAnchor("automacoes.jornadas.busca")}
               />
             </div>
           </div>
@@ -533,10 +550,11 @@ export function JourneysHub() {
               />
             ) : (
               <ul className="divide-y divide-border">
-                {rows.map((journey) => (
+                {rows.map((journey, i) => (
                   <JourneyRow
                     key={journey.id}
                     journey={journey}
+                    isFirst={i === 0}
                     busy={statusControl.isPending}
                     expressBusy={express.isPending}
                     removeBusy={remove.isPending}
@@ -602,8 +620,8 @@ export function JourneysHub() {
             />
           ) : (
             <ul className="divide-y divide-border">
-              {operationItems.map((item) => (
-                <OperationRow key={item.id} item={item} />
+              {operationItems.map((item, i) => (
+                <OperationRow key={item.id} item={item} isFirst={i === 0} view={view} />
               ))}
             </ul>
           )}
@@ -637,10 +655,11 @@ export function JourneysHub() {
             </p>
           ) : (
             <ul className="divide-y divide-border">
-              {visibleLegacyItems.map((item: LegacyJourney) => (
+              {visibleLegacyItems.map((item: LegacyJourney, i: number) => (
                 <li
                   key={`${item.sourceType}:${item.sourceId}`}
                   className="flex flex-col gap-3 px-4 py-3 sm:px-5 lg:flex-row lg:items-center"
+                  {...(i === 0 ? tourAnchor("automacoes.legado.item") : {})}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -727,7 +746,10 @@ export function JourneysHub() {
             <p>{EXPRESS_JOURNEY_HINT}</p>
             <ul className="list-disc space-y-1 pl-5">
               <li>Passa na frente das outras jornadas na fila de envio.</li>
-              <li>Continua respeitando o limite diário da própria jornada e a reentrada.</li>
+              <li>
+                Continua respeitando o limite diário da própria jornada e a{" "}
+                <Term id="reentrada">reentrada</Term>.
+              </li>
               <li>
                 Jogadores desta jornada que foram adiados pelo intervalo entre jornadas ou por
                 limite global voltam para a fila agora.
@@ -875,6 +897,7 @@ export function JourneysHub() {
 
 function JourneyRow({
   journey,
+  isFirst,
   busy,
   expressBusy,
   removeBusy,
@@ -884,6 +907,7 @@ function JourneyRow({
   onDelete,
 }: {
   journey: Journey;
+  isFirst: boolean;
   busy: boolean;
   expressBusy: boolean;
   removeBusy: boolean;
@@ -903,7 +927,10 @@ function JourneyRow({
   const finishedSilent = Number(metrics.finishedWithoutMessage ?? 0);
   const active = journey.status === "active";
   return (
-    <li className="grid gap-4 px-4 py-4 sm:px-5 xl:grid-cols-[minmax(16rem,1fr)_auto_auto] xl:items-center xl:gap-6">
+    <li
+      className="grid gap-4 px-4 py-4 sm:px-5 xl:grid-cols-[minmax(16rem,1fr)_auto_auto] xl:items-center xl:gap-6"
+      {...(isFirst ? tourAnchor("automacoes.jornadas.linha") : {})}
+    >
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <Link
@@ -930,7 +957,8 @@ function JourneyRow({
               className="gap-1 border-warning/30 bg-warning/15 text-warning"
               title={EXPRESS_JOURNEY_HINT}
             >
-              <Zap className="h-3 w-3" aria-hidden="true" /> Envio imediato
+              <Zap className="h-3 w-3" aria-hidden="true" />{" "}
+              <Term id="envio-imediato">Envio imediato</Term>
             </Badge>
           )}
         </div>
@@ -939,7 +967,10 @@ function JourneyRow({
         </p>
         <JourneyStepSummary steps={steps} />
       </div>
-      <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
+      <div
+        className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4"
+        {...(isFirst ? tourAnchor("automacoes.jornadas.metricas") : {})}
+      >
         <JourneyMetric
           label="Em andamento"
           hint="Jogadores dentro da jornada agora: aguardando a próxima etapa, a janela de envio ou pausados por prioridade."
@@ -971,6 +1002,7 @@ function JourneyRow({
             disabled={busy}
             onClick={onPause}
             aria-label={`Pausar a jornada ${journey.name}`}
+            {...(isFirst ? tourAnchor("automacoes.jornadas.pausar-ativar") : {})}
           >
             <Pause className="mr-1 h-4 w-4" aria-hidden="true" /> Pausar
           </Button>
@@ -980,12 +1012,17 @@ function JourneyRow({
             disabled={busy || journey.status === "archived"}
             onClick={onActivate}
             aria-label={`Ativar a jornada ${journey.name}`}
+            {...(isFirst ? tourAnchor("automacoes.jornadas.pausar-ativar") : {})}
           >
             <Play className="mr-1 h-4 w-4" aria-hidden="true" /> Ativar
           </Button>
         )}
         <Button asChild variant="outline" className="h-11 md:h-9">
-          <Link to="/jornadas/$journeyId/relatorio" params={{ journeyId: journey.id }}>
+          <Link
+            to="/jornadas/$journeyId/relatorio"
+            params={{ journeyId: journey.id }}
+            {...(isFirst ? tourAnchor("automacoes.jornadas.relatorio") : {})}
+          >
             Relatório
           </Link>
         </Button>
@@ -995,6 +1032,7 @@ function JourneyRow({
               variant="outline"
               label={`Mais ações da jornada ${journey.name}`}
               icon={<MoreHorizontal className="h-4 w-4" aria-hidden="true" />}
+              {...(isFirst ? tourAnchor("automacoes.jornadas.menu") : {})}
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
@@ -1030,12 +1068,25 @@ function JourneyRow({
   );
 }
 
-function OperationRow({ item }: { item: OperationItem }) {
+function OperationRow({
+  item,
+  isFirst,
+  view,
+}: {
+  item: OperationItem;
+  isFirst: boolean;
+  view: HubView;
+}) {
   const reason = journeyExitReasonLabel(item.exit_reason);
   const statusLabel = ENROLLMENT_STATUS_LABELS[item.status];
   const pauseReason = priorityPauseReasonLabel(item.priority_pause_reason);
   return (
-    <li className="px-4 py-3 text-[13.5px] sm:px-5">
+    <li
+      className="px-4 py-3 text-[13.5px] sm:px-5"
+      {...(isFirst && view === "queue" ? tourAnchor("automacoes.fila.linha") : {})}
+      {...(isFirst && view === "failures" ? tourAnchor("automacoes.falhas.linha") : {})}
+      {...(isFirst && view === "conflicts" ? tourAnchor("automacoes.conflitos.linha") : {})}
+    >
       <p className="font-medium">
         {item.players?.nome ?? "Jogador"}
         <span className="font-normal text-muted-foreground">

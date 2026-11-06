@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Mail, MessageSquare, Phone, Plus, Send, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { tourAnchor } from "@/help/anchor";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
@@ -267,7 +268,7 @@ export function IndividualSmsDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-2" {...tourAnchor("campanhas.teste.canal")}>
             {channelOptions.map(([value, label, Icon]) => (
               <Button
                 key={value}
@@ -293,6 +294,7 @@ export function IndividualSmsDialog({
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="cliente@exemplo.com"
                   inputMode="email"
+                  {...tourAnchor("campanhas.teste.email")}
                 />
               </div>
             ) : (
@@ -303,12 +305,17 @@ export function IndividualSmsDialog({
                   onChange={(event) => setPhone(event.target.value)}
                   placeholder="(11) 98765-4321"
                   inputMode="tel"
+                  {...tourAnchor("campanhas.teste.telefone")}
                 />
               </div>
             )}
             <div className="space-y-1.5">
               <Label>Nome (opcional)</Label>
-              <Input value={name} onChange={(event) => setName(event.target.value)} />
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                {...tourAnchor("campanhas.teste.nome")}
+              />
             </div>
           </div>
           {channel === "email" && (
@@ -330,7 +337,7 @@ export function IndividualSmsDialog({
                     }
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger {...tourAnchor("campanhas.teste.email-template")}>
                     <SelectValue placeholder="Conteúdo manual" />
                   </SelectTrigger>
                   <SelectContent>
@@ -350,6 +357,7 @@ export function IndividualSmsDialog({
                   size="sm"
                   variant="outline"
                   onClick={() => setEmailTemplateDialogOpen(true)}
+                  {...tourAnchor("campanhas.teste.email-criar-template")}
                 >
                   <Plus className="mr-1.5 size-3.5" /> Criar template visual
                 </Button>
@@ -359,6 +367,7 @@ export function IndividualSmsDialog({
                     size="sm"
                     variant="ghost"
                     onClick={() => setEmailTemplateId("")}
+                    {...tourAnchor("campanhas.teste.email-usar-manual")}
                   >
                     <X className="mr-1.5 size-3.5" /> Usar como conteúdo manual
                   </Button>
@@ -366,13 +375,22 @@ export function IndividualSmsDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>Assunto</Label>
-                <Input value={subject} onChange={(event) => setSubject(event.target.value)} />
+                <Input
+                  value={subject}
+                  onChange={(event) => setSubject(event.target.value)}
+                  {...tourAnchor("campanhas.teste.assunto")}
+                />
               </div>
             </div>
           )}
           {channel === "voice" ? (
             <div className="space-y-3">
-              <div className="flex gap-2" role="group" aria-label="Origem do áudio">
+              <div
+                className="flex gap-2"
+                role="group"
+                aria-label="Origem do áudio"
+                {...tourAnchor("campanhas.teste.voz-modo")}
+              >
                 <Button
                   type="button"
                   size="sm"
@@ -395,7 +413,7 @@ export function IndividualSmsDialog({
                 value={voiceMode === "script" ? scriptId : voiceAssetId}
                 onValueChange={voiceMode === "script" ? setScriptId : setVoiceAssetId}
               >
-                <SelectTrigger>
+                <SelectTrigger {...tourAnchor("campanhas.teste.voz-fonte")}>
                   <SelectValue
                     placeholder={
                       voiceMode === "script" ? "Selecione um script" : "Selecione um áudio"
@@ -434,6 +452,7 @@ export function IndividualSmsDialog({
                     ? setVoiceScriptDialogOpen(true)
                     : setVoiceUploadDialogOpen(true)
                 }
+                {...tourAnchor("campanhas.teste.voz-criar")}
               >
                 <Plus className="mr-1.5 size-3.5" />
                 {voiceMode === "script" ? "Criar novo script" : "Enviar novo áudio"}
@@ -452,7 +471,7 @@ export function IndividualSmsDialog({
                       if (selected) setMessage(selected.content);
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger {...tourAnchor("campanhas.teste.sms-origem")}>
                       <SelectValue placeholder="Mensagem manual" />
                     </SelectTrigger>
                     <SelectContent>
@@ -471,6 +490,7 @@ export function IndividualSmsDialog({
                       size="sm"
                       variant="outline"
                       onClick={() => setTemplateDialogOpen(true)}
+                      {...tourAnchor("campanhas.teste.sms-criar-template")}
                     >
                       <Plus className="mr-1.5 size-3.5" /> Criar template
                     </Button>
@@ -480,6 +500,7 @@ export function IndividualSmsDialog({
                         size="sm"
                         variant="ghost"
                         onClick={() => setTemplateId("")}
+                        {...tourAnchor("campanhas.teste.sms-usar-manual")}
                       >
                         <X className="mr-1.5 size-3.5" /> Usar como mensagem manual
                       </Button>
@@ -505,22 +526,27 @@ export function IndividualSmsDialog({
                 rows={5}
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
+                {...tourAnchor("campanhas.teste.mensagem")}
               />
-              <MessageVariablePicker
-                channel={channel}
-                textareaRef={messageRef}
-                value={message}
-                onChange={setMessage}
-              />
+              <div {...tourAnchor("campanhas.teste.variaveis")}>
+                <MessageVariablePicker
+                  channel={channel}
+                  textareaRef={messageRef}
+                  value={message}
+                  onChange={setMessage}
+                />
+              </div>
             </div>
           )}
           {channel !== "voice" && (
-            <LinkTrackingToggle
-              value={trackLinks}
-              onChange={setTrackLinks}
-              content={message}
-              channel={channel}
-            />
+            <div {...tourAnchor("campanhas.teste.rastreio")}>
+              <LinkTrackingToggle
+                value={trackLinks}
+                onChange={setTrackLinks}
+                content={message}
+                channel={channel}
+              />
+            </div>
           )}
           {channel === "sms" && (
             <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
@@ -535,7 +561,11 @@ export function IndividualSmsDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button disabled={!canSend || mutation.isPending} onClick={() => mutation.mutate()}>
+          <Button
+            disabled={!canSend || mutation.isPending}
+            onClick={() => mutation.mutate()}
+            {...tourAnchor("campanhas.teste.enviar")}
+          >
             <Send className="mr-2 h-4 w-4" />
             {mutation.isPending
               ? "Enviando…"

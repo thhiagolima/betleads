@@ -36,6 +36,8 @@ import {
   ShortenerFallbackNotice,
 } from "@/components/house-config/composer-notices";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 import { supabase } from "@/integrations/supabase/client";
 import {
   eventMaxAgeHours,
@@ -206,7 +208,7 @@ function Field({
   className,
 }: {
   id: string;
-  label: string;
+  label: ReactNode;
   hint?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -228,6 +230,7 @@ function OptionSelect({
   options,
   placeholder,
   ariaLabel,
+  anchorProps,
 }: {
   id?: string;
   value: string;
@@ -235,11 +238,19 @@ function OptionSelect({
   options: Option[];
   placeholder?: string;
   ariaLabel?: string;
+  /** The result of calling `tourAnchor` (anchor.ts) at the use site, so the
+   * literal id stays visible to the static coverage scan. */
+  anchorProps?: Record<string, string>;
 }) {
   const known = value === "" || options.some((option) => option.value === value);
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger id={id} aria-label={ariaLabel} className="h-10">
+      <SelectTrigger
+        id={id}
+        aria-label={ariaLabel}
+        className="h-10"
+        {...anchorProps}
+      >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -665,6 +676,7 @@ export function JourneyEditor({
         className="h-11 md:h-9"
         disabled={statusControl.isPending}
         onClick={pause}
+        {...tourAnchor("jornada.rodape.ativar-pausar")}
       >
         <Pause className="mr-1 h-4 w-4" aria-hidden="true" /> Pausar
       </Button>
@@ -674,6 +686,7 @@ export function JourneyEditor({
         className="h-11 md:h-9"
         disabled={statusControl.isPending || mutation.isPending}
         onClick={() => void activate()}
+        {...tourAnchor("jornada.rodape.ativar-pausar")}
       >
         <Play className="mr-1 h-4 w-4" aria-hidden="true" />
         {dirty && savedStatus === "draft" ? "Salvar e ativar" : "Ativar"}
@@ -685,6 +698,7 @@ export function JourneyEditor({
       className="h-11 md:h-9"
       disabled={mutation.isPending}
       onClick={() => mutation.mutate(signature)}
+      {...tourAnchor("jornada.rodape.salvar")}
     >
       <Save className="mr-1 h-4 w-4" aria-hidden="true" />
       {mutation.isPending ? "Salvando…" : "Salvar"}
@@ -707,7 +721,7 @@ export function JourneyEditor({
 
   return (
     <Page className="max-w-3xl">
-      <Button asChild variant="ghost" size="sm" className="-ml-2">
+      <Button asChild variant="ghost" size="sm" className="-ml-2" {...tourAnchor("jornada.voltar")}>
         <Link to="/automacoes" hash="jornadas">
           <ArrowLeft className="mr-1 h-4 w-4" aria-hidden="true" /> Automações
         </Link>
@@ -728,7 +742,12 @@ export function JourneyEditor({
         actions={
           <>
             {id && (
-              <Button asChild variant="outline" className="h-11 md:h-9">
+              <Button
+                asChild
+                variant="outline"
+                className="h-11 md:h-9"
+                {...tourAnchor("jornada.relatorio-link")}
+              >
                 <Link to="/jornadas/$journeyId/relatorio" params={{ journeyId: id }}>
                   Relatório
                 </Link>
@@ -776,7 +795,11 @@ export function JourneyEditor({
               }
             }}
           >
-            <SelectTrigger id="journey-trigger" className="h-10">
+            <SelectTrigger
+              id="journey-trigger"
+              className="h-10"
+              {...tourAnchor("jornada.gatilho.tipo")}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -812,6 +835,7 @@ export function JourneyEditor({
               <Field id="inactivity-field" label="Sem atividade em">
                 <OptionSelect
                   id="inactivity-field"
+                  anchorProps={tourAnchor("jornada.gatilho.atividade")}
                   value={String(triggerConfig.field ?? "ultimo_login")}
                   onChange={(field) => setTriggerConfig((current) => ({ ...current, field }))}
                   options={Object.entries(INACTIVITY_FIELDS).map(([value, label]) => ({
@@ -834,6 +858,7 @@ export function JourneyEditor({
                       hours: event.target.value === "" ? "" : Number(event.target.value),
                     }))
                   }
+                  {...tourAnchor("jornada.gatilho.horas")}
                 />
               </Field>
             </div>
@@ -848,6 +873,7 @@ export function JourneyEditor({
           >
             <OptionSelect
               id="journey-level"
+              anchorProps={tourAnchor("jornada.gatilho.nivel")}
               value={String(triggerConfig.level ?? "")}
               onChange={(level) => setTriggerConfig((current) => ({ ...current, level }))}
               options={LEVEL_OPTIONS}
@@ -878,6 +904,7 @@ export function JourneyEditor({
                   ),
                 }))
               }
+              {...tourAnchor("jornada.gatilho.idade-maxima")}
             />
           </Field>
         )}
@@ -894,6 +921,7 @@ export function JourneyEditor({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Ex.: Sumiu depois do primeiro depósito"
+            {...tourAnchor("jornada.identificacao.nome")}
           />
         </Field>
         <Field id="journey-description" label="Descrição (opcional)">
@@ -901,6 +929,7 @@ export function JourneyEditor({
             id="journey-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            {...tourAnchor("jornada.identificacao.descricao")}
           />
         </Field>
       </EditorSection>
@@ -917,6 +946,7 @@ export function JourneyEditor({
           >
             <OptionSelect
               id="journey-audience"
+              anchorProps={tourAnchor("jornada.publico.quem-entra")}
               value={audience}
               onChange={setAudience}
               options={
@@ -935,11 +965,12 @@ export function JourneyEditor({
           </Field>
           <Field
             id="journey-reentry"
-            label="Reentrada"
+            label={<Term id="reentrada">Reentrada</Term>}
             hint="Se o mesmo jogador pode voltar à jornada depois de sair dela."
           >
             <OptionSelect
               id="journey-reentry"
+              anchorProps={tourAnchor("jornada.publico.reentrada")}
               value={reentry}
               onChange={setReentry}
               options={REENTRY_OPTIONS}
@@ -961,12 +992,13 @@ export function JourneyEditor({
                   return checked === true ? { ...rest, require_ftd: true } : rest;
                 })
               }
+              {...tourAnchor("jornada.publico.ftd")}
             />
             <Label htmlFor="filter-require-ftd" className="cursor-pointer font-normal">
               Só quem já fez o primeiro depósito
             </Label>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2" {...tourAnchor("jornada.publico.filtros")}>
             {ENTRY_FILTER_FIELDS.map((field) => (
               <Field
                 key={field.key}
@@ -1006,7 +1038,9 @@ export function JourneyEditor({
           </p>
         )}
         <ol className="space-y-3">
-          {steps.map((s, i) => (
+          {steps.map((s, i) => {
+            const isFirstOfKind = steps.findIndex((other) => other.kind === s.kind) === i;
+            return (
             <li key={i} className="rounded-xl border border-border p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h3 className="text-[13.5px] font-semibold">
@@ -1017,6 +1051,7 @@ export function JourneyEditor({
                   icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
                   className="-my-2 text-muted-foreground hover:text-destructive"
                   onClick={() => setSteps((all) => all.filter((_, n) => n !== i))}
+                  {...(i === 0 ? tourAnchor("jornada.etapas.remover") : {})}
                 />
               </div>
               {(s.kind === "sms" || s.kind === "email" || s.kind === "voice") &&
@@ -1034,10 +1069,14 @@ export function JourneyEditor({
                       inputMode="decimal"
                       value={s.amount}
                       onChange={(e) => change(i, { ...s, amount: e.target.value })}
+                      {...(isFirstOfKind ? tourAnchor("jornada.etapas.espera-tempo") : {})}
                     />
                     <div className="flex-1">
                       <OptionSelect
                         ariaLabel="Unidade da espera"
+                        anchorProps={
+                          isFirstOfKind ? tourAnchor("jornada.etapas.espera-unidade") : undefined
+                        }
                         value={s.unit}
                         onChange={(unit) => change(i, { ...s, unit: unit as WaitUnit })}
                         options={Object.entries(WAIT_UNITS).map(([value, unit]) => ({
@@ -1061,6 +1100,9 @@ export function JourneyEditor({
                   <Label htmlFor={`step-${i}-sms`}>Template de SMS</Label>
                   <OptionSelect
                     id={`step-${i}-sms`}
+                    anchorProps={
+                      isFirstOfKind ? tourAnchor("jornada.etapas.sms-template") : undefined
+                    }
                     value={s.templateId}
                     placeholder="Selecione um template de SMS"
                     onChange={(templateId) => {
@@ -1099,19 +1141,24 @@ export function JourneyEditor({
                     shortenerPending={shortenerPending}
                     hasVerifiedDomain={shortDomains.length > 0}
                   />
-                  <ShortDomainSelect
-                    domains={shortDomains}
-                    value={(s.extra?.short_domain_id as string | null | undefined) ?? null}
-                    onChange={(short_domain_id) =>
-                      change(i, { ...s, extra: { ...s.extra, short_domain_id } })
-                    }
-                  />
+                  <div {...(isFirstOfKind ? tourAnchor("jornada.etapas.sms-dominio") : {})}>
+                    <ShortDomainSelect
+                      domains={shortDomains}
+                      value={(s.extra?.short_domain_id as string | null | undefined) ?? null}
+                      onChange={(short_domain_id) =>
+                        change(i, { ...s, extra: { ...s.extra, short_domain_id } })
+                      }
+                    />
+                  </div>
                 </div>
               ) : s.kind === "email" ? (
                 <div className="space-y-2">
                   <Label htmlFor={`step-${i}-email`}>Template de e-mail</Label>
                   <OptionSelect
                     id={`step-${i}-email`}
+                    anchorProps={
+                      isFirstOfKind ? tourAnchor("jornada.etapas.email-template") : undefined
+                    }
                     value={s.templateId}
                     placeholder="Selecione um template de e-mail"
                     onChange={(templateId) => change(i, { ...s, templateId })}
@@ -1124,22 +1171,26 @@ export function JourneyEditor({
                     isError={composerOptions.isError}
                     hasVerifiedSender={emailSenders.length > 0}
                   />
-                  <EmailSenderSelect
-                    senders={emailSenders}
-                    value={s.senderId}
-                    onChange={(senderId) => change(i, { ...s, senderId })}
-                  />
+                  <div {...(isFirstOfKind ? tourAnchor("jornada.etapas.email-remetente") : {})}>
+                    <EmailSenderSelect
+                      senders={emailSenders}
+                      value={s.senderId}
+                      onChange={(senderId) => change(i, { ...s, senderId })}
+                    />
+                  </div>
                   <ShortenerFallbackNotice
                     isSuccess={composerOptions.isSuccess}
                     isError={composerOptions.isError}
                     shortenerPending={shortenerPending}
                     hasVerifiedDomain={shortDomains.length > 0}
                   />
-                  <ShortDomainSelect
-                    domains={shortDomains}
-                    value={s.shortDomainId}
-                    onChange={(shortDomainId) => change(i, { ...s, shortDomainId })}
-                  />
+                  <div {...(isFirstOfKind ? tourAnchor("jornada.etapas.email-dominio") : {})}>
+                    <ShortDomainSelect
+                      domains={shortDomains}
+                      value={s.shortDomainId}
+                      onChange={(shortDomainId) => change(i, { ...s, shortDomainId })}
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -1147,6 +1198,9 @@ export function JourneyEditor({
                     <Label htmlFor={`step-${i}-voice`}>Áudio da ligação</Label>
                     <OptionSelect
                       id={`step-${i}-voice`}
+                      anchorProps={
+                        isFirstOfKind ? tourAnchor("jornada.etapas.voz-audio") : undefined
+                      }
                       value={s.assetId}
                       placeholder="Selecione um áudio enviado"
                       onChange={(assetId) => change(i, { ...s, assetId })}
@@ -1155,7 +1209,10 @@ export function JourneyEditor({
                         label: asset.name,
                       }))}
                     />
-                    <label className="inline-flex h-11 cursor-pointer items-center rounded-md border border-border px-3 text-sm hover:bg-muted md:h-9">
+                    <label
+                      className="inline-flex h-11 cursor-pointer items-center rounded-md border border-border px-3 text-sm hover:bg-muted md:h-9"
+                      {...(isFirstOfKind ? tourAnchor("jornada.etapas.voz-upload") : {})}
+                    >
                       <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
                       {uploadAudio.isPending ? "Enviando…" : "Enviar novo áudio"}
                       <input
@@ -1174,11 +1231,16 @@ export function JourneyEditor({
                 </div>
               )}
             </li>
-          ))}
+            );
+          })}
         </ol>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="h-11 w-full sm:w-auto md:h-9">
+            <Button
+              variant="outline"
+              className="h-11 w-full sm:w-auto md:h-9"
+              {...tourAnchor("jornada.etapas.adicionar")}
+            >
               <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Adicionar etapa
             </Button>
           </DropdownMenuTrigger>
@@ -1226,6 +1288,7 @@ export function JourneyEditor({
                     Math.min(MAX_LOOPS_LIMIT, Math.max(0, Math.trunc(Number(e.target.value) || 0))),
                   )
                 }
+                {...tourAnchor("jornada.etapas.loop-maximo")}
               />
             </Field>
           )}
@@ -1237,7 +1300,7 @@ export function JourneyEditor({
         help="A jornada encerra para o jogador quando um destes eventos acontece, para evitar mensagens fora de contexto."
       >
         <div className="grid gap-3 sm:grid-cols-2">
-          {EXIT_RULE_OPTIONS.map((rule) => (
+          {EXIT_RULE_OPTIONS.map((rule, index) => (
             <div key={rule.key} className="flex min-h-11 items-center gap-3 md:min-h-0">
               <Checkbox
                 id={`exit-${rule.key}`}
@@ -1245,6 +1308,7 @@ export function JourneyEditor({
                 onCheckedChange={(checked) =>
                   setExitRules((current) => ({ ...current, [rule.key]: checked === true }))
                 }
+                {...(index === 0 ? tourAnchor("jornada.saida.regra") : {})}
               />
               <Label htmlFor={`exit-${rule.key}`} className="cursor-pointer font-normal">
                 {rule.label}
@@ -1272,6 +1336,7 @@ export function JourneyEditor({
               type="time"
               value={windowStart}
               onChange={(e) => setWindowStart(e.target.value)}
+              {...tourAnchor("jornada.janela.inicio")}
             />
           </Field>
           <Field id="window-end" label="Até">
@@ -1281,6 +1346,7 @@ export function JourneyEditor({
               type="time"
               value={windowEnd}
               onChange={(e) => setWindowEnd(e.target.value)}
+              {...tourAnchor("jornada.janela.fim")}
             />
           </Field>
         </div>
@@ -1299,6 +1365,7 @@ export function JourneyEditor({
               min={1}
               value={dailyLimit}
               onChange={(e) => setDailyLimit(Number(e.target.value))}
+              {...tourAnchor("jornada.limites.diario")}
             />
           </Field>
           <Field
@@ -1313,11 +1380,12 @@ export function JourneyEditor({
               min={0}
               value={cooldownHours}
               onChange={(e) => setCooldownHours(Number(e.target.value))}
+              {...tourAnchor("jornada.limites.intervalo")}
             />
           </Field>
           <Field
             id="holdout"
-            label="Grupo de controle"
+            label={<Term id="grupo-de-controle">Grupo de controle</Term>}
             hint={
               holdoutPercent
                 ? `${holdoutPercent}% dos jogadores que entrarem ficam sem mensagens, para medir o efeito real em Resultados do CRM.`
@@ -1326,6 +1394,7 @@ export function JourneyEditor({
           >
             <OptionSelect
               id="holdout"
+              anchorProps={tourAnchor("jornada.limites.controle")}
               value={String(holdoutPercent)}
               onChange={(value) => setHoldoutPercent(Number(value))}
               options={HOLDOUT_OPTIONS}
@@ -1347,9 +1416,16 @@ export function JourneyEditor({
                 type="datetime-local"
                 value={endsAt}
                 onChange={(e) => setEndsAt(e.target.value)}
+                {...tourAnchor("jornada.limites.termino")}
               />
               {endsAt && (
-                <Button type="button" variant="ghost" size="sm" onClick={() => setEndsAt("")}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setEndsAt("")}
+                  {...tourAnchor("jornada.limites.termino-limpar")}
+                >
                   Limpar
                 </Button>
               )}
@@ -1373,15 +1449,19 @@ export function JourneyEditor({
           </ul>
         )}
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field id="conflict-family" label="Família">
+          <Field id="conflict-family" label={<Term id="familia-de-jornadas">Família</Term>}>
             <OptionSelect
               id="conflict-family"
+              anchorProps={tourAnchor("jornada.conflitos.familia")}
               value={conflictFamily || FAMILY_NONE}
               onChange={(value) => setConflictFamily(value === FAMILY_NONE ? "" : value)}
               options={FAMILY_OPTIONS}
             />
           </Field>
-          <Field id="journey-priority" label="Prioridade (1 é a maior)">
+          <Field
+            id="journey-priority"
+            label={<Term id="prioridade-de-jornada">Prioridade (1 é a maior)</Term>}
+          >
             <Input
               id="journey-priority"
               className="h-10"
@@ -1389,12 +1469,14 @@ export function JourneyEditor({
               min={1}
               max={100}
               value={journeyPriority}
+              {...tourAnchor("jornada.conflitos.prioridade")}
               onChange={(event) => setJourneyPriority(Number(event.target.value) || 1)}
             />
           </Field>
           <Field id="conflict-policy" label="Ao competir">
             <OptionSelect
               id="conflict-policy"
+              anchorProps={tourAnchor("jornada.conflitos.ao-competir")}
               value={conflictPolicy}
               onChange={(value) => setConflictPolicy(value as ConflictPolicy)}
               options={POLICY_OPTIONS}

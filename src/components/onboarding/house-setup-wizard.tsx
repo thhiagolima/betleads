@@ -14,6 +14,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { HelpButton } from "@/components/help/help-button";
+import { tourAnchor } from "@/help/anchor";
 import {
   HouseSiteSection,
   type HouseSiteSaveHandle,
@@ -131,11 +133,14 @@ export function applyWizardEffect(
 export function WizardReadyStepView({ checklist }: { checklist: SetupChecklist | undefined }) {
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
+      <p className="text-sm text-muted-foreground" {...tourAnchor("onboarding.pronto.intro")}>
         Tudo pronto. Você pode ajustar qualquer coisa depois em Configurações → Casa.
       </p>
       {checklist && (
-        <div className="rounded-lg border border-border/40 bg-background/30 p-4">
+        <div
+          className="rounded-lg border border-border/40 bg-background/30 p-4"
+          {...tourAnchor("onboarding.pronto.resumo")}
+        >
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold">Resumo da configuração</h3>
             <span className="text-xs tabular-nums text-muted-foreground">
@@ -171,14 +176,28 @@ function WizardStepContent({
   return <WizardReadyStepView checklist={checklist} />;
 }
 
-export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: WizardStepId }) {
+export function HouseSetupWizard({
+  initialStep = "casa",
+  onStepChange,
+}: {
+  initialStep?: WizardStepId;
+  /** Reported on every step change, so `OnboardingGate` can keep the help
+   * overlay's `setScreenOverride("onboarding", <passo>)` in sync — the
+   * wizard owns its own step state, the gate only mirrors it. */
+  onStepChange?: (step: WizardStepId) => void;
+}) {
   const qc = useQueryClient();
   const { isEnabled } = useEnabledChannels();
   // "E-mail" some do assistente quando o canal está desligado para a casa.
   const visibleSteps = WIZARD_STEPS.filter((s) => s.id !== "email" || isEnabled("email"));
-  const [step, setStep] = useState<WizardStepId>(() =>
+  const [stepState, setStepState] = useState<WizardStepId>(() =>
     visibleSteps.some((s) => s.id === initialStep) ? initialStep : "casa",
   );
+  const setStep = (next: WizardStepId) => {
+    setStepState(next);
+    onStepChange?.(next);
+  };
+  const step = stepState;
   const siteSaveRef = useRef<HouseSiteSaveHandle>(null);
   const [savingStep, setSavingStep] = useState(false);
 
@@ -235,7 +254,11 @@ export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: Wizar
   return (
     <div className="flex min-h-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/40 px-4 py-4 sm:px-6">
-        <nav aria-label="Passos da configuração" className="flex flex-wrap items-center gap-2">
+        <nav
+          aria-label="Passos da configuração"
+          className="flex flex-wrap items-center gap-2"
+          {...tourAnchor("onboarding.header.markers")}
+        >
           {visibleSteps.map((s, i) => (
             <span
               key={s.id}
@@ -249,14 +272,18 @@ export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: Wizar
             </span>
           ))}
         </nav>
-        <Button
-          type="button"
-          variant="ghost"
-          disabled={pending}
-          onClick={() => dispatch({ type: "skip" })}
-        >
-          Pular configuração
-        </Button>
+        <div className="flex items-center gap-2">
+          <HelpButton />
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => dispatch({ type: "skip" })}
+            {...tourAnchor("onboarding.header.skip")}
+          >
+            Pular configuração
+          </Button>
+        </div>
       </header>
 
       <div className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 sm:px-6 sm:py-10">
@@ -274,6 +301,7 @@ export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: Wizar
             variant="outline"
             disabled={pending}
             onClick={() => dispatch({ type: "later" })}
+            {...tourAnchor("onboarding.footer.later")}
           >
             Fazer depois
           </Button>
@@ -282,6 +310,7 @@ export function HouseSetupWizard({ initialStep = "casa" }: { initialStep?: Wizar
           type="button"
           disabled={pending}
           onClick={() => void primary({ type: buttons.primary === "concluir" ? "complete" : "later" })}
+          {...tourAnchor("onboarding.footer.primary")}
         >
           {buttons.primary === "concluir"
             ? complete.isPending

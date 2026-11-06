@@ -119,6 +119,7 @@ export function WebpushIntegrationPanel() {
                   loaderSnippet={data.loaderSnippet}
                   playerSnippet={data.playerSnippet}
                   onProgress={onProgress}
+                  onCheckScript={() => query.refetch()}
                 />
               )}
             </DataCard>

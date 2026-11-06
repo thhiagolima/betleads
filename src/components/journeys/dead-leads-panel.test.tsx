@@ -26,6 +26,12 @@ vi.mock("@/lib/journeys.functions", () => ({
   runDeadLeadBackfill: vi.fn(),
 }));
 vi.mock("@/components/system-dialog-host", () => ({ requestConfirmation: vi.fn() }));
+// Term pulls in HelpProvider's chain (shell nav, active tenant, ...) through
+// useHelp() — out of scope for this pure component test, so it's replaced
+// with a passthrough, the same way every other external dependency here is.
+vi.mock("@/components/help/term", () => ({
+  Term: ({ children }: { children?: ReactNode }) => <>{children}</>,
+}));
 // A moeda vem da casa ativa (switcher); aqui, uma casa em BRL.
 vi.mock("@/hooks/use-tenant-currency", async () => {
   const { formatMoney } = await import("@/lib/currency");

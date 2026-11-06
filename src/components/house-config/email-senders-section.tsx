@@ -2,7 +2,7 @@
 // the sender a local part / from name / optional reply-to, and mark it as
 // default. Flags senders sitting on a domain that isn't verified yet (the
 // domain section above is what actually verifies them).
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Send } from "lucide-react";
@@ -23,6 +23,9 @@ import { DataCard } from "@/components/ui-premium";
 import { Badge } from "@/components/ui/badge";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
+import { requestConfirmation } from "@/components/system-dialog-host";
 import {
   getHouseConfig,
   removeEmailSenderForHouse,
@@ -32,6 +35,33 @@ import {
   HOUSE_CONFIG_QUERY_KEY,
   invalidateHouseConfigQueries,
 } from "@/components/house-config/house-config-query";
+
+/** Shape the "Remover" confirmation needs from a sender row. */
+export type RemovableSender = { id: string; fromName: string; fromEmail: string };
+
+/** Pure so the exact copy (title/description/label) is testable without
+ * rendering: the "Remover" button never calls the mutation directly. */
+export function buildRemoveSenderConfirmOptions(sender: RemovableSender) {
+  return {
+    title: "Remover remetente?",
+    description: `O remetente ${sender.fromName} <${sender.fromEmail}> deixa de poder ser usado em novas campanhas e jornadas de e-mail.`,
+    confirmLabel: "Remover remetente",
+    destructive: true,
+  } as const;
+}
+
+/** Confirms before removing (never calls `remove` without an explicit yes).
+ * `confirm` is injected so this is testable without the real dialog host. */
+export async function confirmAndRemoveSender(
+  sender: RemovableSender,
+  deps: {
+    confirm: (options: ReturnType<typeof buildRemoveSenderConfirmOptions>) => Promise<boolean>;
+    remove: (id: string) => void;
+  },
+): Promise<void> {
+  const confirmed = await deps.confirm(buildRemoveSenderConfirmOptions(sender));
+  if (confirmed) deps.remove(sender.id);
+}
 
 export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "wizard" }) {
   const isDemo = useIsDemoTenant();
@@ -45,12 +75,24 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
   const canEdit = config?.canEdit ?? false;
   const emailDomains = (config?.domains ?? []).filter((d) => d.kind === "email");
   const senders = config?.senders ?? [];
+  const hasVerifiedEmailDomain = emailDomains.some((d) => d.status === "verified");
 
   const [domainId, setDomainId] = useState<string>("");
   const [localPart, setLocalPart] = useState("");
   const [fromName, setFromName] = useState("");
   const [replyTo, setReplyTo] = useState("");
   const [isDefault, setIsDefault] = useState(false);
+
+  const formRef = useRef<HTMLDivElement>(null);
+  const localPartInputRef = useRef<HTMLInputElement>(null);
+
+  // Scrolls to the sender form and focuses "Endereço", for the "Agora crie
+  // um remetente" hint shown once the domain is verified and there's no
+  // sender yet.
+  function focusSenderForm() {
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    localPartInputRef.current?.focus();
+  }
 
   // Config, composer pickers and setup status (wizard summary / checklist).
   const refresh = () => invalidateHouseConfigQueries(qc);
@@ -90,11 +132,22 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
 
   const content = (
     <div className="space-y-6">
-      <div className="space-y-2">
+      <div className="space-y-2" {...tourAnchor("casa.remetente.list")}>
         {senders.length === 0 && (
           <p className="text-sm text-muted-foreground">Nenhum remetente cadastrado ainda.</p>
         )}
-        {senders.map((s) => (
+        {canEdit && hasVerifiedEmailDomain && senders.length === 0 && (
+          <button
+            type="button"
+            onClick={focusSenderForm}
+            className="w-full rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3 text-left text-sm text-foreground transition-colors hover:bg-primary/10"
+            {...tourAnchor("casa.remetente.hint")}
+          >
+            Domínio verificado. Agora crie um remetente para enviar campanhas e jornadas por
+            e-mail.
+          </button>
+        )}
+        {senders.map((s, index) => (
           <div
             key={s.id}
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/40 bg-background/30 p-3"
@@ -117,7 +170,13 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
                     size="sm"
                     className="text-destructive hover:text-destructive"
                     disabled={isDemo}
-                    onClick={() => remove.mutate(s.id)}
+                    onClick={() =>
+                      void confirmAndRemoveSender(s, {
+                        confirm: requestConfirmation,
+                        remove: remove.mutate,
+                      })
+                    }
+                    {...(index === 0 ? tourAnchor("casa.remetente.remove") : {})}
                   >
                     Remover
                   </Button>
@@ -129,12 +188,12 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
       </div>
 
       {canEdit && (
-        <div className="space-y-3 rounded-lg border border-border/40 bg-background/30 p-4">
+        <div ref={formRef} className="space-y-3 rounded-lg border border-border/40 bg-background/30 p-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label>Domínio de e-mail</Label>
               <Select value={domainId} onValueChange={setDomainId}>
-                <SelectTrigger>
+                <SelectTrigger {...tourAnchor("casa.remetente.domain")}>
                   <SelectValue placeholder="Selecione um domínio" />
                 </SelectTrigger>
                 <SelectContent>
@@ -150,10 +209,12 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
               <Label>Endereço</Label>
               <div className="flex items-center gap-1">
                 <Input
+                  ref={localPartInputRef}
                   value={localPart}
                   onChange={(e) => setLocalPart(e.target.value)}
                   placeholder="promo"
                   className="max-w-[140px]"
+                  {...tourAnchor("casa.remetente.local-part")}
                 />
                 <span className="text-sm text-muted-foreground">
                   @{selectedDomain?.hostname ?? "..."}
@@ -161,11 +222,14 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
               </div>
             </div>
             <div>
-              <Label>Nome do remetente</Label>
+              <Label>
+                Nome do <Term id="remetente">remetente</Term>
+              </Label>
               <Input
                 value={fromName}
                 onChange={(e) => setFromName(e.target.value)}
                 placeholder="Promo SuaCasa"
+                {...tourAnchor("casa.remetente.from-name")}
               />
             </div>
             <div>
@@ -175,11 +239,12 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
                 value={replyTo}
                 onChange={(e) => setReplyTo(e.target.value)}
                 placeholder="atendimento@suacasa.bet.br"
+                {...tourAnchor("casa.remetente.reply-to")}
               />
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Switch checked={isDefault} onCheckedChange={setIsDefault} />
+            <Switch checked={isDefault} onCheckedChange={setIsDefault} {...tourAnchor("casa.remetente.default")} />
             <Label>Remetente padrão</Label>
           </div>
           <DemoDisabledTooltip active={isDemo}>
@@ -188,6 +253,7 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
               size="sm"
               disabled={isDemo || !domainId || !localPart.trim() || !fromName.trim() || save.isPending}
               onClick={() => save.mutate()}
+              {...tourAnchor("casa.remetente.save")}
             >
               {save.isPending ? "Salvando…" : "Salvar remetente"}
             </Button>

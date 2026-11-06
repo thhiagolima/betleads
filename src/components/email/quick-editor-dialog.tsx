@@ -33,6 +33,8 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { EMAIL_IMAGE_MAX_BYTES, uploadEmailImage } from "@/lib/email-image-upload";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import type { EditorTemplate } from "./template-editor-dialog";
 
 // Modelos pedidos pela operação BETLEADS
@@ -372,6 +374,7 @@ export function QuickEditorDialog({
                     value={state.nome}
                     onChange={(e) => set("nome", e.target.value)}
                     placeholder="Ex: Retorno dia 1"
+                    {...tourAnchor("email.rapido.nome")}
                   />
                 </Field>
                 <Field label="Modelo do e-mail">
@@ -379,7 +382,7 @@ export function QuickEditorDialog({
                     value={state.modelo}
                     onValueChange={(v) => changeModelo(v as QuickModelo)}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger {...tourAnchor("email.rapido.modelo")}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -394,13 +397,23 @@ export function QuickEditorDialog({
                 <Field label="Objetivo do e-mail">
                   <Input value={state.objetivo} onChange={(e) => set("objetivo", e.target.value)} />
                 </Field>
-                <Field label="Nome do remetente">
-                  <Input value={state.fromName} onChange={(e) => set("fromName", e.target.value)} />
+                <Field
+                  label={
+                    <>
+                      Nome do <Term id="remetente">remetente</Term>
+                    </>
+                  }
+                >
+                  <Input
+                    value={state.fromName}
+                    onChange={(e) => set("fromName", e.target.value)}
+                    {...tourAnchor("email.rapido.remetente")}
+                  />
                 </Field>
                 <Field label="Assunto" full>
                   <Input value={state.assunto} onChange={(e) => set("assunto", e.target.value)} />
                 </Field>
-                <Field label="Preheader" full>
+                <Field label={<Term id="preheader">Preheader</Term>} full>
                   <Input
                     value={state.preheader}
                     onChange={(e) => set("preheader", e.target.value)}
@@ -411,19 +424,23 @@ export function QuickEditorDialog({
 
             <Block title="2. Imagens">
               <div className="space-y-3">
-                <ImageField
-                  label="Logo"
-                  value={state.logoUrl}
-                  onChange={(v) => set("logoUrl", v)}
-                  maxW={200}
-                />
-                <ImageField
-                  label="Banner principal"
-                  value={state.bannerUrl}
-                  onChange={(v) => set("bannerUrl", v)}
-                  altValue={state.bannerAlt}
-                  onAltChange={(v) => set("bannerAlt", v)}
-                />
+                <div {...tourAnchor("email.rapido.logo")}>
+                  <ImageField
+                    label="Logo"
+                    value={state.logoUrl}
+                    onChange={(v) => set("logoUrl", v)}
+                    maxW={200}
+                  />
+                </div>
+                <div {...tourAnchor("email.rapido.banner")}>
+                  <ImageField
+                    label="Banner principal"
+                    value={state.bannerUrl}
+                    onChange={(v) => set("bannerUrl", v)}
+                    altValue={state.bannerAlt}
+                    onAltChange={(v) => set("bannerAlt", v)}
+                  />
+                </div>
               </div>
             </Block>
 
@@ -458,12 +475,17 @@ export function QuickEditorDialog({
                 <Field label="Cupom">
                   <Input value={state.cupom} onChange={(e) => set("cupom", e.target.value)} />
                 </Field>
-                <Field label="CTA — texto">
-                  <Input value={state.ctaTexto} onChange={(e) => set("ctaTexto", e.target.value)} />
-                </Field>
-                <Field label="CTA — URL">
-                  <Input value={state.ctaUrl} onChange={(e) => set("ctaUrl", e.target.value)} />
-                </Field>
+                <div className="contents" {...tourAnchor("email.rapido.cta")}>
+                  <Field label={<><Term id="cta">CTA</Term> — texto</>}>
+                    <Input
+                      value={state.ctaTexto}
+                      onChange={(e) => set("ctaTexto", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="CTA — URL">
+                    <Input value={state.ctaUrl} onChange={(e) => set("ctaUrl", e.target.value)} />
+                  </Field>
+                </div>
                 <Field label="Link alternativo" full>
                   <Input
                     value={state.linkAlternativo}
@@ -487,7 +509,7 @@ export function QuickEditorDialog({
             </Block>
 
             <Block title="4. Blocos visíveis">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3" {...tourAnchor("email.rapido.blocos")}>
                 <Toggle
                   label="Card de benefício"
                   value={state.mostrarCard}
@@ -512,7 +534,10 @@ export function QuickEditorDialog({
             </Block>
 
             <Block title="5. Cores">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div
+                className="grid grid-cols-2 sm:grid-cols-3 gap-3"
+                {...tourAnchor("email.rapido.cores")}
+              >
                 <Color
                   label="Fundo geral"
                   value={state.bgGeral}
@@ -554,7 +579,10 @@ export function QuickEditorDialog({
           </div>
 
           {/* Preview */}
-          <div className="col-span-12 lg:col-span-5 border-l border-border/50 bg-muted/20 overflow-hidden flex flex-col">
+          <div
+            className="col-span-12 lg:col-span-5 border-l border-border/50 bg-muted/20 overflow-hidden flex flex-col"
+            {...tourAnchor("email.rapido.preview")}
+          >
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Eye className="h-3.5 w-3.5" /> Preview ao vivo
@@ -618,6 +646,7 @@ export function QuickEditorDialog({
             onClick={abrirAvancado}
             className="gap-2"
             disabled={!onOpenAdvanced}
+            {...tourAnchor("email.rapido.avancado")}
           >
             <Wand2 className="h-4 w-4" /> Editar no modo avançado
           </Button>
@@ -625,7 +654,7 @@ export function QuickEditorDialog({
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button onClick={salvar} className="gap-2">
+            <Button onClick={salvar} className="gap-2" {...tourAnchor("email.rapido.salvar")}>
               <CheckCircle2 className="h-4 w-4" /> Salvar template
             </Button>
           </div>
@@ -655,7 +684,7 @@ function Field({
   full,
   children,
 }: {
-  label: string;
+  label: React.ReactNode;
   full?: boolean;
   children: React.ReactNode;
 }) {
