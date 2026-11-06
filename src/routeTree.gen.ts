@@ -91,6 +91,7 @@ import { Route as ApiPublicHooksJourneyCrossingRouteImport } from './routes/api/
 import { Route as ApiPublicHooksJourneyScanRouteImport } from './routes/api/public/hooks/journey-scan'
 import { Route as ApiPublicHooksMorningCheckRouteImport } from './routes/api/public/hooks/morning-check'
 import { Route as ApiPublicHooksOrchestrateRouteImport } from './routes/api/public/hooks/orchestrate'
+import { Route as ApiPublicHooksPlatformAlertsRouteImport } from './routes/api/public/hooks/platform-alerts'
 import { Route as ApiPublicHooksRecoveryRouteImport } from './routes/api/public/hooks/recovery'
 import { Route as ApiPublicHooksSmsRefreshStatusRouteImport } from './routes/api/public/hooks/sms-refresh-status'
 import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/public/hooks/webhook-replay'
@@ -540,6 +541,12 @@ const ApiPublicHooksOrchestrateRoute =
     path: '/api/public/hooks/orchestrate',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksPlatformAlertsRoute =
+  ApiPublicHooksPlatformAlertsRouteImport.update({
+    id: '/api/public/hooks/platform-alerts',
+    path: '/api/public/hooks/platform-alerts',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksRecoveryRoute = ApiPublicHooksRecoveryRouteImport.update({
   id: '/api/public/hooks/recovery',
   path: '/api/public/hooks/recovery',
@@ -744,6 +751,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/journey-scan': typeof ApiPublicHooksJourneyScanRoute
   '/api/public/hooks/morning-check': typeof ApiPublicHooksMorningCheckRoute
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
+  '/api/public/hooks/platform-alerts': typeof ApiPublicHooksPlatformAlertsRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
@@ -849,6 +857,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/journey-scan': typeof ApiPublicHooksJourneyScanRoute
   '/api/public/hooks/morning-check': typeof ApiPublicHooksMorningCheckRoute
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
+  '/api/public/hooks/platform-alerts': typeof ApiPublicHooksPlatformAlertsRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
@@ -955,6 +964,7 @@ export interface FileRoutesById {
   '/api/public/hooks/journey-scan': typeof ApiPublicHooksJourneyScanRoute
   '/api/public/hooks/morning-check': typeof ApiPublicHooksMorningCheckRoute
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
+  '/api/public/hooks/platform-alerts': typeof ApiPublicHooksPlatformAlertsRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
@@ -1062,6 +1072,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/journey-scan'
     | '/api/public/hooks/morning-check'
     | '/api/public/hooks/orchestrate'
+    | '/api/public/hooks/platform-alerts'
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
@@ -1167,6 +1178,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/journey-scan'
     | '/api/public/hooks/morning-check'
     | '/api/public/hooks/orchestrate'
+    | '/api/public/hooks/platform-alerts'
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
@@ -1272,6 +1284,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/journey-scan'
     | '/api/public/hooks/morning-check'
     | '/api/public/hooks/orchestrate'
+    | '/api/public/hooks/platform-alerts'
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
@@ -1360,6 +1373,7 @@ export interface RootRouteChildren {
   ApiPublicHooksJourneyScanRoute: typeof ApiPublicHooksJourneyScanRoute
   ApiPublicHooksMorningCheckRoute: typeof ApiPublicHooksMorningCheckRoute
   ApiPublicHooksOrchestrateRoute: typeof ApiPublicHooksOrchestrateRoute
+  ApiPublicHooksPlatformAlertsRoute: typeof ApiPublicHooksPlatformAlertsRoute
   ApiPublicHooksRecoveryRoute: typeof ApiPublicHooksRecoveryRoute
   ApiPublicHooksSmsRefreshStatusRoute: typeof ApiPublicHooksSmsRefreshStatusRoute
   ApiPublicHooksWebhookReplayRoute: typeof ApiPublicHooksWebhookReplayRoute
@@ -1959,6 +1973,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksOrchestrateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/platform-alerts': {
+      id: '/api/public/hooks/platform-alerts'
+      path: '/api/public/hooks/platform-alerts'
+      fullPath: '/api/public/hooks/platform-alerts'
+      preLoaderRoute: typeof ApiPublicHooksPlatformAlertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/recovery': {
       id: '/api/public/hooks/recovery'
       path: '/api/public/hooks/recovery'
@@ -2327,6 +2348,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksJourneyScanRoute: ApiPublicHooksJourneyScanRoute,
   ApiPublicHooksMorningCheckRoute: ApiPublicHooksMorningCheckRoute,
   ApiPublicHooksOrchestrateRoute: ApiPublicHooksOrchestrateRoute,
+  ApiPublicHooksPlatformAlertsRoute: ApiPublicHooksPlatformAlertsRoute,
   ApiPublicHooksRecoveryRoute: ApiPublicHooksRecoveryRoute,
   ApiPublicHooksSmsRefreshStatusRoute: ApiPublicHooksSmsRefreshStatusRoute,
   ApiPublicHooksWebhookReplayRoute: ApiPublicHooksWebhookReplayRoute,

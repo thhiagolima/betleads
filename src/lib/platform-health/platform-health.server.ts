@@ -336,7 +336,7 @@ export async function adminPlatformHealthFor(
     if (inflight) return inflight;
   }
 
-  const load = loadPlatformHealth(opts.now ?? new Date());
+  const load = computePlatformHealth(opts.now ?? new Date());
   if (opts.fresh) return load;
   inflight = load;
   try {
@@ -346,7 +346,13 @@ export async function adminPlatformHealthFor(
   }
 }
 
-async function loadPlatformHealth(now: Date): Promise<PlatformHealth> {
+/**
+ * One full health computation at `now`: no auth check and no cache. Used by
+ * `adminPlatformHealthFor` (behind `assertSuperAdmin` + the 60 s cache) and
+ * by the platform-alerts cron (`alert-store.server.ts`), which is already
+ * behind `requireSharedSecret`.
+ */
+export async function computePlatformHealth(now: Date): Promise<PlatformHealth> {
   const windows = healthWindows(presetRange("today", now).from);
   const alerts: PlatformAlert[] = [];
   const failed = new Set<string>();
