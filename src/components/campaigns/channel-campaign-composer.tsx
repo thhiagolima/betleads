@@ -51,6 +51,7 @@ import { bulkDispatchCalls, listCallScripts } from "@/lib/calls.functions";
 import { tenantSafeChannelError } from "@/lib/channel-error";
 import { type CampaignDraft, type CampaignDraftPayload } from "@/lib/campaign-drafts.functions";
 import { useCampaignDataSource } from "@/hooks/use-campaign-data-source";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import {
   bulkDispatchExpertCalls,
   getExpertCampaignUsage,
@@ -210,6 +211,7 @@ export function ChannelCampaignComposer({
   // house-only controls are hidden for the expert below.
   const source = useCampaignDataSource();
   const isExpert = source.isExpert;
+  const { isEnabled } = useEnabledChannels();
   const resolveAudience = useServerFn(resolveCampaignAudience);
   const getDraft = source.getDraft;
   const saveDraft = source.saveDraft;
@@ -245,7 +247,14 @@ export function ChannelCampaignComposer({
     queryFn: () => getWebpushIntegration(),
     enabled: open && !isExpert,
   });
-  const webpushAvailable = !isExpert && webpushIntegration.data?.enabled === true;
+  const webpushAvailable =
+    !isExpert && isEnabled("webpush") && webpushIntegration.data?.enabled === true;
+  // Channels offered in the tab bar: web push needs the integration active
+  // on top of the channel switch; the others follow the house's channel
+  // switches directly.
+  const visibleChannels = (Object.keys(channelMeta) as Channel[]).filter((item) =>
+    item === "webpush" ? webpushAvailable : isEnabled(item),
+  );
 
   const composerOptions = useQuery({
     queryKey: COMPOSER_OPTIONS_QUERY_KEY,
@@ -501,13 +510,19 @@ export function ChannelCampaignComposer({
   // can seed `channel` with "webpush" before the integration's enabled state
   // is known, or for a house/expert where it's disabled or never comes
   // available (expert: `webpushAvailable` is house-only, so it's always
-  // false for them). Clamp back to the default channel as soon as that's
-  // certain — the tab itself is already filtered out of the SegmentedFilter,
-  // but the channel state must not silently stay on a tab nobody can select.
+  // false for them) — or with any channel the super admin has since turned
+  // off for the house. Clamp back to a channel still offered as soon as
+  // that's certain — the tab itself is already filtered out of the
+  // SegmentedFilter, but the channel state must not silently stay on a tab
+  // nobody can select.
   useEffect(() => {
-    if (!open || channel !== "webpush") return;
-    if (isExpert || (webpushIntegration.isSuccess && !webpushAvailable)) setChannel("sms");
-  }, [open, channel, isExpert, webpushIntegration.isSuccess, webpushAvailable]);
+    if (!open) return;
+    if (channel === "webpush") {
+      if (isExpert || (webpushIntegration.isSuccess && !webpushAvailable)) setChannel("sms");
+      return;
+    }
+    if (!visibleChannels.includes(channel)) setChannel(visibleChannels[0] ?? "sms");
+  }, [open, channel, isExpert, webpushIntegration.isSuccess, webpushAvailable, visibleChannels]);
 
   useEffect(() => {
     const draft = draftQuery.data as CampaignDraft | undefined;
@@ -1264,12 +1279,10 @@ export function ChannelCampaignComposer({
                       audienceMutation.mutate({ criteria: selected.criteria, channel: item });
                     }
                   }}
-                  items={(Object.keys(channelMeta) as Channel[])
-                    .filter((item) => item !== "webpush" || webpushAvailable)
-                    .map((item) => ({
-                      value: item,
-                      label: channelMeta[item].label,
-                    }))}
+                  items={visibleChannels.map((item) => ({
+                    value: item,
+                    label: channelMeta[item].label,
+                  }))}
                 />
               </div>
               <div className="space-y-2">

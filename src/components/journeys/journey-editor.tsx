@@ -27,6 +27,7 @@ import {
   listJourneyVoiceAssets,
 } from "@/lib/journey-voice-assets.functions";
 import { getComposerOptions } from "@/lib/house-config.functions";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
 import { ShortDomainSelect } from "@/components/house-config/short-domain-select";
 import { EmailSenderSelect } from "@/components/house-config/email-sender-select";
@@ -316,6 +317,7 @@ export function JourneyEditor({
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isEnabled } = useEnabledChannels();
   const save = useServerFn(saveJourney);
   const statusControl = useJourneyStatusControl();
   const listJourneysFn = useServerFn(listJourneys);
@@ -1017,7 +1019,12 @@ export function JourneyEditor({
                   onClick={() => setSteps((all) => all.filter((_, n) => n !== i))}
                 />
               </div>
-              {s.kind === "wait" ? (
+              {(s.kind === "sms" || s.kind === "email" || s.kind === "voice") &&
+              !isEnabled(s.kind) ? (
+                <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-[12.5px] text-warning">
+                  Canal desabilitado — será pulado
+                </p>
+              ) : s.kind === "wait" ? (
                 <div className="space-y-1.5">
                   <Label htmlFor={`step-${i}-wait`}>Tempo de espera</Label>
                   <div className="flex max-w-sm gap-2">
@@ -1179,15 +1186,21 @@ export function JourneyEditor({
             <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("wait")}>
               <Clock3 className="mr-2 h-4 w-4" aria-hidden="true" /> Espera
             </DropdownMenuItem>
-            <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("sms")}>
-              <MessageSquare className="mr-2 h-4 w-4" aria-hidden="true" /> SMS
-            </DropdownMenuItem>
-            <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("email")}>
-              <Mail className="mr-2 h-4 w-4" aria-hidden="true" /> E-mail
-            </DropdownMenuItem>
-            <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("voice")}>
-              <Phone className="mr-2 h-4 w-4" aria-hidden="true" /> Ligação (voz)
-            </DropdownMenuItem>
+            {isEnabled("sms") && (
+              <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("sms")}>
+                <MessageSquare className="mr-2 h-4 w-4" aria-hidden="true" /> SMS
+              </DropdownMenuItem>
+            )}
+            {isEnabled("email") && (
+              <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("email")}>
+                <Mail className="mr-2 h-4 w-4" aria-hidden="true" /> E-mail
+              </DropdownMenuItem>
+            )}
+            {isEnabled("voice") && (
+              <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("voice")}>
+                <Phone className="mr-2 h-4 w-4" aria-hidden="true" /> Ligação (voz)
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         <div className="space-y-3 rounded-lg border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground">

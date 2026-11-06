@@ -30,6 +30,7 @@ import {
   setJourneyExpress,
 } from "@/lib/journeys.functions";
 import { useMoney } from "@/hooks/use-tenant-currency";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import { EXPRESS_JOURNEY_HINT } from "@/lib/journey-express";
 import { ENROLLMENT_STATUS_LABELS } from "@/lib/player-journeys";
 import { JourneyMapCard } from "@/components/journeys/journey-map-card";
@@ -181,6 +182,7 @@ export function JourneysHub() {
   const navigate = useNavigate();
   // Recuperado = depósito da casa, na moeda dela.
   const { money } = useMoney();
+  const { isEnabled } = useEnabledChannels();
   const queryClient = useQueryClient();
   const list = useServerFn(listJourneys);
   const changeExpress = useServerFn(setJourneyExpress);
@@ -197,7 +199,12 @@ export function JourneysHub() {
   // Active tab lives in the URL hash (#jornadas, #mapa, #fila…), pushed to the
   // history so Voltar returns to the previous tab.
   const hash = useLocation({ select: (location) => location.hash });
-  const view = viewFromHash(hash);
+  // "Fluxos de voz" só existe com o canal de voz ligado.
+  const visibleHubViews = HUB_VIEWS.filter(
+    (item) => item.value !== "flows" || isEnabled("voice"),
+  );
+  const rawView = viewFromHash(hash);
+  const view = visibleHubViews.some((item) => item.value === rawView) ? rawView : "journeys";
   const setView = (next: HubView) => {
     void navigate({
       to: "/automacoes",
@@ -227,6 +234,9 @@ export function JourneysHub() {
     queryFn: () => legacyFn(),
     enabled: Boolean(journeys.data) && view === "journeys",
   });
+  const visibleLegacyItems = (legacy.data?.items ?? []).filter((item: LegacyJourney) =>
+    isEnabled(item.channel),
+  );
   const express = useMutation({
     mutationFn: (input: { id: string; express: boolean }) => changeExpress({ data: input }),
     onSuccess: async (result) => {
@@ -405,7 +415,7 @@ export function JourneysHub() {
           value={view}
           onValueChange={setView}
           label="Seções de Automações"
-          items={HUB_VIEWS.map((item) => ({
+          items={visibleHubViews.map((item) => ({
             value: item.value,
             label:
               item.value === "conflicts" && pausedByPriority > 0
@@ -600,7 +610,7 @@ export function JourneysHub() {
         </HomeCard>
       )}
       {view === "dead" && <DeadLeadsPanel onOpenSettings={() => void openContactSettings()} />}
-      {view === "flows" && <FlowsTab />}
+      {view === "flows" && isEnabled("voice") && <FlowsTab />}
       {view === "map" && (
         <JourneyMapCard
           journeys={allJourneys.map((journey) => ({
@@ -609,7 +619,7 @@ export function JourneysHub() {
           }))}
         />
       )}
-      {view === "journeys" && ((legacy.data?.items ?? []).length > 0 || legacy.isLoading) && (
+      {view === "journeys" && (visibleLegacyItems.length > 0 || legacy.isLoading) && (
         <HomeCard className="overflow-hidden border-dashed">
           <div id="legado" className="border-b border-border px-4 py-3 sm:px-5">
             <div className="flex flex-wrap items-center gap-2">
@@ -627,7 +637,7 @@ export function JourneysHub() {
             </p>
           ) : (
             <ul className="divide-y divide-border">
-              {(legacy.data?.items ?? []).map((item: LegacyJourney) => (
+              {visibleLegacyItems.map((item: LegacyJourney) => (
                 <li
                   key={`${item.sourceType}:${item.sourceId}`}
                   className="flex flex-col gap-3 px-4 py-3 sm:px-5 lg:flex-row lg:items-center"

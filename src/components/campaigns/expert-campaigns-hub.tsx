@@ -44,11 +44,13 @@ import {
 import { EXPERT_USAGE_QUERY_KEY, type ExpertCampaignUsageData } from "@/lib/expert-campaign-usage";
 import { num } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 
 const KPI_WINDOW_DAYS = 30;
 
 export function ExpertCampaignsHub() {
   const queryClient = useQueryClient();
+  const { isEnabled } = useEnabledChannels();
   const source = useCampaignDataSource();
   const listCampaignsFn = useServerFn(listExpertCampaigns);
   const usageFn = useServerFn(getExpertCampaignUsage);
@@ -63,7 +65,10 @@ export function ExpertCampaignsHub() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get("newChannel");
-    if (requested === "email" || requested === "voice" || requested === "sms") {
+    if (
+      (requested === "email" || requested === "voice" || requested === "sms") &&
+      isEnabled(requested)
+    ) {
       setInitialChannel(requested);
       setComposerOpen(true);
     } else if (params.get("newCampaign") === "1") {
@@ -71,6 +76,9 @@ export function ExpertCampaignsHub() {
       setInitialAudienceId(audienceFromSearch(params.get("audience")));
       setComposerOpen(true);
     }
+    // Only on mount, like the URL params it reads; isEnabled already falls
+    // back to the right defaults the first time it's called.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const campaigns = useQuery({
@@ -115,6 +123,7 @@ export function ExpertCampaignsHub() {
 
   const all: Campaign[] = ((campaigns.data?.items ?? []) as ExpertCampaignItem[])
     .map(expertCampaignToRow)
+    .filter((campaign) => isEnabled(campaign.channel))
     .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
   const normalizedSearch = search.trim().toLowerCase();
   const rows = all.filter(

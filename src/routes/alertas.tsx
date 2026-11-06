@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/format";
 import { useMoney } from "@/hooks/use-tenant-currency";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import type { TenantCurrency } from "@/lib/currency";
 import { toast } from "sonner";
 import { requestConfirmation } from "@/components/system-dialog-host";
@@ -349,6 +350,7 @@ function AlertRow({
   onAction: (player: EnrichedPlayer, alerta: Alerta, acao: AcaoRecomendada) => void;
 }) {
   const { money } = useMoney();
+  const { isEnabled } = useEnabledChannels();
   const c = priorityColor(p.topPrioridade);
   const dep = Number(p.total_depositado ?? 0);
   const saldo = Number(p.saldo_carteira ?? 0);
@@ -549,7 +551,9 @@ function AlertRow({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {ACOES.filter((a) => a !== principal.acaoRecomendada).map((a) => (
+              {ACOES.filter(
+                (a) => a !== principal.acaoRecomendada && (a !== "sms" || isEnabled("sms")),
+              ).map((a) => (
                 <DropdownMenuItem key={a} onSelect={() => onAction(p, principal, a)}>
                   {ACAO_BOTAO[a]}
                 </DropdownMenuItem>

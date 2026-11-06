@@ -30,6 +30,7 @@ import {
   SYSTEM_SMS_AUDIENCES,
   type SmsAudienceCriteria,
 } from "@/lib/sms-audience-criteria";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 
 export const Route = createFileRoute("/publicos")({ component: PublicosPage });
 
@@ -69,6 +70,7 @@ function PublicosPage() {
   // expert lists/saves their own audiences, sees the house's read-only, and
   // the server limits every count to their leads.
   const source = useCampaignDataSource();
+  const { isEnabled } = useEnabledChannels();
   const isExpert = source.isExpert;
   const listFn = source.listAudiences;
   const saveFn = source.saveAudience;
@@ -456,8 +458,13 @@ function PublicosPage() {
             </p>
             {!calculating && preview.data && isExpert && (
               <p className="mt-1 text-meta text-muted-foreground">
-                {preview.data.recipientTotal.toLocaleString("pt-BR")} com celular ·{" "}
-                {(preview.data.emailEligible ?? 0).toLocaleString("pt-BR")} com e-mail
+                {preview.data.recipientTotal.toLocaleString("pt-BR")} com celular
+                {isEnabled("email") && (
+                  <>
+                    {" "}
+                    · {(preview.data.emailEligible ?? 0).toLocaleString("pt-BR")} com e-mail
+                  </>
+                )}
               </p>
             )}
             {!calculating && preview.data && !isExpert && (

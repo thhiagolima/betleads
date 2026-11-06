@@ -32,6 +32,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
+import { BILLING_ITEM_CHANNEL } from "@/lib/tenant-channels.shared";
+import { BILLING_ITEMS } from "@/lib/format";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { Badge } from "@/components/ui/badge";
@@ -136,6 +139,10 @@ function PlanoECreditosPage() {
   // The house is chosen only in the header; this page follows it.
   const tenant = useActiveTenant();
   const tenantId = tenant.data?.activeTenantId ?? null;
+  const { isEnabled } = useEnabledChannels();
+  const visibleBillingItems = BILLING_ITEMS.filter((item) =>
+    isEnabled(BILLING_ITEM_CHANNEL[item]),
+  );
   const [buyOpen, setBuyOpen] = useState(false);
   const [payCharge, setPayCharge] = useState<PixChargePayload | null>(null);
   const [paySuccessText, setPaySuccessText] = useState("Mensalidade paga.");
@@ -520,9 +527,13 @@ function PlanoECreditosPage() {
       </Dialog>
 
       {/* Bloco 4: Consumo do mês e extrato */}
-      <MonthUsageCard monthUsage={monthUsage} prices={prices} />
+      <MonthUsageCard
+        monthUsage={monthUsage}
+        prices={prices}
+        visibleItems={visibleBillingItems}
+      />
 
-      <CurrentPricesCard prices={prices} />
+      <CurrentPricesCard prices={prices} visibleItems={visibleBillingItems} />
 
       <Card>
         <CardHeader>

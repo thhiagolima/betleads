@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { num } from "@/lib/format";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import {
   audienceFromSearch,
   campaignStopReason,
@@ -145,6 +146,7 @@ type WebpushCampaignSummaryRow = {
 
 export function CampaignsHub() {
   const queryClient = useQueryClient();
+  const { isEnabled } = useEnabledChannels();
   const listCampaigns = useServerFn(listScheduledSmsCampaigns);
   const listEmailCampaignsFn = useServerFn(listEmailCampaigns);
   const listCallQueueFn = useServerFn(listCallQueue);
@@ -170,10 +172,11 @@ export function CampaignsHub() {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get("newChannel");
     if (
-      requested === "email" ||
-      requested === "voice" ||
-      requested === "sms" ||
-      requested === "webpush"
+      (requested === "email" ||
+        requested === "voice" ||
+        requested === "sms" ||
+        requested === "webpush") &&
+      isEnabled(requested)
     ) {
       setInitialChannel(requested);
       setComposerOpen(true);
@@ -184,6 +187,9 @@ export function CampaignsHub() {
       setInitialAudienceId(audienceFromSearch(params.get("audience")));
       setComposerOpen(true);
     }
+    // Only on mount, like the URL params it reads; isEnabled already falls
+    // back to the right defaults the first time it's called.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const campaigns = useQuery({
@@ -340,9 +346,9 @@ export function CampaignsHub() {
     cancellable: campaign.status === "agendada" || campaign.status === "pausada",
     resumable: campaign.status === "pausada",
   }));
-  const all: Campaign[] = [...smsCampaigns, ...emailRows, ...voiceRows, ...webpushRows].sort(
-    (a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
-  );
+  const all: Campaign[] = [...smsCampaigns, ...emailRows, ...voiceRows, ...webpushRows]
+    .filter((campaign) => isEnabled(campaign.channel))
+    .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
   const normalizedSearch = search.trim().toLowerCase();
   const rows = all.filter(
     (campaign) =>
@@ -390,9 +396,11 @@ export function CampaignsHub() {
         subtitle="Envie SMS, e-mail ou voz para um público e acompanhe o resultado de cada envio."
         actions={
           <>
-            <Button variant="outline" onClick={() => setIndividualOpen(true)}>
-              <Send /> Envio de teste
-            </Button>
+            {(isEnabled("sms") || isEnabled("email") || isEnabled("voice")) && (
+              <Button variant="outline" onClick={() => setIndividualOpen(true)}>
+                <Send /> Envio de teste
+              </Button>
+            )}
             <Button onClick={openNewCampaign}>
               <Plus /> Nova campanha
             </Button>

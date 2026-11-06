@@ -30,6 +30,7 @@ import {
   saveChannelConsent,
   saveVoiceContactPolicy,
 } from "@/lib/consent.functions";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 
 export const Route = createFileRoute("/consentimentos")({ component: ConsentPage });
 
@@ -120,14 +121,23 @@ function ConsentPage() {
   const importFn = useServerFn(importChannelConsents);
   const savePolicyFn = useServerFn(saveVoiceContactPolicy);
   const exportFn = useServerFn(exportChannelConsents);
+  const { isEnabled } = useEnabledChannels();
   const navigate = useNavigate();
+  const visibleViews = VIEWS.filter((item) => item.value !== "voz" || isEnabled("voice"));
   const hash = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
-  const view: View = VIEWS.find((item) => item.value === hash)?.value ?? "base";
+  const rawView = VIEWS.find((item) => item.value === hash)?.value ?? "base";
+  const view: View = visibleViews.some((item) => item.value === rawView) ? rawView : "base";
   const setView = (next: View) =>
     void navigate({ to: "/consentimentos", hash: next === "base" ? undefined : next });
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [channel, setChannel] = useState<Channel>("sms");
+  useEffect(() => {
+    if (!isEnabled(channel)) {
+      const fallback = (["sms", "email", "voice"] as Channel[]).find((c) => isEnabled(c));
+      if (fallback) setChannel(fallback);
+    }
+  }, [channel, isEnabled]);
   const [subject, setSubject] = useState("");
   const [status, setStatus] = useState<Status>("revoked");
   const [reason, setReason] = useState("Pedido do titular");
@@ -241,7 +251,7 @@ function ConsentPage() {
         value={view}
         onValueChange={setView}
         label="Seções de consentimentos"
-        items={VIEWS}
+        items={visibleViews}
       />
 
       <div role="tabpanel" aria-labelledby={`tab-${view}`} className="space-y-4">
@@ -372,9 +382,9 @@ function ConsentPage() {
                     value={channel}
                     onChange={(e) => setChannel(e.target.value as Channel)}
                   >
-                    <option value="sms">SMS</option>
-                    <option value="email">E-mail</option>
-                    <option value="voice">Voz</option>
+                    {isEnabled("sms") && <option value="sms">SMS</option>}
+                    {isEnabled("email") && <option value="email">E-mail</option>}
+                    {isEnabled("voice") && <option value="voice">Voz</option>}
                   </select>
                 </div>
                 <div className="md:col-span-2">

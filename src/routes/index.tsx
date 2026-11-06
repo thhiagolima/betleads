@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useMoney } from "@/hooks/use-tenant-currency";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import { POLL_INTERVALS, useUpdatedAgo } from "@/hooks/use-updated-ago";
 import { getDashboardSummary } from "@/lib/dashboard.functions";
 import { brl, num, timeAgo } from "@/lib/format";
@@ -127,6 +128,7 @@ function CashflowChart({ data }: { data: DashboardData }) {
 
 function CrmCard({ data }: { data: DashboardData }) {
   const { currency, money } = useMoney();
+  const { isEnabled } = useEnabledChannels();
   // Recuperado vem na moeda da casa e o gasto em SMS é sempre BRL: só faz
   // sentido dividir um pelo outro quando a casa também opera em BRL.
   const roi = currency === "BRL" ? data.messageRoi : 0;
@@ -142,7 +144,7 @@ function CrmCard({ data }: { data: DashboardData }) {
           : "Ainda não há depósitos após clique em link no período."}
       </p>
       <div className="mt-3">
-        <MetricRow label="Gasto em SMS" value={brl(data.messageCost)} />
+        {isEnabled("sms") && <MetricRow label="Gasto em SMS" value={brl(data.messageCost)} />}
         <MetricRow
           label="Retorno sobre o envio"
           value={roi > 0 ? fmtRoi(roi) : "—"}

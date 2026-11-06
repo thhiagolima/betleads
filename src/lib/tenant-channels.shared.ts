@@ -27,6 +27,14 @@ export const STEP_TYPE_CHANNEL: Partial<Record<string, ProviderChannel>> = {
   voice: "voice",
 };
 
+/** Item de cobrança (`src/lib/format.ts` BillingItem) -> canal correspondente. */
+export const BILLING_ITEM_CHANNEL: Record<"sms" | "voice_30s" | "email" | "webpush", ProviderChannel> = {
+  sms: "sms",
+  voice_30s: "voice",
+  email: "email",
+  webpush: "webpush",
+};
+
 /** Formato mínimo de um passo de jornada usado para o diff de canal (Task 7). */
 export type StepLike = {
   id?: string | null;
