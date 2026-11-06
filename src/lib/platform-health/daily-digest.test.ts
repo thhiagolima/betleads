@@ -6,6 +6,8 @@ import type { StoredAlert } from "./alert-lifecycle";
 import { buildDailyDigest } from "./daily-digest";
 import type { HouseHealthRow } from "./house-health";
 
+const NOW = new Date("2026-11-05T11:00:00.000Z");
+
 function alert(overrides: Partial<StoredAlert> = {}): StoredAlert {
   return {
     id: "a1",
@@ -55,6 +57,7 @@ describe("buildDailyDigest", () => {
   it("renders the three sections with their content and the Saúde link", () => {
     const { html } = buildDailyDigest({
       day: "2026-11-05",
+      now: NOW,
       openAlerts: [alert()],
       houses: [house()],
       debtors: [debtor()],
@@ -75,6 +78,7 @@ describe("buildDailyDigest", () => {
   it("shows 'Nada aqui hoje.' for every empty section", () => {
     const { html } = buildDailyDigest({
       day: "2026-11-05",
+      now: NOW,
       openAlerts: [],
       houses: [],
       debtors: [],
@@ -90,6 +94,7 @@ describe("buildDailyDigest", () => {
   it("lists silenced alerts separately, after the active ones", () => {
     const { html } = buildDailyDigest({
       day: "2026-11-05",
+      now: NOW,
       openAlerts: [
         alert({ alertKey: "job:a", message: "Ativo" }),
         alert({
@@ -111,9 +116,31 @@ describe("buildDailyDigest", () => {
     expect(calmIdx).toBeGreaterThan(silencedHeadingIdx);
   });
 
+  it("an expired silence is listed among the active alerts, not under Silenciados", () => {
+    const { html } = buildDailyDigest({
+      day: "2026-11-05",
+      now: NOW,
+      openAlerts: [
+        alert({
+          alertKey: "job:b",
+          message: "Silêncio vencido",
+          silencedUntil: "2026-11-05T10:00:00.000Z",
+        }),
+      ],
+      houses: [],
+      debtors: [],
+      owedCents: 0,
+    });
+
+    const silencedHeadingIdx = html.indexOf("Silenciados");
+    expect(html.indexOf("Silêncio vencido")).toBeGreaterThan(-1);
+    expect(html.indexOf("Silêncio vencido")).toBeLessThan(silencedHeadingIdx);
+  });
+
   it("puts critical alerts before warnings in 'Alertas abertos'", () => {
     const { html } = buildDailyDigest({
       day: "2026-11-05",
+      now: NOW,
       openAlerts: [
         alert({ alertKey: "warn:1", severity: "warning", message: "Aviso" }),
         alert({ alertKey: "crit:1", severity: "critical", message: "Crítico" }),
@@ -129,6 +156,7 @@ describe("buildDailyDigest", () => {
   it("subject counts open alerts and red houses in pt-BR", () => {
     const { subject } = buildDailyDigest({
       day: "2026-11-05",
+      now: NOW,
       openAlerts: [alert({ alertKey: "a" }), alert({ alertKey: "b" })],
       houses: [house({ level: "red" }), house({ tenantId: "t3", level: "yellow" })],
       debtors: [],
@@ -141,6 +169,7 @@ describe("buildDailyDigest", () => {
   it("escapes a house name containing <script>", () => {
     const { html } = buildDailyDigest({
       day: "2026-11-05",
+      now: NOW,
       openAlerts: [],
       houses: [house({ name: "<script>alert(1)</script>" })],
       debtors: [],

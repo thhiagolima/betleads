@@ -5,10 +5,14 @@
 // Idempotency: `platform_digest_log` has a primary key on `digest_day`
 // (Brasília calendar day). `runDailyDigest` claims the day with a plain
 // insert before doing any work; a concurrent/duplicate run collides (23505)
-// and is told `already_sent` without e-mailing anyone. The claim happens
-// before the flag/recipients checks are resolved into an e-mail, so a second
-// call on the same day never re-sends even if the first call found no
-// recipients.
+// and is told `already_sent` without e-mailing anyone. When the run then
+// cannot deliver (no recipients, a throw, or no send accepted) it deletes
+// its claim, so the 11:30 UTC retry cron (or a manual re-run) the same day
+// still sends; after a delivered digest the retry is a no-op.
+//
+// The alerts listed are the ones computed this run (`health.alerts`, joined
+// with their stored silence), not the `platform_alerts` table, so a stalled
+// alerts cron can never produce an "all clear" digest.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
@@ -20,7 +24,6 @@ import { sendPlatformEmail } from "@/lib/billing/billing-emails.server";
 import { brtDayKey } from "@/lib/tz";
 
 import { isPlatformAlertsEmailEnabled, listSuperAdminEmails } from "./alert-email.server";
-import { loadOpenAlerts } from "./alert-store.server";
 import { buildDailyDigest } from "./daily-digest";
 import type { HouseHealthRow } from "./house-health";
 import { computePlatformHealth } from "./platform-health.server";
@@ -45,6 +48,12 @@ async function claimDigestDay(day: string): Promise<boolean> {
   if (!error) return true;
   if ((error as DbError)?.code === UNIQUE_VIOLATION) return false;
   fail(error);
+}
+
+/** Deletes today's claim so a later run the same day can send. */
+async function releaseDigestDay(day: string): Promise<void> {
+  const { error } = await db().from(DIGEST_TABLE).delete().eq("digest_day", day);
+  if (error) fail(error);
 }
 
 async function recordRecipients(day: string, recipients: number): Promise<void> {
@@ -105,49 +114,41 @@ async function loadDebtors(
   return { debtors: summary.debtors, owedCents: summary.owedCents };
 }
 
-/**
- * One daily digest run. Off by default (`PLATFORM_ALERTS_EMAIL_ENABLED`);
- * when on, claims the Brasília day in `platform_digest_log` and e-mails
- * every super admin once (`idempotencyKey` `platform-digest:<day>:<index>`).
- */
-export async function runDailyDigest(
-  now: Date,
-): Promise<{
+type DigestResult = {
   sent: boolean;
-  reason?: "already_sent" | "disabled" | "no_recipients";
+  reason?: "already_sent" | "disabled" | "no_recipients" | "failed";
+  /** E-mails the provider accepted. */
   recipients: number;
-}> {
-  if (!isPlatformAlertsEmailEnabled()) {
-    return { sent: false, reason: "disabled", recipients: 0 };
-  }
+};
 
-  const day = brtDayKey(now);
-  const claimed = await claimDigestDay(day);
-  if (!claimed) {
-    return { sent: false, reason: "already_sent", recipients: 0 };
-  }
-
+/** Builds and sends the digest for `day`; returns how many sends were accepted (no recipients: null). */
+async function deliverDigest(day: string, now: Date): Promise<number | null> {
   const recipients = await listSuperAdminEmails();
-  if (recipients.length === 0) {
-    return { sent: false, reason: "no_recipients", recipients: 0 };
-  }
+  if (recipients.length === 0) return null;
 
-  const [health, openAlerts] = await Promise.all([computePlatformHealth(now), loadOpenAlerts()]);
+  const health = await computePlatformHealth(now);
   const { debtors, owedCents } = await loadDebtors(health.houses, now);
 
   const { subject, html } = buildDailyDigest({
     day,
-    openAlerts,
+    now,
+    openAlerts: health.alerts.map((alert) => ({
+      severity: alert.severity,
+      message: alert.message,
+      silencedUntil: alert.stored?.silencedUntil ?? null,
+    })),
     houses: health.houses,
     debtors,
     owedCents,
   });
 
+  let accepted = 0;
   for (const [index, to] of recipients.entries()) {
     const idempotencyKey = `platform-digest:${day}:${index}`;
     try {
       const result = await sendPlatformEmail({ to, subject, html, idempotencyKey });
-      if (!result.ok) {
+      if (result.ok) accepted += 1;
+      else {
         console.error("[platform-digest] provider refused the send", {
           recipientIndex: index,
           status: result.status,
@@ -160,8 +161,48 @@ export async function runDailyDigest(
       });
     }
   }
+  return accepted;
+}
 
-  await recordRecipients(day, recipients.length);
+/**
+ * One daily digest run. Off by default (`PLATFORM_ALERTS_EMAIL_ENABLED`);
+ * when on, claims the Brasília day in `platform_digest_log` and e-mails
+ * every super admin once (`idempotencyKey` `platform-digest:<day>:<index>`).
+ * No recipients, a throw or no accepted send releases the day
+ * (`no_recipients` / `failed`) so a retry the same day can send.
+ */
+export async function runDailyDigest(now: Date): Promise<DigestResult> {
+  if (!isPlatformAlertsEmailEnabled()) {
+    return { sent: false, reason: "disabled", recipients: 0 };
+  }
 
-  return { sent: true, recipients: recipients.length };
+  const day = brtDayKey(now);
+  const claimed = await claimDigestDay(day);
+  if (!claimed) {
+    return { sent: false, reason: "already_sent", recipients: 0 };
+  }
+
+  let accepted: number | null;
+  try {
+    accepted = await deliverDigest(day, now);
+  } catch (err) {
+    console.error("[platform-digest] digest failed", {
+      day,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    await releaseDigestDay(day);
+    return { sent: false, reason: "failed", recipients: 0 };
+  }
+
+  if (accepted === null) {
+    await releaseDigestDay(day);
+    return { sent: false, reason: "no_recipients", recipients: 0 };
+  }
+  if (accepted === 0) {
+    await releaseDigestDay(day);
+    return { sent: false, reason: "failed", recipients: 0 };
+  }
+
+  await recordRecipients(day, accepted);
+  return { sent: true, recipients: accepted };
 }

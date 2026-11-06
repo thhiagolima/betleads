@@ -12,16 +12,12 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 
 const mocks = vi.hoisted(() => ({
   computePlatformHealth: vi.fn(),
-  loadOpenAlerts: vi.fn(),
   listSuperAdminEmails: vi.fn(),
   sendPlatformEmail: vi.fn(),
 }));
 
 vi.mock("./platform-health.server", () => ({
   computePlatformHealth: mocks.computePlatformHealth,
-}));
-vi.mock("./alert-store.server", () => ({
-  loadOpenAlerts: mocks.loadOpenAlerts,
 }));
 vi.mock("./alert-email.server", () => ({
   listSuperAdminEmails: mocks.listSuperAdminEmails,
@@ -40,8 +36,7 @@ const NOW = new Date("2026-11-05T11:00:00.000Z");
 
 beforeEach(() => {
   fake.admin.reset();
-  mocks.computePlatformHealth.mockReset().mockResolvedValue({ houses: [] });
-  mocks.loadOpenAlerts.mockReset().mockResolvedValue([]);
+  mocks.computePlatformHealth.mockReset().mockResolvedValue({ houses: [], alerts: [] });
   mocks.listSuperAdminEmails.mockReset().mockResolvedValue(["root@betleads.io"]);
   mocks.sendPlatformEmail.mockReset().mockResolvedValue({ ok: true, status: 200 });
 });
@@ -67,6 +62,92 @@ describe("runDailyDigest", () => {
 
     expect(result).toEqual({ sent: false, reason: "no_recipients", recipients: 0 });
     expect(mocks.sendPlatformEmail).not.toHaveBeenCalled();
+    // The day is released so a later run (e.g. the 11:30 retry) can still send.
+    expect(fake.admin.rows("platform_digest_log")).toHaveLength(0);
+  });
+
+  it("a throw after the claim releases the day and reports failed; a retry sends", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.computePlatformHealth.mockRejectedValueOnce(new Error("health down"));
+
+    const result = await runDailyDigest(NOW);
+
+    expect(result).toEqual({ sent: false, reason: "failed", recipients: 0 });
+    expect(fake.admin.rows("platform_digest_log")).toHaveLength(0);
+    expect(errorSpy).toHaveBeenCalled();
+
+    const retry = await runDailyDigest(new Date(NOW.getTime() + 30 * 60_000));
+    expect(retry).toEqual({ sent: true, recipients: 1 });
+    expect(fake.admin.rows("platform_digest_log")).toHaveLength(1);
+    errorSpy.mockRestore();
+  });
+
+  it("every send refused: releases the day and reports failed", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.sendPlatformEmail.mockResolvedValue({ ok: false, status: 503 });
+
+    const result = await runDailyDigest(NOW);
+
+    expect(result).toEqual({ sent: false, reason: "failed", recipients: 0 });
+    expect(fake.admin.rows("platform_digest_log")).toHaveLength(0);
+    errorSpy.mockRestore();
+  });
+
+  it("records the accepted count, not the recipient count", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.listSuperAdminEmails.mockResolvedValue(["root1@betleads.io", "root2@betleads.io"]);
+    mocks.sendPlatformEmail
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockRejectedValueOnce(new Error("network"));
+
+    const result = await runDailyDigest(NOW);
+
+    expect(result).toEqual({ sent: true, recipients: 1 });
+    expect(fake.admin.rows("platform_digest_log")[0]).toMatchObject({ recipients: 1 });
+    errorSpy.mockRestore();
+  });
+
+  it("lists the freshly computed alerts (with their stored silence), not the stored table", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    mocks.computePlatformHealth.mockResolvedValue({
+      houses: [],
+      alerts: [
+        {
+          key: "job:a",
+          kind: "job",
+          severity: "critical",
+          message: "Robô recém-parado",
+          tenantId: null,
+          since: null,
+          href: null,
+          stored: null,
+        },
+        {
+          key: "job:b",
+          kind: "job",
+          severity: "warning",
+          message: "Robô calado",
+          tenantId: null,
+          since: null,
+          href: null,
+          stored: {
+            openedAt: "2026-11-05T09:00:00.000Z",
+            acknowledgedAt: null,
+            silencedUntil: "2026-11-06T09:00:00.000Z",
+          },
+        },
+      ],
+    });
+
+    await runDailyDigest(NOW);
+
+    const [{ html, subject }] = mocks.sendPlatformEmail.mock.calls[0];
+    expect(subject).toContain("2 alertas");
+    expect(html).toContain("Robô recém-parado");
+    expect(html.indexOf("Robô calado")).toBeGreaterThan(html.indexOf("Silenciados"));
   });
 
   it("flag on with recipients: sends one e-mail per recipient and logs the day", async () => {
@@ -102,6 +183,7 @@ describe("runDailyDigest", () => {
   it("pulls debtors from tenant_billing + open billing_invoices for the health houses", async () => {
     vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
     mocks.computePlatformHealth.mockResolvedValue({
+      alerts: [],
       houses: [
         {
           tenantId: "t1",

@@ -5,14 +5,19 @@
 // money. No DB access, no server-only import — `daily-digest.server.ts`
 // gathers the data and calls this.
 
-import type { StoredAlert } from "./alert-lifecycle";
+import { isSilenced, type StoredAlert } from "./alert-lifecycle";
 import type { HouseHealthRow } from "./house-health";
 import type { Debtor } from "@/lib/billing/billing-state-summary";
+
+/** What the digest needs of an open alert (a `StoredAlert` fits, so does a computed alert). */
+export type DigestAlert = Pick<StoredAlert, "severity" | "message" | "silencedUntil">;
 
 export type DigestInput = {
   /** Brasília calendar day the digest is for, YYYY-MM-DD. */
   day: string;
-  openAlerts: StoredAlert[];
+  /** When the digest runs: decides whether a silence is still in force. */
+  now: Date;
+  openAlerts: DigestAlert[];
   houses: HouseHealthRow[];
   debtors: Debtor[];
   owedCents: number;
@@ -54,7 +59,7 @@ ${itemsHtml.join("\n")}
       ${body}`;
 }
 
-function alertItem(a: StoredAlert): string {
+function alertItem(a: DigestAlert): string {
   return `        <li style="margin:0 0 8px;"><strong>${escapeHtml(a.message)}</strong></li>`;
 }
 
@@ -70,15 +75,15 @@ function debtorItem(d: Debtor): string {
 
 /** Subject + inline HTML for the daily digest, in the same card style as the critical alert e-mail. */
 export function buildDailyDigest(input: DigestInput): { subject: string; html: string } {
-  const { day, openAlerts, houses, debtors, owedCents } = input;
+  const { day, now, openAlerts, houses, debtors, owedCents } = input;
 
   const redHouses = houses.filter((h) => h.level === "red");
   const yellowHouses = houses.filter((h) => h.level === "yellow");
 
   const subject = `BetLeads — resumo de ${ddmm(day)}: ${openAlerts.length} alertas, ${redHouses.length} casas em vermelho`;
 
-  const active = openAlerts.filter((a) => a.silencedUntil === null);
-  const silenced = openAlerts.filter((a) => a.silencedUntil !== null);
+  const active = openAlerts.filter((a) => !isSilenced(a, now));
+  const silenced = openAlerts.filter((a) => isSilenced(a, now));
   const sortedActive = [...active].sort(
     (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
   );
