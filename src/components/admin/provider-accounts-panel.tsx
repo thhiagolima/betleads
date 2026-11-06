@@ -228,6 +228,9 @@ function AccountsCard({
   }
 
   async function makeDefault(account: ProviderAccountView, channel: ProviderChannelName) {
+    // Computed client-side from the tenants list already in the query cache
+    // (no conta própria no canal + canal ligado) — same data the server
+    // used to build `houses`, no extra round-trip needed.
     const n = tenants.filter((t) => !t.accounts[channel] && t.channels[channel]).length;
     const ok = await requestConfirmation({
       title: `Tornar "${account.label}" a padrão de ${PROVIDER_CHANNEL_LABEL[channel]}?`,
@@ -711,7 +714,13 @@ function TenantProvidersCard({
 
   async function toggleChannel(tenant: TenantRow, channel: ProviderChannelName, enabled: boolean) {
     if (!enabled) {
-      const impact = await impactFn({ data: { tenantId: tenant.id, channel } });
+      let impact: { activeJourneys: number; scheduledCampaigns: number };
+      try {
+        impact = await impactFn({ data: { tenantId: tenant.id, channel } });
+      } catch (error) {
+        toast.error(errorMessage(error));
+        return;
+      }
       const ok = await requestConfirmation({
         title: `Desligar ${PROVIDER_CHANNEL_LABEL[channel]} para ${tenant.nome}?`,
         description: `${impact.activeJourneys} jornada(s) ativa(s) vão pular esses passos e ${impact.scheduledCampaigns} envio(s) agendado(s) serão cancelados. O pessoal da casa verá um aviso.`,
