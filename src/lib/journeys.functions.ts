@@ -119,6 +119,22 @@ export async function disabledChannelsFor(tenantId: string): Promise<Set<Provide
 }
 
 /**
+ * `template_snapshot` is a server-derived cache of the referenced
+ * template's current content (sms/email steps), rebuilt fresh on every
+ * `saveJourney` regardless of whether the user touched that step. Comparing
+ * it would flag an untouched step as "changed" the moment someone edits the
+ * template elsewhere (or, for `setJourneyStatus`, between two publishes).
+ * Stripped from both sides before the identity diff, so only the user's own
+ * input (template_id, sender, text, …) counts as a change.
+ */
+function comparableStep(step: StepLike): StepLike {
+  const { template_snapshot: _snapshot, ...config } = step.config as Record<string, unknown> & {
+    template_snapshot?: unknown;
+  };
+  return { id: step.id, step_type: step.step_type, config };
+}
+
+/**
  * Lança `CHANNEL_DISABLED_MESSAGE` se `incoming` tiver um passo novo/alterado
  * de canal desligado para a casa, comparado a `stored` (jornada antiga com o
  * passo inalterado continua salvável).
@@ -130,7 +146,11 @@ export async function assertNoNewDisabledChannelSteps(
 ) {
   const disabled = await disabledChannelsFor(tenantId);
   if (disabled.size === 0) return;
-  const offending = newDisabledChannelSteps(stored, incoming, disabled);
+  const offending = newDisabledChannelSteps(
+    stored.map(comparableStep),
+    incoming.map(comparableStep),
+    disabled,
+  );
   if (offending.length === 0) return;
   const channel = STEP_TYPE_CHANNEL[offending[0].step_type];
   if (channel) throw new Error(CHANNEL_DISABLED_MESSAGE(channel));

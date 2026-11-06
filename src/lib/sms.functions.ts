@@ -93,6 +93,22 @@ const SHORT_BRASIL_REQUEST_TIMEOUT_MS = 8_000;
 const campaignDb = () => supabaseAdmin as unknown as CampaignDb;
 
 /**
+ * Guard sequence shared by `sendBulkSms`/`scheduleBulkSms`, extracted so it
+ * can be unit-tested directly (createServerFn handlers can't: the TanStack
+ * Start compiler swaps their body for a client-side stub — same reasoning
+ * as `journeys.functions.ts`'s `assertNoNewDisabledChannelSteps`). Covers
+ * the brief's Task 7 case: a disabled SMS channel throws
+ * `CHANNEL_DISABLED_MESSAGE("sms")` before any campaign row or recipient
+ * resolution.
+ */
+export async function assertBulkSmsCanSend(tenantId: string): Promise<void> {
+  await assertTenantCanOperate(tenantId);
+  // Demo guard once, before the campaign row, stats or any per-recipient send.
+  await assertTenantNotDemoForSend(tenantId);
+  await assertChannelEnabled(tenantId, "sms");
+}
+
+/**
  * ENV-06: campaigns send to every recipient that resolves to a player of the
  * tenant and report the rest. Only a campaign with NO resolvable recipient is
  * refused.
@@ -1288,10 +1304,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
 
-    await assertTenantCanOperate(tenantId);
-    // Demo guard once, before the campaign row, stats or any per-recipient send.
-    await assertTenantNotDemoForSend(tenantId);
-    await assertChannelEnabled(tenantId, "sms");
+    await assertBulkSmsCanSend(tenantId);
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)
@@ -2329,10 +2342,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
 
     const tenantId = await resolveCurrentTenantId(context.supabase);
 
-    await assertTenantCanOperate(tenantId);
-    // Demo guard once, before the campaign row, stats or any per-recipient send.
-    await assertTenantNotDemoForSend(tenantId);
-    await assertChannelEnabled(tenantId, "sms");
+    await assertBulkSmsCanSend(tenantId);
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)

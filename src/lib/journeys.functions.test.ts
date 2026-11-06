@@ -108,6 +108,72 @@ describe("assertNoNewDisabledChannelSteps (usado por saveJourney/setJourneyStatu
     await expect(assertNoNewDisabledChannelSteps(TENANT, [], incoming)).resolves.toBeUndefined();
   });
 
+  // Fix review finding #1: saveJourney rebuilds an email/sms step's
+  // `template_snapshot` fresh on every save (the server re-resolves the
+  // referenced template's current content), so an untouched step must not
+  // be flagged just because the template's content changed since the last
+  // save — only the user's own input (template_id, sender, etc.) counts.
+  it("passo de e-mail inalterado (mesmo id/template_id) com template_snapshot desatualizado continua salvável", async () => {
+    smsOff();
+    channels.getTenantChannels.mockResolvedValue({
+      sms: { enabled: true, disabledAt: null },
+      email: { enabled: false, disabledAt: "2026-11-05T00:00:00Z" },
+      voice: { enabled: true, disabledAt: null },
+      webpush: { enabled: false, disabledAt: null },
+    });
+    const stored: StepLike[] = [
+      {
+        id: "s1",
+        step_type: "email",
+        config: {
+          template_id: "t1",
+          template_snapshot: { id: "t1", subject: "Antigo", body_html: "<p>Antigo</p>", version: 1 },
+        },
+      },
+    ];
+    // Mesmo passo (mesmo id, mesmo template_id); só o snapshot foi
+    // re-resolvido com o conteúdo atual do template (editado em outro lugar).
+    const incoming: StepLike[] = [
+      {
+        id: "s1",
+        step_type: "email",
+        config: {
+          template_id: "t1",
+          template_snapshot: { id: "t1", subject: "Novo", body_html: "<p>Novo</p>", version: 2 },
+        },
+      },
+    ];
+    await expect(
+      assertNoNewDisabledChannelSteps(TENANT, stored, incoming),
+    ).resolves.toBeUndefined();
+  });
+
+  it("passo de e-mail com template_id realmente alterado continua recusado (ignorar o snapshot não esconde uma mudança real)", async () => {
+    channels.getTenantChannels.mockResolvedValue({
+      sms: { enabled: true, disabledAt: null },
+      email: { enabled: false, disabledAt: "2026-11-05T00:00:00Z" },
+      voice: { enabled: true, disabledAt: null },
+      webpush: { enabled: false, disabledAt: null },
+    });
+    const stored: StepLike[] = [
+      {
+        id: "s1",
+        step_type: "email",
+        config: { template_id: "t1", template_snapshot: { id: "t1", subject: "A", body_html: "<p>A</p>" } },
+      },
+    ];
+    const incoming: StepLike[] = [
+      {
+        id: "s1",
+        step_type: "email",
+        config: { template_id: "t2", template_snapshot: { id: "t2", subject: "B", body_html: "<p>B</p>" } },
+      },
+    ];
+    await expect(assertNoNewDisabledChannelSteps(TENANT, stored, incoming)).rejects.toThrow(
+      "O canal E-mail está desabilitado para esta casa.",
+    );
+  });
+
   it("setJourneyStatus (publicar): compara contra a última versão publicada; sem versão publicada, lista vazia", async () => {
     smsOff();
     // Sem jornada publicada anterior (revision_of nulo): stored = [].

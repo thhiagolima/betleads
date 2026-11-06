@@ -56,17 +56,28 @@ const scheduleWebpushCampaignInput = z.object({
   scheduledAt: z.string().nullable(),
 });
 
+/**
+ * Guard sequence for `scheduleWebpushCampaignFn`, extracted so it can be
+ * unit-tested directly (createServerFn handlers can't — see
+ * `journeys.functions.ts`'s `assertNoNewDisabledChannelSteps`). Same guard
+ * order as `assertBulkSmsCanSend` (sms.functions.ts): resolve the caller's
+ * tenant, refuse an operationally blocked house, then a demo house, then a
+ * disabled web push channel — before anything is written. Covers the
+ * brief's Task 7 case: a house with no `tenant_channels` row (web push off
+ * by default) throws `CHANNEL_DISABLED_MESSAGE("webpush")`.
+ */
+export async function assertWebpushCampaignCanSend(tenantId: string): Promise<void> {
+  await assertTenantCanOperate(tenantId);
+  await assertTenantNotDemoForSend(tenantId);
+  await assertChannelEnabled(tenantId, "webpush");
+}
+
 export const scheduleWebpushCampaignFn = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => scheduleWebpushCampaignInput.parse(input))
   .handler(async ({ data, context }) => {
-    // Same guard order as scheduleBulkSms (sms.functions.ts): resolve the
-    // caller's tenant, refuse an operationally blocked house, then refuse a
-    // demo house, before anything is written.
     const tenantId = await resolveCurrentTenantId(context.supabase);
-    await assertTenantCanOperate(tenantId);
-    await assertTenantNotDemoForSend(tenantId);
-    await assertChannelEnabled(tenantId, "webpush");
+    await assertWebpushCampaignCanSend(tenantId);
     return scheduleWebpushCampaign(campaignsDb, {
       tenantId,
       name: data.name,
