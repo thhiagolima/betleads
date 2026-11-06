@@ -116,7 +116,10 @@ function SilencedTag({ until }: { until: string }) {
   );
 }
 
-const ROW_CLASS = "flex w-full items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm";
+// Under `sm` (360 px phones) the actions stack below the message instead of
+// squeezing it to nothing; from `sm` up they sit on the same line.
+const ROW_CLASS =
+  "flex w-full flex-col gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm sm:flex-row sm:items-center";
 const ACTION_BUTTON_CLASS =
   "shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -169,7 +172,7 @@ export function AlertRow({
           {content}
         </button>
       )}
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center justify-end gap-1">
         {!acknowledged && (
           <button
             type="button"

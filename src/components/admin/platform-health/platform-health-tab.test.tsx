@@ -505,6 +505,25 @@ describe("AlertRow (fix round 1: tag replaces the matching action button)", () =
     expect(html).not.toContain("Reconhecer");
     expect(html).toContain("Silenciar 24 h");
   });
+
+  it("under sm the actions stack below the message (column), side by side from sm up", () => {
+    const html = renderToStaticMarkup(
+      <AlertRow
+        alert={{ ...baseAlert, stored: null }}
+        now={now}
+        onOpen={noop}
+        onAcknowledge={noop}
+        onSilence={noop}
+        pending={false}
+      />,
+    );
+
+    const rowClass = /^<div class="([^"]+)"/.exec(html)?.[1] ?? "";
+    expect(rowClass.split(" ")).toEqual(
+      expect.arrayContaining(["flex", "flex-col", "sm:flex-row", "sm:items-center"]),
+    );
+    expect(rowClass.split(" ")).not.toContain("items-center");
+  });
 });
 
 describe("formatSince", () => {
