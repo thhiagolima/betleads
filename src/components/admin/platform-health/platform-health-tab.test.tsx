@@ -15,13 +15,21 @@ afterEach(() => {
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => queryState,
+  useMutation: () => ({ mutate: vi.fn(), isPending: false }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
 vi.mock("@/lib/platform-health/platform-health.functions", () => ({
   adminPlatformHealth: vi.fn(),
 }));
+vi.mock("@/lib/platform-health/platform-alerts.functions", () => ({
+  adminAcknowledgeAlert: vi.fn(),
+  adminSilenceAlert: vi.fn(),
+  adminAlertHistory: vi.fn(),
+}));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { formatSince } from "./health-alerts-strip";
+import { AlertHistoryList, formatSince } from "./health-alerts-strip";
 import { openHref, PlatformHealthTab } from "./platform-health-tab";
 
 function resetQueryState() {
@@ -273,7 +281,11 @@ describe("PlatformHealthTab", () => {
     const html = renderToStaticMarkup(<PlatformHealthTab />);
 
     expect(html).toContain("Não foi possível verificar finance_days");
-    expect(html).not.toContain("<button");
+    // No clickable "open" area for this row (no screen fixes it) — only the
+    // Reconhecer/Silenciar action buttons, never nested inside another button.
+    expect(html).not.toContain("hover:text-foreground");
+    expect(html).toContain("Reconhecer");
+    expect(html).toContain("Silenciar 24 h");
   });
 
   it("housesUnavailable shows a load-failure line instead of an empty table", () => {
@@ -301,6 +313,135 @@ describe("PlatformHealthTab", () => {
     const html = renderToStaticMarkup(<PlatformHealthTab />);
 
     expect(html).not.toContain(formatMoney(0, "BRL", { decimals: 0 }));
+  });
+
+  it("every alert row offers Reconhecer and Silenciar 24 h", () => {
+    resetQueryState();
+    queryState.data = healthData({
+      alerts: [
+        {
+          key: "job:a",
+          kind: "job",
+          severity: "critical",
+          message: "Robô travado",
+          tenantId: null,
+          since: null,
+          href: "/admin#canais",
+          stored: null,
+        },
+      ],
+    });
+
+    const html = renderToStaticMarkup(<PlatformHealthTab />);
+
+    expect(html).toContain("Reconhecer");
+    expect(html).toContain("Silenciar 24 h");
+  });
+
+  it("an acknowledged alert stays listed, muted, tagged 'reconhecido'", () => {
+    resetQueryState();
+    queryState.data = healthData({
+      alerts: [
+        {
+          key: "job:a",
+          kind: "job",
+          severity: "critical",
+          message: "Robô travado",
+          tenantId: null,
+          since: null,
+          href: "/admin#canais",
+          stored: {
+            openedAt: "2026-11-04T10:00:00.000Z",
+            acknowledgedAt: "2026-11-04T10:05:00.000Z",
+            silencedUntil: null,
+          },
+        },
+      ],
+    });
+
+    const html = renderToStaticMarkup(<PlatformHealthTab />);
+
+    expect(html).toContain("Robô travado");
+    expect(html).toContain("reconhecido");
+    expect(html).toContain("opacity-70");
+  });
+
+  it("a silenced alert is hidden from the list and counted in the 'silenciados' line", () => {
+    resetQueryState();
+    // Far enough in the future that it stays "silenced" (still > now) regardless of when this
+    // test actually runs.
+    const silencedUntil = "2099-11-05T20:00:00.000Z";
+    queryState.data = healthData({
+      alerts: [
+        {
+          key: "job:a",
+          kind: "job",
+          severity: "critical",
+          message: "Robô A travado",
+          tenantId: null,
+          since: null,
+          href: "/admin#canais",
+          stored: {
+            openedAt: "2026-11-04T10:00:00.000Z",
+            acknowledgedAt: null,
+            silencedUntil,
+          },
+        },
+        {
+          key: "job:b",
+          kind: "job",
+          severity: "warning",
+          message: "Robô B parcial",
+          tenantId: null,
+          since: null,
+          href: "/admin#canais",
+          stored: null,
+        },
+      ],
+    });
+
+    const html = renderToStaticMarkup(<PlatformHealthTab />);
+
+    expect(html).not.toContain("Robô A travado");
+    expect(html).toContain("Robô B parcial");
+    expect(html).toContain("1 silenciado até 17:00 — mostrar");
+  });
+
+  it("the Saúde tab offers a 30-day history button", () => {
+    resetQueryState();
+    queryState.data = healthData();
+
+    const html = renderToStaticMarkup(<PlatformHealthTab />);
+
+    expect(html).toContain("Histórico (30 dias)");
+  });
+});
+
+describe("AlertHistoryList", () => {
+  it("lists resolved alerts with message, opened/resolved times and duration", () => {
+    const html = renderToStaticMarkup(
+      <AlertHistoryList
+        history={[
+          {
+            id: "r1",
+            message: "Robô A travado",
+            openedAt: "2026-11-01T10:00:00.000Z",
+            resolvedAt: "2026-11-01T13:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Robô A travado");
+    expect(html).toContain("aberto em");
+    expect(html).toContain("resolvido em");
+    expect(html).toContain("3 h");
+  });
+
+  it("shows an empty-state message when there is nothing resolved", () => {
+    const html = renderToStaticMarkup(<AlertHistoryList history={[]} />);
+
+    expect(html).toContain("Nenhum alerta resolvido nos últimos 30 dias.");
   });
 });
 

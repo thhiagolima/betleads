@@ -1,22 +1,45 @@
-// Super-admin "Saúde" tab (Task 4, spec §5.2–5.3): wires Task 3's
-// `adminPlatformHealth` loader to the alert strip and house table. Polls
-// every 60 s (same cadence as the server cache) so the super admin always
-// sees a result at most a minute stale. A failed background refetch keeps
-// the last data on screen (with a "Falha ao atualizar" line); the error
-// screen only shows when there is no data at all.
-import { useQuery } from "@tanstack/react-query";
+// Super-admin "Saúde" tab (Task 4, spec §5.2–5.3; Task 5/F3: alert state,
+// actions and history): wires Task 3's `adminPlatformHealth` loader to the
+// alert strip and house table. Polls every 60 s (same cadence as the server
+// cache) so the super admin always sees a result at most a minute stale. A
+// failed background refetch keeps the last data on screen (with a "Falha ao
+// atualizar" line); the error screen only shows when there is no data at all.
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { CircleAlert } from "lucide-react";
+import { CircleAlert, History } from "lucide-react";
+import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { DataCard } from "@/components/ui-premium/data-card";
-import type { PlatformAlert } from "@/lib/platform-health/alert-rules";
+import { HISTORY_DAYS } from "@/lib/platform-health/alert-lifecycle";
+import {
+  adminAcknowledgeAlert,
+  adminAlertHistory,
+  adminSilenceAlert,
+} from "@/lib/platform-health/platform-alerts.functions";
 import { adminPlatformHealth } from "@/lib/platform-health/platform-health.functions";
 import type { PlatformHealth } from "@/lib/platform-health/platform-health.server";
 
-import { formatCheckedAt, HealthAlertsStrip } from "./health-alerts-strip";
+import {
+  AlertHistoryList,
+  type AlertHistoryItem,
+  type AlertWithStored,
+  formatCheckedAt,
+  HealthAlertsStrip,
+} from "./health-alerts-strip";
 import { HouseHealthTable } from "./house-health-table";
 
 const QUERY_KEY = ["admin-platform-health"];
+const HISTORY_QUERY_KEY = ["admin-platform-health", "history"];
 const ACTIVE_TENANT_KEY = "betleads:active-tenant";
 
 /**
@@ -31,12 +54,70 @@ export function openHref(href: string, tenantId: string | null) {
   window.location.assign(href);
 }
 
+function AlertHistoryDialog() {
+  const [open, setOpen] = useState(false);
+  const historyFn = useServerFn(adminAlertHistory);
+  const { data, isLoading, isError } = useQuery({
+    queryKey: HISTORY_QUERY_KEY,
+    queryFn: () => historyFn() as Promise<AlertHistoryItem[]>,
+    enabled: open,
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          <History className="size-3.5" />
+          Histórico ({HISTORY_DAYS} dias)
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Histórico de alertas ({HISTORY_DAYS} dias)</DialogTitle>
+          <DialogDescription>Alertas resolvidos nos últimos {HISTORY_DAYS} dias.</DialogDescription>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="h-10 animate-pulse rounded-md bg-muted" />
+        ) : isError || !data ? (
+          <p className="text-sm text-muted-foreground">Não foi possível carregar o histórico.</p>
+        ) : (
+          <AlertHistoryList history={data} />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function PlatformHealthTab() {
   const fn = useServerFn(adminPlatformHealth);
+  const queryClient = useQueryClient();
   const { data, isLoading, isError } = useQuery({
     queryKey: QUERY_KEY,
     queryFn: () => fn(),
     refetchInterval: 60_000,
+  });
+
+  const ackFn = useServerFn(adminAcknowledgeAlert);
+  const silenceFn = useServerFn(adminSilenceAlert);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+
+  function invalidateHealth() {
+    void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+  }
+
+  const ackMut = useMutation({
+    mutationFn: (key: string) => ackFn({ data: { key } }),
+    onMutate: (key) => setPendingKey(key),
+    onSuccess: invalidateHealth,
+    onError: (error: Error) => toast.error(error.message),
+    onSettled: () => setPendingKey(null),
+  });
+  const silenceMut = useMutation({
+    mutationFn: (key: string) => silenceFn({ data: { key } }),
+    onMutate: (key) => setPendingKey(key),
+    onSuccess: invalidateHealth,
+    onError: (error: Error) => toast.error(error.message),
+    onSettled: () => setPendingKey(null),
   });
 
   if (isLoading) {
@@ -59,8 +140,9 @@ export function PlatformHealthTab() {
 
   const health = data as PlatformHealth;
   const checkedAt = formatCheckedAt(health.checkedAt);
+  const alerts = health.alerts as AlertWithStored[];
 
-  function openAlert(alert: PlatformAlert & { href: string }) {
+  function openAlert(alert: AlertWithStored & { href: string }) {
     openHref(alert.href, alert.tenantId);
   }
 
@@ -79,9 +161,21 @@ export function PlatformHealthTab() {
       <DataCard
         title="Alertas técnicos"
         description="Robôs, webhooks, filas, fornecedores, saldo e cobrança. Clique em um alerta para resolver."
-        actions={<span className="text-xs text-muted-foreground">verificado às {checkedAt}</span>}
+        actions={
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">verificado às {checkedAt}</span>
+            <AlertHistoryDialog />
+          </div>
+        }
       >
-        <HealthAlertsStrip alerts={health.alerts} checkedAt={health.checkedAt} onOpen={openAlert} />
+        <HealthAlertsStrip
+          alerts={alerts}
+          checkedAt={health.checkedAt}
+          onOpen={openAlert}
+          onAcknowledge={(key) => ackMut.mutate(key)}
+          onSilence={(key) => silenceMut.mutate(key)}
+          pendingKey={pendingKey}
+        />
       </DataCard>
       <DataCard
         title="Casas"
