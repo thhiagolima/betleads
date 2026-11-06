@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { HOUSE_SETUP_STATUS_QUERY_KEY } from "@/components/house-config/house-config-query";
 import { getHouseSetupStatus, markVerifiedNoticeSeen } from "@/lib/house-config.functions";
 import { useShellNav } from "@/components/shell/use-shell-nav";
+import { tourAnchor } from "@/help/anchor";
 
 export function DomainVerifiedNotice() {
   const { role, isSuperAdmin } = useShellNav();
@@ -51,6 +52,7 @@ export function DomainVerifiedNotice() {
         className="shrink-0 rounded-md p-1 text-emerald-100/70 hover:bg-emerald-500/10 hover:text-emerald-100"
         disabled={markSeen.isPending}
         onClick={() => markSeen.mutate(newlyVerified.map((d) => d.id))}
+        {...tourAnchor("inicio.aviso-dominio.fechar")}
       >
         <X className="size-4" aria-hidden="true" />
       </button>

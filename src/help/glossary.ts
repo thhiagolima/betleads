@@ -209,4 +209,18 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "Um número de 1 a 100 que decide quem vence quando duas jornadas disputam o mesmo jogador no mesmo canal: o menor número vence.",
   },
+
+  // --- Início e Eventos (fase 2, Task 1) ---
+  {
+    id: "pix-gerado-pago",
+    term: "PIX gerado/pago",
+    short:
+      "PIX gerado é o QR Code/código Pix que a casa emitiu para o jogador pagar; PIX pago é quando esse código foi de fato pago e virou depósito. \"PIX pagos\" é a fração dos gerados que foram pagos; \"PIX não pagos\" é quantos ficaram sem pagamento no período.",
+  },
+  {
+    id: "pp",
+    term: "p.p.",
+    short:
+      "Sigla de \"pontos percentuais\": a diferença entre duas taxas (ex.: de 20% para 21% é +1,0 p.p.), não a variação relativa entre elas. Usado na variação da Conversão cadastro → FTD, que já é uma taxa.",
+  },
 ];

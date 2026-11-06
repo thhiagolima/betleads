@@ -15,6 +15,7 @@ import { Activity } from "lucide-react";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { tourAnchor } from "@/help/anchor";
 
 export const Route = createFileRoute("/eventos")({
   component: EventosPage,
@@ -119,7 +120,7 @@ function EventosPage() {
           />
         ) : (
           <>
-            <ul className="divide-y divide-border">
+            <ul className="divide-y divide-border" {...tourAnchor("eventos.lista")}>
               {visible.map((e: any) => {
                 const cfg = eventConfig(e.tipo);
                 return (
@@ -155,7 +156,12 @@ function EventosPage() {
             </ul>
             {events.length > visible.length && (
               <div className="border-t border-border p-3 text-center">
-                <Button size="sm" variant="ghost" onClick={() => setShowAll(true)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowAll(true)}
+                  {...tourAnchor("eventos.mostrar-mais")}
+                >
                   Mostrar mais {events.length - visible.length}
                 </Button>
               </div>

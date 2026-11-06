@@ -1,7 +1,7 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { type DateRange } from "react-day-picker";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import {
@@ -36,6 +36,8 @@ import { homeRedirect } from "@/lib/navigation";
 import { brtDayStart } from "@/lib/tz";
 import { chartAxisProps, chartGridProps, chartTooltipStyle } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
@@ -69,7 +71,7 @@ function fmtRoi(value: number) {
 function CashflowChart({ data }: { data: DashboardData }) {
   const { money } = useMoney();
   return (
-    <HomeCard className="flex h-full flex-col p-4 sm:p-5">
+    <HomeCard className="flex h-full flex-col p-4 sm:p-5" {...tourAnchor("inicio.fluxo.grafico")}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[15px] font-semibold">Depósitos e saques</h2>
         <div className="flex gap-4 text-xs text-muted-foreground">
@@ -159,6 +161,7 @@ function CrmCard({ data }: { data: DashboardData }) {
         asChild
         variant="secondary"
         className="mt-4 h-10 w-full bg-success/12 font-semibold text-success hover:bg-success/20 lg:mt-auto"
+        {...tourAnchor("inicio.recuperado.ver-resultados")}
       >
         <Link to="/resultados">
           Ver resultados do CRM
@@ -171,7 +174,13 @@ function CrmCard({ data }: { data: DashboardData }) {
 
 function SecondaryMetrics({ data }: { data: DashboardData }) {
   const { money } = useMoney();
-  const cells = [
+  const cells: Array<{
+    label: ReactNode;
+    value: ReactNode;
+    trend?: ReturnType<typeof trendDisplay>;
+    detail?: string;
+    valueClassName?: string;
+  }> = [
     {
       label: "Novos clientes",
       value: num(data.newPlayers),
@@ -185,7 +194,11 @@ function SecondaryMetrics({ data }: { data: DashboardData }) {
       detail: `${num(data.redepositPlayers)} jogadores`,
     },
     {
-      label: "PIX pagos",
+      label: (
+        <>
+          <Term id="pix-gerado-pago">PIX</Term> pagos
+        </>
+      ),
       value: fmtPct(data.pixPayRate),
       detail: `${num(data.depositCount)} de ${num(data.pixGenerated)}`,
     },
@@ -196,10 +209,13 @@ function SecondaryMetrics({ data }: { data: DashboardData }) {
     },
   ];
   return (
-    <HomeCard className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5">
+    <HomeCard
+      className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5"
+      {...tourAnchor("inicio.metricas-secundarias")}
+    >
       {cells.map((cell, index) => (
         <div
-          key={cell.label}
+          key={index}
           className={cn(
             "border-border/70 p-4 sm:px-5",
             // Hairlines between cells on every breakpoint without doubling them up.
@@ -236,7 +252,11 @@ function LiveFeed({ events }: { events: DashboardData["liveEvents"] }) {
     <HomeCard className="p-4 sm:px-5">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-[15px] font-semibold">Ao vivo</h2>
-        <Link to="/eventos" className="text-[12.5px] text-primary hover:underline">
+        <Link
+          to="/eventos"
+          className="text-[12.5px] text-primary hover:underline"
+          {...tourAnchor("inicio.ao-vivo.ver-todos")}
+        >
           Ver todos os eventos
         </Link>
       </div>
@@ -384,20 +404,25 @@ function Dashboard() {
             )}
           </p>
         </div>
-        <PeriodPicker
-          preset={preset}
-          range={range}
-          onChange={(nextPreset, nextRange) => {
-            setPreset(nextPreset);
-            setRange(nextRange);
-          }}
-        />
+        <div {...tourAnchor("inicio.periodo")}>
+          <PeriodPicker
+            preset={preset}
+            range={range}
+            onChange={(nextPreset, nextRange) => {
+              setPreset(nextPreset);
+              setRange(nextRange);
+            }}
+          />
+        </div>
       </header>
 
       <DomainVerifiedNotice />
       <HouseSetupChecklist />
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+      <div
+        className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4"
+        {...tourAnchor("inicio.kpis")}
+      >
         <KpiCard
           className="col-span-2 xl:col-span-1"
           title="Depositado"
@@ -413,14 +438,22 @@ function Dashboard() {
           detail={comparison}
         />
         <KpiCard
-          title="Primeiros depósitos (FTD)"
+          title={
+            <>
+              Primeiros depósitos (<Term id="ftd">FTD</Term>)
+            </>
+          }
           value={num(data.ftd)}
           trend={trendDisplay(data.ftdGrowth)}
           detail={comparison}
         />
         <KpiCard
           className="col-span-2 sm:col-span-1"
-          title="Conversão cadastro → FTD"
+          title={
+            <>
+              Conversão cadastro → <Term id="ftd">FTD</Term>
+            </>
+          }
           value={fmtPct(data.conversion)}
           trend={trendDisplay(data.conversionGrowth, "pp")}
           detail={`${num(data.ftd)} de ${num(data.newPlayers)} cadastros`}

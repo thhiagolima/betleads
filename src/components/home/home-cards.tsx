@@ -41,7 +41,7 @@ export function KpiCard({
   sparkline,
   className,
 }: {
-  title: string;
+  title: ReactNode;
   value: string;
   trend?: Trend | null;
   detail?: string;
