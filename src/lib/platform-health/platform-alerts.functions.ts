@@ -11,7 +11,7 @@ import { assertSuperAdmin } from "@/lib/billing/billing-health.server";
 
 import type { PlatformAlert } from "./alert-rules";
 import { acknowledgeAlert, listAlertHistory, silenceAlert } from "./alert-store.server";
-import { adminPlatformHealthFor } from "./platform-health.server";
+import { adminPlatformHealthFor, invalidatePlatformHealthCache } from "./platform-health.server";
 
 type AuthContext = { userId: string };
 
@@ -31,6 +31,10 @@ export async function adminAcknowledgeAlertFor(
   await assertSuperAdmin(ctx.userId);
   const current = await currentAlertFor(ctx, input.key);
   await acknowledgeAlert(input.key, ctx.userId, current, new Date());
+  // Fix round 1: the write above is invisible to the next `adminPlatformHealthFor` call for up
+  // to CACHE_MS otherwise — the acting admin's own `invalidateQueries` would refetch into a
+  // still-stale server-side cache.
+  invalidatePlatformHealthCache();
   return { ok: true };
 }
 
@@ -44,6 +48,7 @@ export async function adminSilenceAlertFor(ctx: AuthContext, data: unknown): Pro
   await assertSuperAdmin(ctx.userId);
   const current = await currentAlertFor(ctx, input.key);
   await silenceAlert(input.key, current, new Date());
+  invalidatePlatformHealthCache();
   return { ok: true };
 }
 

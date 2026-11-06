@@ -22,6 +22,8 @@ const TIME_ZONE = "America/Sao_Paulo";
 
 export type AlertWithStored = PlatformAlert & { stored: StoredAlertInfo | null };
 
+const EMPTY_PENDING_KEYS: ReadonlySet<string> = new Set();
+
 /** "HH:MM" of an ISO instant, in São Paulo. */
 export function formatCheckedAt(checkedAt: string): string {
   return new Date(checkedAt).toLocaleTimeString("pt-BR", {
@@ -104,31 +106,48 @@ function AcknowledgedTag() {
   );
 }
 
+/** Fix round 1 (controller ruling): a silenced row shown via "mostrar" carries its own
+ * "silenciado até HH:MM" tag instead of the "Silenciar 24 h" button. */
+function SilencedTag({ until }: { until: string }) {
+  return (
+    <span className="shrink-0 rounded-md border border-muted-foreground/30 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+      silenciado até {formatCheckedAt(until)}
+    </span>
+  );
+}
+
 const ROW_CLASS = "flex w-full items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm";
 const ACTION_BUTTON_CLASS =
   "shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50";
 
-function AlertRow({
+/** Exported for direct testing (fix round 1): a silenced/acknowledged row's tag+button state is
+ * only reachable through "mostrar" via a click renderToStaticMarkup can't simulate here, so the
+ * tests render this row directly instead of through `HealthAlertsStrip`'s toggle. */
+export function AlertRow({
   alert,
   now,
   onOpen,
   onAcknowledge,
   onSilence,
-  pendingKey,
+  pending,
 }: {
   alert: AlertWithStored;
   now: Date;
   onOpen: (alert: AlertWithStored & { href: string }) => void;
   onAcknowledge: (key: string) => void;
   onSilence: (key: string) => void;
-  pendingKey: string | null;
+  /** Fix round 1: computed per row by the caller (a Set of in-flight keys), not a single
+   * shared "pendingKey" shared between the ack and silence mutations. */
+  pending: boolean;
 }) {
   const acknowledged = alert.stored?.acknowledgedAt != null;
-  const pending = pendingKey === alert.key;
+  const silencedUntil = alert.stored?.silencedUntil ?? null;
+  const silenced = alertIsSilenced(alert, now);
   const content = (
     <>
       <SeverityTag severity={alert.severity} />
       {acknowledged && <AcknowledgedTag />}
+      {silenced && silencedUntil && <SilencedTag until={silencedUntil} />}
       <span className="min-w-0 flex-1 truncate">{alert.message}</span>
       <span className="shrink-0 text-xs text-muted-foreground">
         {formatSince(alert.since, now)}
@@ -151,28 +170,32 @@ function AlertRow({
         </button>
       )}
       <div className="flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          disabled={pending}
-          onClick={(event) => {
-            event.stopPropagation();
-            onAcknowledge(alert.key);
-          }}
-          className={ACTION_BUTTON_CLASS}
-        >
-          Reconhecer
-        </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSilence(alert.key);
-          }}
-          className={ACTION_BUTTON_CLASS}
-        >
-          Silenciar {SILENCE_HOURS} h
-        </button>
+        {!acknowledged && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={(event) => {
+              event.stopPropagation();
+              onAcknowledge(alert.key);
+            }}
+            className={ACTION_BUTTON_CLASS}
+          >
+            Reconhecer
+          </button>
+        )}
+        {!silenced && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSilence(alert.key);
+            }}
+            className={ACTION_BUTTON_CLASS}
+          >
+            Silenciar {SILENCE_HOURS} h
+          </button>
+        )}
       </div>
     </div>
   );
@@ -184,14 +207,17 @@ export function HealthAlertsStrip({
   onOpen,
   onAcknowledge,
   onSilence,
-  pendingKey = null,
+  pendingKeys = EMPTY_PENDING_KEYS,
 }: {
   alerts: AlertWithStored[];
   checkedAt: string;
   onOpen: (alert: AlertWithStored & { href: string }) => void;
   onAcknowledge: (key: string) => void;
   onSilence: (key: string) => void;
-  pendingKey?: string | null;
+  /** Fix round 1: keys currently being acknowledged/silenced, one Set per row instead of a
+   * single shared "pendingKey" (acting on two rows in quick succession must not re-enable
+   * the wrong one). */
+  pendingKeys?: ReadonlySet<string>;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -222,7 +248,7 @@ export function HealthAlertsStrip({
           onOpen={onOpen}
           onAcknowledge={onAcknowledge}
           onSilence={onSilence}
-          pendingKey={pendingKey}
+          pending={pendingKeys.has(alert.key)}
         />
       ))}
       {silenced.length > 0 && (
@@ -245,7 +271,7 @@ export function HealthAlertsStrip({
                 onOpen={onOpen}
                 onAcknowledge={onAcknowledge}
                 onSilence={onSilence}
-                pendingKey={pendingKey}
+                pending={pendingKeys.has(alert.key)}
               />
             ))}
         </div>

@@ -99,7 +99,22 @@ export function PlatformHealthTab() {
 
   const ackFn = useServerFn(adminAcknowledgeAlert);
   const silenceFn = useServerFn(adminSilenceAlert);
-  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  // Fix round 1 (controller ruling): per-row pending state as a Set, not one shared
+  // "pendingKey" between the two mutations — acting on two rows in quick succession must not
+  // re-enable the wrong row's buttons.
+  const [pendingKeys, setPendingKeys] = useState<Set<string>>(() => new Set());
+
+  function addPending(key: string) {
+    setPendingKeys((prev) => new Set(prev).add(key));
+  }
+  function removePending(key: string) {
+    setPendingKeys((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }
 
   function invalidateHealth() {
     void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
@@ -107,17 +122,17 @@ export function PlatformHealthTab() {
 
   const ackMut = useMutation({
     mutationFn: (key: string) => ackFn({ data: { key } }),
-    onMutate: (key) => setPendingKey(key),
+    onMutate: (key) => addPending(key),
     onSuccess: invalidateHealth,
     onError: (error: Error) => toast.error(error.message),
-    onSettled: () => setPendingKey(null),
+    onSettled: (_data, _error, key) => removePending(key),
   });
   const silenceMut = useMutation({
     mutationFn: (key: string) => silenceFn({ data: { key } }),
-    onMutate: (key) => setPendingKey(key),
+    onMutate: (key) => addPending(key),
     onSuccess: invalidateHealth,
     onError: (error: Error) => toast.error(error.message),
-    onSettled: () => setPendingKey(null),
+    onSettled: (_data, _error, key) => removePending(key),
   });
 
   if (isLoading) {
@@ -174,7 +189,7 @@ export function PlatformHealthTab() {
           onOpen={openAlert}
           onAcknowledge={(key) => ackMut.mutate(key)}
           onSilence={(key) => silenceMut.mutate(key)}
-          pendingKey={pendingKey}
+          pendingKeys={pendingKeys}
         />
       </DataCard>
       <DataCard

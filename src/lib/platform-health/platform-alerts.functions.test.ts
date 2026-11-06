@@ -9,9 +9,13 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   return { supabaseAdmin: fake.admin.client };
 });
 
-const mocks = vi.hoisted(() => ({ adminPlatformHealthFor: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  adminPlatformHealthFor: vi.fn(),
+  invalidatePlatformHealthCache: vi.fn(),
+}));
 vi.mock("./platform-health.server", () => ({
   adminPlatformHealthFor: mocks.adminPlatformHealthFor,
+  invalidatePlatformHealthCache: mocks.invalidatePlatformHealthCache,
 }));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
@@ -65,6 +69,7 @@ beforeEach(() => {
     error: null,
   }));
   mocks.adminPlatformHealthFor.mockReset();
+  mocks.invalidatePlatformHealthCache.mockReset();
 });
 
 afterEach(() => {
@@ -86,6 +91,9 @@ describe("adminAcknowledgeAlertFor", () => {
 
     const [row] = await loadOpenAlerts();
     expect(row).toMatchObject({ alertKey: "job:a", acknowledgedAt: expect.any(String) });
+    // Fix round 1: the write must invalidate the 60 s module cache, or the tab's refetch would
+    // keep serving a stale (not-yet-acknowledged) alert for up to a minute.
+    expect(mocks.invalidatePlatformHealthCache).toHaveBeenCalledTimes(1);
   });
 
   it("throws when the key is neither stored nor in the current computed alerts", async () => {
@@ -112,6 +120,7 @@ describe("adminSilenceAlertFor", () => {
     const [row] = await loadOpenAlerts();
     expect(row.alertKey).toBe("job:a");
     expect(row.silencedUntil).not.toBeNull();
+    expect(mocks.invalidatePlatformHealthCache).toHaveBeenCalledTimes(1);
   });
 });
 

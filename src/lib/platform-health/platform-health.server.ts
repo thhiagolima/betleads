@@ -97,6 +97,18 @@ export function __resetPlatformHealthCacheForTests(): void {
   inflight = null;
 }
 
+/**
+ * Forgets the cached result so the next `adminPlatformHealthFor` call fetches
+ * fresh. Called after a write that the cache can't see on its own (Task 5
+ * fix round 1: acknowledging/silencing an alert), so the tab's next refetch
+ * — and the acting admin's own `invalidateQueries` — doesn't serve a stale
+ * `acknowledgedAt`/`silencedUntil` for up to `CACHE_MS`.
+ */
+export function invalidatePlatformHealthCache(): void {
+  cache = null;
+  inflight = null;
+}
+
 const DEFAULT_TIMEOUT_MS = 8000;
 
 const WEBHOOK_SAMPLE_DAYS = 7;

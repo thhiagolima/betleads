@@ -29,7 +29,7 @@ vi.mock("@/lib/platform-health/platform-alerts.functions", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { AlertHistoryList, formatSince } from "./health-alerts-strip";
+import { AlertHistoryList, AlertRow, formatSince } from "./health-alerts-strip";
 import { openHref, PlatformHealthTab } from "./platform-health-tab";
 
 function resetQueryState() {
@@ -442,6 +442,68 @@ describe("AlertHistoryList", () => {
     const html = renderToStaticMarkup(<AlertHistoryList history={[]} />);
 
     expect(html).toContain("Nenhum alerta resolvido nos últimos 30 dias.");
+  });
+});
+
+describe("AlertRow (fix round 1: tag replaces the matching action button)", () => {
+  const now = new Date("2026-11-05T12:00:00.000Z");
+  const baseAlert = {
+    key: "job:a",
+    kind: "job" as const,
+    severity: "critical" as const,
+    message: "Robô A travado",
+    tenantId: null,
+    since: null,
+    href: "/admin#canais",
+  };
+  const noop = () => {};
+
+  it("a silenced row shows 'silenciado até HH:MM' and no 'Silenciar 24 h' button, but keeps Reconhecer", () => {
+    const html = renderToStaticMarkup(
+      <AlertRow
+        alert={{
+          ...baseAlert,
+          stored: {
+            openedAt: "2026-11-04T10:00:00.000Z",
+            acknowledgedAt: null,
+            silencedUntil: "2026-11-05T20:00:00.000Z",
+          },
+        }}
+        now={now}
+        onOpen={noop}
+        onAcknowledge={noop}
+        onSilence={noop}
+        pending={false}
+      />,
+    );
+
+    expect(html).toContain("silenciado até 17:00");
+    expect(html).not.toContain("Silenciar 24 h");
+    expect(html).toContain("Reconhecer");
+  });
+
+  it("an acknowledged row shows 'reconhecido' and no 'Reconhecer' button, but keeps Silenciar", () => {
+    const html = renderToStaticMarkup(
+      <AlertRow
+        alert={{
+          ...baseAlert,
+          stored: {
+            openedAt: "2026-11-04T10:00:00.000Z",
+            acknowledgedAt: "2026-11-04T10:05:00.000Z",
+            silencedUntil: null,
+          },
+        }}
+        now={now}
+        onOpen={noop}
+        onAcknowledge={noop}
+        onSilence={noop}
+        pending={false}
+      />,
+    );
+
+    expect(html).toContain("reconhecido");
+    expect(html).not.toContain("Reconhecer");
+    expect(html).toContain("Silenciar 24 h");
   });
 });
 
