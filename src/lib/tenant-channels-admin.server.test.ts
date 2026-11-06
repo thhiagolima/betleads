@@ -165,11 +165,12 @@ describe("adminSetTenantChannelFor", () => {
 
     expect(result).toEqual({ cancelled: 4 });
     const byId = (id: string) => fake.db.rows("call_queue").find((r) => r.id === id)!;
-    expect(byId("cq-1").status).toBe("cancelled");
-    expect(byId("cq-2").status).toBe("cancelled");
-    expect(byId("cq-3").status).toBe("cancelled");
-    expect(byId("cq-4").status).toBe("cancelled");
+    // Same marker the voice dispatcher writes for a channel_disabled call.
+    for (const id of ["cq-1", "cq-2", "cq-3", "cq-4"]) {
+      expect(byId(id)).toMatchObject({ status: "cancelled", provider_status: "channel_disabled" });
+    }
     expect(byId("cq-5").status).toBe("completed");
+    expect(byId("cq-5").provider_status).toBeUndefined();
   });
 
   it("religar grava enabled=true/disabled_at=null e não reativa o que foi cancelado", async () => {

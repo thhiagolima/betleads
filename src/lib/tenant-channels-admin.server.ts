@@ -153,7 +153,8 @@ async function cancelEmailSends(tenantId: string): Promise<number> {
 async function cancelVoiceSends(tenantId: string): Promise<number> {
   const { data: rows, error } = await db()
     .from("call_queue")
-    .update({ status: "cancelled" })
+    // Same marker the voice dispatcher writes (calls.server.ts).
+    .update({ status: "cancelled", provider_status: "channel_disabled" })
     .eq("tenant_id", tenantId)
     .in("status", CALL_QUEUE_CANCELLABLE_STATUSES)
     .select("id");

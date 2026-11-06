@@ -7,10 +7,10 @@ import { resolveOperationalTenantId } from "@/lib/tenant-access.server";
 import { PROVIDER_CHANNELS } from "@/lib/provider-accounts.shared";
 import { dbUuid } from "@/lib/zod-helpers";
 
-const ackChannelNoticeInput = z.object({
+export const ackChannelNoticeInput = z.object({
   tenantId: dbUuid(),
   channel: z.enum(PROVIDER_CHANNELS),
-  disabledAt: z.string(),
+  disabledAt: z.string().datetime({ offset: true }),
 });
 
 export const getPendingChannelNotices = createServerFn({ method: "GET" })
