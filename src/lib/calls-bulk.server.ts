@@ -7,6 +7,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { runVoiceQueueDispatcher, VOICE_INSUFFICIENT_BALANCE_MESSAGE } from "./calls.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { assertChannelEnabled } from "./tenant-channels.server";
 import type { BulkDispatchCallsInput } from "./calls.functions";
 
 /** Targets left out after the house ran out of balance in "Disparar agora". */
@@ -18,6 +19,7 @@ export async function bulkDispatchCallsFor(
   data: BulkDispatchCallsInput,
 ) {
   const tenantId = await resolveOperationalTenantId(supabase);
+  await assertChannelEnabled(tenantId, "voice");
   const scheduledAt = data.scheduled_at ? new Date(data.scheduled_at) : null;
   if (scheduledAt && !Number.isFinite(scheduledAt.getTime())) {
     throw new Error("Data de agendamento de voz inválida.");

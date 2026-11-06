@@ -23,6 +23,7 @@ import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { logCallHistoryInsertError } from "./voice-history-log";
 import { bulkDispatchCallsFor } from "./calls-bulk.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
+import { assertChannelEnabled } from "./tenant-channels.server";
 import { CHANNEL_DISABLED_MESSAGE } from "./tenant-channels.shared";
 import {
   assertTenantNotDemoForSend,
@@ -695,6 +696,10 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ call_queue_id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const { supabase } = context;
+    // Clear error before any work (Task 7): checked before loading the queue
+    // item, resolving the phone or any consent/provider call.
+    const tenantId = await resolveOperationalTenantId(supabase);
+    await assertChannelEnabled(tenantId, "voice");
 
     const { data: q, error: qErr } = await supabase
       .from("call_queue")
@@ -724,7 +729,6 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       throw new Error(e instanceof Error ? e.message : String(e));
     }
 
-    const tenantId = await resolveOperationalTenantId(supabase);
     const contactPolicy = await evaluateVoiceContactPolicy(tenantId, to);
     if (!contactPolicy.allowed) {
       const consentRevoked = contactPolicy.reason === "consent_revoked";

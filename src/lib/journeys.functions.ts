@@ -10,6 +10,14 @@ import {
   journeyStatusSchema,
   legacyEmailBlockSenderConfig,
 } from "./journeys.shared";
+import { getTenantChannels } from "./tenant-channels.server";
+import {
+  CHANNEL_DISABLED_MESSAGE,
+  newDisabledChannelSteps,
+  STEP_TYPE_CHANNEL,
+  type ProviderChannel,
+  type StepLike,
+} from "./tenant-channels.shared";
 import { activationTriggerConfig, journeyEntryKey } from "./journey-policy";
 import { previewJourneyActivation } from "./journey-activation-preview.server";
 import { conversionFunnelSnapshot } from "./conversion-funnel";
@@ -92,6 +100,40 @@ async function requireJourneyDraftEditor(userId: string, tenantId: string) {
   if (role !== "admin" && role !== "gestor" && role !== "super_admin") {
     throw new Error("Você não tem permissão para editar jornadas.");
   }
+}
+
+/**
+ * Canais desligados para a casa (Task 7: recusar passo novo/alterado de
+ * canal desligado). Exportado (junto de `assertNoNewDisabledChannelSteps`)
+ * porque o compilador do TanStack Start troca o corpo dos `createServerFn`
+ * por um stub fora do servidor — os testes exercitam esta função pura, que
+ * `saveJourney`/`setJourneyStatus`/`convertLegacyJourney` chamam.
+ */
+export async function disabledChannelsFor(tenantId: string): Promise<Set<ProviderChannel>> {
+  const channels = await getTenantChannels(tenantId);
+  const disabled = new Set<ProviderChannel>();
+  for (const channel of Object.keys(channels) as ProviderChannel[]) {
+    if (!channels[channel].enabled) disabled.add(channel);
+  }
+  return disabled;
+}
+
+/**
+ * Lança `CHANNEL_DISABLED_MESSAGE` se `incoming` tiver um passo novo/alterado
+ * de canal desligado para a casa, comparado a `stored` (jornada antiga com o
+ * passo inalterado continua salvável).
+ */
+export async function assertNoNewDisabledChannelSteps(
+  tenantId: string,
+  stored: StepLike[],
+  incoming: StepLike[],
+) {
+  const disabled = await disabledChannelsFor(tenantId);
+  if (disabled.size === 0) return;
+  const offending = newDisabledChannelSteps(stored, incoming, disabled);
+  if (offending.length === 0) return;
+  const channel = STEP_TYPE_CHANNEL[offending[0].step_type];
+  if (channel) throw new Error(CHANNEL_DISABLED_MESSAGE(channel));
 }
 
 async function requireJourneyPublisher(userId: string, tenantId: string) {
@@ -422,6 +464,8 @@ export const convertLegacyJourney = createServerFn({ method: "POST" })
       throw new Error("A automação legada não possui nenhuma etapa de envio compatível.");
     if (steps.at(-1)?.step_type !== "end")
       steps.push({ step_type: "end", label: "Fim", config: {} });
+    // A jornada convertida é sempre nova: qualquer passo de canal desligado é recusado.
+    await assertNoNewDisabledChannelSteps(tenantId, [], steps as StepLike[]);
     const { data: journeyId, error: saveError } = await db.rpc("save_journey_draft", {
       p_tenant_id: tenantId,
       p_journey_id: null,
@@ -605,6 +649,20 @@ export const saveJourney = createServerFn({ method: "POST" })
         };
       }),
     );
+    // Jornada antiga com passo de canal desligado continua salvável sem
+    // mudar o passo; só um passo novo/alterado do canal recusa (Task 7).
+    const { data: storedSteps } = data.id
+      ? await db
+          .from("journey_steps")
+          .select("id, step_type, config")
+          .eq("journey_id", data.id)
+          .eq("tenant_id", tenantId)
+      : { data: [] };
+    await assertNoNewDisabledChannelSteps(
+      tenantId,
+      (storedSteps ?? []) as StepLike[],
+      steps.map((step): StepLike => ({ step_type: step.step_type, config: step.config })),
+    );
     const { data: journeyId, error } = await db.rpc("save_journey_draft", {
       p_tenant_id: tenantId,
       p_journey_id: data.id ?? null,
@@ -654,7 +712,7 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
     const { data: journey, error: journeyError } = await db
       .from("journeys")
       .select(
-        "id,version,status,conversion_objective,conversion_funnel_snapshot,trigger_type,trigger_config",
+        "id,version,status,revision_of,conversion_objective,conversion_funnel_snapshot,trigger_type,trigger_config",
       )
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
@@ -663,7 +721,7 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
     if (data.status === "active") {
       const { data: steps, error: stepsError } = await db
         .from("journey_steps")
-        .select("step_type,config,is_enabled")
+        .select("id,step_type,config,is_enabled")
         .eq("journey_id", data.id)
         .eq("tenant_id", tenantId)
         .eq("is_enabled", true);
@@ -693,6 +751,20 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
           if (!asset) throw new Error("Há uma etapa de voz sem áudio ativo deste tenant.");
         }
       }
+      // Publicar compara contra a última versão publicada (a jornada da qual
+      // esta é revisão); sem versão publicada, contra uma lista vazia (Task 7).
+      const { data: publishedSteps } = journey.revision_of
+        ? await db
+            .from("journey_steps")
+            .select("id, step_type, config")
+            .eq("journey_id", journey.revision_of)
+            .eq("tenant_id", tenantId)
+        : { data: [] };
+      await assertNoNewDisabledChannelSteps(
+        tenantId,
+        (publishedSteps ?? []) as StepLike[],
+        actionable as StepLike[],
+      );
     }
     const now = new Date().toISOString();
     const statusFields =

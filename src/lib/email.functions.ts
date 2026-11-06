@@ -29,7 +29,7 @@ import {
   resolveOperationalTenantId,
 } from "./tenant-access.server";
 import { isSendBlockedError } from "./billing/billing-locked-error";
-import { isChannelEnabled } from "./tenant-channels.server";
+import { assertChannelEnabled, isChannelEnabled } from "./tenant-channels.server";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
 import { tenantReads } from "@/lib/active-tenant-filter";
@@ -112,6 +112,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => SendTestEmailSchema.parse(d))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    await assertChannelEnabled(tenantId, "email");
     // Always the house's verified default sender: sender/provider overrides
     // in the request are deliberately ignored at this boundary.
     const sender = await resolveSender({ tenantId });
@@ -681,6 +682,12 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => CampanhaInputSchema.parse(d))
   .handler(async ({ data, context }) => {
     const smtpIdNorm = data.smtpId ?? null;
+    // Salvar com um status diferente de rascunho (agendar) recusa canal
+    // de e-mail desligado para a casa (Task 7).
+    if (data.status !== "rascunho") {
+      const tenantId = await resolveOperationalTenantId(context.supabase);
+      await assertChannelEnabled(tenantId, "email");
+    }
     let refColumns: { sender_id?: string | null; short_domain_id?: string | null } = {};
     if (data.senderId !== undefined || data.shortDomainId !== undefined) {
       const tenantId = await resolveOperationalTenantId(context.supabase);
@@ -765,6 +772,11 @@ export const updateEmailCampaignStatus = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
+    // Agendar/retomar o envio recusa canal de e-mail desligado (Task 7).
+    if (data.status === "agendada" || data.status === "enviando") {
+      const tenantId = await resolveOperationalTenantId(context.supabase);
+      await assertChannelEnabled(tenantId, "email");
+    }
     const { error } = await context.supabase
       .from("email_campaigns")
       .update(emailCampaignStatusPatch(data.status))
@@ -894,6 +906,7 @@ export const sendEmailCampaignNow = createServerFn({ method: "POST" })
     await assertNotExpertEmailCampaign(data.campaignId);
     // Before the claim: a demo campaign is never moved to "enviando".
     await assertTenantNotDemoForSend(tenantId);
+    await assertChannelEnabled(tenantId, "email");
     const lockToken = await claimEmailCampaignForSendNow(data.campaignId, tenantId);
     if (!lockToken) throw new Error(EMAIL_CAMPAIGN_ALREADY_SENDING_MESSAGE);
     try {

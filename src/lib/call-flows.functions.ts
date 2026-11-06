@@ -13,6 +13,7 @@ import {
   tickFlows,
 } from "./call-flows.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { assertChannelEnabled } from "./tenant-channels.server";
 import { tenantReads } from "@/lib/active-tenant-filter";
 
 const SmsConditionSchema = z.enum([
@@ -106,6 +107,18 @@ export const saveCallFlow = createServerFn({ method: "POST" })
   .inputValidator((input) => FlowInputSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase } = context;
+    // Um fluxo ativo com bloco de ligação/SMS de canal desligado é recusado
+    // ao salvar (Task 7). O fluxo substitui todos os blocos a cada save, sem
+    // a distinção "passo antigo inalterado" que a jornada tem.
+    if (data.is_active) {
+      const tenantId = await resolveOperationalTenantId(supabase);
+      const hasCall = data.blocks.some((b) => b.block_type === "call");
+      const hasSms = data.blocks.some(
+        (b) => b.block_type === "call" && b.sms.length > 0,
+      );
+      if (hasCall) await assertChannelEnabled(tenantId, "voice");
+      if (hasSms) await assertChannelEnabled(tenantId, "sms");
+    }
     const flowPayload = {
       name: data.name,
       trigger_name: data.trigger_name ?? null,
@@ -244,6 +257,8 @@ export const enrollPlayerInCallFlow = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ flow_id: dbUuid(), player_id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    // O fluxo sempre começa por uma ligação: recusa antes de matricular (Task 7).
+    await assertChannelEnabled(tenantId, "voice");
     const [{ data: flow }, { data: player }] = await Promise.all([
       context.supabase
         .from("call_flows")

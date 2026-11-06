@@ -11,6 +11,7 @@ import {
   assertTenantNotDemoForSend,
   resolveCurrentTenantId,
 } from "@/lib/tenant-access.server";
+import { assertChannelEnabled } from "@/lib/tenant-channels.server";
 import {
   cancelWebpushCampaign,
   countWebpushAudience,
@@ -65,6 +66,7 @@ export const scheduleWebpushCampaignFn = createServerFn({ method: "POST" })
     const tenantId = await resolveCurrentTenantId(context.supabase);
     await assertTenantCanOperate(tenantId);
     await assertTenantNotDemoForSend(tenantId);
+    await assertChannelEnabled(tenantId, "webpush");
     return scheduleWebpushCampaign(campaignsDb, {
       tenantId,
       name: data.name,

@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { dbUuid } from "@/lib/zod-helpers";
 import { assertSuperAdmin } from "@/lib/provider-governance.server";
 import { assertTenantNotDemo, resolveOperationalTenantId } from "@/lib/tenant-access.server";
+import { assertChannelEnabled } from "@/lib/tenant-channels.server";
 import { checkSuperAdmin, checkTenantAdmin, requireHouseAdmin } from "@/lib/house-config.functions";
 import {
   activateWebpushOrigin,
@@ -42,6 +43,7 @@ export const activateWebpushOriginFn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertSuperAdmin(context.userId);
     await assertTenantNotDemo(data.tenantId);
+    await assertChannelEnabled(data.tenantId, "webpush");
     return activateWebpushOrigin(supabaseAdmin, data);
   });
 
@@ -141,5 +143,6 @@ export const sendWebpushTestFn = createServerFn({ method: "POST" })
   .inputValidator((v: unknown) => z.object({ subscriptionRowId: dbUuid() }).parse(v))
   .handler(async ({ data, context }) => {
     const tenantId = await requireHouseAdmin(context);
+    await assertChannelEnabled(tenantId, "webpush");
     return sendWebpushTest(supabaseAdmin, { tenantId, subscriptionRowId: data.subscriptionRowId });
   });

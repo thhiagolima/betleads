@@ -6,6 +6,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { runEmailFlowDispatcher } from "./email-automations.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { assertChannelEnabled } from "./tenant-channels.server";
 import { tenantReads } from "@/lib/active-tenant-filter";
 
 const TriggerSchema = z.enum([
@@ -158,6 +159,11 @@ export const saveEmailFlow = createServerFn({ method: "POST" })
       throw new Error(
         "Para ativar o fluxo, é necessário pelo menos um bloco de envio com template selecionado.",
       );
+    }
+    // Um fluxo ativo com envio de e-mail recusa canal desligado (Task 7).
+    if (data.active && hasSend) {
+      const tenantId = await resolveOperationalTenantId(context.supabase);
+      await assertChannelEnabled(tenantId, "email");
     }
 
     let flowId = data.id;
@@ -348,6 +354,7 @@ export const triggerEmailFlowTest = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    await assertChannelEnabled(tenantId, "email");
     const { data: flow } = await supabaseAdmin
       .from("email_flows")
       .select("id, active")

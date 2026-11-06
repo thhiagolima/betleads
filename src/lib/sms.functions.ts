@@ -25,7 +25,7 @@ import {
 } from "./shortio.server";
 import type { Json } from "@/integrations/supabase/types";
 import { isChannelRevoked } from "./consent.server";
-import { isChannelEnabled } from "./tenant-channels.server";
+import { assertChannelEnabled, isChannelEnabled } from "./tenant-channels.server";
 import { CHANNEL_DISABLED_MESSAGE } from "./tenant-channels.shared";
 import { requireBrazilianPhone } from "./phone-normalization";
 import {
@@ -1148,6 +1148,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    await assertChannelEnabled(tenantId, "sms");
     const house = await loadHouseLinks(tenantId);
     let variables: Record<string, string> | null = null;
     if (data.playerId) {
@@ -1207,6 +1208,7 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    await assertChannelEnabled(tenantId, "sms");
     const { data: flow } = await supabaseAdmin
       .from("sms_flows")
       .select("id, trigger_name, is_active, tenant_id")
@@ -1289,6 +1291,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     await assertTenantCanOperate(tenantId);
     // Demo guard once, before the campaign row, stats or any per-recipient send.
     await assertTenantNotDemoForSend(tenantId);
+    await assertChannelEnabled(tenantId, "sms");
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)
@@ -2085,6 +2088,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await requireActiveTenantAdmin(context.supabase, RESEND_ADMIN_ONLY);
     await assertTenantCanOperate(tenantId);
+    await assertChannelEnabled(tenantId, "sms");
     const { start, end } = brtDayWindow(data.date);
 
     type Row = {
@@ -2328,6 +2332,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
     await assertTenantCanOperate(tenantId);
     // Demo guard once, before the campaign row, stats or any per-recipient send.
     await assertTenantNotDemoForSend(tenantId);
+    await assertChannelEnabled(tenantId, "sms");
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)
