@@ -5,7 +5,8 @@
 // (`user_roles.role = 'super_admin'` with no tenant). Off by default: nothing
 // is sent unless `PLATFORM_ALERTS_EMAIL_ENABLED === "true"`. The claim that
 // keeps two concurrent runs from both e-mailing lives in
-// `alert-store.server.ts` (it marks `last_notified_at` before calling here).
+// `alert-store.server.ts` (it resolves the recipients, then marks
+// `last_notified_at`, before calling here).
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendPlatformEmail } from "@/lib/billing/billing-emails.server";
@@ -115,16 +116,18 @@ ${items}
 }
 
 /**
- * E-mails `alerts` (one message listing all of them) to every super admin.
- * Returns how many e-mails the provider accepted. A no-op (0) unless
- * `PLATFORM_ALERTS_EMAIL_ENABLED === "true"`, and for an empty list. A
- * failed recipient is logged and the others still get theirs.
+ * E-mails `alerts` (one message listing all of them) to every address in
+ * `recipients` (the caller resolves them with `listSuperAdminEmails` before
+ * claiming the alerts). Returns how many e-mails the provider accepted. A
+ * no-op (0) unless `PLATFORM_ALERTS_EMAIL_ENABLED === "true"`, and for an
+ * empty list. A failed recipient is logged and the others still get theirs.
  */
-export async function notifyCriticalAlerts(alerts: StoredAlert[], now: Date): Promise<number> {
-  if (!isPlatformAlertsEmailEnabled() || alerts.length === 0) return 0;
-
-  const recipients = await listSuperAdminEmails();
-  if (recipients.length === 0) return 0;
+export async function notifyCriticalAlerts(
+  alerts: StoredAlert[],
+  now: Date,
+  recipients: string[],
+): Promise<number> {
+  if (!isPlatformAlertsEmailEnabled() || alerts.length === 0 || recipients.length === 0) return 0;
 
   const { subject, html } = criticalAlertEmail(alerts);
   const stamp = now.toISOString();

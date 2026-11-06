@@ -87,6 +87,7 @@ export const JOB_EXPECTED_PERIOD_S: Record<string, number> = {
   journey_dispatch: 60,
   journey_level_outbox: 60,
   journey_scan: 60,
+  platform_alerts: 300,
   recovery: 60,
   shortio_sync: 300,
   sms_tick: 60,

@@ -121,30 +121,35 @@ describe("criticalAlertEmail", () => {
 });
 
 describe("notifyCriticalAlerts", () => {
+  // Recipients are resolved by the caller (alert-store.server.ts) before it claims.
+  const RECIPIENTS = ["root1@betleads.io", "root2@betleads.io"];
+
+  it("sends nothing to an empty recipient list", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    expect(await notifyCriticalAlerts([stored("job:a")], NOW, [])).toBe(0);
+    expect(sendPlatformEmail).not.toHaveBeenCalled();
+  });
+
   it("is a no-op unless PLATFORM_ALERTS_EMAIL_ENABLED is exactly 'true'", async () => {
     vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "1");
-    expect(await notifyCriticalAlerts([stored("job:a")], NOW)).toBe(0);
+    expect(await notifyCriticalAlerts([stored("job:a")], NOW, RECIPIENTS)).toBe(0);
     expect(sendPlatformEmail).not.toHaveBeenCalled();
   });
 
   it("sends nothing for an empty list", async () => {
     vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
-    expect(await notifyCriticalAlerts([], NOW)).toBe(0);
+    expect(await notifyCriticalAlerts([], NOW, RECIPIENTS)).toBe(0);
     expect(sendPlatformEmail).not.toHaveBeenCalled();
   });
 
   it("sends one e-mail per super admin and counts only accepted sends", async () => {
     vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    getUserById().mockImplementation((id: string) => ({
-      data: { user: { email: id === SUPER_1 ? "root1@betleads.io" : "root2@betleads.io" } },
-      error: null,
-    }));
     sendPlatformEmail
       .mockResolvedValueOnce({ ok: true, status: 200 })
       .mockResolvedValueOnce({ ok: false, status: 500 });
 
-    const sent = await notifyCriticalAlerts([stored("job:a"), stored("job:b")], NOW);
+    const sent = await notifyCriticalAlerts([stored("job:a"), stored("job:b")], NOW, RECIPIENTS);
 
     expect(sent).toBe(1);
     expect(sendPlatformEmail).toHaveBeenCalledTimes(2);
@@ -159,15 +164,11 @@ describe("notifyCriticalAlerts", () => {
   it("a throwing send is logged and does not stop the other recipients", async () => {
     vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    getUserById().mockImplementation((id: string) => ({
-      data: { user: { email: id === SUPER_1 ? "root1@betleads.io" : "root2@betleads.io" } },
-      error: null,
-    }));
     sendPlatformEmail
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValueOnce({ ok: true, status: 200 });
 
-    expect(await notifyCriticalAlerts([stored("job:a")], NOW)).toBe(1);
+    expect(await notifyCriticalAlerts([stored("job:a")], NOW, RECIPIENTS)).toBe(1);
     expect(errorSpy).toHaveBeenCalled();
   });
 });

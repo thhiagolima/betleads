@@ -28,7 +28,12 @@ vi.mock("@/lib/billing/billing-emails.server", () => ({
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 
 import type { PlatformAlert } from "./alert-rules";
-import { CRITICAL_RENOTIFY_MS, HISTORY_DAYS, SILENCE_HOURS } from "./alert-lifecycle";
+import {
+  CRITICAL_RENOTIFY_MS,
+  HISTORY_DAYS,
+  RESOLVE_GRACE_MS,
+  SILENCE_HOURS,
+} from "./alert-lifecycle";
 import {
   acknowledgeAlert,
   listAlertHistory,
@@ -50,6 +55,10 @@ const EMAIL_BY_USER: Record<string, string> = {
 
 const NOW = new Date("2026-11-05T15:00:00.000Z");
 const LATER = new Date(NOW.getTime() + 5 * 60_000);
+/** First round after RESOLVE_GRACE_MS: an alert last seen at NOW and absent now resolves. */
+const AFTER_GRACE = new Date(NOW.getTime() + RESOLVE_GRACE_MS + 5 * 60_000);
+const HOUR = 3_600_000;
+const at = (ms: number) => new Date(NOW.getTime() + ms).toISOString();
 
 function alert(key: string, overrides: Partial<PlatformAlert> = {}): PlatformAlert {
   return {
@@ -133,14 +142,14 @@ describe("syncPlatformAlerts", () => {
     mocks.computePlatformHealth.mockResolvedValueOnce(
       healthWith([alert("job:a", { message: "Mensagem nova" })]),
     );
-    const result = await syncPlatformAlerts(LATER);
+    const result = await syncPlatformAlerts(AFTER_GRACE);
 
     expect(result).toMatchObject({ opened: 0, seen: 1, resolved: 1 });
     const a = alertRows().find((row) => row.alert_key === "job:a")!;
     expect(a).toMatchObject({ seen_count: 2, message: "Mensagem nova", resolved_at: null });
-    expect(new Date(String(a.last_seen_at)).getTime()).toBe(LATER.getTime());
+    expect(new Date(String(a.last_seen_at)).getTime()).toBe(AFTER_GRACE.getTime());
     const b = alertRows().find((row) => row.alert_key === "queue:b")!;
-    expect(new Date(String(b.resolved_at)).getTime()).toBe(LATER.getTime());
+    expect(new Date(String(b.resolved_at)).getTime()).toBe(AFTER_GRACE.getTime());
     expect((await loadOpenAlerts()).map((row) => row.alertKey)).toEqual(["job:a"]);
   });
 
@@ -153,7 +162,7 @@ describe("syncPlatformAlerts", () => {
     mocks.computePlatformHealth.mockResolvedValueOnce(
       healthWith([alert("source:observability_queue_metrics", { kind: "source" })]),
     );
-    const result = await syncPlatformAlerts(LATER);
+    const result = await syncPlatformAlerts(AFTER_GRACE);
 
     expect(result.resolved).toBe(0);
     expect(
@@ -167,9 +176,9 @@ describe("syncPlatformAlerts", () => {
     mocks.computePlatformHealth.mockResolvedValueOnce(healthWith([alert("job:a")]));
     await syncPlatformAlerts(NOW);
     mocks.computePlatformHealth.mockResolvedValueOnce(healthWith([]));
-    await syncPlatformAlerts(LATER);
+    await syncPlatformAlerts(AFTER_GRACE);
     mocks.computePlatformHealth.mockResolvedValueOnce(healthWith([alert("job:a")]));
-    const result = await syncPlatformAlerts(new Date(LATER.getTime() + 60_000));
+    const result = await syncPlatformAlerts(new Date(AFTER_GRACE.getTime() + 60_000));
 
     expect(result.opened).toBe(1);
     expect(alertRows().filter((row) => row.alert_key === "job:a")).toHaveLength(2);
@@ -201,6 +210,248 @@ describe("syncPlatformAlerts", () => {
     // One e-mail per super admin, sent by one run only.
     expect(mocks.sendPlatformEmail).toHaveBeenCalledTimes(2);
     expect(first.notified + second.notified).toBe(2);
+  });
+
+  it("a failed tenants source keeps every per-house alert open and sends no new e-mail", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    const perHouse = [
+      alert(`webhook:${HOUSE_A}:silence`, { kind: "webhook", tenantId: HOUSE_A }),
+      alert(`queue:${HOUSE_A}:sms`, { kind: "queue", tenantId: HOUSE_A }),
+      alert(`runway:${HOUSE_A}:zero`, { kind: "runway", tenantId: HOUSE_A }),
+    ];
+    mocks.computePlatformHealth.mockResolvedValueOnce(healthWith(perHouse));
+    await syncPlatformAlerts(NOW);
+    expect(mocks.sendPlatformEmail).toHaveBeenCalledTimes(2);
+
+    // The house set is empty: no per-house rule can fire, which proves nothing.
+    mocks.computePlatformHealth.mockResolvedValueOnce(
+      healthWith([alert("source:tenants", { kind: "source", severity: "warning" })]),
+    );
+    const result = await syncPlatformAlerts(AFTER_GRACE);
+
+    expect(result.resolved).toBe(0);
+    expect(
+      openRows()
+        .map((row) => row.alert_key)
+        .sort(),
+    ).toEqual([...perHouse.map((a) => a.key), "source:tenants"].sort());
+
+    // Houses come back: same rows, still inside the renotify window, no e-mail.
+    mocks.computePlatformHealth.mockResolvedValueOnce(healthWith(perHouse));
+    const back = await syncPlatformAlerts(new Date(AFTER_GRACE.getTime() + 5 * 60_000));
+    expect(back.opened).toBe(0);
+    expect(mocks.sendPlatformEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("a failed finance_days source keeps webhook alerts open", async () => {
+    mocks.computePlatformHealth.mockResolvedValueOnce(
+      healthWith([alert(`webhook:${HOUSE_A}:silence`, { kind: "webhook" })]),
+    );
+    await syncPlatformAlerts(NOW);
+    mocks.computePlatformHealth.mockResolvedValueOnce(
+      healthWith([alert("source:finance_days", { kind: "source", severity: "warning" })]),
+    );
+
+    const result = await syncPlatformAlerts(AFTER_GRACE);
+
+    expect(result.resolved).toBe(0);
+    expect(openRows().map((row) => row.alert_key)).toContain(`webhook:${HOUSE_A}:silence`);
+  });
+
+  it("a key absent one round and back keeps its row and sends no new e-mail", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    mocks.computePlatformHealth.mockResolvedValueOnce(healthWith([alert("job:a")]));
+    await syncPlatformAlerts(NOW);
+    expect(mocks.sendPlatformEmail).toHaveBeenCalledTimes(2);
+
+    mocks.computePlatformHealth.mockResolvedValueOnce(healthWith([]));
+    const absent = await syncPlatformAlerts(LATER);
+    expect(absent.resolved).toBe(0);
+
+    mocks.computePlatformHealth.mockResolvedValueOnce(healthWith([alert("job:a")]));
+    const back = await syncPlatformAlerts(new Date(LATER.getTime() + 5 * 60_000));
+
+    expect(back).toMatchObject({ opened: 0, seen: 1, resolved: 0 });
+    expect(alertRows().filter((row) => row.alert_key === "job:a")).toHaveLength(1);
+    expect(mocks.sendPlatformEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("reopening a key resolved 1 h ago carries its notification and silence: no e-mail", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    alertRows().push(
+      {
+        id: "older",
+        alert_key: "job:a",
+        kind: "job",
+        severity: "critical",
+        resolved_at: at(-3 * HOUR),
+        last_notified_at: at(-20 * HOUR),
+        silenced_until: null,
+      },
+      {
+        id: "recent",
+        alert_key: "job:a",
+        kind: "job",
+        severity: "critical",
+        resolved_at: at(-1 * HOUR),
+        last_notified_at: at(-2 * HOUR),
+        silenced_until: at(10 * HOUR),
+      },
+    );
+    mocks.computePlatformHealth.mockResolvedValue(healthWith([alert("job:a")]));
+
+    const result = await syncPlatformAlerts(NOW);
+
+    expect(result).toMatchObject({ opened: 1, notified: 0 });
+    expect(mocks.sendPlatformEmail).not.toHaveBeenCalled();
+    const [row] = openRows();
+    expect(row.last_notified_at).toBe(at(-2 * HOUR));
+    expect(row.silenced_until).toBe(at(10 * HOUR));
+  });
+
+  it("reopening a key resolved 1 h ago carries last_notified_at but not an expired silence", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    alertRows().push({
+      id: "recent",
+      alert_key: "job:a",
+      kind: "job",
+      severity: "critical",
+      resolved_at: at(-1 * HOUR),
+      last_notified_at: at(-2 * HOUR),
+      silenced_until: at(-30 * 60_000),
+    });
+    mocks.computePlatformHealth.mockResolvedValue(healthWith([alert("job:a")]));
+
+    await syncPlatformAlerts(NOW);
+
+    expect(mocks.sendPlatformEmail).not.toHaveBeenCalled();
+    const [row] = openRows();
+    expect(row.last_notified_at).toBe(at(-2 * HOUR));
+    expect(row.silenced_until ?? null).toBeNull();
+  });
+
+  it("reopening a key resolved 7 h ago starts fresh and e-mails", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    alertRows().push({
+      id: "old",
+      alert_key: "job:a",
+      kind: "job",
+      severity: "critical",
+      resolved_at: at(-7 * HOUR),
+      last_notified_at: at(-8 * HOUR),
+      silenced_until: at(10 * HOUR),
+    });
+    mocks.computePlatformHealth.mockResolvedValue(healthWith([alert("job:a")]));
+
+    const result = await syncPlatformAlerts(NOW);
+
+    expect(result.notified).toBe(2);
+    expect(mocks.sendPlatformEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("an acknowledged warning that escalates to critical loses its acknowledgement and e-mails", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    mocks.computePlatformHealth.mockResolvedValueOnce(
+      healthWith([alert("queue:b", { kind: "queue", severity: "warning" })]),
+    );
+    await syncPlatformAlerts(NOW);
+    await acknowledgeAlert("queue:b", SUPER_1, null, NOW);
+
+    mocks.computePlatformHealth.mockResolvedValueOnce(
+      healthWith([alert("queue:b", { kind: "queue", severity: "critical" })]),
+    );
+    const result = await syncPlatformAlerts(LATER);
+
+    expect(result.notified).toBe(2);
+    const [row] = openRows();
+    expect(row).toMatchObject({
+      severity: "critical",
+      acknowledged_at: null,
+      acknowledged_by: null,
+    });
+  });
+
+  it("an escalation keeps an explicit silence", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    mocks.computePlatformHealth.mockResolvedValueOnce(
+      healthWith([alert("queue:b", { kind: "queue", severity: "warning" })]),
+    );
+    await syncPlatformAlerts(NOW);
+    await silenceAlert("queue:b", null, NOW);
+
+    mocks.computePlatformHealth.mockResolvedValueOnce(
+      healthWith([alert("queue:b", { kind: "queue", severity: "critical" })]),
+    );
+    const result = await syncPlatformAlerts(LATER);
+
+    expect(result.notified).toBe(0);
+    expect(openRows()[0].silenced_until).not.toBeNull();
+  });
+
+  it("no super admin e-mail: nothing is claimed, logged once", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fake.admin.rows("user_roles").length = 0;
+    mocks.computePlatformHealth.mockResolvedValue(healthWith([alert("job:a"), alert("job:b")]));
+
+    const result = await syncPlatformAlerts(NOW);
+
+    expect(result.notified).toBe(0);
+    expect(mocks.sendPlatformEmail).not.toHaveBeenCalled();
+    expect(openRows().every((row) => row.last_notified_at == null)).toBe(true);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    errorSpy.mockRestore();
+  });
+
+  it("recipient lookup failure: nothing is claimed, the sync still purges", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    alertRows().push({
+      id: "old",
+      alert_key: "job:old",
+      kind: "job",
+      severity: "critical",
+      resolved_at: new Date(NOW.getTime() - (HISTORY_DAYS + 1) * 86_400_000).toISOString(),
+    });
+    fake.admin.failNext("user_roles", "select", "roles down");
+    mocks.computePlatformHealth.mockResolvedValue(healthWith([alert("job:a")]));
+
+    const result = await syncPlatformAlerts(NOW);
+
+    expect(result).toMatchObject({ opened: 1, notified: 0, purged: 1 });
+    expect(openRows()[0].last_notified_at ?? null).toBeNull();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[platform-alerts]"),
+      expect.objectContaining({ error: "roles down" }),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("every send failing releases the claims, so the next round e-mails again", async () => {
+    vi.stubEnv("PLATFORM_ALERTS_EMAIL_ENABLED", "true");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const notifiedAt = at(-7 * HOUR);
+    mocks.computePlatformHealth.mockResolvedValue(healthWith([alert("job:a"), alert("job:b")]));
+    await syncPlatformAlerts(NOW);
+    // job:b was notified 7 h ago (due again); job:a never.
+    const a = alertRows().find((row) => row.alert_key === "job:a")!;
+    const b = alertRows().find((row) => row.alert_key === "job:b")!;
+    a.last_notified_at = null;
+    b.last_notified_at = notifiedAt;
+    mocks.sendPlatformEmail.mockReset().mockResolvedValue({ ok: false, status: 503 });
+
+    const failed = await syncPlatformAlerts(LATER);
+
+    expect(failed.notified).toBe(0);
+    expect(mocks.sendPlatformEmail).toHaveBeenCalledTimes(2);
+    expect(a.last_notified_at ?? null).toBeNull();
+    expect(b.last_notified_at).toBe(notifiedAt);
+
+    mocks.sendPlatformEmail.mockReset().mockResolvedValue({ ok: true, status: 200 });
+    const retry = await syncPlatformAlerts(new Date(LATER.getTime() + 5 * 60_000));
+    expect(retry.notified).toBe(2);
+    expect(String(a.last_notified_at)).not.toBe("null");
+    errorSpy.mockRestore();
   });
 
   it("flag off: no e-mail and last_notified_at untouched", async () => {
@@ -324,6 +575,26 @@ describe("acknowledgeAlert / silenceAlert", () => {
     expect(openRows()).toHaveLength(1);
     expect(openRows()[0]).toMatchObject({ acknowledged_by: SUPER_2 });
     expect(openRows()[0].silenced_until).not.toBeNull();
+  });
+
+  it("acknowledging an alert resolved in between throws 'Alerta já resolvido.'", async () => {
+    mocks.computePlatformHealth.mockResolvedValue(healthWith([alert("job:a")]));
+    await syncPlatformAlerts(NOW);
+    // The cron resolves the row between the open-row check and the update.
+    const client = fake.admin.client as unknown as { from: (table: string) => unknown };
+    const realFrom = client.from;
+    let calls = 0;
+    const spy = vi.spyOn(client, "from").mockImplementation((table: string) => {
+      calls += 1;
+      if (calls === 2) for (const row of openRows()) row.resolved_at = LATER.toISOString();
+      return realFrom(table);
+    });
+
+    await expect(acknowledgeAlert("job:a", SUPER_1, null, LATER)).rejects.toThrow(
+      "Alerta já resolvido.",
+    );
+    await expect(silenceAlert("job:a", null, LATER)).rejects.toThrow("Alerta não encontrado.");
+    spy.mockRestore();
   });
 
   it("unknown key without a current alert throws", async () => {
