@@ -154,6 +154,7 @@ function CrmCard({ data }: { data: DashboardData }) {
           label="Em jornada agora"
           value={`${num(data.reactivationQueue)} · ${num(data.activeFlows)}/${num(data.totalFlows)} ativas`}
           to="/jornadas"
+          {...tourAnchor("inicio.recuperado.em-jornada")}
         />
         <MetricRow label="Saldo" value={data.exempt ? "Isenta" : brl(data.walletBalance)} />
       </div>

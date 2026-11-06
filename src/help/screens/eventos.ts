@@ -10,7 +10,7 @@ const screen: HelpScreen = {
   title: "Eventos",
   purpose:
     "Os últimos 100 eventos dos jogadores da casa escolhida — cadastros, logins, depósitos, saques e jogos — atualizando sozinha.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   sections: [
     {
       id: "lista",

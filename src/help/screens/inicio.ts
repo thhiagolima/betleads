@@ -12,7 +12,7 @@ const screen: HelpScreen = {
   title: "Início",
   purpose:
     "Visão geral da casa no período escolhido: os 4 indicadores principais, o fluxo de depósitos e saques, o quanto o CRM recuperou, 5 métricas secundárias e os eventos mais recentes dos jogadores.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["ftd", "pix-gerado-pago", "pp"],
   sections: [
     // ---------------------------------------------------------------
@@ -31,7 +31,9 @@ const screen: HelpScreen = {
         },
         {
           label: 'Texto "Operação de X · atualizado Y"',
-          what: 'Abaixo do título, mostra o período em texto (ex.: "Operação de 01/11 a 07/11") e há quanto tempo os dados foram buscados pela última vez ("atualizado agora", "atualizado há 2 min"...). Um ícone giratório aparece ao lado enquanto busca de novo.',
+          what: 'Abaixo do título, mostra o período em texto e há quanto tempo os dados foram buscados pela última vez ("atualizado agora", "atualizado há 2 min"...). Um ícone giratório aparece ao lado enquanto busca de novo.',
+          notes:
+            'Quando o período é um único dia (Hoje, Ontem, ou duas datas iguais escolhidas em "Datas"), mostra só essa data (ex.: "Operação de 01/11"); quando é um intervalo de vários dias, mostra "de X a Y" (ex.: "Operação de 01/11 a 07/11").',
         },
       ],
     },
@@ -98,7 +100,12 @@ const screen: HelpScreen = {
           label: 'Cartão "Recuperado pelo CRM"',
           what: 'Mostra o valor recuperado e, abaixo, "<N> jogador(es) que estavam parados depositaram até 7 dias depois de clicar num link de campanha ou jornada" (ou "Ainda não há depósitos após clique em link no período.", quando não houve nenhum). Em seguida, quatro linhas: "Gasto em SMS" (preço por segmento vezes os segmentos enviados no período), "Retorno sobre o envio" (recuperado ÷ gasto em SMS, em verde quando positivo, ou "—" sem gasto), "Em jornada agora" (quantos jogadores estão em jornada neste momento e quantas jornadas estão ativas do total) e "Saldo" ("Isenta" para casa isenta de cobrança, ou o saldo em R$).',
           notes:
-            'Recuperado pelo CRM considera só depósitos feitos em até 7 dias depois de um clique humano (não de robô) num link de campanha ou jornada, e não conta quem já estava ativo antes do clique. "Em jornada agora" leva para /jornadas ao clicar.',
+            'Recuperado pelo CRM considera só depósitos feitos em até 7 dias depois de um clique humano (não de robô) num link de campanha ou jornada, e não conta quem já estava ativo antes do clique. Casas que não operam em reais (moeda diferente de BRL) sempre veem "—" em "Retorno sobre o envio": o gasto em SMS é sempre em reais, e não faz sentido dividir um valor recuperado em outra moeda por ele.',
+        },
+        {
+          anchor: "inicio.recuperado.em-jornada",
+          label: "Em jornada agora",
+          what: "Quantos jogadores estão em alguma jornada neste momento e quantas jornadas estão ativas do total da casa. Leva para /jornadas ao clicar.",
         },
         {
           anchor: "inicio.recuperado.ver-resultados",
@@ -191,9 +198,15 @@ const screen: HelpScreen = {
         articleSection: "fluxo",
       },
       {
-        anchor: "inicio.recuperado.ver-resultados",
+        anchor: "inicio.recuperado.em-jornada",
         title: "Recuperado pelo CRM",
-        body: "O valor que o CRM recuperou: depósitos feitos em até 7 dias depois de um clique humano em link de campanha ou jornada. Clique aqui para ver o relatório completo.",
+        body: "O valor que o CRM recuperou: depósitos feitos em até 7 dias depois de um clique humano em link de campanha ou jornada. \"Em jornada agora\" mostra quantos jogadores estão em jornada neste momento — clique para ver em /jornadas.",
+        articleSection: "recuperado",
+      },
+      {
+        anchor: "inicio.recuperado.ver-resultados",
+        title: "Resultados completos",
+        body: "Clique aqui para ver o relatório completo de recuperação pelo CRM.",
         articleSection: "recuperado",
       },
       {
