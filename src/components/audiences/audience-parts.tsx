@@ -47,6 +47,7 @@ export function RuleChip({
   loading,
   dot,
   marker,
+  tourProps,
 }: {
   active: boolean;
   onClick: () => void;
@@ -57,6 +58,8 @@ export function RuleChip({
   dot?: string;
   /** Marcador próprio (ex.: ícone do nível), no lugar da bolinha. */
   marker?: ReactNode;
+  /** `tourAnchor(...)` do chamador (chip repetido num grupo: só o primeiro recebe). */
+  tourProps?: Record<string, string>;
 }) {
   return (
     <button
@@ -69,6 +72,7 @@ export function RuleChip({
           ? "border-primary bg-primary/15 text-primary"
           : "border-border bg-background/40 text-foreground hover:bg-secondary",
       )}
+      {...tourProps}
     >
       {marker ??
         (dot && <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden="true" />)}
@@ -103,6 +107,9 @@ export function AudienceCard({
   labels,
   menu,
   badge,
+  cardAnchor,
+  actionAnchor,
+  menuAnchor,
 }: {
   audienceId: string;
   name: string;
@@ -111,11 +118,20 @@ export function AudienceCard({
   menu?: AudienceMenuItem[];
   /** Short tag next to the name (e.g. "Da casa · somente leitura"). */
   badge?: string;
+  /** `tourAnchor(...)` do chamador para o cartão (lista de cartões: só o primeiro recebe). */
+  cardAnchor?: Record<string, string>;
+  /** `tourAnchor(...)` do chamador para "Usar na campanha". */
+  actionAnchor?: Record<string, string>;
+  /** `tourAnchor(...)` do chamador para o botão "⋯". */
+  menuAnchor?: Record<string, string>;
 }) {
   const regular = (menu ?? []).filter((item) => !item.destructive);
   const destructive = (menu ?? []).filter((item) => item.destructive);
   return (
-    <article className="flex flex-col gap-3 rounded-xl border border-border bg-background/30 p-3.5 sm:flex-row sm:items-start sm:justify-between">
+    <article
+      className="flex flex-col gap-3 rounded-xl border border-border bg-background/30 p-3.5 sm:flex-row sm:items-start sm:justify-between"
+      {...cardAnchor}
+    >
       <div className="min-w-0 flex-1">
         {badge ? (
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -143,7 +159,11 @@ export function AudienceCard({
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         <Button asChild className="h-11 flex-1 sm:h-9 sm:flex-none">
-          <Link to="/campanhas" search={{ newCampaign: 1, audience: audienceId } as never}>
+          <Link
+            to="/campanhas"
+            search={{ newCampaign: 1, audience: audienceId } as never}
+            {...actionAnchor}
+          >
             <Megaphone className="size-4" aria-hidden="true" />
             Usar na campanha
           </Link>
@@ -155,6 +175,7 @@ export function AudienceCard({
                 variant="outline"
                 label={`Mais ações para ${name}`}
                 icon={<MoreHorizontal className="size-4" />}
+                {...menuAnchor}
               />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-44">

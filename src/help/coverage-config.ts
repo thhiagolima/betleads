@@ -61,7 +61,6 @@ export const PENDING_ROUTES: string[] = [
   "/webhooks#webpush",
 
   // --- Fase 2 ---
-  "/publicos",
   "/gamificacao",
   "/regras",
   "/sms",
