@@ -35,6 +35,13 @@ export type ReserveUsageArgs = {
    * counts the expert's monthly cap in the same transaction.
    */
   expertId?: string | null;
+  /**
+   * Conta própria de provedor: the provider account that WILL send this
+   * delivery (resolved once by the send path and passed down). Forwarded as
+   * `_provider_account_id`; SQL decides ownership — an account owned by this
+   * house reserves 0, with no franchise and no provider cost.
+   */
+  providerAccountId?: string | null;
 };
 
 /** Refusal of an expert reservation (never the house's balance). */
@@ -46,7 +53,18 @@ export const EXPERT_CAP_REACHED_MESSAGE = "Teto mensal do expert atingido";
 export const EXPERT_INACTIVE_MESSAGE = "Expert desativado";
 
 export type ReserveUsageResult =
-  | { ok: true; idempotent: boolean; exempt: boolean; amount: number; balance: number }
+  | {
+      ok: true;
+      idempotent: boolean;
+      exempt: boolean;
+      amount: number;
+      balance: number;
+      /**
+       * The RPC treated the call as a send by the house's own account. On an
+       * idempotent replay it reflects this call's args, not the stored row.
+       */
+      ownAccount: boolean;
+    }
   | { ok: false; error: "Saldo insuficiente" }
   | { ok: false; error: string; refusal: ExpertWalletRefusal };
 
@@ -86,6 +104,7 @@ export async function reserveUsage(
     _reference_type: args.referenceType,
     _reference_id: args.referenceId,
     _idempotency_key: args.idempotencyKey,
+    ...(args.providerAccountId ? { _provider_account_id: args.providerAccountId } : {}),
   };
   const { data, error } = args.expertId
     ? await looseDb(client).rpc("expert_wallet_reserve", { _expert: args.expertId, ...rpcArgs })
@@ -108,6 +127,7 @@ export async function reserveUsage(
     exempt?: boolean;
     amount?: number;
     balance?: number;
+    own_account?: boolean;
   };
   return {
     ok: true,
@@ -115,6 +135,7 @@ export async function reserveUsage(
     exempt: result.exempt === true,
     amount: Number(result.amount ?? 0),
     balance: Number(result.balance ?? 0),
+    ownAccount: result.own_account === true,
   };
 }
 
@@ -222,6 +243,8 @@ export type ReserveForDeliveryArgs = {
   referenceType: string;
   /** Expert campaign send: also checks/counts the expert's monthly cap. */
   expertId?: string | null;
+  /** The provider account that will send this delivery (see `ReserveUsageArgs`). */
+  providerAccountId?: string | null;
 };
 
 export type ReserveForDeliveryResult =
@@ -248,6 +271,7 @@ async function reserveOnce(
     units: number;
     referenceType: string;
     expertId?: string | null;
+    providerAccountId?: string | null;
   },
 ): Promise<ReserveForDeliveryResult & { idempotent?: boolean }> {
   const reservation = await reserveUsage(client, {
@@ -258,6 +282,7 @@ async function reserveOnce(
     referenceId: args.referenceId,
     idempotencyKey: `${args.prefix}-reserve:${args.referenceId}`,
     ...(args.expertId ? { expertId: args.expertId } : {}),
+    ...(args.providerAccountId ? { providerAccountId: args.providerAccountId } : {}),
   });
   if (!reservation.ok) {
     return {
@@ -288,7 +313,7 @@ export async function reserveForDelivery(
   client: unknown,
   args: ReserveForDeliveryArgs,
 ): Promise<ReserveForDeliveryResult> {
-  const { tenantId, item, prefix, deliveryKey, units, referenceType, expertId } = args;
+  const { tenantId, item, prefix, deliveryKey, units, referenceType, expertId, providerAccountId } = args;
   if (!deliveryKey) {
     const referenceId = crypto.randomUUID();
     const { idempotent, ...result } = await reserveOnce(client, {
@@ -299,6 +324,7 @@ export async function reserveForDelivery(
       units,
       referenceType,
       expertId,
+      providerAccountId,
     });
     return result;
   }
@@ -312,6 +338,7 @@ export async function reserveForDelivery(
       units,
       referenceType,
       expertId,
+      providerAccountId,
     });
     if (!result.ok) return result;
     if (!idempotent) return result;

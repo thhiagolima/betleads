@@ -257,10 +257,24 @@ function shortcodeResponseFailed(body: unknown): boolean {
   });
 }
 
+/** Result of a send whose house account is unavailable: nothing was sent. */
+function smsAccountUnavailableResult(error: string) {
+  return {
+    ok: false as const,
+    status: 0,
+    body: { error },
+    idempotencyKey: "",
+    errorKind: "misconfigured" as ProviderErrorKind,
+    providerAccountId: null as string | null,
+  };
+}
+
 /**
  * Sends one SMS through the house's SMS account: Short Brasil or Infobip
  * (provider-accounts.server.ts). Guard, account resolution and the shape of
- * the result are the same for both.
+ * the result are the same for both. With `account` (already resolved by the
+ * caller, who reserved the credit with it) the account is not resolved again,
+ * so the reservation and the send always use the same account.
  */
 async function callSmsProvider(
   tenantId: string | null,
@@ -268,6 +282,7 @@ async function callSmsProvider(
   content: string,
   variables?: Record<string, string | number> | null,
   idempotencyKey: string = crypto.randomUUID(),
+  account?: SmsAccount,
 ) {
   // Demo guard right before the provider request (fail-closed). Returned as a
   // non-temporary failure so the caller refunds/logs the usual way and no
@@ -284,17 +299,8 @@ async function callSmsProvider(
       providerAccountId: null as string | null,
     };
   }
-  const resolved = await smsAccountFor(tenantId);
-  if (!resolved.account) {
-    return {
-      ok: false as const,
-      status: 0,
-      body: { error: resolved.error },
-      idempotencyKey: "",
-      errorKind: "misconfigured" as ProviderErrorKind,
-      providerAccountId: null as string | null,
-    };
-  }
+  const resolved = account ? { account } : await smsAccountFor(tenantId);
+  if (!resolved.account) return smsAccountUnavailableResult(resolved.error);
   const message = renderSmsVariables(content, variables);
   if (resolved.account.provider === "infobip") {
     return {
@@ -778,6 +784,11 @@ export async function reserveSmsCreditForDelivery(
   segments: number,
   /** Área do Expert: the send of an expert campaign (monthly cap checked atomically). */
   expertId?: string | null,
+  /**
+   * Conta própria: the provider account that WILL send this SMS. SQL reserves
+   * 0 when this house owns it. Pass the same account object to the send.
+   */
+  providerAccountId?: string | null,
 ): Promise<
   | { ok: true; referenceId: string }
   | { ok: false; referenceId: string; error: string; refusal?: ExpertWalletRefusal }
@@ -791,6 +802,7 @@ export async function reserveSmsCreditForDelivery(
     units,
     referenceType: "sms_send",
     ...(expertId ? { expertId } : {}),
+    ...(providerAccountId ? { providerAccountId } : {}),
   });
   return reservation.ok
     ? { ok: true, referenceId: reservation.referenceId }
@@ -976,15 +988,20 @@ export async function sendSmsInternal(args: {
   // Segments are counted on the FINAL content actually sent (after
   // variables and link shortening), never the template or preview text.
   const billedUnits = Math.max(1, countSmsSegments(preparedContent).segments);
-  if (billingTenantId) {
-    const reservation = args.expertId
-      ? await reserveSmsCreditForDelivery(
-          billingTenantId,
-          args.deliveryKey,
-          billedUnits,
-          args.expertId,
-        )
-      : await reserveSmsCreditForDelivery(billingTenantId, args.deliveryKey, billedUnits);
+  // Conta própria (Review Focus 1): the account is resolved ONCE, before the
+  // reservation, and that same object sends. A house account switched on (or
+  // off) mid-campaign can never reserve on one account and send on another.
+  // An unavailable house account reserves nothing and fails as misconfigured
+  // (no fallback to the platform account).
+  const resolvedAccount = await smsAccountFor(billingTenantId);
+  if (billingTenantId && resolvedAccount.account) {
+    const reservation = await reserveSmsCreditForDelivery(
+      billingTenantId,
+      args.deliveryKey,
+      billedUnits,
+      args.expertId ?? null,
+      resolvedAccount.account.id,
+    );
     billingReferenceId = reservation.referenceId;
     if (!reservation.ok) {
       await logSend({
@@ -1019,13 +1036,16 @@ export async function sendSmsInternal(args: {
   }
 
   const sendStartedAt = new Date();
-  const r = await callSmsProvider(
-    billingTenantId,
-    normalized,
-    preparedContent,
-    undefined,
-    deliveryKey,
-  );
+  const r = resolvedAccount.account
+    ? await callSmsProvider(
+        billingTenantId,
+        normalized,
+        preparedContent,
+        undefined,
+        deliveryKey,
+        resolvedAccount.account,
+      )
+    : smsAccountUnavailableResult(resolvedAccount.error);
   // The Infobip adapter reports its own message id, refusal reason and account
   // verdict; the Short Brasil fields are read from its body.
   const viaInfobip = "provider" in r && r.provider === "infobip";

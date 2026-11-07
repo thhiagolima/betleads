@@ -18,6 +18,12 @@ export type InfobipEmailInput = {
   idempotencyKey?: string;
   /** Casa remetente: escolhe a conta Infobip. Sem casa (e-mails da plataforma), a conta padrão. */
   tenantId?: string | null;
+  /**
+   * Account already resolved by the caller (sendInfobipEmail reserves the
+   * credit with it). With it the account is not resolved again, so the
+   * reservation and the send always use the same account.
+   */
+  account?: InfobipAccount;
 };
 
 export type InfobipEmailResult = {
@@ -57,23 +63,35 @@ function parseBody(text: string, contentType: string | null): unknown {
   }
 }
 
+/** Result of an e-mail whose house account is unavailable: nothing was sent. */
+function infobipEmailAccountUnavailable(
+  error: string,
+  idempotencyKey: string,
+): InfobipEmailResult {
+  return {
+    ok: false,
+    status: 0,
+    body: { error },
+    idempotencyKey,
+    temporary: false,
+    errorKind: "misconfigured",
+    providerAccountId: null,
+  };
+}
+
 /** Sends one email through Infobip's documented multipart HTTP endpoint. */
 export async function callInfobipEmail(input: InfobipEmailInput): Promise<InfobipEmailResult> {
   const idempotencyKey = input.idempotencyKey || crypto.randomUUID();
   let account: InfobipAccount;
-  try {
-    account = await resolveInfobipAccount(input.tenantId, "email");
-  } catch (error) {
-    if (!(error instanceof ProviderAccountUnavailableError)) throw error;
-    return {
-      ok: false,
-      status: 0,
-      body: { error: error.message },
-      idempotencyKey,
-      temporary: false,
-      errorKind: "misconfigured",
-      providerAccountId: null,
-    };
+  if (input.account) {
+    account = input.account;
+  } else {
+    try {
+      account = await resolveInfobipAccount(input.tenantId, "email");
+    } catch (error) {
+      if (!(error instanceof ProviderAccountUnavailableError)) throw error;
+      return infobipEmailAccountUnavailable(error.message, idempotencyKey);
+    }
   }
   const providerAccountId = account.id;
   const url = endpoint(account);

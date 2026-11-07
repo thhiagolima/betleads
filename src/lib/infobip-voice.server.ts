@@ -224,6 +224,9 @@ export async function callInfobipVoice(
     units,
     referenceType: "voice_call",
     ...(options.expertId ? { expertId: options.expertId } : {}),
+    // The account resolved above is the one that dials (conta própria: SQL
+    // reserves 0 when the house owns it).
+    providerAccountId: account.id,
   });
   if (!reservation.ok && reservation.refusal) {
     // Área do Expert: the expert's cap (or deactivation); never dialed.

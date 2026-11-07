@@ -18,6 +18,7 @@ import {
   DEFAULT_INFOBIP_ACCOUNT_ID,
   ProviderAccountUnavailableError,
   resolveInfobipAccount,
+  type InfobipAccount,
 } from "./provider-accounts.server";
 
 /** The house's current e-mail account id; null when its own account is unavailable. */
@@ -303,6 +304,25 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
   // balance" propagates (nothing is sent). Platform e-mails (billing, DNS)
   // call callInfobipEmail directly and are never charged.
   const billingTenantId = tenantId as string; // the guard throws without one
+  // Conta própria (Review Focus 1): the e-mail account is resolved ONCE,
+  // before the reservation, and that same object sends. An unavailable house
+  // account reserves nothing and fails as misconfigured (no fallback).
+  let account: InfobipAccount;
+  try {
+    account = await resolveInfobipAccount(billingTenantId, "email");
+  } catch (error) {
+    await markTrackedDispatchesFailed(trackedDispatchIds);
+    if (!(error instanceof ProviderAccountUnavailableError)) throw error;
+    return {
+      ok: false,
+      status: 0,
+      body: { error: error.message },
+      idempotencyKey,
+      temporary: false,
+      errorKind: "misconfigured",
+      providerAccountId: null,
+    };
+  }
   let reservation: Awaited<ReturnType<typeof reserveForDelivery>>;
   try {
     reservation = await reserveForDelivery(supabaseAdmin, {
@@ -313,6 +333,7 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
       units: 1,
       referenceType: EMAIL_RESERVATION_REFERENCE_TYPE,
       ...(input.expertId ? { expertId: input.expertId } : {}),
+      providerAccountId: account.id,
     });
   } catch (error) {
     await markTrackedDispatchesFailed(trackedDispatchIds);
@@ -353,6 +374,7 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
     result = await callInfobipEmail({
       ...input,
       tenantId,
+      account,
       html: shieldDarkEmailHtml(
         absolutizeEmailUrls(sanitizeEmailHtml(prepared?.content ?? augmentedHtml), getEmailBaseUrl()),
       ),

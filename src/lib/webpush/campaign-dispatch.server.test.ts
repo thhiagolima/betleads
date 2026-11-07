@@ -186,11 +186,11 @@ function world(opts: { appStats?: Map<string, { sentLast15m: number; active: num
       if (existing) {
         // Real semantics: the key dedupes forever, refunded or not.
         state.reserveIdempotentFlags.push(true);
-        return { ok: true, idempotent: true, exempt: false, amount: 0, balance: 1000 };
+        return { ok: true, idempotent: true, exempt: false, amount: 0, balance: 1000, ownAccount: false };
       }
       state.reserveIdempotentFlags.push(false);
       state.ledger.set(args.idempotencyKey, { referenceId: args.referenceId, units: args.units, refunded: false });
-      return { ok: true, idempotent: false, exempt: false, amount: args.units * UNIT_PRICE, balance: 1000 };
+      return { ok: true, idempotent: false, exempt: false, amount: args.units * UNIT_PRICE, balance: 1000, ownAccount: false };
     },
     async refund(args) {
       state.refundCalls.push({ referenceId: args.referenceId, idempotencyKey: args.idempotencyKey });

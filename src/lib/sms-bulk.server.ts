@@ -621,7 +621,15 @@ export class SmsBatchDeferredError extends Error {
  * sent normally. Items of a house with the SMS channel disabled fail the same
  * way, with errorKind `channel_disabled`.
  */
-export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResult> {
+export async function sendSmsBatch(
+  items: SmsBatchItem[],
+  /**
+   * Internal: accounts already resolved by the parent call that split the
+   * batch per account. The group is sent (and reserved) with exactly those
+   * accounts, never a second resolution that could disagree with the split.
+   */
+  resolvedAccounts?: ReadonlyMap<string, SmsAccount | { unavailable: string }>,
+): Promise<SmsBatchResult> {
   const outcomes: Array<SmsBatchOutcome | undefined> = new Array(items.length);
   const result = (lotes: string[], httpCalls: number): SmsBatchResult => ({
     outcomes: outcomes as SmsBatchOutcome[],
@@ -678,6 +686,11 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
   // indisponível falha como misconfigured (sem fallback para a conta padrão).
   const accountOf = new Map<string, SmsAccount | { unavailable: string }>();
   for (const tenantId of new Set(items.map((i) => i.tenantId))) {
+    const known = resolvedAccounts?.get(tenantId);
+    if (known) {
+      accountOf.set(tenantId, known);
+      continue;
+    }
     try {
       accountOf.set(tenantId, await resolveSmsAccount(tenantId));
     } catch (error) {
@@ -705,7 +718,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
     const lotes: string[] = [];
     let httpCalls = 0;
     for (const group of byAccount.values()) {
-      const rest = await sendSmsBatch(group.map((g) => g.item));
+      const rest = await sendSmsBatch(group.map((g) => g.item), accountOf);
       rest.outcomes.forEach((outcome, j) => {
         outcomes[group[j].index] = outcome;
       });
@@ -900,10 +913,14 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
       const dispatchIds = link.ok ? link.links.map((l) => l.dispatchId) : [];
       // Segments counted on the FINAL content (post-link), never the template text.
       const billedUnits = Math.max(1, countSmsSegments(content).segments);
+      // Reserved with the account this batch is sent through (conta própria:
+      // SQL reserves 0 when the house owns it).
       const reservation = await reserveSmsCreditForDelivery(
         c.item.tenantId,
         c.item.deliveryKey,
         billedUnits,
+        null,
+        account.id,
       );
       if (!reservation.ok) {
         // reserveSmsCreditForDelivery only returns ok:false for the house's
