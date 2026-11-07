@@ -11,11 +11,11 @@ configuração, a casa continua no provedor padrão da plataforma.
 
 | Tema | Decisão |
 |---|---|
-| Dono das contas | BetLeads. A casa continua pagando pela carteira; billing não muda. |
+| Dono das contas | BetLeads. A casa continua pagando pela carteira; billing não muda. **Atualizado em 2026-11-07:** agora existe conta com dono (`owner_tenant_id`) por casa x canal, cadastrada pelo próprio admin da casa, liberada pelo super admin com taxa mensal — ver `docs/superpowers/specs/2026-11-07-conta-propria-provedor-design.md`. |
 | Fallback para o padrão se a conta da casa cair | Não. Só aquela casa pausa. |
 | Infobip SMS | Fica para depois (Fase 4). Schema já aceita. |
 | Contas por canal | Uma por `(casa, canal)`. Várias casas podem compartilhar a mesma conta. |
-| Visibilidade | A casa nunca vê nome de fornecedor (regra de `provider-governance.server.ts`). |
+| Visibilidade | A casa nunca vê nome de fornecedor (regra de `provider-governance.server.ts`). **Atualizado em 2026-11-07:** essa regra deixa de valer só para a própria conta com dono da casa (ela escolhe o provedor e cadastra as credenciais) — detalhes em `docs/superpowers/specs/2026-11-07-conta-propria-provedor-design.md` (seção 6.2). |
 
 ## Modelo
 
@@ -101,6 +101,12 @@ precisar.
   - **Webhooks sem segredo por conta.** Todas as contas são da BetLeads: o
     painel de cada conta aponta para a mesma URL com o segredo da plataforma, e
     os callbacks casam pelo `provider_message_id`/correlation já gravados.
+    **Atualizado em 2026-11-07:** deixa de valer para conta com dono — cada
+    uma tem token de callback próprio, amarrado ao `provider_account_id`;
+    token cruzado (global numa conta com dono, ou de uma conta com dono em
+    outra) é ignorado. Ver
+    `docs/superpowers/specs/2026-11-07-conta-propria-provedor-design.md`
+    (seção 6.4).
   - **Nenhum job chama o provedor com credencial**: reconciliação de SMS, e-mail
     e voz só lê o banco (status chega por callback); o polling de voz em
     `call-flows.server.ts` está desligado. Nada a ajustar por conta.
