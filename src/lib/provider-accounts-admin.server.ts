@@ -113,7 +113,7 @@ async function assertNoHouseUsesRemovedChannels(
  * de cada um (mesma conta Infobip que a casa tem hoje) — usado ao trocar a
  * conta de uma casa e ao trocar a padrão de e-mail (nesse caso, as casas sem
  * conta própria). */
-async function moveEmailDomains(
+export async function moveEmailDomains(
   tenantIds: string[],
   opts: { skipOnAccountId?: string } = {},
 ): Promise<Array<{ tenantId: string; hostname: string; status: string; error: string | null }>> {
@@ -178,6 +178,72 @@ const CONFIG_KEYS = {
   onesignal: ["org_id"],
 } as const;
 
+export type AccountProvider = keyof typeof CREDENTIAL_KEYS;
+
+/**
+ * Validação e cifragem de uma conta de provedor gravada no banco, comum ao
+ * super admin (contas da plataforma) e à casa (conta própria): só as chaves
+ * conhecidas do provedor, URLs no allowlist, número de voz em dígitos, e as
+ * credenciais — campo em branco mantém o valor de `stored` — cifradas.
+ * `credentialKeys`: nomes das credenciais gravadas (nunca os valores).
+ */
+export async function buildAccountPayload(
+  provider: AccountProvider,
+  channels: readonly ProviderChannel[],
+  rawConfig: Partial<Record<string, string | undefined>>,
+  rawCredentials: Partial<Record<string, string | undefined>>,
+  stored: Record<string, string>,
+): Promise<{ config: Record<string, string>; credentialsEncrypted: string; credentialKeys: string[] }> {
+  const config: Record<string, string> = {};
+  for (const key of CONFIG_KEYS[provider]) {
+    const value = rawConfig[key];
+    if (value) config[key] = value;
+  }
+  if (provider === "infobip") {
+    if (!config.base_url) throw new Error("Informe a URL base da conta Infobip.");
+    config.base_url = assertInfobipBaseUrl(config.base_url);
+    if (channels.includes("voice")) {
+      const digits = (config.voice_from ?? "").replace(/\D/g, "");
+      if (digits.length < 10) throw new Error("Informe o número de origem das ligações (voz).");
+      config.voice_from = digits;
+    }
+  } else if (provider === "short_brasil") {
+    if (config.shortcode_url) config.shortcode_url = assertShortBrasilUrl("shortcode_url", config.shortcode_url);
+    if (config.single_url) config.single_url = assertShortBrasilUrl("single_url", config.single_url);
+    if (config.bulk_url) config.bulk_url = assertShortBrasilUrl("bulk_url", config.bulk_url);
+  }
+  // onesignal: org_id is a plain identifier, not a URL — nothing to validate.
+
+  const credentials: Record<string, string> = {};
+  for (const key of CREDENTIAL_KEYS[provider]) {
+    const value = cleanCredential(rawCredentials[key] ?? stored[key]);
+    if (value) credentials[key] = value;
+  }
+  const hasCredentials =
+    provider === "short_brasil"
+      ? Boolean(credentials.shortcode_token || (credentials.usuario && credentials.chave))
+      : provider === "infobip"
+        ? Boolean(credentials.api_key)
+        : Boolean(credentials.org_api_key);
+  if (!hasCredentials) {
+    throw new Error(
+      provider === "short_brasil"
+        ? "Informe o token da API Short Code ou o usuário e a chave da API legada."
+        : provider === "infobip"
+          ? "Informe a API key da conta Infobip."
+          : "Informe a chave da organização OneSignal.",
+    );
+  }
+  return {
+    config,
+    credentialsEncrypted: await encryptProviderCredentials(credentials),
+    credentialKeys: Object.keys(credentials),
+  };
+}
+
+/** Mensagem de toda função do super admin que mexeria numa conta com dono. */
+export const OWNED_ACCOUNT_ADMIN_MESSAGE = "Conta da casa: só o admin da casa altera.";
+
 type AccountRow = {
   id: string;
   provider: "short_brasil" | "infobip" | "onesignal";
@@ -187,9 +253,35 @@ type AccountRow = {
   credentials_encrypted: string | null;
   config: Record<string, unknown> | null;
   status: "active" | "disabled";
+  owner_tenant_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };
+
+/** tenant_audit_logs da casa dona de uma conta (nunca credenciais). Falha só loga. */
+export async function auditOwnProviderAction(args: {
+  tenantId: string;
+  actorUserId: string;
+  action: string;
+  entityId: string | null;
+  before?: unknown;
+  after?: unknown;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  const { error } = await db()
+    .from("tenant_audit_logs")
+    .insert({
+      tenant_id: args.tenantId,
+      actor_user_id: args.actorUserId,
+      action: args.action,
+      entity_type: "own_provider",
+      entity_id: args.entityId,
+      before_data: args.before ?? null,
+      after_data: args.after ?? null,
+      metadata: args.metadata ?? {},
+    });
+  if (error) console.error("[own-provider] failed writing tenant audit log", error.message);
+}
 
 export type ProviderAccountView = {
   id: string;
@@ -199,11 +291,14 @@ export type ProviderAccountView = {
   status: "active" | "disabled";
   /** Conta com credentials_source='env': credenciais do ambiente, editável só no nome e nos canais. */
   envAccount: boolean;
+  /** Casa dona da conta (conta própria); null = conta da plataforma. */
+  ownerTenantId: string | null;
   /** Canais dos quais esta conta é hoje a padrão escolhida. */
   defaultFor: ProviderChannel[];
   configured: boolean;
   config: Record<string, string>;
-  /** Masked last characters of each stored credential ("••••abcd"). */
+  /** Masked last characters of each stored credential ("••••abcd"); sempre
+   * vazio em conta com dono (nem dica mascarada sai dessas contas). */
   credentialHints: Record<string, string>;
   /** Houses on this account, per channel (inclui, nos canais de defaultFor,
    * as casas sem conta própria no canal e com o canal ligado). */
@@ -289,10 +384,11 @@ async function accountView(
     channels: row.channels ?? [],
     status: row.status,
     envAccount,
+    ownerTenantId: row.owner_tenant_id ?? null,
     defaultFor,
     configured,
     config: envAccount ? {} : stringConfig(row.config),
-    credentialHints,
+    credentialHints: row.owner_tenant_id ? {} : credentialHints,
     houses,
   };
 }
@@ -307,7 +403,7 @@ export async function adminListProviderAccountsFor(context: AdminContext) {
       db()
         .from("provider_accounts")
         .select(
-          "id, provider, label, channels, credentials_source, credentials_encrypted, config, status, created_at",
+          "id, provider, label, channels, credentials_source, credentials_encrypted, config, status, owner_tenant_id, created_at",
         )
         .order("created_at", { ascending: true }),
       db().from("tenant_channel_providers").select("tenant_id, channel, provider_account_id"),
@@ -447,26 +543,6 @@ export async function adminSaveProviderAccountFor(
     return { id: data.id };
   }
 
-  const config: Record<string, string> = {};
-  for (const key of CONFIG_KEYS[data.provider]) {
-    const value = data.config[key];
-    if (value) config[key] = value;
-  }
-  if (data.provider === "infobip") {
-    if (!config.base_url) throw new Error("Informe a URL base da conta Infobip.");
-    config.base_url = assertInfobipBaseUrl(config.base_url);
-    if (channels.includes("voice")) {
-      const digits = (config.voice_from ?? "").replace(/\D/g, "");
-      if (digits.length < 10) throw new Error("Informe o número de origem das ligações (voz).");
-      config.voice_from = digits;
-    }
-  } else if (data.provider === "short_brasil") {
-    if (config.shortcode_url) config.shortcode_url = assertShortBrasilUrl("shortcode_url", config.shortcode_url);
-    if (config.single_url) config.single_url = assertShortBrasilUrl("single_url", config.single_url);
-    if (config.bulk_url) config.bulk_url = assertShortBrasilUrl("bulk_url", config.bulk_url);
-  }
-  // onesignal: org_id is a plain identifier, not a URL — nothing to validate.
-
   let before: AccountRow | null = null;
   let stored: Record<string, string> = {};
   if (data.id) {
@@ -478,6 +554,7 @@ export async function adminSaveProviderAccountFor(
     if (error) throw new Error(error.message);
     if (!row) throw new Error("Conta de provedor não encontrada.");
     before = row as AccountRow;
+    if (before.owner_tenant_id) throw new Error(OWNED_ACCOUNT_ADMIN_MESSAGE);
     if (before.provider !== data.provider) {
       throw new Error("Não é possível trocar o provedor de uma conta existente.");
     }
@@ -489,33 +566,20 @@ export async function adminSaveProviderAccountFor(
     }
   }
 
-  const credentials: Record<string, string> = {};
-  for (const key of CREDENTIAL_KEYS[data.provider]) {
-    const value = cleanCredential(data.credentials[key] ?? stored[key]);
-    if (value) credentials[key] = value;
-  }
-  const hasCredentials =
-    data.provider === "short_brasil"
-      ? Boolean(credentials.shortcode_token || (credentials.usuario && credentials.chave))
-      : data.provider === "infobip"
-        ? Boolean(credentials.api_key)
-        : Boolean(credentials.org_api_key);
-  if (!hasCredentials) {
-    throw new Error(
-      data.provider === "short_brasil"
-        ? "Informe o token da API Short Code ou o usuário e a chave da API legada."
-        : data.provider === "infobip"
-          ? "Informe a API key da conta Infobip."
-          : "Informe a chave da organização OneSignal.",
-    );
-  }
+  const { config, credentialsEncrypted } = await buildAccountPayload(
+    data.provider,
+    channels,
+    data.config,
+    data.credentials,
+    stored,
+  );
 
   const payload = {
     provider: data.provider,
     label: data.label,
     channels,
     credentials_source: "db",
-    credentials_encrypted: await encryptProviderCredentials(credentials),
+    credentials_encrypted: credentialsEncrypted,
     config,
     updated_at: new Date().toISOString(),
   };
@@ -560,6 +624,10 @@ export async function adminSetProviderAccountStatusFor(
   data: z.infer<typeof setProviderAccountStatusInput>,
 ) {
   await assertSuperAdmin(context.userId);
+  const ownerTenantId = await accountOwnerTenantId(data.id);
+  // Conta com dono: o super admin pode desativar (sem editar credencial);
+  // quem reativa é o admin da casa, ao ativar a conta própria de novo.
+  if (ownerTenantId && data.status === "active") throw new Error(OWNED_ACCOUNT_ADMIN_MESSAGE);
   if (data.status === "disabled") {
     const [defaultedChannel] = await channelsDefaultedTo(data.id);
     if (defaultedChannel) {
@@ -582,7 +650,27 @@ export async function adminSetProviderAccountStatusFor(
     action: `provider_account.${data.status === "active" ? "enable" : "disable"}`,
     after: { id: data.id, label: (row as { label: string }).label, status: data.status },
   });
+  if (ownerTenantId) {
+    await auditOwnProviderAction({
+      tenantId: ownerTenantId,
+      actorUserId: context.userId,
+      action: "own_provider.disable",
+      entityId: data.id,
+      after: { id: data.id, label: (row as { label: string }).label, status: data.status },
+    });
+  }
   return { ok: true };
+}
+
+/** Casa dona da conta (null = conta da plataforma ou conta inexistente). */
+async function accountOwnerTenantId(accountId: string): Promise<string | null> {
+  const { data, error } = await db()
+    .from("provider_accounts")
+    .select("id, owner_tenant_id")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as { owner_tenant_id?: string | null } | null)?.owner_tenant_id ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +685,26 @@ export async function adminTestProviderAccountFor(
   data: z.infer<typeof testProviderAccountInput>,
 ): Promise<ProviderAccountTestResult> {
   await assertSuperAdmin(context.userId);
+  if (await accountOwnerTenantId(data.id)) throw new Error(OWNED_ACCOUNT_ADMIN_MESSAGE);
   const account = await loadProviderAccountForAdmin(data.id);
+  const result = await runProviderAccountTest(account, data.phone);
+  await auditAdminAction({
+    actorUserId: context.userId,
+    action: "provider_account.test",
+    after: { id: data.id, ok: result.ok, message: result.message.slice(0, 300) },
+  });
+  return result;
+}
+
+/**
+ * O teste de conexão em si (sem permissão nem auditoria), comum ao super
+ * admin e ao admin da casa (conta própria). Mensagens de falha genéricas:
+ * nunca status HTTP cru nem texto de erro de rede.
+ */
+export async function runProviderAccountTest(
+  account: Awaited<ReturnType<typeof loadProviderAccountForAdmin>>,
+  rawPhone: string | undefined,
+): Promise<ProviderAccountTestResult> {
   let result: ProviderAccountTestResult;
 
   // Contas env (as 3 fixas de id) leem a URL do ambiente; o config salvo no
@@ -658,8 +765,8 @@ export async function adminTestProviderAccountFor(
       }
     }
   } else {
-    if (!data.phone) throw new Error("Informe um celular para receber o SMS de teste.");
-    const phone = requireBrazilianPhone(data.phone);
+    if (!rawPhone) throw new Error("Informe um celular para receber o SMS de teste.");
+    const phone = requireBrazilianPhone(rawPhone);
     const { postShortBrasilSingle } = await import("@/lib/sms.functions");
     try {
       if (!isEnvAccount) {
@@ -684,12 +791,6 @@ export async function adminTestProviderAccountFor(
       result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
     }
   }
-
-  await auditAdminAction({
-    actorUserId: context.userId,
-    action: "provider_account.test",
-    after: { id: data.id, ok: result.ok, message: result.message.slice(0, 300) },
-  });
   return result;
 }
 
@@ -719,6 +820,14 @@ export async function adminSetTenantChannelProviderFor(
   if (currentError) throw new Error(currentError.message);
   const before = (current as { provider_account_id: string } | null)?.provider_account_id ?? null;
   if (before === accountId) return { emailDomains: [] };
+  // Ligar ou desligar uma conta com dono é coisa da casa (ativar / voltar
+  // para a rota da BetLeads) ou da revogação (adminResolveRevokedOwnProviderFor).
+  if (
+    (accountId && (await accountOwnerTenantId(accountId))) ||
+    (before && (await accountOwnerTenantId(before)))
+  ) {
+    throw new Error(OWNED_ACCOUNT_ADMIN_MESSAGE);
+  }
 
   if (accountId) {
     const { data: row, error } = await db()
@@ -895,12 +1004,16 @@ export async function adminDeleteProviderAccountFor(
 
   const { data: row, error } = await db()
     .from("provider_accounts")
-    .select("id, provider, label, channels")
+    .select("id, provider, label, channels, owner_tenant_id")
     .eq("id", data.id)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  const account = row as Pick<AccountRow, "id" | "provider" | "label" | "channels"> | null;
+  const account = row as Pick<
+    AccountRow,
+    "id" | "provider" | "label" | "channels" | "owner_tenant_id"
+  > | null;
   if (!account) throw new Error("Conta de provedor não encontrada.");
+  if (account.owner_tenant_id) throw new Error(OWNED_ACCOUNT_ADMIN_MESSAGE);
 
   const defaultedChannels = await channelsDefaultedTo(data.id);
   if (defaultedChannels.length) {
