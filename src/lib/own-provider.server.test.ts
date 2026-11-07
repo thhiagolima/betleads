@@ -299,6 +299,13 @@ describe("saveOwnProviderAccountFor", () => {
     expect(emails.sent[0].html).not.toContain(SECRET);
   });
 
+  it("a concurrent create (unique violation) becomes a reload message", async () => {
+    fake.db.failNext("provider_accounts", "insert", "duplicate key value", "23505");
+    await expect(save(infobipSms)).rejects.toThrow(
+      "Já existe uma conta para este canal. Recarregue a página.",
+    );
+  });
+
   it("an e-mail failure does not fail the save", async () => {
     const { sendPlatformEmail } = await import("@/lib/platform-email.server");
     vi.mocked(sendPlatformEmail).mockRejectedValueOnce(new Error("infobip fora"));
@@ -355,8 +362,34 @@ describe("activate / deactivate / remove", () => {
   it("activate re-enables an account disabled by a revocation once the grant is back", async () => {
     await save(infobipSms);
     owned()[0].status = "disabled";
+    owned()[0].disabled_reason = "revoked";
     await activateOwnProviderFor(ctx(), { channel: "sms", password: PASSWORD });
-    expect(owned()[0].status).toBe("active");
+    expect(owned()[0]).toMatchObject({ status: "active", disabled_reason: null });
+  });
+
+  it("an account the BetLeads disabled: activate, save and test refuse; nothing changes", async () => {
+    await save(infobipSms);
+    owned()[0].status = "disabled";
+    owned()[0].disabled_reason = "platform";
+    const message = "Esta conta foi desativada pela BetLeads. Fale com o suporte.";
+    await expect(activateOwnProviderFor(ctx(), { channel: "sms", password: PASSWORD })).rejects.toThrow(
+      message,
+    );
+    await expect(save({ ...infobipSms, label: "outra" })).rejects.toThrow(message);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(testOwnProviderAccountFor(ctx(), { channel: "sms" })).rejects.toThrow(message);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(owned()[0]).toMatchObject({ status: "disabled", label: "Infobip da casa" });
+    expect(fake.db.rows("tenant_channel_providers")).toHaveLength(0);
+  });
+
+  it("a disabled account with no recorded reason is not reactivated by the house", async () => {
+    await save(infobipSms);
+    owned()[0].status = "disabled";
+    await expect(activateOwnProviderFor(ctx(), { channel: "sms", password: PASSWORD })).rejects.toThrow(
+      /desativada pela BetLeads/,
+    );
   });
 
   it("activate on e-mail refreshes the house's e-mail domains", async () => {

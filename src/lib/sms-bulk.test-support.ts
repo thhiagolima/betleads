@@ -39,7 +39,7 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
   const tables = new Map<string, Row[]>();
   const unique: Record<string, string[][]> = { ...options.unique };
   const rpcHandlers = new Map<string, (args: Row) => Result | Promise<Result>>();
-  const failures: Array<{ table: string; op: string; message: string }> = [];
+  const failures: Array<{ table: string; op: string; message: string; code?: string }> = [];
   const calls: Array<{ table: string; op: string; count: number }> = [];
   let seq = 0;
 
@@ -74,7 +74,7 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
       const failure = failures.findIndex((f) => f.table === table && f.op === op);
       if (failure >= 0) {
         const [f] = failures.splice(failure, 1);
-        return { data: null, error: { message: f.message } };
+        return { data: null, error: f.code ? { message: f.message, code: f.code } : { message: f.message } };
       }
       calls.push({ table, op, count: op === "insert" || op === "upsert" ? payload.length : 1 });
       if (op === "insert") {
@@ -293,8 +293,8 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
     onRpc(fn: string, handler: (args: Row) => Result | Promise<Result>) {
       rpcHandlers.set(fn, handler);
     },
-    failNext(table: string, op: string, message = "simulated failure") {
-      failures.push({ table, op, message });
+    failNext(table: string, op: string, message = "simulated failure", code?: string) {
+      failures.push({ table, op, message, code });
     },
     reset() {
       tables.clear();

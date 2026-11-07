@@ -624,10 +624,26 @@ export async function adminSetProviderAccountStatusFor(
   data: z.infer<typeof setProviderAccountStatusInput>,
 ) {
   await assertSuperAdmin(context.userId);
-  const ownerTenantId = await accountOwnerTenantId(data.id);
-  // Conta com dono: o super admin pode desativar (sem editar credencial);
-  // quem reativa é o admin da casa, ao ativar a conta própria de novo.
-  if (ownerTenantId && data.status === "active") throw new Error(OWNED_ACCOUNT_ADMIN_MESSAGE);
+  const owned = await ownedAccountInfo(data.id);
+  const ownerTenantId = owned?.owner_tenant_id ?? null;
+  // Conta com dono: o super admin pode desativar (disabled_reason
+  // 'platform': só ele reativa) e reativar o que ele mesmo desativou. Uma
+  // conta suspensa por revogação ('revoked') quem reativa é o admin da casa,
+  // depois que a concessão volta; e nada reativa com a concessão revogada.
+  if (owned && ownerTenantId && data.status === "active") {
+    if (owned.disabled_reason === "revoked") throw new Error(OWNED_ACCOUNT_ADMIN_MESSAGE);
+    const channel = (owned.channels ?? [])[0];
+    const { data: grant, error: grantError } = await db()
+      .from("tenant_own_provider_grants")
+      .select("allowed")
+      .eq("tenant_id", ownerTenantId)
+      .eq("channel", channel)
+      .maybeSingle();
+    if (grantError) throw new Error(grantError.message);
+    if (!(grant as { allowed?: boolean } | null)?.allowed) {
+      throw new Error("A conta própria deste canal não está liberada para a casa. Libere o canal antes.");
+    }
+  }
   if (data.status === "disabled") {
     const [defaultedChannel] = await channelsDefaultedTo(data.id);
     if (defaultedChannel) {
@@ -638,7 +654,11 @@ export async function adminSetProviderAccountStatusFor(
   }
   const { data: row, error } = await db()
     .from("provider_accounts")
-    .update({ status: data.status, updated_at: new Date().toISOString() })
+    .update({
+      status: data.status,
+      disabled_reason: data.status === "active" ? null : "platform",
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", data.id)
     .select("id, label")
     .maybeSingle();
@@ -654,7 +674,7 @@ export async function adminSetProviderAccountStatusFor(
     await auditOwnProviderAction({
       tenantId: ownerTenantId,
       actorUserId: context.userId,
-      action: "own_provider.disable",
+      action: data.status === "active" ? "own_provider.enable" : "own_provider.disable",
       entityId: data.id,
       after: { id: data.id, label: (row as { label: string }).label, status: data.status },
     });
@@ -662,15 +682,25 @@ export async function adminSetProviderAccountStatusFor(
   return { ok: true };
 }
 
-/** Casa dona da conta (null = conta da plataforma ou conta inexistente). */
-async function accountOwnerTenantId(accountId: string): Promise<string | null> {
+type OwnedAccountInfo = {
+  owner_tenant_id?: string | null;
+  channels?: ProviderChannel[];
+  disabled_reason?: "platform" | "revoked" | null;
+};
+
+async function ownedAccountInfo(accountId: string): Promise<OwnedAccountInfo | null> {
   const { data, error } = await db()
     .from("provider_accounts")
-    .select("id, owner_tenant_id")
+    .select("id, owner_tenant_id, channels, disabled_reason")
     .eq("id", accountId)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return (data as { owner_tenant_id?: string | null } | null)?.owner_tenant_id ?? null;
+  return (data as OwnedAccountInfo | null) ?? null;
+}
+
+/** Casa dona da conta (null = conta da plataforma ou conta inexistente). */
+async function accountOwnerTenantId(accountId: string): Promise<string | null> {
+  return (await ownedAccountInfo(accountId))?.owner_tenant_id ?? null;
 }
 
 // ---------------------------------------------------------------------------

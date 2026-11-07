@@ -46,6 +46,8 @@ const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint
 
 const NOT_HOUSE_ADMIN_MESSAGE = "Só o admin da casa pode fazer isso.";
 const WRONG_PASSWORD_MESSAGE = "Senha incorreta.";
+const PLATFORM_DISABLED_MESSAGE = "Esta conta foi desativada pela BetLeads. Fale com o suporte.";
+const DUPLICATE_ACCOUNT_MESSAGE = "Já existe uma conta para este canal. Recarregue a página.";
 
 // ---------------------------------------------------------------------------
 // Guardas
@@ -121,7 +123,15 @@ type OwnAccountFullRow = {
   config: Record<string, unknown> | null;
   own_unit_cost: number | string | null;
   last_callback_at: string | null;
+  disabled_reason: "platform" | "revoked" | null;
 };
+
+/** Desativada pelo super admin: a casa não grava, não testa nem reativa. */
+function assertNotPlatformDisabled(account: Pick<OwnAccountFullRow, "status" | "disabled_reason">) {
+  if (account.status !== "active" && account.disabled_reason === "platform") {
+    throw new Error(PLATFORM_DISABLED_MESSAGE);
+  }
+}
 
 /** A conta com dono da casa no canal (null quando ainda não cadastrada). */
 async function houseAccount(
@@ -131,7 +141,7 @@ async function houseAccount(
   const { data, error } = await db()
     .from("provider_accounts")
     .select(
-      "id, provider, label, channels, status, owner_tenant_id, credentials_encrypted, config, own_unit_cost, last_callback_at",
+      "id, provider, label, channels, status, owner_tenant_id, credentials_encrypted, config, own_unit_cost, last_callback_at, disabled_reason",
     )
     .eq("owner_tenant_id", tenantId)
     .order("created_at", { ascending: true });
@@ -183,6 +193,8 @@ export type OwnAccountView = {
   provider: OwnProvider;
   label: string;
   status: "active" | "disabled";
+  /** 'platform' = desativada pela BetLeads; 'revoked' = pela revogação do canal. */
+  disabledReason: "platform" | "revoked" | null;
   ownUnitCost: number | null;
   smsFrom: string | null;
   voiceFrom: string | null;
@@ -235,6 +247,7 @@ export async function getOwnProviderStateFor(ctx: HouseContext): Promise<OwnProv
         provider: row.provider,
         label: row.label,
         status: row.status,
+        disabledReason: row.disabled_reason ?? null,
         ownUnitCost: row.own_unit_cost === null ? null : Number(row.own_unit_cost),
         smsFrom: configText(row.config, "sms_from"),
         voiceFrom: configText(row.config, "voice_from"),
@@ -342,6 +355,7 @@ export async function saveOwnProviderAccountFor(
     );
   }
   const existing = await houseAccount(ctx.tenantId, data.channel);
+  if (existing) assertNotPlatformDisabled(existing);
   if (existing && existing.provider !== data.provider) {
     throw new Error("Não é possível trocar o provedor de uma conta existente.");
   }
@@ -394,6 +408,9 @@ export async function saveOwnProviderAccountFor(
           created_by: ctx.userId,
         });
   const { data: saved, error } = await query.select("id").single();
+  // Índice único (owner_tenant_id, channels[1]): outro save da casa criou a
+  // conta do canal ao mesmo tempo.
+  if (error?.code === "23505") throw new Error(DUPLICATE_ACCOUNT_MESSAGE);
   if (error) throw new Error(error.message);
   const id = (saved as { id: string }).id;
   invalidateProviderAccountsCache();
@@ -443,6 +460,7 @@ export async function testOwnProviderAccountFor(
   await requireHouseAdmin(ctx.userId, ctx.tenantId);
   await requireAllowedGrant(ctx.tenantId, data.channel);
   const row = await requireHouseAccount(ctx.tenantId, data.channel);
+  assertNotPlatformDisabled(row);
   const account = await loadProviderAccountForAdmin(row.id);
   if (account.ownerTenantId !== ctx.tenantId || account.provider === "onesignal") {
     throw new Error("Cadastre a conta própria deste canal antes.");
@@ -474,17 +492,22 @@ export async function activateOwnProviderFor(
   await requireHouseAdmin(ctx.userId, ctx.tenantId);
   await requireAllowedGrant(ctx.tenantId, data.channel);
   const account = await requireHouseAccount(ctx.tenantId, data.channel);
+  // Só a desativação por revogação ('revoked') a casa desfaz, e só com a
+  // concessão de volta (checada acima). 'platform' (ou sem motivo
+  // registrado) fica com o super admin.
+  if (account.status !== "active" && account.disabled_reason !== "revoked") {
+    throw new Error(PLATFORM_DISABLED_MESSAGE);
+  }
   await reauth(ctx.userId, data.password);
 
   const now = new Date().toISOString();
-  // Desativada por uma revogação e a concessão voltou (checada acima): quem
-  // reativa é o admin da casa, aqui.
   if (account.status !== "active") {
     const { error } = await db()
       .from("provider_accounts")
-      .update({ status: "active", updated_at: now })
+      .update({ status: "active", disabled_reason: null, updated_at: now })
       .eq("id", account.id)
-      .eq("owner_tenant_id", ctx.tenantId);
+      .eq("owner_tenant_id", ctx.tenantId)
+      .eq("disabled_reason", "revoked");
     if (error) throw new Error(error.message);
   }
   const before = await channelLink(ctx.tenantId, data.channel);

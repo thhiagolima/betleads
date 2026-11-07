@@ -39,6 +39,7 @@ export type OwnedAccountRow = {
   status: "active" | "disabled";
   owner_tenant_id: string;
   last_callback_at: string | null;
+  disabled_reason?: "platform" | "revoked" | null;
 };
 
 export async function loadGrant(tenantId: string, channel: OwnProviderChannel): Promise<GrantRow | null> {
@@ -59,7 +60,7 @@ export async function ownedAccountsOf(
 ): Promise<OwnedAccountRow[]> {
   const { data, error } = await db()
     .from("provider_accounts")
-    .select("id, provider, label, channels, status, owner_tenant_id, last_callback_at")
+    .select("id, provider, label, channels, status, owner_tenant_id, last_callback_at, disabled_reason")
     .eq("owner_tenant_id", tenantId);
   if (error) throw new Error(error.message);
   return ((data ?? []) as OwnedAccountRow[]).filter((row) => (row.channels ?? []).includes(channel));
@@ -201,12 +202,17 @@ export async function adminSetOwnProviderGrantFor(
   if (revoking) {
     // A conta própria do canal fica suspensa: o canal da casa pausa (a
     // ligação em tenant_channel_providers fica; nada cai na rota da BetLeads).
-    const accounts = await ownedAccountsOf(data.tenantId, data.channel);
+    // disabled_reason 'revoked': a casa reativa quando a concessão voltar. Uma
+    // conta já desativada pela BetLeads ('platform') continua assim — senão
+    // liberar de novo a deixaria reativável pela casa.
+    const accounts = (await ownedAccountsOf(data.tenantId, data.channel)).filter(
+      (a) => a.disabled_reason !== "platform",
+    );
     disabledAccountIds = accounts.map((a) => a.id);
     if (disabledAccountIds.length) {
       const { error } = await db()
         .from("provider_accounts")
-        .update({ status: "disabled", updated_at: now })
+        .update({ status: "disabled", disabled_reason: "revoked", updated_at: now })
         .in("id", disabledAccountIds);
       if (error) throw new Error(error.message);
     }
@@ -297,6 +303,8 @@ export type OwnProviderGrantView = {
     provider: "short_brasil" | "infobip";
     label: string;
     status: "active" | "disabled";
+    /** 'platform' = desativada pelo super admin; 'revoked' = pela revogação. */
+    disabledReason: "platform" | "revoked" | null;
     lastCallbackAt: string | null;
     lastAcceptedSendAt: string | null;
   } | null;
@@ -312,7 +320,7 @@ export async function adminListOwnProviderGrantsFor(
     db().from("tenant_own_provider_grants").select("*"),
     db()
       .from("provider_accounts")
-      .select("id, provider, label, channels, status, owner_tenant_id, last_callback_at")
+      .select("id, provider, label, channels, status, owner_tenant_id, last_callback_at, disabled_reason")
       .not("owner_tenant_id", "is", null),
     db().from("tenant_channel_providers").select("tenant_id, channel, provider_account_id"),
   ]);
@@ -352,6 +360,7 @@ export async function adminListOwnProviderGrantsFor(
               provider: account.provider,
               label: account.label,
               status: account.status,
+              disabledReason: account.disabled_reason ?? null,
               lastCallbackAt: account.last_callback_at ?? null,
               lastAcceptedSendAt: await lastAcceptedSendAt(grant.tenant_id, grant.channel, account.id),
             }

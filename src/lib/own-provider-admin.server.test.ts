@@ -160,11 +160,24 @@ describe("adminSetOwnProviderGrantFor", () => {
     expect(fake.db.rows("tenant_own_provider_grants")[0].revoked_at).toBeTruthy();
     expect(fake.db.rows("provider_accounts").find((r) => r.id === OWNED)).toMatchObject({
       status: "disabled",
+      disabled_reason: "revoked",
     });
     // The link stays (the channel pauses; nothing falls back to BetLeads).
     expect(fake.db.rows("tenant_channel_providers")).toHaveLength(1);
     expect(tenantAudits().map((r) => r.action)).toEqual(["own_provider.revoke"]);
     expect(JSON.stringify(tenantAudits())).not.toContain(SECRET);
+  });
+
+  it("revoking keeps an account the BetLeads already disabled as 'platform'", async () => {
+    await ownedAccount({ status: "disabled", disabled_reason: "platform" });
+    grant();
+    await adminSetOwnProviderGrantFor(ADMIN, {
+      tenantId: TENANT,
+      channel: "sms",
+      allowed: false,
+      monthlyFeeCents: 5000,
+    });
+    expect(fake.db.rows("provider_accounts")[0].disabled_reason).toBe("platform");
   });
 
   it("granting again clears revoked_at/by and pending_decision but does not reactivate the account", async () => {
@@ -333,13 +346,30 @@ describe("super admin account functions refuse owned accounts", () => {
     expect(fake.db.rows("tenant_channel_providers")).toHaveLength(1);
   });
 
-  it("status: the super admin may disable an owned account (audited for the house) but not re-enable it", async () => {
+  it("status: the super admin disables an owned account as 'platform' and may re-enable it (audited for the house)", async () => {
+    grant();
     await adminSetProviderAccountStatusFor(ADMIN, { id: OWNED, status: "disabled" });
-    expect(fake.db.rows("provider_accounts")[0].status).toBe("disabled");
-    expect(tenantAudits()).toEqual([expect.objectContaining({ tenant_id: TENANT })]);
+    expect(fake.db.rows("provider_accounts")[0]).toMatchObject({
+      status: "disabled",
+      disabled_reason: "platform",
+    });
+    await adminSetProviderAccountStatusFor(ADMIN, { id: OWNED, status: "active" });
+    expect(fake.db.rows("provider_accounts")[0]).toMatchObject({ status: "active", disabled_reason: null });
+    expect(tenantAudits().map((r) => r.action)).toEqual(["own_provider.disable", "own_provider.enable"]);
+  });
+
+  it("status: the super admin never re-enables an account suspended by revocation, nor one whose grant is off", async () => {
+    grant({ allowed: true });
+    fake.db.rows("provider_accounts")[0].status = "disabled";
+    fake.db.rows("provider_accounts")[0].disabled_reason = "revoked";
     await expect(
       adminSetProviderAccountStatusFor(ADMIN, { id: OWNED, status: "active" }),
     ).rejects.toThrow(OWNED_MESSAGE);
+    fake.db.rows("provider_accounts")[0].disabled_reason = "platform";
+    fake.db.rows("tenant_own_provider_grants")[0].allowed = false;
+    await expect(
+      adminSetProviderAccountStatusFor(ADMIN, { id: OWNED, status: "active" }),
+    ).rejects.toThrow(/não está liberada/);
     expect(fake.db.rows("provider_accounts")[0].status).toBe("disabled");
   });
 

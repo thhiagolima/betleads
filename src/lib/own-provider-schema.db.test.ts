@@ -15,6 +15,10 @@ const { createMigratedDb } = (await import(/* @vite-ignore */ migratedPglitePath
 
 const TENANT_A = "7a3f4d5c-0001-4000-9000-000000000001";
 const TENANT_B = "7a3f4d5c-0001-4000-9000-000000000002";
+// Uma conta própria por casa e canal (20261217100400): cada teste que cria
+// uma conta de SMS com dono usa a sua própria casa.
+const TENANT_C = "7a3f4d5c-0001-4000-9000-000000000003";
+const TENANT_D = "7a3f4d5c-0001-4000-9000-000000000004";
 
 let db: PGlite;
 
@@ -31,6 +35,16 @@ beforeAll(async () => {
      values ($1, 'Casa B (teste conta própria)', 'own-provider-teste-b', 'active', 'starter', false)`,
     [TENANT_B],
   );
+  for (const [id, slug] of [
+    [TENANT_C, "own-provider-teste-c"],
+    [TENANT_D, "own-provider-teste-d"],
+  ]) {
+    await db.query(
+      `insert into public.tenants (id, nome, slug, status, plano, is_demo)
+       values ($1, $2, $2, 'active', 'starter', false)`,
+      [id, slug],
+    );
+  }
 }, 180_000);
 
 afterAll(async () => {
@@ -71,9 +85,9 @@ describe("provider_accounts com dono + platform_channel_defaults_check", () => {
     const { rows } = await db.query<{ id: string }>(
       `insert into public.provider_accounts
          (provider, label, channels, credentials_source, credentials_encrypted, owner_tenant_id)
-       values ('short_brasil', 'Conta própria Casa A (padrão?)', array['sms'], 'db', 'x', $1)
+       values ('short_brasil', 'Conta própria Casa C (padrão?)', array['sms'], 'db', 'x', $1)
        returning id`,
-      [TENANT_A],
+      [TENANT_C],
     );
     const conta = rows[0].id;
 
@@ -91,25 +105,24 @@ describe("exclusão da casa", () => {
     const { rows } = await db.query<{ id: string }>(
       `insert into public.provider_accounts
          (provider, label, channels, credentials_source, credentials_encrypted, owner_tenant_id)
-       values ('short_brasil', 'Conta própria Casa A (exclusão)', array['sms'], 'db', 'x', $1)
+       values ('short_brasil', 'Conta própria Casa D (exclusão)', array['sms'], 'db', 'x', $1)
        returning id`,
-      [TENANT_A],
+      [TENANT_D],
     );
     const conta = rows[0].id;
 
     // Liga a conta própria ao canal da própria casa antes de excluir — exercita
     // a ordem das duas cascatas de ON DELETE CASCADE a partir de tenants
     // (tenant_channel_providers.tenant_id e provider_accounts.owner_tenant_id)
-    // na mesma exclusão, como o brief pede (Step 3). (A,'sms') pode já estar
-    // ligado por um teste anterior nesta casa; substitui a ligação.
+    // na mesma exclusão, como o brief pede (Step 3).
     await db.query(
       `insert into public.tenant_channel_providers (tenant_id, channel, provider_account_id)
        values ($1, 'sms', $2)
        on conflict (tenant_id, channel) do update set provider_account_id = excluded.provider_account_id`,
-      [TENANT_A, conta],
+      [TENANT_D, conta],
     );
 
-    await db.query(`delete from public.tenants where id = $1`, [TENANT_A]);
+    await db.query(`delete from public.tenants where id = $1`, [TENANT_D]);
 
     const { rows: after } = await db.query<{ count: string }>(
       `select count(*) from public.provider_accounts where id = $1`,
