@@ -334,6 +334,7 @@ export function CredentialsStepView({
         <Input
           id="own-save-password"
           type="password"
+          autoComplete="current-password"
           value={password}
           onChange={(e) => onPasswordChange(e.target.value)}
           required
@@ -464,6 +465,7 @@ export function ActivateStepView({
         <Input
           id="own-activate-password"
           type="password"
+          autoComplete="current-password"
           value={password}
           onChange={(e) => onPasswordChange(e.target.value)}
           required

@@ -194,7 +194,7 @@ describe("OwnProviderChannelCard", () => {
     expect(html).toContain("aguardando decisão");
   });
 
-  it("conta desativada pela BetLeads mostra o aviso e nenhum botão de ação", () => {
+  it("conta desativada pela BetLeads mostra o aviso e nenhum botão de ação, sem estar ligada", () => {
     const html = renderToStaticMarkup(
       <OwnProviderChannelCard
         state={channelState({ account: account({ status: "disabled", disabledReason: "platform" }) })}
@@ -204,8 +204,24 @@ describe("OwnProviderChannelCard", () => {
       />,
     );
     expect(html).toContain("Esta conta foi desativada pela BetLeads. Fale com o suporte.");
-    expect(html).not.toContain("Usar minha conta");
     expect(html).not.toContain("Voltar para a rota da BetLeads");
+    expect(html).not.toContain("Usar minha conta");
+  });
+
+  it("conta desativada pela BetLeads mas ainda ligada oferece Voltar para a rota da BetLeads", () => {
+    const html = renderToStaticMarkup(
+      <OwnProviderChannelCard
+        state={channelState({
+          account: account({ status: "disabled", disabledReason: "platform" }),
+          usingOwnAccount: true,
+        })}
+        onOpenWizard={() => {}}
+        onDeactivate={() => {}}
+        deactivating={false}
+      />,
+    );
+    expect(html).toContain("Esta conta foi desativada pela BetLeads. Fale com o suporte.");
+    expect(html).toContain("Voltar para a rota da BetLeads");
   });
 });
 

@@ -137,6 +137,17 @@ export function OwnProviderChannelCard({
           <p className="text-sm text-destructive">
             Esta conta foi desativada pela BetLeads. Fale com o suporte.
           </p>
+          {state.usingOwnAccount && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onDeactivate}
+              disabled={deactivating}
+              {...tourAnchor("webhooks.canais.voltar-plataforma")}
+            >
+              Voltar para a rota da BetLeads
+            </Button>
+          )}
         </CardContent>
       </Card>
     );
@@ -173,7 +184,7 @@ export function OwnProviderChannelCard({
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">Provedor: Plataforma BetLeads</p>
-        <Button type="button" onClick={onOpenWizard}>
+        <Button type="button" onClick={onOpenWizard} {...tourAnchor("webhooks.canais.usar-minha-conta")}>
           Usar minha conta
         </Button>
       </CardContent>
