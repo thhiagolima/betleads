@@ -101,3 +101,9 @@ export const activateOwnProviderInput = z.object({ channel, password });
 export const deactivateOwnProviderInput = z.object({ channel });
 
 export const removeOwnProviderAccountInput = z.object({ channel, password });
+
+/** Mensagem exibida nas telas de SMS/e-mail/voz quando a conta própria da
+ * casa recusa o envio (Task 13) — nunca o nome do provedor. */
+export function ownProviderSendRefusedMessage(channel: OwnProviderChannel): string {
+  return `Sua conta de ${OWN_PROVIDER_CHANNEL_LABEL[channel]} recusou o envio. Confira saldo e credenciais em Integrações → Canais.`;
+}

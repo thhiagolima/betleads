@@ -4,7 +4,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { dbUuid } from "@/lib/zod-helpers";
 import { z } from "zod";
 import { assertSuperAdmin, tenantChannelHealth } from "@/lib/provider-governance.server";
-import { channelConfiguredFor } from "@/lib/provider-accounts.server";
+import { channelConfiguredFor, channelUsesOwnAccountFor } from "@/lib/provider-accounts.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
@@ -88,7 +88,11 @@ export const getEmailProviderStatus = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     // The caller's house account; without a resolvable house, the platform one.
     const tenantId = await resolveCurrentTenantId(context.supabase).catch(() => null);
-    const health = tenantChannelHealth(await channelConfiguredFor(tenantId, "email"));
+    const [available, ownAccount] = await Promise.all([
+      channelConfiguredFor(tenantId, "email"),
+      channelUsesOwnAccountFor(tenantId, "email"),
+    ]);
+    const health = tenantChannelHealth(available, ownAccount);
     return { ...health, configured: health.available };
   });
 

@@ -5,6 +5,7 @@ import { ChannelBlock } from "@/components/channels/channel-overview";
 import { MetricRow } from "@/components/home/home-cards";
 import { Button } from "@/components/ui/button";
 import { num } from "@/lib/format";
+import { ownProviderSendRefusedMessage } from "@/lib/own-provider.shared";
 
 /**
  * "Saúde do canal" block of the SMS overview. No delivery rate: the SMS
@@ -13,6 +14,7 @@ import { num } from "@/lib/format";
  */
 export function SmsChannelHealth({
   configured,
+  ownAccount = false,
   balanceLabel,
   scheduledCampaigns,
   playersInJourneys,
@@ -21,6 +23,9 @@ export function SmsChannelHealth({
   onOpenHistory,
 }: {
   configured: boolean | undefined;
+  /** Task 13: o canal usa a conta própria da casa — indisponível mostra a
+   * mensagem que aponta para Integrações -> Canais em vez da genérica. */
+  ownAccount?: boolean;
   /** Fully formatted, e.g. "R$ 123,45" or "Casa isenta". */
   balanceLabel: string;
   scheduledCampaigns: number;
@@ -56,6 +61,9 @@ export function SmsChannelHealth({
               configured === undefined ? undefined : configured ? "text-success" : "text-warning"
             }
           />
+          {configured === false && ownAccount && (
+            <p className="text-sm text-warning">{ownProviderSendRefusedMessage("sms")}</p>
+          )}
           <MetricRow label="Saldo para envio" value={balanceLabel} />
           <MetricRow label="Campanhas agendadas" value={num(scheduledCampaigns)} />
         </div>

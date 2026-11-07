@@ -162,6 +162,7 @@ function SmsOverview({ onOpenHistory }: { onOpenHistory: () => void }) {
     >
       <SmsChannelHealth
         configured={provider.data ? !!provider.data.configured : undefined}
+        ownAccount={Boolean(provider.data?.ownAccount)}
         balanceLabel={balanceLabel}
         scheduledCampaigns={scheduledCampaigns}
         playersInJourneys={readNumber(totals?.players_in_flow)}

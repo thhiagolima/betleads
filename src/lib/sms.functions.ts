@@ -78,6 +78,7 @@ import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-di
 import { externalListBlockedVariables, externalListVariablesError } from "./campaign-external-list";
 import {
   channelConfiguredFor,
+  channelUsesOwnAccountFor,
   ProviderAccountUnavailableError,
   resolveSmsAccount,
   type ShortBrasilAccount,
@@ -1211,7 +1212,11 @@ export const smsProviderStatus = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     // The caller's house account; without a resolvable house, the platform one.
     const tenantId = await resolveCurrentTenantId(context.supabase).catch(() => null);
-    const health = tenantChannelHealth(await channelConfiguredFor(tenantId, "sms"));
+    const [available, ownAccount] = await Promise.all([
+      channelConfiguredFor(tenantId, "sms"),
+      channelUsesOwnAccountFor(tenantId, "sms"),
+    ]);
+    const health = tenantChannelHealth(available, ownAccount);
     return { ...health, configured: health.available };
   });
 

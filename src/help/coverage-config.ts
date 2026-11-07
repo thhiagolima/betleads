@@ -59,6 +59,7 @@ export const PENDING_ROUTES: string[] = [
   "/webhooks#plataforma",
   "/webhooks#meta",
   "/webhooks#webpush",
+  "/webhooks#canais",
 
   // --- Fase 2 ---
   "/",
@@ -121,4 +122,9 @@ export const ANCHORS_PENDING_ARTICLE: string[] = [
   "webhooks.webpush.bloco-script",
   "webhooks.webpush.bloco-jogador",
   "webhooks.webpush.status",
+  // "/webhooks#canais" is in PENDING_ROUTES above — Task 13's own-provider
+  // tab/wizard added these anchors ahead of that article.
+  "webhooks.canais.usar-minha-conta",
+  "webhooks.canais.voltar-plataforma",
+  "webhooks.canais.webhook",
 ];

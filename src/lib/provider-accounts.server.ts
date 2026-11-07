@@ -645,6 +645,24 @@ export async function channelConfiguredFor(
   }
 }
 
+/**
+ * Task 13: o canal da casa está ligado à conta própria (conta com dono),
+ * esteja ela disponível ou não agora — nunca lança, nunca expõe o provedor.
+ * Serve só para a UI escolher entre a mensagem genérica de indisponibilidade
+ * e a que aponta para Integrações -> Canais.
+ */
+export async function channelUsesOwnAccountFor(
+  tenantId: string | null | undefined,
+  channel: Exclude<ProviderChannel, "webpush">,
+): Promise<boolean> {
+  if (!tenantId) return false;
+  const snap = await currentSnapshot();
+  const overrideId = snap?.overrides.get(`${tenantId}:${channel}`);
+  if (!overrideId) return false;
+  const row = snap!.accounts.get(overrideId);
+  return Boolean(row?.owner_tenant_id);
+}
+
 /** Conta de SMS da casa (Short Brasil ou Infobip). */
 export async function resolveSmsAccount(tenantId: string | null | undefined): Promise<SmsAccount> {
   return resolveChannelAccount(tenantId, "sms");

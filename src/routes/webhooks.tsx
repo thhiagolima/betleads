@@ -38,6 +38,11 @@ import { LinksSettings } from "@/components/integrations/links-settings";
 import { MetaConnectionPanel } from "@/components/integrations/meta-connection";
 import { WebpushIntegrationPanel } from "@/components/webpush/webpush-integration-panel";
 import {
+  OwnProviderTab,
+  showOwnProviderTab,
+  useOwnProviderChannels,
+} from "@/components/integrations/own-provider-tab";
+import {
   getMyWebhookAccess,
   getMyWebhookHealth,
   getMyWebhookLogs,
@@ -61,6 +66,7 @@ const TABS = [
   { value: "links", label: "Links curtos" },
   { value: "meta", label: "Meta Ads" },
   { value: "webpush", label: "Web Push" },
+  { value: "canais", label: "Canais" },
 ] as const;
 type IntegrationTab = (typeof TABS)[number]["value"];
 
@@ -75,7 +81,13 @@ function IntegrationsPage() {
   const hash = useLocation({ select: (l) => l.hash });
   const navigate = useNavigate();
   const { isEnabled } = useEnabledChannels();
-  const visibleTabs = TABS.filter((tab) => tab.value !== "webpush" || isEnabled("webpush"));
+  const ownProviderChannels = useOwnProviderChannels();
+  const visibleTabs = TABS.filter(
+    (tab) =>
+      (tab.value !== "webpush" || isEnabled("webpush")) &&
+      (tab.value !== "canais" ||
+        showOwnProviderTab(ownProviderChannels.data, ownProviderChannels.isError)),
+  );
   const tab = integrationTabFromHash(hash, visibleTabs);
 
   return (
@@ -98,6 +110,7 @@ function IntegrationsPage() {
         )}
         {tab === "meta" && <MetaConnectionPanel />}
         {tab === "webpush" && isEnabled("webpush") && <WebpushIntegrationPanel />}
+        {tab === "canais" && <OwnProviderTab />}
       </div>
     </Page>
   );

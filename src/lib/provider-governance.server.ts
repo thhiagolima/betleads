@@ -15,14 +15,19 @@ export type TenantChannelHealth = {
   canSend: boolean;
   lastUpdated: string;
   status: "available" | "attention" | "unavailable";
+  /** Task 13: o canal usa a conta própria da casa (nunca o nome do
+   * provedor) — a UI troca a mensagem genérica de indisponibilidade por uma
+   * que aponta para Integrações -> Canais quando isto é true. */
+  ownAccount: boolean;
 };
 
 /** Public-safe projection. Never add vendor names, endpoints or raw errors. */
-export function tenantChannelHealth(available: boolean): TenantChannelHealth {
+export function tenantChannelHealth(available: boolean, ownAccount = false): TenantChannelHealth {
   return {
     available,
     canSend: available,
     lastUpdated: new Date().toISOString(),
     status: available ? "available" : "unavailable",
+    ownAccount,
   };
 }
