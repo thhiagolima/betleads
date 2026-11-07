@@ -72,6 +72,7 @@ type InvoiceDTO = {
   dueDate: string;
   amountCents: number;
   discountCents: number;
+  channelFeesCents: number;
   status: "open" | "paid" | "canceled";
   paidAt: string | null;
   paidVia: "pix" | "manual" | "full_discount" | null;
@@ -434,10 +435,18 @@ function PlanoECreditosPage() {
                     <TableCell className="text-right">
                       {invoice.discountCents > 0 && (
                         <div className="text-xs text-muted-foreground line-through">
-                          {brl((invoice.amountCents + invoice.discountCents) / 100)}
+                          {brl(
+                            (invoice.amountCents + invoice.discountCents - invoice.channelFeesCents) /
+                              100,
+                          )}
                         </div>
                       )}
                       {brl(invoice.amountCents / 100)}
+                      {invoice.channelFeesCents > 0 && (
+                        <div className="text-xs text-muted-foreground">
+                          Taxa de canal próprio: {brl(invoice.channelFeesCents / 100)}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>{invoiceStatusText(invoice)}</TableCell>
                     <TableCell className="text-right">

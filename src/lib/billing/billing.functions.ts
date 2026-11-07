@@ -259,6 +259,8 @@ type InvoiceRow = {
   amount_cents: number | string;
   discount_cents: number | string;
   one_off_discount_cents: number | string;
+  /** Taxa mensal de conta própria (congelada na emissão) — Task 3. */
+  channel_fees_cents: number | string | null;
   status: "open" | "paid" | "canceled";
   paid_at: string | null;
   paid_via: "pix" | "manual" | "full_discount" | null;
@@ -272,6 +274,8 @@ type InvoiceDTO = {
   dueDate: string;
   amountCents: number;
   discountCents: number;
+  /** Taxa de canal próprio já somada em `amountCents`, congelada na emissão. */
+  channelFeesCents: number;
   status: "open" | "paid" | "canceled";
   paidAt: string | null;
   paidVia: "pix" | "manual" | "full_discount" | null;
@@ -285,6 +289,7 @@ function toInvoiceDTO(row: InvoiceRow): InvoiceDTO {
     dueDate: row.due_date,
     amountCents: Number(row.amount_cents),
     discountCents: Number(row.discount_cents) + Number(row.one_off_discount_cents),
+    channelFeesCents: Number(row.channel_fees_cents ?? 0),
     status: row.status,
     paidAt: row.paid_at,
     paidVia: row.paid_via,
@@ -343,7 +348,7 @@ export async function getPlanOverviewFor(
     looseDb(supabaseAdmin)
       .from<InvoiceRow[]>("billing_invoices")
       .select(
-        "id,tenant_id,period_start,period_end,cycle_due_date,due_date,amount_cents,discount_cents,one_off_discount_cents,status,paid_at,paid_via,payment_charge_id",
+        "id,tenant_id,period_start,period_end,cycle_due_date,due_date,amount_cents,discount_cents,one_off_discount_cents,channel_fees_cents,status,paid_at,paid_via,payment_charge_id",
       )
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })

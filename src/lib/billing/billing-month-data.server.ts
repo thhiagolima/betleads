@@ -38,6 +38,7 @@ function nextYyyyMm(yyyyMm: string): string {
 type BillingPlanRow = { code: string; price_cents: number | string; exempt_all: boolean };
 type TenantRow = { id: string; nome: string | null; slug: string | null; plano: string | null };
 type AmountRow = { id: string; tenant_id: string; paid_amount_cents: number | string | null };
+type PaidInvoiceRow = AmountRow & { channel_fees_cents: number | string | null };
 type LedgerRow = {
   id: string;
   tenant_id: string;
@@ -139,10 +140,10 @@ export async function loadMonthData(month: string): Promise<MonthData> {
     await Promise.all([
       sb.from("tenants").select("id,nome,slug,plano").order("nome", { ascending: true }),
       sb.from("billing_plans").select("code,price_cents,exempt_all"),
-      selectAllPages<AmountRow>("billing_invoices_paid_csv", () =>
+      selectAllPages<PaidInvoiceRow>("billing_invoices_paid_csv", () =>
         sb
           .from("billing_invoices")
-          .select("id,tenant_id,paid_amount_cents")
+          .select("id,tenant_id,paid_amount_cents,channel_fees_cents")
           .eq("status", "paid")
           .gte("paid_at", monthStartISO)
           .lt("paid_at", monthEndExclusiveISO),
@@ -198,6 +199,7 @@ export async function loadMonthData(month: string): Promise<MonthData> {
     invoicesPaid: invPaged.data.map((r) => ({
       tenant_id: r.tenant_id,
       paid_amount_cents: Number(r.paid_amount_cents ?? 0),
+      channel_fees_cents: Number(r.channel_fees_cents ?? 0),
     })),
     topups: topupPaged.data.map((r) => ({
       tenant_id: r.tenant_id,

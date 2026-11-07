@@ -354,6 +354,7 @@ describe("getPlanOverviewFor", () => {
       "dueDate",
       "amountCents",
       "discountCents",
+      "channelFeesCents",
       "status",
       "paidAt",
       "paidVia",

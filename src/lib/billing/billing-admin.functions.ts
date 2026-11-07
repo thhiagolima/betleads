@@ -1282,6 +1282,8 @@ export const adminBillingMonthlyCsv = createServerFn({ method: "GET" })
 export type AdminBillingOpenInvoice = {
   id: string;
   amountCents: number;
+  /** Taxa de canal próprio já somada em `amountCents`, congelada na emissão (Task 3). */
+  channelFeesCents: number;
   dueDate: string;
   /** Narrowed from `access_state` — only the phases an open invoice can be in. */
   phase: "due_soon" | "overdue" | "locked_unpaid" | "awaiting_first_payment" | "open";
@@ -1334,6 +1336,7 @@ type OpenInvoiceListRow = {
   id: string;
   tenant_id: string;
   amount_cents: number | string;
+  channel_fees_cents: number | string | null;
   due_date: string;
   created_at: string;
 };
@@ -1373,7 +1376,7 @@ export async function adminBillingTenantListFor(ctx: ServerContext): Promise<Adm
     selectAllPages<OpenInvoiceListRow>("billing_admin_tenant_list_open_invoices", () =>
       sb
         .from("billing_invoices")
-        .select("id,tenant_id,amount_cents,due_date,created_at")
+        .select("id,tenant_id,amount_cents,channel_fees_cents,due_date,created_at")
         .eq("status", "open"),
     ),
   ]);
@@ -1403,6 +1406,7 @@ export async function adminBillingTenantListFor(ctx: ServerContext): Promise<Adm
         ? {
             id: openInv.id,
             amountCents: Number(openInv.amount_cents),
+            channelFeesCents: Number(openInv.channel_fees_cents ?? 0),
             dueDate: openInv.due_date,
             phase: invoicePhaseFor(accessState),
             issuedOn: brtDayKey(new Date(openInv.created_at)),

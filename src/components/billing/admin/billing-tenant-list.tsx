@@ -93,6 +93,11 @@ function TenantSituationCell({ row }: { row: AdminBillingTenantRow }) {
           {formatCentsBRL(row.openInvoice.amountCents)} · vence {formatDateBR(row.openInvoice.dueDate)}
         </div>
       )}
+      {row.openInvoice && row.openInvoice.channelFeesCents > 0 && (
+        <div className="text-xs text-muted-foreground">
+          Taxa de canal próprio: {formatCentsBRL(row.openInvoice.channelFeesCents)}
+        </div>
+      )}
       {row.continuousDiscount && (
         <div className="text-xs text-muted-foreground">
           Desconto contínuo: {row.continuousDiscount.kind === "percent"

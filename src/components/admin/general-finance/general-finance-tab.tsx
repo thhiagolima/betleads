@@ -151,6 +151,9 @@ export function GeneralFinanceTab() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Mensalidades recebidas" value={brl(totals.mensalidadeReais)} />
+        {totals.canalProprioReais > 0 && (
+          <MetricCard label="Taxa de canal próprio" value={brl(totals.canalProprioReais)} />
+        )}
         <MetricCard label="Recargas recebidas" value={brl(totals.topupReais)} />
         <MetricCard label="Consumo vendido" value={brl(consumoVendido)} />
         <MetricCard

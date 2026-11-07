@@ -3,13 +3,29 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 const queryState = { data: undefined as unknown, isLoading: false };
+/** Task 12: `ProviderAccountsPanel` now also queries the own-provider grants list
+ * (`OWN_GRANTS_QUERY_KEY`, key[1] = "own-provider-grants") alongside the main
+ * accounts list — route by queryKey so each query gets its own fixture instead of
+ * both reading `queryState.data`. */
+const grantsQueryState = { data: [] as unknown[], isLoading: false };
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => queryState,
-  useMutation: () => ({ mutate: vi.fn(), isPending: false }),
+  useQuery: (opts: { queryKey: unknown[] }) =>
+    Array.isArray(opts.queryKey) && opts.queryKey[1] === "own-provider-grants"
+      ? grantsQueryState
+      : queryState,
+  useMutation: (opts: { mutationFn: (vars: unknown) => unknown }) => ({
+    mutate: (vars: unknown) => void opts.mutationFn(vars),
+    isPending: false,
+  }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
+vi.mock("@/components/system-dialog-host", () => ({
+  requestConfirmation: vi.fn(async () => true),
+  requestTextInput: vi.fn(async () => null),
+}));
 vi.mock("@/lib/provider-accounts.functions", () => ({
   adminListProviderAccounts: vi.fn(),
   adminSaveProviderAccount: vi.fn(),
@@ -20,6 +36,11 @@ vi.mock("@/lib/provider-accounts.functions", () => ({
   adminDeleteProviderAccount: vi.fn(),
   adminTenantChannelImpact: vi.fn(),
   adminSetTenantChannel: vi.fn(),
+}));
+vi.mock("@/lib/own-provider.functions", () => ({
+  adminListOwnProviderGrants: vi.fn(),
+  adminSetOwnProviderGrant: vi.fn(),
+  adminResolveRevokedOwnProvider: vi.fn(),
 }));
 // Select/Dropdown content is rendered inside a Radix Portal that only mounts
 // when open; pass through so static markup exposes the options/disabled state.
@@ -40,7 +61,17 @@ vi.mock("@/components/ui/select", () => {
   };
 });
 
-import { ProviderAccountsPanel } from "./provider-accounts-panel";
+import {
+  AccountsCard,
+  ProviderAccountsPanel,
+  TenantProvidersCard,
+  ownProviderPauseConfirmMessage,
+  ownProviderStateLabel,
+  tenantChannelAccountOptions,
+  type TenantProvidersRow,
+} from "./provider-accounts-panel";
+import type { ProviderAccountView } from "@/lib/provider-accounts-admin.server";
+import type { OwnProviderGrantView } from "@/lib/own-provider-admin.server";
 
 const houses = (sms = 0, email = 0, voice = 0, webpush = 0) => ({ sms, email, voice, webpush });
 const channels = (sms = true, email = true, voice = true, webpush = false) => ({
@@ -331,5 +362,224 @@ describe("ProviderAccountsPanel", () => {
     const emptyHtml = renderToStaticMarkup(<ProviderAccountsPanel />);
     expect(emptyHtml).toContain("Nenhuma casa encontrada");
     expect(emptyHtml).toMatch(/colSpan="5"|colspan="5"/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 12: conta própria de provedor por casa — telas do super admin.
+// ---------------------------------------------------------------------------
+
+function account(overrides: Partial<ProviderAccountView> = {}): ProviderAccountView {
+  return {
+    id: "acc-1",
+    provider: "infobip",
+    label: "Infobip Padrão",
+    channels: ["sms"],
+    status: "active",
+    envAccount: false,
+    ownerTenantId: null,
+    defaultFor: [],
+    configured: true,
+    config: {},
+    credentialHints: { api_key: "••••abcd" },
+    houses: { sms: 0, email: 0, voice: 0, webpush: 0 },
+    ...overrides,
+  };
+}
+
+function tenantRow(overrides: Partial<TenantProvidersRow> = {}): TenantProvidersRow {
+  return {
+    id: "tenant-1",
+    nome: "Casa Teste",
+    accounts: { sms: null, email: null, voice: null, webpush: null },
+    channels: { sms: true, email: true, voice: true, webpush: true },
+    ...overrides,
+  };
+}
+
+describe("AccountsCard — conta com dono", () => {
+  it('mostra o selo "Conta da casa {nome}" e esconde Editar/Testar/Excluir, só Desativar/Reativar', () => {
+    const owned = account({
+      id: "acc-owned",
+      ownerTenantId: "tenant-1",
+      label: "Conta própria SMS",
+      credentialHints: {},
+    });
+    const html = renderToStaticMarkup(
+      <AccountsCard
+        accounts={[owned]}
+        tenants={[tenantRow()]}
+        verifiedEmailDomainsOnDefault={0}
+        loading={false}
+        onCreate={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(html).toContain("Conta da casa Casa Teste");
+    expect(html).not.toContain("Editar");
+    expect(html).not.toContain("Testar");
+    expect(html).not.toContain("Excluir");
+    expect(html).toContain("Desativar");
+  });
+
+  it("uma conta da plataforma continua com Editar/Testar/Excluir", () => {
+    const platform = account({ id: "acc-platform" });
+    const html = renderToStaticMarkup(
+      <AccountsCard
+        accounts={[platform]}
+        tenants={[]}
+        verifiedEmailDomainsOnDefault={0}
+        loading={false}
+        onCreate={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(html).toContain("Editar");
+    expect(html).toContain("Testar");
+    expect(html).toContain("Excluir");
+    expect(html).not.toContain("Conta da casa");
+  });
+});
+
+describe("TenantProvidersCard — conta própria por casa", () => {
+  it('mostra "Permitir conta própria", "Taxa mensal (R$)" e o estado "Plataforma" sem concessão', () => {
+    const html = renderToStaticMarkup(
+      <TenantProvidersCard
+        accounts={[]}
+        tenants={[tenantRow()]}
+        defaults={{} as Record<string, string>}
+        grants={[]}
+        loading={false}
+      />,
+    );
+    expect(html).toContain("Permitir conta própria");
+    expect(html).toContain("Plataforma");
+  });
+
+  it('mostra "Conta da casa: {label}" e o campo de taxa quando a concessão está ativa e ligada', () => {
+    const grant: OwnProviderGrantView = {
+      tenantId: "tenant-1",
+      channel: "sms",
+      allowed: true,
+      monthlyFeeCents: 5000,
+      pendingDecision: false,
+      account: {
+        id: "acc-own",
+        provider: "short_brasil",
+        label: "Conta própria SMS",
+        status: "active",
+        disabledReason: null,
+        lastCallbackAt: null,
+        lastAcceptedSendAt: null,
+      },
+      active: true,
+    };
+    const html = renderToStaticMarkup(
+      <TenantProvidersCard
+        accounts={[]}
+        tenants={[tenantRow()]}
+        defaults={{} as Record<string, string>}
+        grants={[grant]}
+        loading={false}
+      />,
+    );
+    expect(html).toContain("Conta da casa: Conta própria SMS");
+    expect(html).toContain("Taxa mensal (R$)");
+  });
+
+  it('mostra "Pausado: aguardando decisão" com os botões de resolução', () => {
+    const grant: OwnProviderGrantView = {
+      tenantId: "tenant-1",
+      channel: "email",
+      allowed: false,
+      monthlyFeeCents: 0,
+      pendingDecision: true,
+      account: null,
+      active: false,
+    };
+    const html = renderToStaticMarkup(
+      <TenantProvidersCard
+        accounts={[]}
+        tenants={[tenantRow()]}
+        defaults={{} as Record<string, string>}
+        grants={[grant]}
+        loading={false}
+      />,
+    );
+    expect(html).toContain("Pausado: aguardando decisão");
+    expect(html).toContain("Voltar para a padrão");
+    expect(html).toContain("Manter pausado");
+  });
+});
+
+describe("ownProviderStateLabel", () => {
+  it("retorna Plataforma sem concessão", () => {
+    expect(ownProviderStateLabel(undefined)).toBe("Plataforma");
+  });
+
+  it("retorna o rótulo pausado quando pendingDecision", () => {
+    expect(
+      ownProviderStateLabel({
+        tenantId: "t",
+        channel: "sms",
+        allowed: false,
+        monthlyFeeCents: 0,
+        pendingDecision: true,
+        account: null,
+        active: false,
+      }),
+    ).toBe("Pausado: aguardando decisão");
+  });
+
+  it("retorna Conta da casa quando ativa com conta ligada", () => {
+    expect(
+      ownProviderStateLabel({
+        tenantId: "t",
+        channel: "sms",
+        allowed: true,
+        monthlyFeeCents: 100,
+        pendingDecision: false,
+        account: {
+          id: "a",
+          provider: "short_brasil",
+          label: "X",
+          status: "active",
+          disabledReason: null,
+          lastCallbackAt: null,
+          lastAcceptedSendAt: null,
+        },
+        active: true,
+      }),
+    ).toBe("Conta da casa: X");
+  });
+});
+
+describe("ownProviderPauseConfirmMessage", () => {
+  it("monta a mensagem de confirmação ao desligar o canal", () => {
+    expect(ownProviderPauseConfirmMessage("sms")).toBe(
+      "Os envios de SMS desta casa vão pausar e a equipe da casa verá um aviso. Nada sai pela rota da BetLeads até você decidir.",
+    );
+  });
+});
+
+describe("tenantChannelAccountOptions", () => {
+  it("não lista conta com dono de outra casa", () => {
+    const own = account({ id: "own", ownerTenantId: "other-tenant", channels: ["sms"] });
+    const platform = account({ id: "plat", ownerTenantId: null, channels: ["sms"] });
+    const options = tenantChannelAccountOptions([own, platform], "sms");
+    expect(options.map((a) => a.id)).toEqual(["plat"]);
+  });
+
+  it("não lista conta com dono mesmo quando é a conta própria da própria casa", () => {
+    const own = account({ id: "own", ownerTenantId: "tenant-1", channels: ["sms"] });
+    const options = tenantChannelAccountOptions([own], "sms");
+    expect(options).toEqual([]);
+  });
+
+  it("não lista conta desativada nem conta que não atende o canal", () => {
+    const disabled = account({ id: "off", status: "disabled", channels: ["sms"] });
+    const otherChannel = account({ id: "voice-only", channels: ["voice"] });
+    const options = tenantChannelAccountOptions([disabled, otherChannel], "sms");
+    expect(options).toEqual([]);
   });
 });

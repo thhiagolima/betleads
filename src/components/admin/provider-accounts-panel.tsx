@@ -1,6 +1,6 @@
 // Admin → Integrações: provider accounts (SMS/e-mail/voz) and each house's
 // account per channel. Super admin only; vendor names never reach a house.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { KeyRound, Pencil, Plug, Plus, Power, Star, Trash2 } from "lucide-react";
@@ -57,9 +57,19 @@ import {
   type SaveProviderAccountInput,
 } from "@/lib/provider-accounts.shared";
 import type { ProviderAccountView } from "@/lib/provider-accounts-admin.server";
+import { adminListOwnProviderGrants, adminResolveRevokedOwnProvider, adminSetOwnProviderGrant } from "@/lib/own-provider.functions";
+import {
+  OWN_PROVIDER_CHANNEL_LABEL,
+  OWN_PROVIDER_CHANNELS,
+  type OwnProviderChannel,
+} from "@/lib/own-provider.shared";
+import type { OwnProviderGrantView } from "@/lib/own-provider-admin.server";
 
 const QUERY_KEY = ["admin", "provider-accounts"] as const;
+const OWN_GRANTS_QUERY_KEY = ["admin", "own-provider-grants"] as const;
 const PLATFORM = "platform";
+/** Canais com conta própria, como `Set` para teste O(1) no filtro de colunas. */
+const OWN_CHANNEL_SET = new Set<ProviderChannelName>(OWN_PROVIDER_CHANNELS);
 /** Valor do item "Re-sincronizar domínios de e-mail" no menu "Tornar padrão". */
 const RESYNC_EMAIL = "resync-email";
 
@@ -125,6 +135,11 @@ function errorMessage(error: unknown) {
 export function ProviderAccountsPanel() {
   const listFn = useServerFn(adminListProviderAccounts);
   const { data, isLoading } = useQuery({ queryKey: QUERY_KEY, queryFn: () => listFn() });
+  const grantsFn = useServerFn(adminListOwnProviderGrants);
+  const { data: grants } = useQuery({
+    queryKey: OWN_GRANTS_QUERY_KEY,
+    queryFn: () => grantsFn(),
+  });
   const [editing, setEditing] = useState<ProviderAccountView | "new" | null>(null);
 
   return (
@@ -141,6 +156,7 @@ export function ProviderAccountsPanel() {
         accounts={data?.accounts ?? []}
         tenants={data?.tenants ?? []}
         defaults={data?.defaults ?? ({} as Record<ProviderChannelName, string>)}
+        grants={grants ?? []}
         loading={isLoading}
       />
       {editing && (
@@ -155,7 +171,7 @@ export function ProviderAccountsPanel() {
 
 // ─── Contas ─────────────────────────────────────────────────────────────────
 
-function AccountsCard({
+export function AccountsCard({
   accounts,
   tenants,
   verifiedEmailDomainsOnDefault,
@@ -164,7 +180,7 @@ function AccountsCard({
   onEdit,
 }: {
   accounts: ProviderAccountView[];
-  tenants: TenantRow[];
+  tenants: TenantProvidersRow[];
   verifiedEmailDomainsOnDefault: number;
   loading: boolean;
   onCreate: () => void;
@@ -284,6 +300,8 @@ function AccountsCard({
     remove.mutate({ id: account.id });
   }
 
+  const tenantNameById = useMemo(() => new Map(tenants.map((t) => [t.id, t.nome])), [tenants]);
+
   async function runTest(account: ProviderAccountView) {
     if (account.provider === "short_brasil") {
       const phone = await requestTextInput({
@@ -362,6 +380,13 @@ function AccountsCard({
                         ))}
                       </div>
                     )}
+                    {account.ownerTenantId && (
+                      <div className="mt-1">
+                        <Badge variant="outline">
+                          Conta da casa {tenantNameById.get(account.ownerTenantId) ?? "desconhecida"}
+                        </Badge>
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -373,7 +398,9 @@ function AccountsCard({
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-meta">
-                    {Object.keys(account.credentialHints).length === 0 ? (
+                    {account.ownerTenantId ? (
+                      <span className="text-muted-foreground">conta da casa</span>
+                    ) : Object.keys(account.credentialHints).length === 0 ? (
                       <span className="text-destructive">nenhuma</span>
                     ) : (
                       Object.entries(account.credentialHints).map(([key, value]) => (
@@ -396,18 +423,23 @@ function AccountsCard({
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap justify-end gap-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => runTest(account)}
-                        disabled={test.isPending}
-                      >
-                        <Plug className="h-4 w-4" /> Testar
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => onEdit(account)}>
-                        <Pencil className="h-4 w-4" /> Editar
-                      </Button>
-                      {account.status === "active" &&
+                      {!account.ownerTenantId && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => runTest(account)}
+                          disabled={test.isPending}
+                        >
+                          <Plug className="h-4 w-4" /> Testar
+                        </Button>
+                      )}
+                      {!account.ownerTenantId && (
+                        <Button variant="outline" size="sm" onClick={() => onEdit(account)}>
+                          <Pencil className="h-4 w-4" /> Editar
+                        </Button>
+                      )}
+                      {!account.ownerTenantId &&
+                        account.status === "active" &&
                         (eligibleForDefault.length > 0 || account.defaultFor.includes("email")) && (
                         <Select
                           value=""
@@ -444,10 +476,10 @@ function AccountsCard({
                           disabled={status.isPending}
                         >
                           <Power className="h-4 w-4" />
-                          {account.status === "active" ? "Desativar" : "Ativar"}
+                          {account.status === "active" ? "Desativar" : "Reativar"}
                         </Button>
                       )}
-                      {!account.envAccount && (
+                      {!account.ownerTenantId && !account.envAccount && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -649,45 +681,220 @@ function AccountDialog({
 
 // ─── Provedor por casa ──────────────────────────────────────────────────────
 
-type TenantRow = {
+export type TenantProvidersRow = {
   id: string;
   nome: string;
   accounts: Record<ProviderChannelName, string | null>;
   channels: Record<ProviderChannelName, boolean>;
 };
 
-function TenantProvidersCard({
+/**
+ * Opções do seletor de conta por casa de um canal: só contas da plataforma
+ * (ativas, atendem o canal) — conta com dono (de qualquer casa, inclusive a
+ * própria) nunca aparece aqui. O super admin nunca liga/desliga uma conta
+ * com dono por este seletor; isso é coisa da casa (ativar/"voltar para a
+ * rota da BetLeads") ou da revogação (adminResolveRevokedOwnProvider), e o
+ * servidor (adminSetTenantChannelProviderFor) já recusa a tentativa.
+ */
+export function tenantChannelAccountOptions(
+  accounts: ProviderAccountView[],
+  channel: ProviderChannelName,
+): ProviderAccountView[] {
+  return accounts.filter(
+    (a) =>
+      a.status === "active" &&
+      !a.ownerTenantId &&
+      a.channels.includes(channel) &&
+      SUPPORTED_CHANNELS[a.provider].includes(channel),
+  );
+}
+
+/** "Plataforma" / "Conta da casa: {label}" / "Pausado: aguardando decisão" — o estado da
+ * concessão de conta própria de um canal, exibido na linha da casa. */
+export function ownProviderStateLabel(grant: OwnProviderGrantView | undefined): string {
+  if (grant?.pendingDecision) return "Pausado: aguardando decisão";
+  if (grant?.active && grant.account) return `Conta da casa: ${grant.account.label}`;
+  return "Plataforma";
+}
+
+/** Mensagem de confirmação ao desligar "Permitir conta própria" de um canal já liberado. */
+export function ownProviderPauseConfirmMessage(channel: OwnProviderChannel): string {
+  return `Os envios de ${OWN_PROVIDER_CHANNEL_LABEL[channel]} desta casa vão pausar e a equipe da casa verá um aviso. Nada sai pela rota da BetLeads até você decidir.`;
+}
+
+function OwnProviderGrantCell({
+  tenant,
+  channel,
+  grant,
+  onSetGrant,
+  onResolve,
+  pending,
+}: {
+  tenant: TenantProvidersRow;
+  channel: OwnProviderChannel;
+  grant: OwnProviderGrantView | undefined;
+  onSetGrant: (vars: {
+    tenantId: string;
+    channel: OwnProviderChannel;
+    allowed: boolean;
+    monthlyFeeCents: number;
+  }) => void;
+  onResolve: (vars: {
+    tenantId: string;
+    channel: OwnProviderChannel;
+    action: "use_default" | "keep_paused";
+  }) => void;
+  pending: boolean;
+}) {
+  const allowed = grant?.allowed ?? false;
+  const feeCents = grant?.monthlyFeeCents ?? 0;
+  const [feeDraft, setFeeDraft] = useState(String(feeCents / 100));
+  useEffect(() => {
+    setFeeDraft(String(feeCents / 100));
+  }, [feeCents]);
+
+  async function toggleAllowed(next: boolean) {
+    if (!next && allowed) {
+      const ok = await requestConfirmation({
+        title: `Desligar conta própria de ${OWN_PROVIDER_CHANNEL_LABEL[channel]} para ${tenant.nome}?`,
+        description: ownProviderPauseConfirmMessage(channel),
+        confirmLabel: "Desligar",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    const cents = Math.round(Number(feeDraft || "0") * 100);
+    onSetGrant({
+      tenantId: tenant.id,
+      channel,
+      allowed: next,
+      monthlyFeeCents: Number.isFinite(cents) && cents >= 0 ? cents : feeCents,
+    });
+  }
+
+  function commitFee() {
+    const cents = Math.round(Number(feeDraft || "0") * 100);
+    if (!Number.isFinite(cents) || cents < 0 || cents === feeCents) return;
+    onSetGrant({ tenantId: tenant.id, channel, allowed, monthlyFeeCents: cents });
+  }
+
+  return (
+    <div className="mt-2 space-y-1.5 border-t pt-2">
+      <label className="flex items-center justify-between gap-2 text-meta">
+        <span>Permitir conta própria</span>
+        <Switch
+          checked={allowed}
+          onCheckedChange={(checked) => void toggleAllowed(checked)}
+          disabled={pending}
+        />
+      </label>
+      {allowed && (
+        <div className="flex items-center gap-2">
+          <Label htmlFor={`own-fee-${tenant.id}-${channel}`} className="text-meta">
+            Taxa mensal (R$)
+          </Label>
+          <Input
+            id={`own-fee-${tenant.id}-${channel}`}
+            type="number"
+            min={0}
+            step="0.01"
+            value={feeDraft}
+            onChange={(e) => setFeeDraft(e.target.value)}
+            onBlur={commitFee}
+            className="h-7 w-24 text-meta"
+          />
+        </div>
+      )}
+      <div className="text-meta text-muted-foreground">{ownProviderStateLabel(grant)}</div>
+      {grant?.pendingDecision && (
+        <div className="flex flex-wrap gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onResolve({ tenantId: tenant.id, channel, action: "use_default" })}
+          >
+            Voltar para a padrão
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onResolve({ tenantId: tenant.id, channel, action: "keep_paused" })}
+          >
+            Manter pausado
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function TenantProvidersCard({
   accounts,
   tenants,
   defaults,
+  grants,
   loading,
 }: {
   accounts: ProviderAccountView[];
-  tenants: TenantRow[];
+  tenants: TenantProvidersRow[];
   defaults: Record<ProviderChannelName, string>;
+  grants: OwnProviderGrantView[];
   loading: boolean;
 }) {
   const qc = useQueryClient();
   const setFn = useServerFn(adminSetTenantChannelProvider);
   const impactFn = useServerFn(adminTenantChannelImpact);
   const setChannelFn = useServerFn(adminSetTenantChannel);
+  const setOwnGrantFn = useServerFn(adminSetOwnProviderGrant);
+  const resolveOwnGrantFn = useServerFn(adminResolveRevokedOwnProvider);
   const [search, setSearch] = useState("");
 
   const optionsByChannel = useMemo(() => {
     const out = {} as Record<ProviderChannelName, ProviderAccountView[]>;
     for (const channel of PROVIDER_CHANNELS) {
-      out[channel] = accounts.filter(
-        (a) =>
-          a.status === "active" &&
-          a.channels.includes(channel) &&
-          SUPPORTED_CHANNELS[a.provider].includes(channel),
-      );
+      out[channel] = tenantChannelAccountOptions(accounts, channel);
     }
     return out;
   }, [accounts]);
+  const grantsByKey = useMemo(() => {
+    const map = new Map<string, OwnProviderGrantView>();
+    for (const g of grants) map.set(`${g.tenantId}:${g.channel}`, g);
+    return map;
+  }, [grants]);
   const labelOf = (id: string | null) =>
     id ? (accounts.find((a) => a.id === id)?.label ?? "conta removida") : "a conta padrão";
   const defaultLabelOf = (channel: ProviderChannelName) => labelOf(defaults[channel] ?? null);
+
+  const setOwnGrant = useMutation({
+    mutationFn: (input: {
+      tenantId: string;
+      channel: OwnProviderChannel;
+      allowed: boolean;
+      monthlyFeeCents: number;
+    }) => setOwnGrantFn({ data: input }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: OWN_GRANTS_QUERY_KEY }),
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+  const resolveOwnGrant = useMutation({
+    mutationFn: (input: {
+      tenantId: string;
+      channel: OwnProviderChannel;
+      action: "use_default" | "keep_paused";
+    }) => resolveOwnGrantFn({ data: input }),
+    onSuccess: (result) => {
+      void qc.invalidateQueries({ queryKey: OWN_GRANTS_QUERY_KEY });
+      void qc.invalidateQueries({ queryKey: QUERY_KEY });
+      if (result.emailDomains.length > 0) {
+        const pending = result.emailDomains.filter((d) => d.status !== "verified");
+        toast.warning(
+          `${result.emailDomains.length} domínio(s) de e-mail recadastrado(s) na conta padrão; ${pending.length} aguardam a casa publicar os DNS novos.`,
+        );
+      }
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
 
   const assign = useMutation({
     mutationFn: (input: {
@@ -708,7 +915,7 @@ function TenantProvidersCard({
     onError: (error) => toast.error(errorMessage(error)),
   });
 
-  async function change(tenant: TenantRow, channel: ProviderChannelName, value: string) {
+  async function change(tenant: TenantProvidersRow, channel: ProviderChannelName, value: string) {
     const accountId = value === PLATFORM ? null : value;
     if (accountId === tenant.accounts[channel]) return;
     const ok = await requestConfirmation({
@@ -742,7 +949,11 @@ function TenantProvidersCard({
     onError: (error) => toast.error(errorMessage(error)),
   });
 
-  async function toggleChannel(tenant: TenantRow, channel: ProviderChannelName, enabled: boolean) {
+  async function toggleChannel(
+    tenant: TenantProvidersRow,
+    channel: ProviderChannelName,
+    enabled: boolean,
+  ) {
     if (!enabled) {
       let impact: { activeJourneys: number; scheduledCampaigns: number };
       try {
@@ -812,8 +1023,17 @@ function TenantProvidersCard({
                   const current = tenant.accounts[channel];
                   const options = optionsByChannel[channel];
                   const enabled = tenant.channels[channel];
-                  // Keep a now-disabled current account visible in its own select.
+                  // Keep a current account missing from `options` visible in its own select —
+                  // either it's disabled, or (now that `options` never lists an owned account)
+                  // it's the house's own account, activated by its admin.
                   const currentMissing = current && !options.some((a) => a.id === current);
+                  const currentAccountRow = current
+                    ? accounts.find((a) => a.id === current) ?? null
+                    : null;
+                  const missingSuffix = currentAccountRow?.ownerTenantId
+                    ? " (conta própria da casa)"
+                    : " (desativada)";
+                  const isOwnChannel = OWN_CHANNEL_SET.has(channel);
                   return (
                     <TableCell key={channel} className="min-w-52">
                       <div className="mb-1.5 flex items-center gap-2">
@@ -839,7 +1059,10 @@ function TenantProvidersCard({
                         <SelectContent>
                           <SelectItem value={PLATFORM}>Padrão ({defaultLabelOf(channel)})</SelectItem>
                           {currentMissing && (
-                            <SelectItem value={current}>{labelOf(current)} (desativada)</SelectItem>
+                            <SelectItem value={current}>
+                              {labelOf(current)}
+                              {missingSuffix}
+                            </SelectItem>
                           )}
                           {options.map((a) => (
                             <SelectItem key={a.id} value={a.id}>
@@ -848,6 +1071,16 @@ function TenantProvidersCard({
                           ))}
                         </SelectContent>
                       </Select>
+                      {isOwnChannel && (
+                        <OwnProviderGrantCell
+                          tenant={tenant}
+                          channel={channel as OwnProviderChannel}
+                          grant={grantsByKey.get(`${tenant.id}:${channel}`)}
+                          onSetGrant={setOwnGrant.mutate}
+                          onResolve={resolveOwnGrant.mutate}
+                          pending={setOwnGrant.isPending}
+                        />
+                      )}
                     </TableCell>
                   );
                 })}

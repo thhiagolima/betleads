@@ -43,7 +43,13 @@ export type MonthUsageRow = {
 export type MonthData = {
   month: string;
   tenants: MonthTenant[];
-  invoicesPaid: Array<{ tenant_id: string; paid_amount_cents: number }>;
+  /** `channel_fees_cents` is part of `paid_amount_cents` (congelado na emissão, Task 3) and
+   * optional so existing fixtures without it keep working (defaults to 0). */
+  invoicesPaid: Array<{
+    tenant_id: string;
+    paid_amount_cents: number;
+    channel_fees_cents?: number;
+  }>;
   topups: Array<{ tenant_id: string; paid_amount_cents: number }>;
   usage: MonthUsageRow[];
   pixFees: Array<{ tenant_id: string; fee_cents: number }>;
@@ -59,6 +65,10 @@ export type MonthHouseRow = {
   plan: string | null;
   exempt: boolean;
   mensalidadeReais: number;
+  /** Taxa de canal próprio recebida no mês (congelada em cada fatura na emissão, Task 3) —
+   * já estava somada em `mensalidadeReais` antes desta coluna existir; agora é sua própria
+   * linha, e `mensalidadeReais` conta só a base do plano. */
+  canalProprioReais: number;
   topupReais: number;
   topupCount: number;
   consumoSms: number;
@@ -95,6 +105,12 @@ function buildRow(tenant: MonthTenant, data: MonthData): MonthHouseRow {
     (r) => Number(r.paid_amount_cents ?? 0),
     (r) => r.tenant_id,
   );
+  const canalProprioCents = sumCentsBy(
+    data.invoicesPaid,
+    tenant.id,
+    (r) => Number(r.channel_fees_cents ?? 0),
+    (r) => r.tenant_id,
+  );
   const topupRowsForTenant = data.topups.filter((r) => r.tenant_id === tenant.id);
   const topupCents = topupRowsForTenant.reduce(
     (acc, r) => acc + Number(r.paid_amount_cents ?? 0),
@@ -127,11 +143,15 @@ function buildRow(tenant: MonthTenant, data: MonthData): MonthHouseRow {
     (r) => r.tenant_id,
   );
 
-  const mensalidadeReais = mensalidadeCents / 100;
+  // mensalidadeCents is paid_amount_cents, which already includes the frozen channel fee
+  // (Task 3's billing_issue_invoice: amount_cents = base - discount + channel_fees_cents) —
+  // subtract it so mensalidadeReais is the plan base only, with the fee its own line.
+  const mensalidadeReais = (mensalidadeCents - canalProprioCents) / 100;
+  const canalProprioReais = canalProprioCents / 100;
   const topupReais = topupCents / 100;
   const taxaPixReais = taxaPixCents / 100;
   const custoFornecedor = usageForTenant.reduce((acc, r) => acc + r.provider_cost, 0);
-  const receitaBruta = mensalidadeReais + consumoSms + consumoVoz + consumoEmail;
+  const receitaBruta = mensalidadeReais + canalProprioReais + consumoSms + consumoVoz + consumoEmail;
   const receitaLiquida = receitaBruta - custoFornecedor - taxaPixReais;
   const margemPct = receitaBruta !== 0 ? (receitaLiquida / receitaBruta) * 100 : null;
 
@@ -142,6 +162,7 @@ function buildRow(tenant: MonthTenant, data: MonthData): MonthHouseRow {
     plan: tenant.plano,
     exempt: tenant.exempt,
     mensalidadeReais,
+    canalProprioReais,
     topupReais,
     topupCount: topupRowsForTenant.length,
     consumoSms,
@@ -171,6 +192,7 @@ export function sumMonthRows(rows: MonthHouseRow[]): MonthTotals {
   const totals = rows.reduce(
     (acc, r) => ({
       mensalidadeReais: acc.mensalidadeReais + r.mensalidadeReais,
+      canalProprioReais: acc.canalProprioReais + r.canalProprioReais,
       topupReais: acc.topupReais + r.topupReais,
       topupCount: acc.topupCount + r.topupCount,
       consumoSms: acc.consumoSms + r.consumoSms,
@@ -192,6 +214,7 @@ export function sumMonthRows(rows: MonthHouseRow[]): MonthTotals {
     }),
     {
       mensalidadeReais: 0,
+      canalProprioReais: 0,
       topupReais: 0,
       topupCount: 0,
       consumoSms: 0,

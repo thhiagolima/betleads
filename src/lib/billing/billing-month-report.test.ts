@@ -122,6 +122,7 @@ describe("computeMonthRows", () => {
     const totals = sumMonthRows(rows);
     expect(totals).toEqual({
       mensalidadeReais: 0,
+      canalProprioReais: 0,
       topupReais: 0,
       topupCount: 0,
       consumoSms: 0,
@@ -146,6 +147,37 @@ describe("computeMonthRows", () => {
     });
     const rows = computeMonthRows(data);
     expect(rows.map((r) => r.tenantId)).toEqual([PAYING, EXEMPT]);
+  });
+});
+
+describe("computeMonthRows — taxa de canal próprio (Task 3/12)", () => {
+  it("separa a taxa de canal próprio da mensalidade base, sem mudar a receita bruta", () => {
+    const data = baseData({
+      tenants: [
+        { id: PAYING, nome: "Casa Paga", slug: "casa-paga", plano: "crm_unico", exempt: false },
+      ],
+      invoicesPaid: [
+        { tenant_id: PAYING, paid_amount_cents: 405000, channel_fees_cents: 5000 },
+      ],
+    });
+
+    const [row] = computeMonthRows(data);
+    expect(row.mensalidadeReais).toBe(4000);
+    expect(row.canalProprioReais).toBe(50);
+    expect(row.receitaBruta).toBe(4050);
+  });
+
+  it("sem channel_fees_cents (fatura anterior à Task 3) conta tudo como mensalidade", () => {
+    const data = baseData({
+      tenants: [
+        { id: PAYING, nome: "Casa Paga", slug: "casa-paga", plano: "crm_unico", exempt: false },
+      ],
+      invoicesPaid: [{ tenant_id: PAYING, paid_amount_cents: 400000 }],
+    });
+
+    const [row] = computeMonthRows(data);
+    expect(row.mensalidadeReais).toBe(4000);
+    expect(row.canalProprioReais).toBe(0);
   });
 });
 
