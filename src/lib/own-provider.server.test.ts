@@ -12,6 +12,8 @@ const auth = vi.hoisted(() => ({
   passwords: new Map<string, string>(),
   signIns: [] as string[],
   signOuts: 0,
+  /** Runs inside signInWithPassword (simulates a change between read and write). */
+  onSignIn: null as null | (() => void),
 }));
 
 vi.mock("@/integrations/supabase/client.server", async () => {
@@ -38,6 +40,7 @@ vi.mock("@supabase/supabase-js", () => ({
     auth: {
       signInWithPassword: async ({ email, password }: { email: string; password: string }) => {
         auth.signIns.push(email);
+        auth.onSignIn?.();
         return auth.passwords.get(email) === password
           ? { data: { session: { access_token: "t" }, user: { email } }, error: null }
           : { data: { session: null, user: null }, error: { message: "Invalid login credentials" } };
@@ -128,6 +131,7 @@ beforeEach(() => {
   ]);
   auth.signIns = [];
   auth.signOuts = 0;
+  auth.onSignIn = null;
   __resetProviderAccountsCacheForTests();
   __resetCallbackTokensForTests();
   fake.db.onRpc("is_super_admin", (args) => ({ data: args._user_id === SUPER, error: null }));
@@ -166,6 +170,16 @@ describe("requireHouseAdmin / requirePasswordReauth", () => {
     await expect(requirePasswordReauth("admin@casa.com", "errada")).rejects.toThrow("Senha incorreta.");
     await expect(requirePasswordReauth("admin@casa.com", PASSWORD)).resolves.toBeUndefined();
     expect(auth.signOuts).toBe(1);
+  });
+
+  it("falls back to VITE_SUPABASE_PUBLISHABLE_KEY", async () => {
+    vi.stubEnv("SUPABASE_PUBLISHABLE_KEY", undefined);
+    vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "anon-key");
+    await expect(requirePasswordReauth("admin@casa.com", PASSWORD)).resolves.toBeUndefined();
+    vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", undefined);
+    await expect(requirePasswordReauth("admin@casa.com", PASSWORD)).rejects.toThrow(
+      "Não foi possível confirmar a senha agora.",
+    );
   });
 });
 
@@ -314,6 +328,37 @@ describe("saveOwnProviderAccountFor", () => {
   });
 });
 
+describe("getOwnProviderStateFor after a revocation", () => {
+  it("shows the paused channel (revoked, pendingDecision) while the house still has the account/link", async () => {
+    grant();
+    const { id } = await save(infobipSms);
+    await activateOwnProviderFor(ctx(), { channel: "sms", password: PASSWORD });
+    Object.assign(fake.db.rows("tenant_own_provider_grants")[0], { allowed: false, pending_decision: true });
+    owned()[0].status = "disabled";
+    owned()[0].disabled_reason = "revoked";
+    const [state] = await getOwnProviderStateFor(ctx());
+    expect(state).toMatchObject({
+      channel: "sms",
+      revoked: true,
+      pendingDecision: true,
+      usingOwnAccount: true,
+      account: { id, status: "disabled", disabledReason: "revoked" },
+    });
+    // And the house can go back to the BetLeads route on its own.
+    await deactivateOwnProviderFor(ctx(), { channel: "sms" });
+    expect(fake.db.rows("tenant_channel_providers")).toHaveLength(0);
+  });
+
+  it("hides a revoked channel where the house never registered an account; allowed ones say revoked: false", async () => {
+    grant("sms", { allowed: false, pending_decision: true });
+    grant("email");
+    const state = await getOwnProviderStateFor(ctx());
+    expect(state).toEqual([
+      expect.objectContaining({ channel: "email", revoked: false, pendingDecision: false, account: null }),
+    ]);
+  });
+});
+
 describe("testOwnProviderAccountFor", () => {
   beforeEach(() => grant());
 
@@ -384,12 +429,52 @@ describe("activate / deactivate / remove", () => {
     expect(fake.db.rows("tenant_channel_providers")).toHaveLength(0);
   });
 
-  it("a disabled account with no recorded reason is not reactivated by the house", async () => {
+  it("a disabled account with no recorded reason is treated like 'platform' (activate, save, test)", async () => {
     await save(infobipSms);
     owned()[0].status = "disabled";
     await expect(activateOwnProviderFor(ctx(), { channel: "sms", password: PASSWORD })).rejects.toThrow(
       /desativada pela BetLeads/,
     );
+    await expect(save({ ...infobipSms, label: "outra" })).rejects.toThrow(/desativada pela BetLeads/);
+    await expect(testOwnProviderAccountFor(ctx(), { channel: "sms" })).rejects.toThrow(
+      /desativada pela BetLeads/,
+    );
+  });
+
+  it("a 'platform' disable cannot be bypassed by deactivate → remove → save → activate", async () => {
+    const { id } = await save(infobipSms);
+    await activateOwnProviderFor(ctx(), { channel: "sms", password: PASSWORD });
+    owned()[0].status = "disabled";
+    owned()[0].disabled_reason = "platform";
+
+    // Going back to the BetLeads route stays allowed.
+    await deactivateOwnProviderFor(ctx(), { channel: "sms" });
+    await expect(
+      removeOwnProviderAccountFor(ctx(), { channel: "sms", password: PASSWORD }),
+    ).rejects.toThrow("Esta conta foi desativada pela BetLeads. Fale com o suporte.");
+    await expect(save({ ...infobipSms, label: "nova" })).rejects.toThrow(/desativada pela BetLeads/);
+    await expect(activateOwnProviderFor(ctx(), { channel: "sms", password: PASSWORD })).rejects.toThrow(
+      /desativada pela BetLeads/,
+    );
+    expect(owned()).toEqual([expect.objectContaining({ id, status: "disabled", disabled_reason: "platform" })]);
+    expect(fake.db.rows("tenant_channel_providers")).toHaveLength(0);
+  });
+
+  it("activate refuses when the reactivation matches no row (reason changed meanwhile): no link, no audit, no e-mail", async () => {
+    await save(infobipSms);
+    owned()[0].status = "disabled";
+    owned()[0].disabled_reason = "revoked";
+    emails.sent = [];
+    auth.onSignIn = () => {
+      owned()[0].disabled_reason = "platform";
+    };
+    await expect(activateOwnProviderFor(ctx(), { channel: "sms", password: PASSWORD })).rejects.toThrow(
+      /desativada pela BetLeads/,
+    );
+    expect(owned()[0].status).toBe("disabled");
+    expect(fake.db.rows("tenant_channel_providers")).toHaveLength(0);
+    expect(tenantAudits().map((r) => r.action)).toEqual(["own_provider.save"]);
+    expect(emails.sent).toHaveLength(0);
   });
 
   it("activate on e-mail refreshes the house's e-mail domains", async () => {

@@ -70,8 +70,9 @@ export async function requireHouseAdmin(userId: string, tenantId: string): Promi
  * persistida). A sessão criada é encerrada na hora, só ela (scope local).
  */
 export async function requirePasswordReauth(email: string, password: string): Promise<void> {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
+  // Só a chave pública (anon): nunca a secret, que pularia a checagem de senha.
+  const url = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) throw new Error("Não foi possível confirmar a senha agora.");
   const client = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -126,9 +127,14 @@ type OwnAccountFullRow = {
   disabled_reason: "platform" | "revoked" | null;
 };
 
-/** Desativada pelo super admin: a casa não grava, não testa nem reativa. */
+/**
+ * Desativada pela BetLeads ('platform', ou sem motivo registrado): a casa não
+ * grava, não testa, não reativa nem remove — a linha continua ocupando a vaga
+ * do canal (índice único), então a casa também não cria outra no lugar. Só a
+ * desativação por revogação ('revoked') fica nas mãos da casa.
+ */
 function assertNotPlatformDisabled(account: Pick<OwnAccountFullRow, "status" | "disabled_reason">) {
-  if (account.status !== "active" && account.disabled_reason === "platform") {
+  if (account.status !== "active" && account.disabled_reason !== "revoked") {
     throw new Error(PLATFORM_DISABLED_MESSAGE);
   }
 }
@@ -212,23 +218,35 @@ export type OwnProviderChannelState = {
   usingOwnAccount: boolean;
   /** Short Brasil: URL a configurar no painel. Infobip: null (vai em cada envio). */
   callbackUrl: string | null;
+  /** Concessão revogada: o canal aparece só para mostrar a pausa e o "Voltar
+   * para a rota da BetLeads" (quando a conta ainda está ligada). */
+  revoked: boolean;
+  /** Revogada e aguardando a decisão do super admin (padrão ou pausado). */
+  pendingDecision: boolean;
 };
 
 export async function getOwnProviderStateFor(ctx: HouseContext): Promise<OwnProviderChannelState[]> {
   await requireHouseAdmin(ctx.userId, ctx.tenantId);
   const { data, error } = await db()
     .from("tenant_own_provider_grants")
-    .select("channel, allowed, monthly_fee_cents")
-    .eq("tenant_id", ctx.tenantId)
-    .eq("allowed", true);
+    .select("channel, allowed, monthly_fee_cents, pending_decision")
+    .eq("tenant_id", ctx.tenantId);
   if (error) throw new Error(error.message);
-  const grants = (data ?? []) as Array<{ channel: OwnProviderChannel; monthly_fee_cents: number }>;
+  const grants = (data ?? []) as Array<{
+    channel: OwnProviderChannel;
+    allowed: boolean;
+    monthly_fee_cents: number;
+    pending_decision: boolean;
+  }>;
 
   const states: OwnProviderChannelState[] = [];
   for (const channel of OWN_PROVIDER_CHANNELS) {
     const grant = grants.find((g) => g.channel === channel);
     if (!grant) continue;
     const row = await houseAccount(ctx.tenantId, channel);
+    // Canal sem concessão fica escondido, a não ser que a revogação tenha
+    // deixado conta ou ligação da casa (estado pausado).
+    if (!grant.allowed && !row) continue;
     let account: OwnAccountView | null = null;
     let callbackUrl: string | null = null;
     let usingOwnAccount = false;
@@ -265,6 +283,8 @@ export async function getOwnProviderStateFor(ctx: HouseContext): Promise<OwnProv
       account,
       usingOwnAccount,
       callbackUrl,
+      revoked: !grant.allowed,
+      pendingDecision: Boolean(grant.pending_decision),
     });
   }
   return states;
@@ -495,20 +515,22 @@ export async function activateOwnProviderFor(
   // Só a desativação por revogação ('revoked') a casa desfaz, e só com a
   // concessão de volta (checada acima). 'platform' (ou sem motivo
   // registrado) fica com o super admin.
-  if (account.status !== "active" && account.disabled_reason !== "revoked") {
-    throw new Error(PLATFORM_DISABLED_MESSAGE);
-  }
+  assertNotPlatformDisabled(account);
   await reauth(ctx.userId, data.password);
 
   const now = new Date().toISOString();
   if (account.status !== "active") {
-    const { error } = await db()
+    const { data: reactivated, error } = await db()
       .from("provider_accounts")
       .update({ status: "active", disabled_reason: null, updated_at: now })
       .eq("id", account.id)
       .eq("owner_tenant_id", ctx.tenantId)
-      .eq("disabled_reason", "revoked");
+      .eq("disabled_reason", "revoked")
+      .select("id");
     if (error) throw new Error(error.message);
+    // O motivo mudou entre a leitura e a escrita (ex.: o super admin
+    // desativou agora): nada de ligação nem aviso de ativação.
+    if (!((reactivated ?? []) as unknown[]).length) throw new Error(PLATFORM_DISABLED_MESSAGE);
   }
   const before = await channelLink(ctx.tenantId, data.channel);
   const { error: upsertError } = await db().from("tenant_channel_providers").upsert(
@@ -576,6 +598,7 @@ export async function removeOwnProviderAccountFor(
   await requireHouseAdmin(ctx.userId, ctx.tenantId);
   await requireAllowedGrant(ctx.tenantId, data.channel);
   const account = await requireHouseAccount(ctx.tenantId, data.channel);
+  assertNotPlatformDisabled(account);
 
   const { data: links, error: linksError } = await db()
     .from("tenant_channel_providers")
@@ -608,12 +631,16 @@ export async function removeOwnProviderAccountFor(
     .eq("provider_account_id", account.id)
     .not("removed_at", "is", null);
   if (clearError) throw new Error(clearError.message);
-  const { error: deleteError } = await db()
+  const { data: deleted, error: deleteError } = await db()
     .from("provider_accounts")
     .delete()
     .eq("id", account.id)
-    .eq("owner_tenant_id", ctx.tenantId);
+    .eq("owner_tenant_id", ctx.tenantId)
+    // Mesma regra de assertNotPlatformDisabled, na própria escrita.
+    .or("status.eq.active,disabled_reason.eq.revoked")
+    .select("id");
   if (deleteError) throw new Error(deleteError.message);
+  if (!((deleted ?? []) as unknown[]).length) throw new Error(PLATFORM_DISABLED_MESSAGE);
   invalidateProviderAccountsCache();
 
   await auditOwnProviderAction({
