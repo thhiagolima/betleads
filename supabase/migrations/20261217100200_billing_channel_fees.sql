@@ -27,6 +27,25 @@
 --     final depois do desconto contínuo e do desconto pontual (que
 --     continua limitado só à base, sem a taxa). A regra do mínimo do Pix e
 --     a baixa automática de valor 0 olham esse valor final.
+--   * billing_admin_one_off_discount recriada (corpo de 20261023100000:1023)
+--     pela mesma razão: ela também escreve amount_cents direto (fora de
+--     billing_reprice_open_invoice), então sem isso o desconto pontual do
+--     superadmin apagaria a taxa congelada da fatura. O clamp do desconto
+--     pontual (least(one_off, base - discount)) continua só sobre a base;
+--     o mínimo do Pix e a baixa automática de valor 0 olham o valor final
+--     já com a taxa.
+--   * Toda outra função que grava billing_invoices.amount_cents foi
+--     conferida (grep "update public.billing_invoices" em
+--     supabase/migrations/*.sql): billing_settle_invoice,
+--     billing_cancel_open_invoice, billing_admin_free_days e
+--     billing_admin_cancel_invoice não tocam amount_cents;
+--     billing_admin_set_custom_price e billing_admin_set_continuous_discount
+--     não gravam direto, chamam billing_reprice_open_invoice;
+--     billing_admin_set_frozen (ao descongelar) e billing_on_tenant_plano
+--     (gatilho do plano) chamam billing_issue_invoice. Os três caminhos
+--     restantes que gravavam amount_cents direto eram billing_issue_invoice,
+--     billing_reprice_open_invoice e billing_admin_one_off_discount — os
+--     três recriados aqui.
 --   * billing_channel_fees: security definer, só service_role (mesmo padrão
 --     de billing_monthly_amount: revoke de public/anon/authenticated, grant
 --     só a service_role). Super admin acessa pelo backend (service_role),
@@ -42,9 +61,9 @@
 --   ALTER TABLE public.billing_invoices DROP COLUMN channel_fees_cents;
 --   ALTER TABLE public.billing_invoices DROP COLUMN channel_fees;
 --   DROP FUNCTION public.billing_channel_fees(uuid);
---   -- (billing_issue_invoice/billing_reprice_open_invoice voltam ao corpo
---   -- de 20261023100000 se essa migração for reaplicada, ou com um
---   -- CREATE OR REPLACE manual.)
+--   -- (billing_issue_invoice/billing_reprice_open_invoice/
+--   -- billing_admin_one_off_discount voltam ao corpo de 20261023100000 se
+--   -- essa migração for reaplicada, ou com um CREATE OR REPLACE manual.)
 
 SET LOCAL lock_timeout = '5s';
 
@@ -211,6 +230,56 @@ begin
 end;
 $$;
 
+-- Desconto pontual do superadmin: mesmo corpo de
+-- 20261023100000_billing_invoices.sql:1023, somando o channel_fees_cents já
+-- congelado na fatura ao valor final. O clamp do desconto pontual
+-- (least(one_off, base - discount)) continua só sobre a base, sem a taxa.
+create or replace function public.billing_admin_one_off_discount(_invoice uuid, _kind text, _value numeric)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_inv public.billing_invoices%rowtype;
+  v_room bigint;
+  v_one_off bigint;
+  v_final bigint;
+begin
+  if not public.is_super_admin() then
+    raise exception 'forbidden';
+  end if;
+  if _kind is not null and (
+       _kind not in ('percent', 'fixed')
+       or _value is null
+       or _value < 0
+       or (_kind = 'percent' and _value > 100)
+     ) then
+    raise exception 'invalid_discount';
+  end if;
+
+  v_inv := public.billing_admin_lock_open_invoice(_invoice);
+
+  v_room := v_inv.base_amount_cents - v_inv.discount_cents;
+  v_one_off := least(v_room, public.billing_discount_cents(v_inv.base_amount_cents, _kind, _value));
+  v_final := v_room - v_one_off + v_inv.channel_fees_cents;
+
+  perform public.billing_assert_pix_minimum(v_final);
+
+  update public.billing_invoices
+     set one_off_discount_cents = v_one_off,
+         amount_cents = v_final,
+         updated_at = now()
+   where id = v_inv.id;
+
+  if v_final = 0 then
+    perform public.billing_settle_invoice(v_inv.id, 'full_discount', 0, null, null, null);
+  end if;
+
+  return public.billing_admin_result(v_inv.tenant_id);
+end;
+$$;
+
 revoke execute on function public.billing_channel_fees(uuid) from public, anon, authenticated;
 grant execute on function public.billing_channel_fees(uuid) to service_role;
 
@@ -219,5 +288,11 @@ grant execute on function public.billing_channel_fees(uuid) to service_role;
 -- security definer). create or replace preserva, mas reafirmamos.
 revoke execute on function public.billing_issue_invoice(uuid, boolean) from public, anon, authenticated;
 revoke execute on function public.billing_reprice_open_invoice(uuid) from public, anon, authenticated;
+
+-- billing_admin_one_off_discount: mesmo grant original (chamada do cliente
+-- do superadmin autenticado, mais service_role). create or replace preserva,
+-- mas reafirmamos.
+revoke execute on function public.billing_admin_one_off_discount(uuid, text, numeric) from public, anon;
+grant execute on function public.billing_admin_one_off_discount(uuid, text, numeric) to authenticated, service_role;
 
 NOTIFY pgrst, 'reload schema';

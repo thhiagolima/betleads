@@ -155,6 +155,7 @@ type InvoiceRow = {
   status: string;
   base_amount_cents: string;
   discount_cents: string;
+  one_off_discount_cents: string;
   amount_cents: string;
   channel_fees_cents: string;
   channel_fees: Record<string, number>;
@@ -163,7 +164,8 @@ type InvoiceRow = {
 
 async function openInvoiceOf(tenant: string): Promise<InvoiceRow | undefined> {
   const { rows } = await db.query<InvoiceRow>(
-    `select id, status, base_amount_cents::text, discount_cents::text, amount_cents::text,
+    `select id, status, base_amount_cents::text, discount_cents::text,
+            one_off_discount_cents::text, amount_cents::text,
             channel_fees_cents::text, channel_fees, paid_via
      from public.billing_invoices where tenant_id = $1 and status in ('open', 'paid')
      order by created_at desc limit 1`,
@@ -314,6 +316,29 @@ describe("billing_channel_fees", () => {
       base_amount_cents: "200000",
       amount_cents: "250000",
     });
+  });
+
+  it("desconto pontual do superadmin (billing_admin_one_off_discount) mantém a taxa", async () => {
+    const tenant = await createHouse();
+    await grant(tenant, "sms", true, 50000);
+    await ownAccount(tenant, "sms", "active");
+    await reissueUpfront(tenant);
+
+    const before = await openInvoiceOf(tenant);
+    expect(before).toMatchObject({ channel_fees_cents: "50000" });
+
+    await admin("select public.billing_admin_one_off_discount($1, 'fixed', 10000)", [before!.id]);
+
+    const after = await openInvoiceOf(tenant);
+    expect(after).toMatchObject({
+      id: before!.id,
+      channel_fees_cents: "50000",
+      channel_fees: { sms: 50000 },
+      one_off_discount_cents: "10000",
+    });
+    expect(Number(after!.amount_cents)).toBe(
+      Number(before!.base_amount_cents) - Number(before!.discount_cents) - 10000 + 50000,
+    );
   });
 
   it("permissões: só service_role chama billing_channel_fees", async () => {
