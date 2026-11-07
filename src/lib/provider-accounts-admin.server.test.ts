@@ -106,7 +106,7 @@ beforeEach(() => {
   platformAccounts();
   vi.stubEnv("PROVIDER_CREDENTIALS_ENCRYPTION_KEY", "k".repeat(40));
   vi.stubEnv("INFOBIP_API_KEY", "platform-infobip-key");
-  vi.stubEnv("INFOBIP_BASE_URL", "https://platform.api.infobip.test");
+  vi.stubEnv("INFOBIP_BASE_URL", "https://platform.api.infobip.com");
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -128,7 +128,7 @@ describe("provider accounts admin", () => {
       provider: "infobip",
       label: "Infobip Casa Um",
       channels: ["email", "voice"],
-      config: { base_url: "https://own.api.infobip.test", voice_from: "+55 (11) 3000-0000" },
+      config: { base_url: "https://own.api.infobip.com", voice_from: "+55 (11) 3000-0000" },
       credentials: { api_key: "segredo-da-casa-1234" },
     });
 
@@ -164,12 +164,12 @@ describe("provider accounts admin", () => {
       provider: "infobip",
       label: "Infobip SMS",
       channels: ["sms"],
-      config: { base_url: "https://a.test", sms_from: "CasaUm" },
+      config: { base_url: "https://a.api.infobip.com", sms_from: "CasaUm" },
       credentials: { api_key: "k" },
     });
     expect(fake.db.rows("provider_accounts").find((r) => r.id === id)).toMatchObject({
       channels: ["sms"],
-      config: { base_url: "https://a.test", sms_from: "CasaUm" },
+      config: { base_url: "https://a.api.infobip.com", sms_from: "CasaUm" },
     });
   });
 
@@ -195,7 +195,7 @@ describe("provider accounts admin", () => {
         provider: "infobip",
         label: "x",
         channels: ["voice"],
-        config: { base_url: "https://a.test" },
+        config: { base_url: "https://a.api.infobip.com" },
         credentials: { api_key: "k" },
       }),
     ).rejects.toThrow(/número de origem/);
@@ -238,7 +238,7 @@ describe("provider accounts admin", () => {
         provider: "infobip",
         label: "Infobip Betleads Voz",
         channels: ["voice"],
-        config: { base_url: "https://voz.api.infobip.test", voice_from: "5511300000000" },
+        config: { base_url: "https://voz.api.infobip.com", voice_from: "5511300000000" },
         credentials: { api_key: "k" },
       },
       "e0e0e0e0-0000-4000-8000-000000000000",
@@ -300,7 +300,7 @@ describe("provider accounts admin", () => {
         provider: "infobip",
         label: "Infobip Casa Um",
         channels: ["email", "voice"],
-        config: { base_url: "https://own.api.infobip.test", voice_from: "5511300000000" },
+        config: { base_url: "https://own.api.infobip.com", voice_from: "5511300000000" },
         credentials: { api_key: "k-1" },
       },
       "77777777-7777-4777-8777-777777777777",
@@ -314,7 +314,7 @@ describe("provider accounts admin", () => {
         provider: "infobip",
         label: "Infobip Casa Um",
         channels: ["email"],
-        config: { base_url: "https://own.api.infobip.test" },
+        config: { base_url: "https://own.api.infobip.com" },
       }),
     ).rejects.toThrow(/Há casas usando esta conta/);
   });
@@ -325,7 +325,7 @@ describe("provider accounts admin", () => {
         provider: "infobip",
         label: "Infobip Betleads",
         channels: ["email", "voice"],
-        config: { base_url: "https://nova.api.infobip.test", voice_from: "5511300000000" },
+        config: { base_url: "https://nova.api.infobip.com", voice_from: "5511300000000" },
         credentials: { api_key: "k" },
       },
       "d0d0d0d0-0000-4000-8000-000000000000",
@@ -338,7 +338,7 @@ describe("provider accounts admin", () => {
         provider: "infobip",
         label: "Infobip Betleads",
         channels: ["voice"],
-        config: { base_url: "https://nova.api.infobip.test", voice_from: "5511300000000" },
+        config: { base_url: "https://nova.api.infobip.com", voice_from: "5511300000000" },
       }),
     ).rejects.toThrow("Esta conta é a padrão de E-mail. Escolha outra padrão antes.");
   });
@@ -577,24 +577,30 @@ describe("provider accounts admin", () => {
         expect(result).toEqual({ ok: true, message: "Chave da organização aceita." });
       });
 
-      it("401/403 reports the key refused", async () => {
+      it("401/403 reports the generic failure, without leaking the status", async () => {
         const id = await ownOneSignal();
         vi.stubGlobal(
           "fetch",
           vi.fn(async () => new Response("{}", { status: 401 })),
         );
         const result = await adminTestProviderAccountFor(ADMIN, { id });
-        expect(result).toEqual({ ok: false, message: "Chave recusada pela OneSignal." });
+        expect(result).toEqual({
+          ok: false,
+          message: "Não foi possível conectar com essa conta. Confira as credenciais e o endereço.",
+        });
       });
 
-      it("other statuses report the HTTP status", async () => {
+      it("other statuses also report the generic failure, without leaking the status", async () => {
         const id = await ownOneSignal();
         vi.stubGlobal(
           "fetch",
           vi.fn(async () => new Response("{}", { status: 500 })),
         );
         const result = await adminTestProviderAccountFor(ADMIN, { id });
-        expect(result).toEqual({ ok: false, message: "A OneSignal respondeu HTTP 500." });
+        expect(result).toEqual({
+          ok: false,
+          message: "Não foi possível conectar com essa conta. Confira as credenciais e o endereço.",
+        });
       });
 
       it("never calls the real OneSignal API when unconfigured", async () => {
@@ -680,7 +686,7 @@ describe("provider accounts admin", () => {
           provider: "infobip",
           label: "Infobip Casa B",
           channels: ["email"],
-          config: { base_url: "https://b.api.infobip.test" },
+          config: { base_url: "https://b.api.infobip.com" },
           credentials: { api_key: "k-b" },
         },
         "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
@@ -694,7 +700,7 @@ describe("provider accounts admin", () => {
           provider: "infobip",
           label: "Infobip Betleads",
           channels: ["email"],
-          config: { base_url: "https://nova.api.infobip.test" },
+          config: { base_url: "https://nova.api.infobip.com" },
           credentials: { api_key: "k-nova" },
         },
         "ffffffff-ffff-4fff-8fff-ffffffffffff",
@@ -726,7 +732,7 @@ describe("provider accounts admin", () => {
           provider: "infobip",
           label: "Infobip Betleads",
           channels: ["email"],
-          config: { base_url: "https://nova.api.infobip.test" },
+          config: { base_url: "https://nova.api.infobip.com" },
           credentials: { api_key: "k-nova" },
         },
         "ffffffff-1111-4fff-8fff-ffffffffffff",
@@ -736,7 +742,7 @@ describe("provider accounts admin", () => {
           provider: "infobip",
           label: "Infobip Casa C",
           channels: ["email"],
-          config: { base_url: "https://c.api.infobip.test" },
+          config: { base_url: "https://c.api.infobip.com" },
           credentials: { api_key: "k-c" },
         },
         "abababab-1111-4aba-8aba-abababababab",
@@ -844,7 +850,7 @@ describe("provider accounts admin", () => {
           provider: "infobip",
           label: "Infobip Casa Um",
           channels: ["email"],
-          config: { base_url: "https://own.api.infobip.test" },
+          config: { base_url: "https://own.api.infobip.com" },
           credentials: { api_key: "k" },
         },
         "77777777-2222-4333-8444-555555555555",
@@ -864,7 +870,7 @@ describe("provider accounts admin", () => {
           provider: "infobip",
           label: "Infobip Casa Um",
           channels: ["email"],
-          config: { base_url: "https://own.api.infobip.test" },
+          config: { base_url: "https://own.api.infobip.com" },
           credentials: { api_key: "k" },
         },
         "88888888-2222-4333-8444-555555555555",
@@ -889,7 +895,7 @@ describe("provider accounts admin", () => {
           provider: "infobip",
           label: "Infobip Casa Um",
           channels: ["email"],
-          config: { base_url: "https://own.api.infobip.test" },
+          config: { base_url: "https://own.api.infobip.com" },
           credentials: { api_key: "k" },
         },
         "a1a1a1a1-2222-4333-8444-555555555555",

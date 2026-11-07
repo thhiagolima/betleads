@@ -27,6 +27,12 @@ import {
 import { decryptProviderCredentials, encryptProviderCredentials } from "@/lib/secret-box.server";
 import { requireBrazilianPhone } from "@/lib/phone-normalization";
 import {
+  assertInfobipBaseUrl,
+  assertShortBrasilUrl,
+  PROVIDER_TEST_FAILURE_MESSAGE,
+  providerFetch,
+} from "@/lib/provider-url-policy.server";
+import {
   deleteProviderAccountInput,
   PROVIDER_CHANNEL_LABEL,
   PROVIDER_CHANNELS,
@@ -392,19 +398,6 @@ export async function adminListProviderAccountsFor(context: AdminContext) {
 // ---------------------------------------------------------------------------
 // Create / edit
 
-function assertHttpsUrl(value: string | undefined, field: string) {
-  if (!value) return;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error(`${field}: URL inválida.`);
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error(`${field}: use uma URL http(s).`);
-  }
-}
-
 export async function adminSaveProviderAccountFor(
   context: AdminContext,
   data: z.infer<typeof saveProviderAccountInput>,
@@ -461,16 +454,16 @@ export async function adminSaveProviderAccountFor(
   }
   if (data.provider === "infobip") {
     if (!config.base_url) throw new Error("Informe a URL base da conta Infobip.");
-    assertHttpsUrl(config.base_url, "URL base");
+    config.base_url = assertInfobipBaseUrl(config.base_url);
     if (channels.includes("voice")) {
       const digits = (config.voice_from ?? "").replace(/\D/g, "");
       if (digits.length < 10) throw new Error("Informe o número de origem das ligações (voz).");
       config.voice_from = digits;
     }
   } else if (data.provider === "short_brasil") {
-    assertHttpsUrl(config.shortcode_url, "URL da API Short Code");
-    assertHttpsUrl(config.single_url, "URL de envio individual");
-    assertHttpsUrl(config.bulk_url, "URL de envio em lote");
+    if (config.shortcode_url) config.shortcode_url = assertShortBrasilUrl("shortcode_url", config.shortcode_url);
+    if (config.single_url) config.single_url = assertShortBrasilUrl("single_url", config.single_url);
+    if (config.bulk_url) config.bulk_url = assertShortBrasilUrl("bulk_url", config.bulk_url);
   }
   // onesignal: org_id is a plain identifier, not a URL — nothing to validate.
 
@@ -609,79 +602,74 @@ export async function adminTestProviderAccountFor(
 
   if (account.provider === "infobip") {
     if (!infobipConfigured(account)) {
-      result = { ok: false, message: "URL base ou API key não configurada." };
+      result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
     } else {
       try {
-        const response = await fetch(`${account.baseUrl}/account/1/balance`, {
+        const response = await providerFetch(`${account.baseUrl}/account/1/balance`, {
           headers: { Accept: "application/json", Authorization: `App ${account.apiKey}` },
-          signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
+          timeoutMs: TEST_TIMEOUT_MS,
         });
         const body = (await response.json().catch(() => null)) as {
           balance?: number;
           currency?: string;
         } | null;
-        result = response.ok
-          ? {
-              ok: true,
-              message:
-                typeof body?.balance === "number"
-                  ? `Conectado. Saldo: ${body.balance.toLocaleString("pt-BR")} ${body.currency ?? ""}`.trim()
-                  : "Conectado.",
-            }
-          : {
-              ok: false,
-              message:
-                response.status === 401 || response.status === 403
-                  ? "A Infobip recusou a API key."
-                  : `A Infobip respondeu HTTP ${response.status}.`,
-            };
+        if (response.ok) {
+          result = {
+            ok: true,
+            message:
+              typeof body?.balance === "number"
+                ? `Conectado. Saldo: ${body.balance.toLocaleString("pt-BR")} ${body.currency ?? ""}`.trim()
+                : "Conectado.",
+          };
+        } else {
+          console.error(`provider_account.test infobip: HTTP ${response.status}`);
+          result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
+        }
       } catch (error) {
-        result = {
-          ok: false,
-          message: `Sem resposta da Infobip: ${error instanceof Error ? error.message : String(error)}`,
-        };
+        console.error("provider_account.test infobip:", error);
+        result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
       }
     }
   } else if (account.provider === "onesignal") {
     if (!oneSignalConfigured(account)) {
-      result = { ok: false, message: "Chave da organização não configurada." };
+      result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
     } else {
       try {
-        const response = await fetch("https://api.onesignal.com/apps", {
+        const response = await providerFetch("https://api.onesignal.com/apps", {
           headers: { Accept: "application/json", Authorization: `Key ${account.orgApiKey}` },
-          signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
+          timeoutMs: TEST_TIMEOUT_MS,
         });
-        result =
-          response.status === 401 || response.status === 403
-            ? { ok: false, message: "Chave recusada pela OneSignal." }
-            : response.ok
-              ? { ok: true, message: "Chave da organização aceita." }
-              : { ok: false, message: `A OneSignal respondeu HTTP ${response.status}.` };
+        if (response.ok) {
+          result = { ok: true, message: "Chave da organização aceita." };
+        } else {
+          console.error(`provider_account.test onesignal: HTTP ${response.status}`);
+          result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
+        }
       } catch (error) {
-        result = {
-          ok: false,
-          message: `Sem resposta da OneSignal: ${error instanceof Error ? error.message : String(error)}`,
-        };
+        console.error("provider_account.test onesignal:", error);
+        result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
       }
     }
   } else {
     if (!data.phone) throw new Error("Informe um celular para receber o SMS de teste.");
     const phone = requireBrazilianPhone(data.phone);
-    const { postShortBrasilSingle, summarizeProviderError } = await import("@/lib/sms.functions");
-    const r = await postShortBrasilSingle(
-      account,
-      phone,
-      `Teste de conexão BetLeads: conta "${account.label}".`,
-    );
-    result = r.ok
-      ? { ok: true, message: `SMS de teste aceito pelo provedor para ${phone}.` }
-      : {
-          ok: false,
-          message:
-            r.status > 0
-              ? summarizeProviderError(r.status, r.body)
-              : String((r.body as { error?: unknown } | null)?.error ?? "Falha no envio."),
-        };
+    const { postShortBrasilSingle } = await import("@/lib/sms.functions");
+    try {
+      const r = await postShortBrasilSingle(
+        account,
+        phone,
+        `Teste de conexão BetLeads: conta "${account.label}".`,
+      );
+      if (r.ok) {
+        result = { ok: true, message: `SMS de teste aceito pelo provedor para ${phone}.` };
+      } else {
+        console.error(`provider_account.test short_brasil: status ${r.status}`, r.body);
+        result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
+      }
+    } catch (error) {
+      console.error("provider_account.test short_brasil:", error);
+      result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
+    }
   }
 
   await auditAdminAction({
