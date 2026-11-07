@@ -130,6 +130,20 @@ export const GLOSSARY: GlossaryTerm[] = [
       "Cada bloco de até 160 caracteres de uma mensagem. Uma mensagem maior é cobrada em mais de um segmento.",
   },
 
+  // --- SMS (fase 2, Task 4) ---
+  {
+    id: "gsm-7",
+    term: "GSM-7",
+    short:
+      "O alfabeto padrão do SMS: até 160 caracteres cabem em 1 segmento (153 quando a mensagem passa de um segmento). Acentos comuns do português (á, ã, ç, ü...) continuam nele e não mudam a codificação.",
+  },
+  {
+    id: "ucs-2",
+    term: "UCS-2",
+    short:
+      "Codificação usada quando a mensagem tem um caractere fora do alfabeto padrão do SMS — como um emoji ou aspas curvas. Cabe só 70 caracteres por segmento (67 quando passa de um), por isso o custo pode dobrar mesmo numa mensagem curta.",
+  },
+
   // --- Web Push (merge de origin/main, canal OneSignal) ---
   {
     id: "web-push",

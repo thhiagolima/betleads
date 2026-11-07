@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { HomeCard } from "@/components/home/home-cards";
 import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
 import { LinkInsertMenu } from "@/components/house-config/link-insert-menu";
+import { Term } from "@/components/help/term";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -37,6 +38,7 @@ import {
   saveSmsTemplate,
 } from "@/lib/sms-templates.functions";
 import { cn } from "@/lib/utils";
+import { tourAnchor } from "@/help/anchor";
 
 type Template = {
   id: string;
@@ -138,7 +140,11 @@ export function SmsTemplatesPanel() {
         <p className="text-body text-muted-foreground">
           Mensagens reutilizáveis para campanhas e jornadas.
         </p>
-        <Button className="h-9" onClick={() => setEditing(toDraft(EMPTY_TEMPLATE))}>
+        <Button
+          className="h-9"
+          onClick={() => setEditing(toDraft(EMPTY_TEMPLATE))}
+          {...tourAnchor("sms.templates.novo")}
+        >
           <Plus className="size-4" aria-hidden="true" />
           Novo template
         </Button>
@@ -199,16 +205,23 @@ export function SmsTemplatesPanel() {
                 maxLength={480}
                 required
                 onChange={(event) => patch({ content: event.target.value })}
+                {...tourAnchor("sms.templates.mensagem")}
               />
-              <LinkInsertMenu
-                siteUrl={composerOptions.data?.siteUrl ?? null}
-                quickLinks={composerOptions.data?.quickLinks ?? []}
-                textareaRef={contentRef}
-                value={editing.content}
-                onChange={(content) => patch({ content })}
-              />
+              <div {...tourAnchor("sms.templates.links")}>
+                <LinkInsertMenu
+                  siteUrl={composerOptions.data?.siteUrl ?? null}
+                  quickLinks={composerOptions.data?.quickLinks ?? []}
+                  textareaRef={contentRef}
+                  value={editing.content}
+                  onChange={(content) => patch({ content })}
+                />
+              </div>
               <p className="text-xs text-muted-foreground">
-                {estimate.characters} caracteres · {estimate.encoding} · {estimate.parts} parte(s)
+                {estimate.characters} caracteres ·{" "}
+                <Term id={estimate.encoding === "GSM-7" ? "gsm-7" : "ucs-2"}>
+                  {estimate.encoding}
+                </Term>{" "}
+                · {estimate.parts} parte(s)
               </p>
             </div>
             <div className="flex gap-2">
@@ -250,10 +263,11 @@ export function SmsTemplatesPanel() {
         </HomeCard>
       ) : (
         <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => (
+          {items.map((item, index) => (
             <HomeCard
               key={item.id}
               className={cn("flex flex-col p-4 sm:p-5", !item.isActive && "opacity-60")}
+              {...(index === 0 ? tourAnchor("sms.templates.card") : {})}
             >
               <div className="flex items-start justify-between gap-2">
                 <h3 className="min-w-0 truncate text-[15px] font-semibold">{item.name}</h3>
@@ -269,7 +283,12 @@ export function SmsTemplatesPanel() {
                 {item.tags.length ? ` · ${item.tags.join(", ")}` : ""}
               </p>
               <div className="mt-4 flex items-center gap-2 pt-1 lg:mt-auto">
-                <Button variant="outline" className="h-9" onClick={() => setEditing(toDraft(item))}>
+                <Button
+                  variant="outline"
+                  className="h-9"
+                  onClick={() => setEditing(toDraft(item))}
+                  {...(index === 0 ? tourAnchor("sms.templates.editar") : {})}
+                >
                   <Pencil className="size-3.5" aria-hidden="true" />
                   Editar
                 </Button>
@@ -278,6 +297,7 @@ export function SmsTemplatesPanel() {
                     <IconButton
                       label={`Mais ações de ${item.name}`}
                       icon={<MoreHorizontal className="size-4" />}
+                      {...(index === 0 ? tourAnchor("sms.templates.menu") : {})}
                     />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">

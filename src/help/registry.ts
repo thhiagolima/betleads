@@ -16,6 +16,7 @@ export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpSc
   "/eventos": () => import("./screens/eventos"),
   "/configuracoes/casa": () => import("./screens/configuracoes-casa"),
   "/email": () => import("./screens/email"),
+  "/sms": () => import("./screens/sms"),
   "/campanhas": () => import("./screens/campanhas"),
   "/publicos": () => import("./screens/publicos"),
   "/campanhas/$campaignId/relatorio": () => import("./screens/campanha-relatorio"),

@@ -63,7 +63,6 @@ export const PENDING_ROUTES: string[] = [
   // --- Fase 2 ---
   "/gamificacao",
   "/regras",
-  "/sms",
   "/plano-e-creditos",
   "/ligacoes",
   "/consentimentos",
