@@ -3,6 +3,13 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { ACCEPTED_SMS_STATUSES } from "@/lib/campaign-recipients.server";
 import {
+  ownedAccountIdsFor,
+  resolveCallbackScope,
+  scopeAllowsRow,
+  touchCallbackReceived,
+  type CallbackScope,
+} from "@/lib/provider-callback-tokens.server";
+import {
   SECRET_KEYS,
   describeCallbackBody,
   hasIdentity,
@@ -13,6 +20,10 @@ import {
 // Callback Short Brasil SMS.
 // URL sugerida:
 //   https://seu-dominio.com/api/public/sms-webhook?token=<SHORT_BRASIL_WEBHOOK_SECRET>
+// Conta própria da casa (provider_accounts.owner_tenant_id): o token é o da
+// conta (provider-callback-tokens.server.ts), configurado no painel da Short
+// Brasil daquela conta. O token da conta só mexe nos envios dela; o global
+// nunca mexe em envio de conta com dono (o callback é aceito e ignorado).
 //
 // A Short Brasil envia callbacks Single via HTTP/GET e pode enviar callbacks
 // Bulk em JSON com { lote: [...] }. Sempre respondemos 200 depois da
@@ -25,13 +36,6 @@ const CORS = {
   "Access-Control-Max-Age": "86400",
 } as const;
 
-
-function timingSafeEqualStr(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let r = 0;
-  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return r === 0;
-}
 
 function extractToken(request: Request): string | null {
   const url = new URL(request.url);
@@ -51,19 +55,31 @@ function extractToken(request: Request): string | null {
   return headerToken ? headerToken.trim() : null;
 }
 
-function authorizeCallback(request: Request): Response | null {
+async function authorizeCallback(
+  request: Request,
+): Promise<{ scope: CallbackScope } | { response: Response }> {
   const expected = process.env.SHORT_BRASIL_WEBHOOK_SECRET;
+  const scope = await resolveCallbackScope(extractToken(request), expected);
+  if (scope) return { scope };
   if (!expected) {
-    return Response.json(
-      { ok: false, error: "SHORT_BRASIL_WEBHOOK_SECRET not configured" },
-      { status: 500, headers: CORS },
-    );
+    return {
+      response: Response.json(
+        { ok: false, error: "SHORT_BRASIL_WEBHOOK_SECRET not configured" },
+        { status: 500, headers: CORS },
+      ),
+    };
   }
-  const got = extractToken(request);
-  if (!got || !timingSafeEqualStr(got, expected)) {
-    return Response.json({ ok: false, error: "unauthorized" }, { status: 401, headers: CORS });
-  }
-  return null;
+  return {
+    response: Response.json({ ok: false, error: "unauthorized" }, { status: 401, headers: CORS }),
+  };
+}
+
+type CallbackFilter = { scope: CallbackScope; ownedAccountIds: ReadonlySet<string> };
+
+type SendLogRef = { id: string; provider_account_id: string | null };
+
+function allowed(filter: CallbackFilter, row: SendLogRef): boolean {
+  return scopeAllowsRow(filter.scope, row.provider_account_id ?? null, filter.ownedAccountIds);
 }
 
 function pickStr(obj: CallbackPayload, ...keys: string[]): string | null {
@@ -155,7 +171,15 @@ function logUnrecognizedShape(
   });
 }
 
-async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
+/**
+ * Applies one callback to the send log the scope allows. "ignored": the
+ * message belongs to another account (or, for an account token, to nothing
+ * of its own) — acknowledged, never applied.
+ */
+async function updateFromPayload(
+  payload: CallbackPayload,
+  filter: CallbackFilter,
+): Promise<"matched" | "unmatched" | "ignored"> {
   const providerMessageId = pickStr(payload, "id", "message_id", "messageId", "sms_id", "smsId");
   const idempotencyKey = pickStr(payload, "parceiroId", "idempotency_key", "idempotencyKey");
   const status = normalizeShortBrasilStatus(payload);
@@ -186,33 +210,45 @@ async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
 
   let matched = false;
   if (providerMessageId) {
-    const { data } = await supabaseAdmin
+    const { data: rows } = await supabaseAdmin
       .from("sms_send_logs")
-      .update(patch)
-      .eq("provider_message_id", providerMessageId)
-      .select("id");
-    matched = !!data && data.length > 0;
+      .select("id, provider_account_id")
+      .eq("provider_message_id", providerMessageId);
+    const found = (rows ?? []) as SendLogRef[];
+    const allowedIds = found.filter((row) => allowed(filter, row)).map((row) => row.id);
+    if (found.length > 0 && allowedIds.length === 0) return "ignored";
+    if (allowedIds.length > 0) {
+      const { data } = await supabaseAdmin
+        .from("sms_send_logs")
+        .update(patch)
+        .in("id", allowedIds)
+        .select("id");
+      matched = !!data && data.length > 0;
+    }
   }
   if (!matched && idempotencyKey) {
     // A delivery key can have older 'error' rows (refunded attempts) besides
     // the accepted one: update only the most recent accepted row.
     const { data: candidates } = await supabaseAdmin
       .from("sms_send_logs")
-      .select("id")
+      .select("id, provider_account_id")
       .eq("idempotency_key", idempotencyKey)
       .in("status", ACCEPTED_SMS_STATUSES)
       .order("created_at", { ascending: false })
       .limit(1);
-    const targetId = candidates?.[0]?.id;
-    if (targetId) {
+    const target = (candidates?.[0] ?? null) as SendLogRef | null;
+    if (target && !allowed(filter, target)) return "ignored";
+    if (target) {
       const { data } = await supabaseAdmin
         .from("sms_send_logs")
         .update(patch)
-        .eq("id", targetId)
+        .eq("id", target.id)
         .select("id");
       matched = !!data && data.length > 0;
     }
   }
+  // An account token only ever acts on its own send.
+  if (!matched && filter.scope.kind === "account") return "ignored";
 
   // A dispatch uses `${sms_log.idempotency_key}:position`; this carries the
   // provider's confirmed delivery back to the conversion report without ever
@@ -225,6 +261,7 @@ async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
   }
 
   if (!matched) {
+    // Platform scope only (an account scope returned above).
     await supabaseAdmin.from("sms_send_logs").insert({
       to_phone: pickStr(payload, "celular", "to", "phone", "destination") ?? "unknown",
       content: pickStr(payload, "mensagem") ?? "(callback sem envio correspondente)",
@@ -240,7 +277,7 @@ async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
       trigger_name: "callback-orphan",
     });
   }
-  return matched;
+  return matched ? "matched" : "unmatched";
 }
 
 /**
@@ -273,17 +310,21 @@ async function saveRawCallback(request: Request, body: string): Promise<number |
 }
 
 async function handleCallback(request: Request): Promise<Response> {
-  const unauthorized = authorizeCallback(request);
-  if (unauthorized) return unauthorized;
+  const auth = await authorizeCallback(request);
+  if ("response" in auth) return auth.response;
+  const { scope } = auth;
+  if (scope.kind === "account") await touchCallbackReceived(scope.accountId);
 
   let processed = 0;
   let matched = 0;
+  let ignored = 0;
   let unidentified = 0;
   let rawId: number | null = null;
   try {
     // Read the raw body once; the parser receives a copy of the request.
     const rawBody = request.method === "GET" ? "" : await request.clone().text();
     rawId = await saveRawCallback(request, rawBody);
+    const filter: CallbackFilter = { scope, ownedAccountIds: await ownedAccountIdsFor(scope) };
     let bodyText = "";
     const payloads = await parseSmsCallbackPayloads(request, (text) => {
       bodyText = text;
@@ -296,7 +337,9 @@ async function handleCallback(request: Request): Promise<Response> {
         continue;
       }
       processed++;
-      if (await updateFromPayload(payload)) matched++;
+      const outcome = await updateFromPayload(payload, filter);
+      if (outcome === "matched") matched++;
+      else if (outcome === "ignored") ignored++;
     }
     if (unidentified > 0) logUnrecognizedShape(request, payloads, bodyText);
   } catch (err) {
@@ -315,7 +358,7 @@ async function handleCallback(request: Request): Promise<Response> {
   }
 
   return Response.json(
-    { received: true, processed, matched, unidentified },
+    { received: true, processed, matched, ignored, unidentified },
     { status: 200, headers: CORS },
   );
 }

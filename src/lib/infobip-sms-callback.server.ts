@@ -4,9 +4,15 @@
 // (infobip-sms.server.ts), so the sms_send_logs row is found by
 // provider_message_id and the tracked links by delivery key, like the Short
 // Brasil webhook does.
+//
+// The callback's scope (provider-callback-tokens.server.ts) decides which
+// rows a report may touch: an account token only its own sends, the global
+// token never a house-owned account's send. A report for a row outside the
+// scope is acknowledged and ignored.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
+import { scopeAllowsRow, type CallbackScope } from "./provider-callback-tokens.server";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -36,11 +42,31 @@ function isoDate(raw: unknown): string | null {
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
-/** Applies one delivery report. Returns whether a send log matched. */
-async function applyReport(report: JsonRecord): Promise<boolean> {
+type ReportFilter = { scope: CallbackScope; ownedAccountIds: ReadonlySet<string> };
+
+type ReportOutcome = "matched" | "ignored" | "unmatched";
+
+/** Applies one delivery report to the send logs the scope allows. */
+async function applyReport(report: JsonRecord, filter: ReportFilter): Promise<ReportOutcome> {
   const messageId = str(report.messageId);
   const deliveryKey = str(report.callbackData) ?? messageId;
-  if (!messageId) return false;
+  if (!messageId) return "unmatched";
+
+  const { data: candidates, error: lookupError } = await supabaseAdmin
+    .from("sms_send_logs")
+    .select("id, provider_account_id")
+    .eq("provider_message_id", messageId);
+  if (lookupError) throw new Error(lookupError.message);
+  const rows = (candidates ?? []) as Array<{ id: string; provider_account_id: string | null }>;
+  const allowedIds = rows
+    .filter((row) =>
+      scopeAllowsRow(filter.scope, row.provider_account_id ?? null, filter.ownedAccountIds),
+    )
+    .map((row) => row.id);
+  if (rows.length > 0 && allowedIds.length === 0) return "ignored";
+  // An account token never touches anything it cannot tie to its own send.
+  if (allowedIds.length === 0 && filter.scope.kind === "account") return "ignored";
+
   const deliveryStatus = infobipSmsDeliveryStatus(report);
   const status = asRecord(report.status);
   const error = asRecord(report.error);
@@ -60,13 +86,16 @@ async function applyReport(report: JsonRecord): Promise<boolean> {
   if (deliveredAt) patch.delivered_at = deliveredAt;
   if (errorText) patch.error = errorText;
 
-  const { data, error: updateError } = await supabaseAdmin
-    .from("sms_send_logs")
-    .update(patch)
-    .eq("provider_message_id", messageId)
-    .select("id");
-  if (updateError) throw new Error(updateError.message);
-  const matched = (data ?? []).length > 0;
+  let matched = false;
+  if (allowedIds.length > 0) {
+    const { data, error: updateError } = await supabaseAdmin
+      .from("sms_send_logs")
+      .update(patch)
+      .in("id", allowedIds)
+      .select("id");
+    if (updateError) throw new Error(updateError.message);
+    matched = (data ?? []).length > 0;
+  }
 
   // Carries the confirmed outcome to the conversion report (never sent/accepted).
   if (deliveryKey && (deliveryStatus === "delivered" || deliveryStatus === "failed")) {
@@ -81,18 +110,24 @@ async function applyReport(report: JsonRecord): Promise<boolean> {
       deliveryStatus,
     });
   }
-  return matched;
+  return matched ? "matched" : "unmatched";
 }
 
-/** Applies every report of one callback body. */
+/** Applies every report of one callback body, within the callback's scope. */
 export async function applyInfobipSmsReports(
   body: unknown,
-): Promise<{ received: number; matched: number }> {
+  filter: ReportFilter,
+): Promise<{ received: number; matched: number; ignored: number }> {
   const results = asRecord(body)?.results;
   const reports = (Array.isArray(results) ? results : Array.isArray(body) ? body : [body])
     .map(asRecord)
     .filter((r): r is JsonRecord => r !== null);
   let matched = 0;
-  for (const report of reports) if (await applyReport(report)) matched++;
-  return { received: reports.length, matched };
+  let ignored = 0;
+  for (const report of reports) {
+    const outcome = await applyReport(report, filter);
+    if (outcome === "matched") matched++;
+    else if (outcome === "ignored") ignored++;
+  }
+  return { received: reports.length, matched, ignored };
 }

@@ -10,6 +10,7 @@ import {
   resolveInfobipAccount,
   type InfobipAccount,
 } from "./provider-accounts.server";
+import { callbackTokenFor } from "./provider-callback-tokens.server";
 
 // Infobip Calls Markup Language (CML) adapter for outbound recorded calls.
 // Voz do CRM é atendida exclusivamente pela Infobip.
@@ -96,9 +97,18 @@ function jsonBody(text: string): unknown {
   }
 }
 
-function callbackUrl(path: string, params: Record<string, string>): string | null {
+/**
+ * CML / event URL. `accountToken` is the house-owned account's callback token
+ * (provider-callback-tokens.server.ts); null means a platform account, which
+ * keeps the global INFOBIP_VOICE_CALLBACK_TOKEN.
+ */
+function callbackUrl(
+  path: string,
+  params: Record<string, string>,
+  accountToken: string | null,
+): string | null {
   const appUrl = process.env.PUBLIC_APP_URL?.replace(/\/$/, "");
-  const token = process.env.INFOBIP_VOICE_CALLBACK_TOKEN;
+  const token = accountToken ?? process.env.INFOBIP_VOICE_CALLBACK_TOKEN;
   if (!appUrl || !token) return null;
   const url = new URL(`${appUrl}${path}`);
   url.searchParams.set("token", token);
@@ -183,18 +193,39 @@ export async function callInfobipVoice(
     };
   }
   const { baseUrl, apiKey, voiceFrom: from } = account;
+  let accountToken: string | null;
+  try {
+    accountToken = await callbackTokenFor(account);
+  } catch (error) {
+    // Owned account without a readable callback token: never dialed, and
+    // never with the global token.
+    return {
+      ok: false,
+      status: 0,
+      body: {
+        error: `Token de callback da conta indisponível: ${error instanceof Error ? error.message : String(error)}`,
+      },
+      idempotencyKey,
+      providerCallId: null,
+      errorKind: "misconfigured",
+      providerAccountId: account.id,
+    };
+  }
   const callback = callbackUrl(
     "/api/public/infobip/voice/cml",
     content.type === "audio"
       ? { audio: content.audioUrl, correlation: idempotencyKey }
       : { mode: "say", correlation: idempotencyKey },
+    accountToken,
   );
   // The event webhook is unique per request as well. `customData` is kept as
   // a second correlation mechanism because providers may omit URL parameters
   // from a forwarded event payload.
-  const notifyUrl = callbackUrl("/api/public/infobip/voice/events", {
-    correlation: idempotencyKey,
-  });
+  const notifyUrl = callbackUrl(
+    "/api/public/infobip/voice/events",
+    { correlation: idempotencyKey },
+    accountToken,
+  );
   if (!baseUrl || !apiKey || !from || !callback || !notifyUrl) {
     return {
       ok: false,

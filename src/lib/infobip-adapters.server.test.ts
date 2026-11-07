@@ -21,7 +21,17 @@ vi.mock("./provider-accounts.server", async (importOriginal) => {
   return { ...actual, resolveInfobipAccount: vi.fn(async () => actual.envInfobipAccount()) };
 });
 
+// The callback-token store has its own coverage
+// (provider-callback-tokens.server.test.ts): an owned account gets OWN_TOKEN.
+const OWN_TOKEN = "pa_77777777777747778777777777777777_ownsecret";
+vi.mock("./provider-callback-tokens.server", () => ({
+  callbackTokenFor: vi.fn(async (account: { ownerTenantId: string | null }) =>
+    account.ownerTenantId ? OWN_TOKEN : null,
+  ),
+}));
+
 import { callInfobipEmail } from "./infobip-email.server";
+import { envInfobipAccount, resolveInfobipAccount } from "./provider-accounts.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
@@ -162,5 +172,50 @@ describe("Infobip provider adapters", () => {
     expect(body.callback.url).toContain("correlation=" + result.idempotencyKey);
     expect(body.callback.url).not.toContain("audio=");
     expect(body.callback.url).not.toContain(encodeURIComponent(script));
+  });
+
+  it("an owned account's e-mail and voice callback URLs carry the account token, never the global one", async () => {
+    process.env.INFOBIP_EMAIL_CALLBACK_TOKEN = "email-callback-token";
+    process.env.INFOBIP_VOICE_CALLBACK_TOKEN = "callback-token";
+    process.env.INFOBIP_VOICE_FROM = "+551130000000";
+    process.env.PUBLIC_APP_URL = "https://app.example.test/";
+    const owned = {
+      ...envInfobipAccount(),
+      id: "77777777-7777-4777-8777-777777777777",
+      ownerTenantId: TENANT,
+      baseUrl: "https://own.api.infobip.test",
+      apiKey: "own-key",
+      voiceFrom: "551130000000",
+    };
+    vi.mocked(resolveInfobipAccount).mockResolvedValueOnce(owned).mockResolvedValueOnce(owned);
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async () => new Response(JSON.stringify({ callId: "c-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await callInfobipEmail({
+      to: "destinatario@example.test",
+      from: "remetente@example.test",
+      subject: "Assunto",
+      html: "<p>Mensagem</p>",
+      idempotencyKey: "email-owned-1",
+      tenantId: TENANT,
+    });
+    const emailUrl = String((fetchMock.mock.calls[0][1].body as FormData).get("notifyUrl"));
+    expect(emailUrl).toContain(`token=${OWN_TOKEN}`);
+    expect(emailUrl).not.toContain("email-callback-token");
+    expect(emailUrl).not.toContain("token=callback-token");
+
+    await callInfobipVoice(
+      "+5511999999999",
+      { type: "audio", audioUrl: "https://assets.example.test/call.mp3" },
+      { tenantId: TENANT },
+    );
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1].body));
+    for (const url of [body.callback.url as string, body.notifyUrl as string]) {
+      expect(url).toContain("token=pa_");
+      expect(url).toContain(`token=${OWN_TOKEN}`);
+      expect(url).not.toContain("token=callback-token");
+    }
   });
 });

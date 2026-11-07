@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const OWN_TOKEN = "pa_55555555555545558555555555555555_ownsecret";
+// The token store has its own coverage (provider-callback-tokens.server.test.ts).
+vi.mock("./provider-callback-tokens.server", () => ({
+  callbackTokenFor: vi.fn(async (account: { ownerTenantId: string | null }) =>
+    account.ownerTenantId ? OWN_TOKEN : null,
+  ),
+}));
+
 import { postInfobipSms } from "./infobip-sms.server";
+import { callbackTokenFor } from "./provider-callback-tokens.server";
 import type { InfobipAccount } from "./provider-accounts.server";
 
 const ACCOUNT: InfobipAccount = {
@@ -62,6 +72,32 @@ describe("postInfobipSms", () => {
         },
       ],
     });
+  });
+
+  it("a house-owned account's delivery-report URL carries the account token, never the global one", async () => {
+    await postInfobipSms(
+      { ...ACCOUNT, ownerTenantId: "00000000-0000-4000-8000-000000000001" },
+      "+55 11 99999-0000",
+      "Oi",
+      "key-1",
+    );
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const notifyUrl = JSON.parse(String(init.body)).messages[0].notifyUrl as string;
+    expect(notifyUrl).toContain(`token=${OWN_TOKEN}`);
+    expect(notifyUrl).toContain("token=pa_");
+    expect(notifyUrl).not.toContain("sms-hook-token");
+  });
+
+  it("an owned account whose callback token cannot be read sends nothing", async () => {
+    vi.mocked(callbackTokenFor).mockRejectedValueOnce(new Error("sem chave"));
+    const r = await postInfobipSms(
+      { ...ACCOUNT, ownerTenantId: "00000000-0000-4000-8000-000000000001" },
+      "+55 11 99999-0000",
+      "Oi",
+      "key-1",
+    );
+    expect(r).toMatchObject({ ok: false, errorKind: "misconfigured" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("an account without credits is an account refusal (opens that account's breaker)", async () => {

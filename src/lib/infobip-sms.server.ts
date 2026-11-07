@@ -6,6 +6,7 @@
 // delivery report (/api/public/infobip/sms/events) finds the sms_send_logs
 // row by provider_message_id and the tracked links by delivery key.
 
+import { callbackTokenFor } from "./provider-callback-tokens.server";
 import type { InfobipAccount } from "./provider-accounts.server";
 import {
   transportErrorKind,
@@ -38,9 +39,13 @@ type InfobipStatus = {
   description?: string;
 };
 
-function notifyUrl(): string | null {
+/**
+ * Delivery-report URL. A house-owned account carries its own callback token
+ * (provider-callback-tokens.server.ts), never the global one.
+ */
+async function notifyUrl(account: InfobipAccount): Promise<string | null> {
   const appUrl = process.env.PUBLIC_APP_URL?.trim().replace(/\/$/, "");
-  const token = infobipSmsCallbackToken();
+  const token = (await callbackTokenFor(account)) ?? infobipSmsCallbackToken();
   if (!appUrl || !token) return null;
   const url = new URL(`${appUrl}/api/public/infobip/sms/events`);
   url.searchParams.set("token", token);
@@ -120,7 +125,22 @@ export async function postInfobipSms(
       errorSummary: "Conta Infobip sem URL base ou API key",
     };
   }
-  const reportUrl = notifyUrl();
+  let reportUrl: string | null;
+  try {
+    reportUrl = await notifyUrl(account);
+  } catch (error) {
+    // Owned account without a readable callback token: nothing is sent (never
+    // the global token for a house account).
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      ...base,
+      ok: false,
+      status: 0,
+      body: { error: `Token de callback da conta indisponível: ${reason}` },
+      errorKind: "misconfigured",
+      errorSummary: "Token de callback da conta indisponível",
+    };
+  }
   const payload = {
     messages: [
       {

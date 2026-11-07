@@ -191,6 +191,15 @@ export function createFakeDb(options: { unique?: Record<string, string[][]> } = 
         filters.push((r) => terms.some((t) => t(r)));
         return builder;
       },
+      // PostgREST `contains(col, {k: v})` on a jsonb column (top-level keys only).
+      contains: (col: string, value: Row) => {
+        filters.push((r) => {
+          const v = r[col];
+          if (!v || typeof v !== "object") return false;
+          return Object.entries(value).every(([k, want]) => (v as Row)[k] === want);
+        });
+        return builder;
+      },
       like: (col: string, pattern: string) => {
         const re = likeToRegex(pattern);
         filters.push((r) => typeof r[col] === "string" && re.test(r[col] as string));

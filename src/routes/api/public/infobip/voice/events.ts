@@ -1,15 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { handleCallCompletion } from "@/lib/call-flows.server";
+import {
+  ownedAccountIdsFor,
+  resolveCallbackScope,
+  scopeAllowsRow,
+  touchCallbackReceived,
+} from "@/lib/provider-callback-tokens.server";
 import { settleVoiceHistory, voiceCallAnswered } from "@/lib/voice-billing.server";
 
-function authorized(request: Request): boolean {
-  const expected = process.env.INFOBIP_VOICE_CALLBACK_TOKEN;
-  const received = new URL(request.url).searchParams.get("token");
-  if (!expected || !received || expected.length !== received.length) return false;
-  return timingSafeEqual(Buffer.from(expected), Buffer.from(received));
-}
+// ?token= is INFOBIP_VOICE_CALLBACK_TOKEN for platform accounts or the
+// account's own token for a house-owned account
+// (provider-callback-tokens.server.ts). An event only touches a call_history
+// row whose provider_account_id the token's scope allows; otherwise it is
+// acknowledged (200) and ignored.
 
 function valueAt(payload: Record<string, unknown>, ...keys: string[]): unknown {
   for (const source of [payload, payload.data, payload.properties, payload.call]) {
@@ -248,7 +252,7 @@ async function releaseVoicePermit(providerResponse: Record<string, unknown>): Pr
 }
 
 const HISTORY_COLUMNS =
-  "id, call_queue_id, provider_call_id, provider_response, tenant_id, status, billing_reference_id, billing_settled_at";
+  "id, call_queue_id, provider_call_id, provider_response, tenant_id, status, billing_reference_id, billing_settled_at, provider_account_id";
 
 type HistoryRow = {
   id: string;
@@ -259,13 +263,19 @@ type HistoryRow = {
   status?: string | null;
   billing_reference_id?: string | null;
   billing_settled_at?: string | null;
+  provider_account_id?: string | null;
 };
 
 export const Route = createFileRoute("/api/public/infobip/voice/events")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        if (!authorized(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
+        const scope = await resolveCallbackScope(
+          new URL(request.url).searchParams.get("token"),
+          process.env.INFOBIP_VOICE_CALLBACK_TOKEN,
+        );
+        if (!scope) return Response.json({ error: "unauthorized" }, { status: 401 });
+        if (scope.kind === "account") await touchCallbackReceived(scope.accountId);
         let payload: Record<string, unknown>;
         try {
           payload = (await request.json()) as Record<string, unknown>;
@@ -302,6 +312,19 @@ export const Route = createFileRoute("/api/public/infobip/voice/events")({
             .limit(1)
             .maybeSingle();
           history = data as HistoryRow | null;
+        }
+        // An account token only acts on its own call; the global token never
+        // on a house-owned account's call.
+        if (
+          history
+            ? !scopeAllowsRow(
+                scope,
+                history.provider_account_id ?? null,
+                await ownedAccountIdsFor(scope),
+              )
+            : scope.kind === "account"
+        ) {
+          return Response.json({ ok: true, skipped: "out_of_scope", matched: false });
         }
         const previous =
           history?.provider_response && typeof history.provider_response === "object"

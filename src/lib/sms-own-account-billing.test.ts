@@ -70,6 +70,12 @@ vi.mock("./shortio.server", () => ({
   markTrackedDispatchesSent: vi.fn(async () => undefined),
   markTrackedDispatchesFailed: vi.fn(async () => undefined),
 }));
+// Callback tokens have their own coverage (provider-callback-tokens.server.test.ts).
+vi.mock("./provider-callback-tokens.server", () => ({
+  callbackTokenFor: vi.fn(async (account: { ownerTenantId: string | null }) =>
+    account.ownerTenantId ? "pa_test_token" : null,
+  ),
+}));
 vi.mock("./provider-accounts.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./provider-accounts.server")>()),
   resolveSmsAccount: vi.fn(),

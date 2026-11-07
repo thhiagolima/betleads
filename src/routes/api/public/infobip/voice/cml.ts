@@ -1,20 +1,31 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import {
+  ownedAccountIdsFor,
+  resolveCallbackScope,
+  scopeAllowsRow,
+  touchCallbackReceived,
+} from "@/lib/provider-callback-tokens.server";
 
-function authorized(request: Request): boolean {
-  const expected = process.env.INFOBIP_VOICE_CALLBACK_TOKEN;
-  const received = new URL(request.url).searchParams.get("token");
-  if (!expected || !received || expected.length !== received.length) return false;
-  return timingSafeEqual(Buffer.from(expected), Buffer.from(received));
-}
+// ?token= is INFOBIP_VOICE_CALLBACK_TOKEN for platform accounts or the
+// account's own token for a house-owned account
+// (provider-callback-tokens.server.ts). A call outside the token's scope is
+// answered with a bare hangup: no update and none of its TTS script.
+const OUT_OF_SCOPE_CML = { actions: [{ action: "hangup" }] };
+
+const HISTORY_COLUMNS = "id, call_queue_id, provider_response, provider_account_id";
 
 export const Route = createFileRoute("/api/public/infobip/voice/cml")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        if (!authorized(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
         const url = new URL(request.url);
+        const scope = await resolveCallbackScope(
+          url.searchParams.get("token"),
+          process.env.INFOBIP_VOICE_CALLBACK_TOKEN,
+        );
+        if (!scope) return Response.json({ error: "unauthorized" }, { status: 401 });
+        if (scope.kind === "account") await touchCallbackReceived(scope.accountId);
         const audio = url.searchParams.get("audio");
         const isTts = url.searchParams.get("mode") === "say";
         const correlation = url.searchParams.get("correlation");
@@ -36,7 +47,7 @@ export const Route = createFileRoute("/api/public/infobip/voice/cml")({
         if (callId) {
           const { data } = await supabaseAdmin
             .from("call_history")
-            .select("id, call_queue_id, provider_response")
+            .select(HISTORY_COLUMNS)
             .eq("provider_call_id", callId)
             .order("created_at", { ascending: false })
             .limit(1)
@@ -46,12 +57,24 @@ export const Route = createFileRoute("/api/public/infobip/voice/cml")({
         if (!history && correlation) {
           const { data } = await supabaseAdmin
             .from("call_history")
-            .select("id, call_queue_id, provider_response")
+            .select(HISTORY_COLUMNS)
             .contains("provider_response", { correlation_id: correlation })
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle();
           history = data;
+        }
+        // Without a row nothing is updated (and a TTS call 409s below): the
+        // audio comes from this signed URL, as today.
+        if (
+          history &&
+          !scopeAllowsRow(
+            scope,
+            (history as { provider_account_id?: string | null }).provider_account_id ?? null,
+            await ownedAccountIdsFor(scope),
+          )
+        ) {
+          return Response.json(OUT_OF_SCOPE_CML);
         }
         const previous =
           history?.provider_response && typeof history.provider_response === "object"

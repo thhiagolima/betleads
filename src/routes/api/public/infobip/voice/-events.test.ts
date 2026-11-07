@@ -11,6 +11,30 @@ vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
 }));
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: { from, rpc } }));
+
+// The token store has its own coverage (provider-callback-tokens.server.test.ts);
+// here account A's token is "pa_token_a" and the owned accounts are A and B.
+const scopeIds = vi.hoisted(() => ({
+  OWN_A: "11111111-1111-4111-8111-111111111111",
+  OWN_B: "22222222-2222-4222-8222-222222222222",
+  TENANT: "00000000-0000-4000-8000-000000000001",
+  touch: vi.fn(async (_accountId: string) => undefined),
+}));
+vi.mock("@/lib/provider-callback-tokens.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/provider-callback-tokens.server")>();
+  return {
+    ...actual,
+    resolveCallbackScope: vi.fn(async (token: string | null, global: string | undefined) => {
+      if (token === "pa_token_a")
+        return { kind: "account", accountId: scopeIds.OWN_A, tenantId: scopeIds.TENANT };
+      return token && token === global ? { kind: "platform" } : null;
+    }),
+    ownedAccountIdsFor: vi.fn(async (scope: { kind: string }) =>
+      scope.kind === "platform" ? new Set([scopeIds.OWN_A, scopeIds.OWN_B]) : new Set(),
+    ),
+    touchCallbackReceived: scopeIds.touch,
+  };
+});
 vi.mock("@/lib/call-flows.server", () => ({ handleCallCompletion }));
 vi.mock("@/lib/billing/wallet.server", () => ({ settleVoiceCall }));
 
@@ -587,6 +611,74 @@ describe("Infobip voice event callback", () => {
       );
       expect(body).toMatchObject({ status: null });
       expect(settleVoiceCall).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("callback scope", () => {
+    function event(token: string) {
+      return post({
+        request: new Request(
+          `https://betleads.io/api/public/infobip/voice/events?token=${token}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ callId: "provider-call", status: "COMPLETED", duration: 17 }),
+          },
+        ),
+      });
+    }
+    const historyOf = (providerAccountId: string | null) =>
+      historyLookup({
+        id: "history-scope",
+        call_queue_id: "queue-scope",
+        provider_call_id: "provider-call",
+        provider_response: {},
+        tenant_id: scopeIds.TENANT,
+        billing_reference_id: null,
+        billing_settled_at: null,
+        provider_account_id: providerAccountId,
+      });
+
+    it("(a) global token + owned account's call -> 200, nothing applied", async () => {
+      from.mockReturnValueOnce(historyOf(scopeIds.OWN_A));
+      const response = await event("callback-secret");
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, skipped: "out_of_scope" });
+      expect(from).toHaveBeenCalledTimes(1);
+      expect(settleVoiceCall).not.toHaveBeenCalled();
+      expect(handleCallCompletion).not.toHaveBeenCalled();
+      expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it("(b) account A's token + account B's / platform call (or no call) -> 200, nothing applied", async () => {
+      for (const accountId of [scopeIds.OWN_B, null]) {
+        from.mockReset();
+        from.mockReturnValueOnce(historyOf(accountId));
+        const response = await event("pa_token_a");
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ skipped: "out_of_scope" });
+        expect(from).toHaveBeenCalledTimes(1);
+      }
+      from.mockReset();
+      from.mockReturnValue(historyLookup(null));
+      expect(await (await event("pa_token_a")).json()).toMatchObject({ skipped: "out_of_scope" });
+      expect(settleVoiceCall).not.toHaveBeenCalled();
+      expect(handleCallCompletion).not.toHaveBeenCalled();
+    });
+
+    it("(c) account A's token + account A's call -> applied, last callback touched", async () => {
+      scopeIds.touch.mockClear();
+      const historyUpdate = updateQuery();
+      from
+        .mockReturnValueOnce(historyOf(scopeIds.OWN_A))
+        .mockReturnValueOnce(historyUpdate)
+        .mockReturnValueOnce(updateQuery());
+      const response = await event("pa_token_a");
+      expect(await response.json()).toMatchObject({ ok: true, matched: true, status: "completed" });
+      expect(historyUpdate.update).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "completed", duration_seconds: 17 }),
+      );
+      expect(handleCallCompletion).toHaveBeenCalled();
+      expect(scopeIds.touch).toHaveBeenCalledWith(scopeIds.OWN_A);
     });
   });
 });

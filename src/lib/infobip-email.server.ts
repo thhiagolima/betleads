@@ -7,6 +7,7 @@ import {
   resolveInfobipAccount,
   type InfobipAccount,
 } from "./provider-accounts.server";
+import { callbackTokenFor } from "./provider-callback-tokens.server";
 
 export type InfobipEmailInput = {
   to: string;
@@ -44,10 +45,16 @@ function endpoint(account: InfobipAccount): string | null {
   return account.baseUrl ? `${account.baseUrl}/email/3/send` : null;
 }
 
-function notifyUrl(correlationId: string): string | null {
+/**
+ * Delivery-event URL. A house-owned account carries its own callback token
+ * (provider-callback-tokens.server.ts), never the global one.
+ */
+async function notifyUrl(correlationId: string, account: InfobipAccount): Promise<string | null> {
   const appUrl = process.env.PUBLIC_APP_URL?.trim().replace(/\/$/, "");
-  const token = process.env.INFOBIP_EMAIL_CALLBACK_TOKEN?.trim()
-    ?? process.env.INFOBIP_VOICE_CALLBACK_TOKEN?.trim();
+  const token =
+    (await callbackTokenFor(account)) ??
+    process.env.INFOBIP_EMAIL_CALLBACK_TOKEN?.trim() ??
+    process.env.INFOBIP_VOICE_CALLBACK_TOKEN?.trim();
   if (!appUrl || !token) return null;
   const url = new URL(`${appUrl}/api/public/infobip/email/events`);
   url.searchParams.set("token", token);
@@ -117,7 +124,23 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
   // Both values are per-request: the URL routes the provider event and the
   // opaque key links it to exactly one local delivery without exposing PII.
   form.set("callbackData", idempotencyKey);
-  const deliveryUrl = notifyUrl(idempotencyKey);
+  let deliveryUrl: string | null;
+  try {
+    deliveryUrl = await notifyUrl(idempotencyKey, account);
+  } catch (error) {
+    // Owned account without a readable callback token: nothing is sent.
+    return {
+      ok: false,
+      status: 0,
+      body: {
+        error: `Token de callback da conta indisponível: ${error instanceof Error ? error.message : String(error)}`,
+      },
+      idempotencyKey,
+      temporary: false,
+      errorKind: "misconfigured",
+      providerAccountId,
+    };
+  }
   if (deliveryUrl) {
     form.set("notifyUrl", deliveryUrl);
     form.set("notifyContentType", "application/json");
