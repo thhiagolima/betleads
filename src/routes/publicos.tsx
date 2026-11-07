@@ -32,6 +32,7 @@ import {
 } from "@/lib/sms-audience-criteria";
 import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 
 export const Route = createFileRoute("/publicos")({ component: PublicosPage });
 
@@ -288,7 +289,11 @@ function PublicosPage() {
                   </RuleGroup>
                   <RuleGroup title="Pendências" dot={FILTER_GROUP_DOT.pending}>
                     <RuleChip
-                      label="Gerou PIX e não pagou"
+                      label={
+                        <>
+                          Gerou <Term id="pix-gerado-pago">PIX</Term> e não pagou
+                        </>
+                      }
                       dot={FILTER_GROUP_DOT.pending}
                       count={facets?.activity.pixUnpaid}
                       loading={calculating}

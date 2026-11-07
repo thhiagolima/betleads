@@ -51,7 +51,8 @@ export function RuleChip({
 }: {
   active: boolean;
   onClick: () => void;
-  label: string;
+  /** Normalmente um texto; aceita nó (ex.: <Term>) quando o rótulo tem jargão a explicar. */
+  label: ReactNode;
   count?: number;
   loading?: boolean;
   /** Classe de cor da bolinha (tipo do filtro). */

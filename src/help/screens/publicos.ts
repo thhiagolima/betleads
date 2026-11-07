@@ -16,6 +16,7 @@ const screen: HelpScreen = {
   purpose:
     "Criar e gerenciar grupos de jogadores (públicos) por regras de comportamento, usar os públicos automáticos por nível e enviar qualquer público direto para uma campanha ou (o 'Todos os jogadores') para uma jornada.",
   roles: ["admin", "gestor", "member"],
+  terms: ["pix-gerado-pago", "leads-mortos"],
   sections: [
     // ---------------------------------------------------------------
     // Editor de público
