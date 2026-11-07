@@ -43,8 +43,20 @@ beforeEach(() => {
   fake.db
     .rows("sms_send_logs")
     .push(
-      { id: "log-1", provider: "infobip", provider_message_id: "key-1", delivery_status: "sent" },
-      { id: "log-2", provider: "infobip", provider_message_id: "key-2", delivery_status: "sent" },
+      {
+        id: "log-1",
+        provider: "infobip",
+        provider_message_id: "key-1",
+        idempotency_key: "key-1",
+        delivery_status: "sent",
+      },
+      {
+        id: "log-2",
+        provider: "infobip",
+        provider_message_id: "key-2",
+        idempotency_key: "key-2",
+        delivery_status: "sent",
+      },
     );
   fake.db
     .rows("link_dispatches")
@@ -104,8 +116,20 @@ describe("Infobip SMS delivery reports", () => {
     const delivered = { groupId: 3, groupName: "DELIVERED" };
     beforeEach(() => {
       fake.db.rows("sms_send_logs").push(
-        { id: "log-a", provider_message_id: "key-a", provider_account_id: OWN_A, delivery_status: "sent" },
-        { id: "log-b", provider_message_id: "key-b", provider_account_id: OWN_B, delivery_status: "sent" },
+        {
+          id: "log-a",
+          provider_message_id: "key-a",
+          idempotency_key: "key-a",
+          provider_account_id: OWN_A,
+          delivery_status: "sent",
+        },
+        {
+          id: "log-b",
+          provider_message_id: "key-b",
+          idempotency_key: "key-b",
+          provider_account_id: OWN_B,
+          delivery_status: "sent",
+        },
       );
       fake.db.rows("link_dispatches").push(
         { id: "ld-a", idempotency_key: "key-a:0", delivery_status: "sent" },
@@ -139,6 +163,30 @@ describe("Infobip SMS delivery reports", () => {
       expect(result).toEqual({ received: 1, matched: 1, ignored: 0 });
       expect(log("log-a").delivery_status).toBe("delivered");
       expect(link("ld-a").delivery_status).toBe("delivered");
+    });
+
+    it("A's token + A's real messageId + callbackData of B or '%' -> only A's links", async () => {
+      fake.db.rows("link_dispatches").push({ id: "ld-x", idempotency_key: "zz:0", delivery_status: "sent" });
+      await apply(
+        { results: [report("key-a", delivered, { callbackData: "key-b" })] },
+        accountScope(OWN_A),
+      );
+      await apply(
+        { results: [report("key-a", delivered, { callbackData: "%" })] },
+        accountScope(OWN_A),
+      );
+      expect(link("ld-a").delivery_status).toBe("delivered");
+      for (const id of ["ld-b", "ld-1", "ld-2", "ld-x"]) expect(link(id).delivery_status).toBe("sent");
+    });
+
+    it("global token, no row, callbackData '%' / '_' / '*' -> no mass update", async () => {
+      for (const callbackData of ["%", "_", "key-_", "*"]) {
+        await apply(
+          { results: [report("key-none", delivered, { callbackData })] },
+          PLATFORM_SCOPE,
+        );
+      }
+      for (const id of ["ld-a", "ld-b", "ld-1", "ld-2"]) expect(link(id).delivery_status).toBe("sent");
     });
   });
 });

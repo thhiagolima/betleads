@@ -12,6 +12,7 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
+import { likeKeyPrefixPattern } from "./sql-like";
 import { scopeAllowsRow, type CallbackScope } from "./provider-callback-tokens.server";
 
 type JsonRecord = Record<string, unknown>;
@@ -49,20 +50,22 @@ type ReportOutcome = "matched" | "ignored" | "unmatched";
 /** Applies one delivery report to the send logs the scope allows. */
 async function applyReport(report: JsonRecord, filter: ReportFilter): Promise<ReportOutcome> {
   const messageId = str(report.messageId);
-  const deliveryKey = str(report.callbackData) ?? messageId;
   if (!messageId) return "unmatched";
 
   const { data: candidates, error: lookupError } = await supabaseAdmin
     .from("sms_send_logs")
-    .select("id, provider_account_id")
+    .select("id, provider_account_id, idempotency_key")
     .eq("provider_message_id", messageId);
   if (lookupError) throw new Error(lookupError.message);
-  const rows = (candidates ?? []) as Array<{ id: string; provider_account_id: string | null }>;
-  const allowedIds = rows
-    .filter((row) =>
-      scopeAllowsRow(filter.scope, row.provider_account_id ?? null, filter.ownedAccountIds),
-    )
-    .map((row) => row.id);
+  const rows = (candidates ?? []) as Array<{
+    id: string;
+    provider_account_id: string | null;
+    idempotency_key?: string | null;
+  }>;
+  const allowedRows = rows.filter((row) =>
+    scopeAllowsRow(filter.scope, row.provider_account_id ?? null, filter.ownedAccountIds),
+  );
+  const allowedIds = allowedRows.map((row) => row.id);
   if (rows.length > 0 && allowedIds.length === 0) return "ignored";
   // An account token never touches anything it cannot tie to its own send.
   if (allowedIds.length === 0 && filter.scope.kind === "account") return "ignored";
@@ -98,11 +101,21 @@ async function applyReport(report: JsonRecord, filter: ReportFilter): Promise<Re
   }
 
   // Carries the confirmed outcome to the conversion report (never sent/accepted).
-  if (deliveryKey && (deliveryStatus === "delivered" || deliveryStatus === "failed")) {
-    await (supabaseAdmin as any) // eslint-disable-line @typescript-eslint/no-explicit-any
-      .from("link_dispatches")
-      .update({ delivery_status: deliveryStatus, delivered_at: deliveredAt })
-      .like("idempotency_key", `${deliveryKey}:%`);
+  // Keys of the matched rows only; with no row (platform scope only, as
+  // before) the report's key, wildcards escaped so it never matches others.
+  const payloadKey = str(report.callbackData) ?? messageId;
+  const linkKeys = matched
+    ? [...new Set(allowedRows.map((row) => row.idempotency_key).filter((k): k is string => !!k))]
+    : [payloadKey];
+  if (deliveryStatus === "delivered" || deliveryStatus === "failed") {
+    for (const key of linkKeys) {
+      const pattern = likeKeyPrefixPattern(key);
+      if (!pattern) continue;
+      await (supabaseAdmin as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from("link_dispatches")
+        .update({ delivery_status: deliveryStatus, delivered_at: deliveredAt })
+        .like("idempotency_key", pattern);
+    }
   }
   if (!matched) {
     console.warn("[infobip-sms-callback] report without a matching send", {

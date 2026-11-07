@@ -21,9 +21,18 @@ function jsonPath(row: Row, col: string): unknown {
   return v && typeof v === "object" ? (v as Row)[key] : undefined;
 }
 
+/** SQL LIKE -> RegExp: `%` any run, `_` one char, `\x` the literal x. */
 function likeToRegex(pattern: string) {
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
-  return new RegExp(`^${escaped}$`);
+  const literal = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let out = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "\\" && i + 1 < pattern.length) out += literal(pattern[++i]);
+    else if (ch === "%") out += ".*";
+    else if (ch === "_") out += ".";
+    else out += literal(ch);
+  }
+  return new RegExp(`^${out}$`, "s");
 }
 
 export function createFakeDb(options: { unique?: Record<string, string[][]> } = {}) {

@@ -147,4 +147,47 @@ describe("Short Brasil sms-webhook: callback scope", () => {
     await callback("global-hook-secret", { id: "msg-unknown" });
     expect(orphans()).toHaveLength(1);
   });
+
+  describe("link_dispatches only follow the matched row's own key", () => {
+    beforeEach(() => {
+      fake.db
+        .rows("link_dispatches")
+        .push(
+          { id: "ld-x", idempotency_key: "zz:0", delivery_status: "sent" },
+          { id: "ld-pct", idempotency_key: "a%b:0", delivery_status: "sent" },
+        );
+    });
+    const untouched = (...ids: string[]) =>
+      ids.forEach((id) => expect(link(id).delivery_status).toBe("sent"));
+
+    it("A's token + A's real message id + B's key -> only A's links, B's untouched", async () => {
+      const response = await callback(tokens.tokenA, { id: "msg-key-a", parceiroId: "key-b" });
+      expect(await response.json()).toMatchObject({ matched: 1 });
+      expect(log("log-a").delivery_status).toBe("delivered");
+      expect(link("ld-a").delivery_status).toBe("delivered");
+      untouched("ld-b", "ld-p", "ld-x", "ld-pct");
+    });
+
+    it("A's token + A's real message id + parceiroId '%' -> no other link touched", async () => {
+      await callback(tokens.tokenA, { id: "msg-key-a", parceiroId: "%" });
+      expect(link("ld-a").delivery_status).toBe("delivered");
+      untouched("ld-b", "ld-p", "ld-x", "ld-pct");
+    });
+
+    it("global token, no row, parceiroId '%' / '_' / '*' -> no mass update", async () => {
+      // A fresh message id each time (each unmatched callback leaves an orphan row).
+      for (const [i, parceiroId] of ["%", "%%", "_", "key-_", "*", "a%b"].entries()) {
+        await callback("global-hook-secret", { id: `msg-none-${i}`, parceiroId });
+      }
+      untouched("ld-a", "ld-b", "ld-p", "ld-x");
+      // "a%b" is literal: only the dispatch whose key really is "a%b" moves.
+      expect(link("ld-pct").delivery_status).toBe("delivered");
+    });
+
+    it("global token, no row, plain key -> today's behavior (that delivery's links)", async () => {
+      await callback("global-hook-secret", { id: "msg-none", parceiroId: "zz" });
+      expect(link("ld-x").delivery_status).toBe("delivered");
+      untouched("ld-a", "ld-b", "ld-p");
+    });
+  });
 });

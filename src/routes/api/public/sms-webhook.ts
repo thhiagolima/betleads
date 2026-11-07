@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { ACCEPTED_SMS_STATUSES } from "@/lib/campaign-recipients.server";
+import { likeKeyPrefixPattern } from "@/lib/sql-like";
 import {
   ownedAccountIdsFor,
   resolveCallbackScope,
@@ -76,7 +77,11 @@ async function authorizeCallback(
 
 type CallbackFilter = { scope: CallbackScope; ownedAccountIds: ReadonlySet<string> };
 
-type SendLogRef = { id: string; provider_account_id: string | null };
+type SendLogRef = {
+  id: string;
+  provider_account_id: string | null;
+  idempotency_key?: string | null;
+};
 
 function allowed(filter: CallbackFilter, row: SendLogRef): boolean {
   return scopeAllowsRow(filter.scope, row.provider_account_id ?? null, filter.ownedAccountIds);
@@ -209,13 +214,17 @@ async function updateFromPayload(
   if (errorMsg) patch.error = errorMsg;
 
   let matched = false;
+  // Delivery keys of the rows actually updated: the only keys that may reach
+  // link_dispatches (never the payload's own key once a row matched).
+  const matchedKeys = new Set<string>();
   if (providerMessageId) {
     const { data: rows } = await supabaseAdmin
       .from("sms_send_logs")
-      .select("id, provider_account_id")
+      .select("id, provider_account_id, idempotency_key")
       .eq("provider_message_id", providerMessageId);
     const found = (rows ?? []) as SendLogRef[];
-    const allowedIds = found.filter((row) => allowed(filter, row)).map((row) => row.id);
+    const allowedRows = found.filter((row) => allowed(filter, row));
+    const allowedIds = allowedRows.map((row) => row.id);
     if (found.length > 0 && allowedIds.length === 0) return "ignored";
     if (allowedIds.length > 0) {
       const { data } = await supabaseAdmin
@@ -224,6 +233,9 @@ async function updateFromPayload(
         .in("id", allowedIds)
         .select("id");
       matched = !!data && data.length > 0;
+      if (matched) {
+        for (const row of allowedRows) if (row.idempotency_key) matchedKeys.add(row.idempotency_key);
+      }
     }
   }
   if (!matched && idempotencyKey) {
@@ -231,7 +243,7 @@ async function updateFromPayload(
     // the accepted one: update only the most recent accepted row.
     const { data: candidates } = await supabaseAdmin
       .from("sms_send_logs")
-      .select("id, provider_account_id")
+      .select("id, provider_account_id, idempotency_key")
       .eq("idempotency_key", idempotencyKey)
       .in("status", ACCEPTED_SMS_STATUSES)
       .order("created_at", { ascending: false })
@@ -245,6 +257,7 @@ async function updateFromPayload(
         .eq("id", target.id)
         .select("id");
       matched = !!data && data.length > 0;
+      if (matched && target.idempotency_key) matchedKeys.add(target.idempotency_key);
     }
   }
   // An account token only ever acts on its own send.
@@ -252,12 +265,19 @@ async function updateFromPayload(
 
   // A dispatch uses `${sms_log.idempotency_key}:position`; this carries the
   // provider's confirmed delivery back to the conversion report without ever
-  // treating accepted/sent as delivered.
-  if (idempotencyKey && ["delivered", "failed"].includes(patch.delivery_status)) {
-    await (supabaseAdmin as any)
-      .from("link_dispatches")
-      .update({ delivery_status: patch.delivery_status, delivered_at: deliveredAt })
-      .like("idempotency_key", `${idempotencyKey}:%`);
+  // treating accepted/sent as delivered. A matched row's own key only; with
+  // no row (platform scope only, as before) the payload's key, wildcards
+  // escaped so it can never match other deliveries.
+  const linkKeys = matched ? [...matchedKeys] : idempotencyKey ? [idempotencyKey] : [];
+  if (["delivered", "failed"].includes(patch.delivery_status)) {
+    for (const key of linkKeys) {
+      const pattern = likeKeyPrefixPattern(key);
+      if (!pattern) continue;
+      await (supabaseAdmin as any)
+        .from("link_dispatches")
+        .update({ delivery_status: patch.delivery_status, delivered_at: deliveredAt })
+        .like("idempotency_key", pattern);
+    }
   }
 
   if (!matched) {

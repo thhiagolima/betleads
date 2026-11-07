@@ -10,6 +10,12 @@
 // aplica um evento à linha de log cujo provider_account_id o escopo permite
 // (scopeAllowsRow): o token de uma conta só mexe nos envios dela, e o token
 // global nunca mexe em envio de conta com dono.
+//
+// Caches em memória do processo: token em claro (5 min) e ids das contas com
+// dono (30 s). Esta instância descarta o cache de ids quando gera o primeiro
+// token de uma conta (invalidateOwnedAccountIdsCache); as outras instâncias
+// enxergam uma conta que acabou de ganhar dono em até 30 s — nessa janela o
+// token global ainda poderia aplicar um callback a um envio dela.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { decryptProviderCredentials, encryptProviderCredentials } from "./secret-box.server";
@@ -28,6 +34,11 @@ const TOUCH_INTERVAL_MS = 60_000;
 const tokenCache = new Map<string, { token: string; at: number }>();
 let ownedIdsCache: { ids: ReadonlySet<string>; at: number } | null = null;
 const lastTouch = new Map<string, number>();
+
+/** Drops this instance's owned-ids cache (other instances: <= 30 s). */
+export function invalidateOwnedAccountIdsCache() {
+  ownedIdsCache = null;
+}
 
 export function __resetCallbackTokensForTests() {
   tokenCache.clear();
@@ -99,6 +110,9 @@ export async function ensureCallbackToken(accountId: string): Promise<string> {
       .eq("id", accountId)
       .is("callback_token_encrypted", null);
     if (error) throw new Error(error.message);
+    // A conta que recebe o primeiro token é (ou acabou de virar) conta com
+    // dono: o escopo plataforma desta instância passa a recusá-la já.
+    invalidateOwnedAccountIdsCache();
     // Outra instância pode ter gravado antes: vale o que está no banco.
     const stored = await readTokenRow(accountId);
     token = stored?.callback_token_encrypted

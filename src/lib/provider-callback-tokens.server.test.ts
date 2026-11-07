@@ -29,28 +29,26 @@ beforeEach(() => {
   vi.stubEnv("PROVIDER_CREDENTIALS_ENCRYPTION_KEY", "k".repeat(40));
   fake.db.reset();
   __resetCallbackTokensForTests();
-  fake.db
-    .rows("provider_accounts")
-    .push(
-      {
-        id: OWN_A,
-        owner_tenant_id: TENANT,
-        callback_token_encrypted: null,
-        last_callback_at: null,
-      },
-      {
-        id: OWN_B,
-        owner_tenant_id: TENANT,
-        callback_token_encrypted: null,
-        last_callback_at: null,
-      },
-      {
-        id: PLATFORM,
-        owner_tenant_id: null,
-        callback_token_encrypted: null,
-        last_callback_at: null,
-      },
-    );
+  fake.db.rows("provider_accounts").push(
+    {
+      id: OWN_A,
+      owner_tenant_id: TENANT,
+      callback_token_encrypted: null,
+      last_callback_at: null,
+    },
+    {
+      id: OWN_B,
+      owner_tenant_id: TENANT,
+      callback_token_encrypted: null,
+      last_callback_at: null,
+    },
+    {
+      id: PLATFORM,
+      owner_tenant_id: null,
+      callback_token_encrypted: null,
+      last_callback_at: null,
+    },
+  );
 });
 
 afterEach(() => {
@@ -173,5 +171,21 @@ describe("touchCallbackReceived", () => {
     vi.setSystemTime(new Date("2026-11-07T12:01:01Z"));
     await touchCallbackReceived(OWN_A);
     expect(account(OWN_A).last_callback_at).toBe("2026-11-07T12:01:01.000Z");
+  });
+});
+
+describe("owned-ids cache", () => {
+  it("generating an account's first token drops this instance's owned-ids cache", async () => {
+    const NEW = "33333333-3333-4333-8333-333333333333";
+    expect((await loadOwnedAccountIds()).has(NEW)).toBe(false);
+    fake.db.rows("provider_accounts").push({
+      id: NEW,
+      owner_tenant_id: TENANT,
+      callback_token_encrypted: null,
+      last_callback_at: null,
+    });
+    expect((await loadOwnedAccountIds()).has(NEW)).toBe(false); // cached
+    await ensureCallbackToken(NEW);
+    expect((await loadOwnedAccountIds()).has(NEW)).toBe(true);
   });
 });
