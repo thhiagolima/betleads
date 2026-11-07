@@ -48,10 +48,29 @@ describe("ChannelDisabledNoticeGate", () => {
   });
 
   it("renderiza o aviso do canal Voz e o botão Ciente com 1 pendente", () => {
-    queryState.data = [{ channel: "voice", disabledAt: "2026-11-05T12:00:00.000Z" }];
+    queryState.data = [{ kind: "disabled", channel: "voice", disabledAt: "2026-11-05T12:00:00.000Z" }];
     const html = render();
     expect(html).toContain("O canal Voz foi desabilitado para a sua casa");
     expect(html).toContain("Ciente");
+  });
+
+  it("renderiza o aviso de revogação da conta própria com o texto exato", () => {
+    queryState.data = [
+      { kind: "own_revoked", channel: "sms", disabledAt: "2026-11-07T10:00:00.000Z" },
+    ];
+    const html = render();
+    expect(html).toContain(
+      "A conta própria de SMS da sua casa foi desligada pela BetLeads. Os envios desse canal estão pausados até a BetLeads definir o próximo passo.",
+    );
+    expect(html).not.toContain("foi desabilitado para a sua casa");
+    expect(html).toContain("Ciente");
+  });
+
+  it("aviso de revogação de e-mail usa o rótulo do canal", () => {
+    queryState.data = [
+      { kind: "own_revoked", channel: "email", disabledAt: "2026-11-07T10:00:00.000Z" },
+    ];
+    expect(render()).toContain("A conta própria de E-mail da sua casa foi desligada pela BetLeads.");
   });
 
   it("não busca os avisos para o super admin", () => {

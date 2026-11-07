@@ -204,6 +204,8 @@ type AccountRow = {
   config: Record<string, unknown> | null;
   status: string;
   owner_tenant_id: string | null;
+  /** 20261217100400: 'platform' | 'revoked' | null (why a disabled account is off). */
+  disabled_reason?: string | null;
 };
 
 type OverrideRow = { tenant_id: string; channel: string; provider_account_id: string };
@@ -244,7 +246,7 @@ async function loadSnapshot(): Promise<Snapshot> {
     db()
       .from("provider_accounts")
       .select(
-        "id, provider, label, channels, credentials_source, credentials_encrypted, config, status, owner_tenant_id",
+        "id, provider, label, channels, credentials_source, credentials_encrypted, config, status, owner_tenant_id, disabled_reason",
       ),
     db().from("tenant_channel_providers").select("tenant_id, channel, provider_account_id"),
     db().from("platform_channel_defaults").select("channel, provider_account_id"),
@@ -447,6 +449,53 @@ export async function platformDefaultAccountId(channel: ProviderChannel): Promis
   const snap = await currentSnapshot();
   const accountId = snap?.defaults.get(channel);
   return snap && accountId ? accountId : envDefaultAccountId(channel);
+}
+
+/**
+ * Conta própria (Task 11): o canal da casa está pausado por uma revogação da
+ * concessão — o link da casa (tenant_channel_providers) ainda aponta para a
+ * conta dela, e essa conta está desativada com disabled_reason 'revoked'.
+ * Cobre a decisão pendente e o "manter pausado" (o link fica); "usar a
+ * padrão" remove o link e a pausa acaba. Lido do mesmo snapshot do resolver,
+ * então concorda com o que o envio resolveria (que lançaria
+ * ProviderAccountUnavailableError). Sem snapshot: false (o envio decide).
+ */
+export async function ownAccountPausedByRevocation(
+  tenantId: string | null | undefined,
+  channel: Exclude<ProviderChannel, "webpush">,
+): Promise<boolean> {
+  if (!tenantId) return false;
+  const snap = await currentSnapshot();
+  const accountId = snap?.overrides.get(`${tenantId}:${channel}`);
+  return !!accountId && revokedOwnRow(snap!.accounts.get(accountId), tenantId);
+}
+
+function revokedOwnRow(row: AccountRow | undefined, tenantId: string): boolean {
+  return (
+    !!row &&
+    row.owner_tenant_id === tenantId &&
+    row.status !== "active" &&
+    row.disabled_reason === "revoked"
+  );
+}
+
+/**
+ * Every `${tenantId}:${channel}` (sms/email/voice) paused by a revocation
+ * (ownAccountPausedByRevocation), from the in-memory snapshot: the journey
+ * claim excludes these pairs (p_exclude), so their steps stay due on the same
+ * step, untouched, until "usar a padrão" (or the house reactivating) ends it.
+ */
+export async function revokedOwnChannelKeys(): Promise<string[]> {
+  const snap = await currentSnapshot();
+  if (!snap) return [];
+  const keys: string[] = [];
+  for (const [key, accountId] of snap.overrides) {
+    const sep = key.lastIndexOf(":");
+    const channel = key.slice(sep + 1);
+    if (channel === "webpush") continue;
+    if (revokedOwnRow(snap.accounts.get(accountId), key.slice(0, sep))) keys.push(key);
+  }
+  return keys;
 }
 
 /**

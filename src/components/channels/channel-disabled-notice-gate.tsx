@@ -4,6 +4,8 @@
 // notice at a time, overlay like OnboardingGate's wizard. The super admin
 // never sees it (the server already returns `[]` for it; `enabled: false`
 // here also skips the fetch).
+// Conta própria (Task 11): the same gate shows the `own_revoked` notice (the
+// house's own account of a channel paused by the BetLeads revoking the grant).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
@@ -15,7 +17,20 @@ import type { ProviderChannel } from "@/lib/tenant-channels.shared";
 
 const PENDING_CHANNEL_NOTICES_QUERY_KEY = ["pending-channel-notices"];
 
-type PendingNotice = { channel: ProviderChannel; disabledAt: string };
+type PendingNotice = {
+  /** Absent on servers from before Task 11 = "disabled". */
+  kind?: "disabled" | "own_revoked";
+  channel: ProviderChannel;
+  disabledAt: string;
+};
+
+function noticeText(notice: PendingNotice): string {
+  const label = PROVIDER_CHANNEL_LABEL[notice.channel];
+  if (notice.kind === "own_revoked") {
+    return `A conta própria de ${label} da sua casa foi desligada pela BetLeads. Os envios desse canal estão pausados até a BetLeads definir o próximo passo.`;
+  }
+  return `O canal ${label} foi desabilitado para a sua casa pela BetLeads. Ele não aparece mais no painel, e os passos desse canal nas jornadas serão pulados.`;
+}
 
 export function ChannelDisabledNoticeGate({ children }: { children: React.ReactNode }) {
   const { active } = useActiveTenant();
@@ -35,6 +50,7 @@ export function ChannelDisabledNoticeGate({ children }: { children: React.ReactN
       ack({
         data: {
           tenantId: active?.id ?? "",
+          kind: notice.kind ?? "disabled",
           channel: notice.channel,
           disabledAt: notice.disabledAt,
         },
@@ -52,11 +68,7 @@ export function ChannelDisabledNoticeGate({ children }: { children: React.ReactN
       {children}
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
         <div className="max-w-md space-y-4 rounded-lg border bg-card p-6 shadow-lg">
-          <p className="text-sm text-foreground">
-            O canal {PROVIDER_CHANNEL_LABEL[pending.channel]} foi desabilitado para a sua casa pela
-            BetLeads. Ele não aparece mais no painel, e os passos desse canal nas jornadas serão
-            pulados.
-          </p>
+          <p className="text-sm text-foreground">{noticeText(pending)}</p>
           <Button
             onClick={() => mutation.mutate(pending)}
             disabled={mutation.isPending}

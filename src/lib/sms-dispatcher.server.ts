@@ -49,6 +49,7 @@ import { SmsAccountGates } from "./sms-account-gates.server";
 import { isChannelEnabled } from "./tenant-channels.server";
 import {
   isOwnedAccount,
+  ownAccountPausedByRevocation,
   ProviderAccountUnavailableError,
   resolveSmsAccount,
 } from "./provider-accounts.server";
@@ -1051,6 +1052,11 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
         expertCap: errorKind === "expert_cap",
         expertInactive: errorKind === "expert_inactive",
         channelDisabled: errorKind === "channel_disabled",
+        // Conta própria (Task 11): the grant was revoked between the tick's
+        // check and this send; the campaign pauses before this recipient.
+        ownAccountPaused:
+          errorKind === "misconfigured" &&
+          (await ownAccountPausedByRevocation(campaign.tenant_id, "sms")),
         error: r.ok ? undefined : (r as { error?: string }).error,
       };
     },
@@ -1204,6 +1210,7 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
         ...scoped,
         providerGate: () => campaignProviderGate(gates, c),
         channelEnabled: (tenantId: string) => isChannelEnabled(tenantId, "sms"),
+        ownAccountPaused: (tenantId: string) => ownAccountPausedByRevocation(tenantId, "sms"),
       };
       const r = await processSmsCampaignTick(c, deps, {
         deadline,

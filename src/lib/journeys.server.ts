@@ -44,6 +44,7 @@ import { resolveDispatchWorkerConfig } from "./rate-limit/worker-config";
 import { brtDayStart } from "./tz";
 import { listDemoTenantIds } from "./tenant-access.server";
 import { isChannelEnabled } from "./tenant-channels.server";
+import { ownAccountPausedByRevocation, revokedOwnChannelKeys } from "./provider-accounts.server";
 import { STEP_TYPE_CHANNEL } from "./tenant-channels.shared";
 import {
   audienceMatches,
@@ -431,6 +432,13 @@ async function waitSecondsBeforePosition(journeyId: string, position: number) {
   );
 }
 
+/** The step sends on a channel whose own account is paused by a revocation (Task 11). */
+async function stepOwnAccountRevoked(tenantId: string, stepType: string | null | undefined) {
+  const channel = stepType ? STEP_TYPE_CHANNEL[stepType] : undefined;
+  if (channel !== "sms" && channel !== "email" && channel !== "voice") return false;
+  return ownAccountPausedByRevocation(tenantId, channel);
+}
+
 /** The step sends on a channel the house has turned off. */
 async function stepChannelDisabled(tenantId: string, stepType: string | null | undefined) {
   const channel = stepType ? STEP_TYPE_CHANNEL[stepType] : undefined;
@@ -527,6 +535,15 @@ async function executeEnrollment(
       step_position: step.position,
       reason: "channel_disabled",
     });
+    return;
+  }
+
+  // Conta própria (Task 11): the house's own account of this channel is
+  // paused by a revocation. Normally the claim already kept these items out
+  // (revokedOwnChannelKeys); this covers a claim made with an older snapshot.
+  // The step waits on the same position, before any reservation.
+  if (await stepOwnAccountRevoked(enrollment.tenant_id, step.step_type)) {
+    await holdForOwnAccountRevoked(enrollment, ctx, step.step_type, null);
     return;
   }
 
@@ -701,6 +718,8 @@ type ChannelGate = {
 const SEND_CHANNELS = new Set(["sms", "email", "voice"]);
 /** A step held for lack of house balance comes back after this, so a recharge resumes it. */
 const NO_BALANCE_RETRY_MS = 15 * 60_000;
+/** A step held because the house's own account is paused by a revocation (Task 11). */
+const OWN_ACCOUNT_REVOKED_RETRY_MS = 5 * 60_000;
 
 /**
  * I2: admits a claimed item against the channel budget BEFORE the expensive
@@ -1317,6 +1336,43 @@ async function holdForBalance(
 }
 
 /**
+ * Conta própria (Task 11): the house's own account of the step's channel was
+ * disabled by a revocation of the grant and the house's link still points to
+ * it (decision pending, or "manter pausado"). The step waits on the SAME
+ * position, no attempt consumed, never skipped nor failed, no cap (the pause
+ * lasts until the super admin decides): "usar a padrão" removes the link and
+ * the next send goes through the platform default, charged. Most items never
+ * get here: the claim excludes these (tenant, channel) pairs.
+ * `refusal` is the send's error when the send itself found the account off
+ * (its execution goes back to `retrying`); null when held before reserving.
+ */
+async function holdForOwnAccountRevoked(
+  enrollment: EnrollmentRow,
+  ctx: DispatchContext,
+  channel: string | null,
+  refusal: string | null,
+) {
+  ctx.counters.rescheduled++;
+  const retryAt = new Date(Date.now() + OWN_ACCOUNT_REVOKED_RETRY_MS).toISOString();
+  if (refusal !== null) {
+    await finishOwnExecution(ctx, enrollment.id, {
+      status: "retrying",
+      error: refusal.slice(0, 1000),
+      completed_at: new Date().toISOString(),
+    });
+  }
+  // attempts, provider_deferrals and platform_holds intentionally unchanged.
+  await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt });
+  await event(enrollment, "step_deferred", {
+    channel,
+    step_position: Number(enrollment.current_position ?? 0),
+    reason: "own_account_revoked",
+    retry_at: retryAt,
+    attempt_consumed: false,
+  });
+}
+
+/**
  * Error path for one item (B1 / ENV-04):
  * - defer   (provider answered 429/5xx/402...): reschedule WITHOUT consuming an
  *           attempt, at most MAX_NO_COST_DEFERS times in a row per step; after
@@ -1487,6 +1543,17 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
       return;
     }
     // Cap reached: from now on the failure costs an attempt (below).
+  }
+
+  // Conta própria (Task 11): the send found the house's own account off
+  // (misconfigured) because the grant was revoked meanwhile: wait, uncapped,
+  // instead of a platform hold (which would fail the player after 3 days).
+  if (decision.reason === "provider_misconfigured") {
+    const channel = error instanceof ProviderSendError ? error.channel : (row.step_type ?? null);
+    if (await stepOwnAccountRevoked(row.tenant_id, channel)) {
+      await holdForOwnAccountRevoked(enrollment, ctx, channel, message);
+      return;
+    }
   }
 
   // P0.1b: the platform failed before anything was sent (Short.io, send log,
@@ -1775,9 +1842,15 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
       claim: async (count) => {
         for (;;) {
           // I2: (tenant, channel) pairs whose budget is exhausted right now,
-          // plus every (tenant, sms) pair while the SMS provider breaker blocks.
+          // plus every (tenant, sms) pair while the SMS provider breaker blocks,
+          // plus (Task 11) every (tenant, channel) whose own account is paused
+          // by a revocation: those steps stay due, untouched, on the same step.
           const budgetExclude = exhaustedKeys(ctx);
-          const exclude = [...budgetExclude, ...(await smsExcludeKeys(ctx, scope.tenantIds))];
+          const exclude = [
+            ...budgetExclude,
+            ...(await smsExcludeKeys(ctx, scope.tenantIds)),
+            ...(await revokedOwnChannelKeys()),
+          ];
           const { data, error } = await db.rpc("claim_journey_enrollments_leased", {
             p_limit: count,
             p_worker_id: workerId,

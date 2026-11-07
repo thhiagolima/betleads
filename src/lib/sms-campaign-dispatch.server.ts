@@ -126,6 +126,13 @@ export type SendOutcome = {
    * "channel_disabled"): nothing sent nor charged; the campaign is cancelled.
    */
   channelDisabled?: boolean;
+  /**
+   * Conta própria (Task 11): the send found the house's own SMS account off
+   * because the BetLeads revoked the grant (still linked, disabled_reason
+   * 'revoked'). Nothing sent nor charged; cut like `insufficientBalance` and
+   * the campaign pauses with SMS_CAMPAIGN_OWN_ACCOUNT_PAUSED_MESSAGE.
+   */
+  ownAccountPaused?: boolean;
   error?: string;
 };
 
@@ -138,6 +145,9 @@ export const SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE =
   "O expert dono desta campanha foi desativado; nada será enviado.";
 /** last_error of a campaign cancelled because the house's SMS channel was turned off. */
 export const SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE = "Canal SMS desabilitado para a casa.";
+/** last_error of a campaign paused because the house's own SMS account was revoked (Task 11). */
+export const SMS_CAMPAIGN_OWN_ACCOUNT_PAUSED_MESSAGE =
+  "Conta própria do canal pausada pela BetLeads";
 
 /**
  * SMS provider circuit breaker, asked before every batch:
@@ -201,6 +211,11 @@ export type CampaignDispatchDeps = {
   findRegisteredPhones?: (tenantId: string, phones: string[]) => Promise<Set<string>>;
   /** SMS channel on for the house (tenant_channels); absent = always on. */
   channelEnabled?: (tenantId: string) => Promise<boolean>;
+  /**
+   * Conta própria (Task 11): the house's own SMS account is paused by a
+   * revocation (ownAccountPausedByRevocation); absent = never paused.
+   */
+  ownAccountPaused?: (tenantId: string) => Promise<boolean>;
 };
 
 export type CampaignTickResult = {
@@ -224,7 +239,8 @@ export type CampaignTickResult = {
     | "insufficient_balance"
     | "expert_cap"
     | "expert_inactive"
-    | "channel_disabled";
+    | "channel_disabled"
+    | "own_account_paused";
   /** ENV-10: sends whose provider outcome is unknown (counted in `sent`). */
   pendingConfirmation?: number;
 };
@@ -309,6 +325,19 @@ export async function processSmsCampaignTick(
       locked_by: null,
     });
     return { ...result, status: "cancelada", stopReason: "channel_disabled" };
+  }
+
+  // Conta própria (Task 11): the house's own SMS account was disabled by a
+  // revocation and is still linked. Paused before anything is resolved, sent
+  // or charged ("Retomar" brings it back once the BetLeads decided).
+  if (deps.ownAccountPaused && (await deps.ownAccountPaused(c.tenant_id))) {
+    await deps.updateCampaign(c, {
+      status: "pausada",
+      last_error: SMS_CAMPAIGN_OWN_ACCOUNT_PAUSED_MESSAGE,
+      locked_at: null,
+      locked_by: null,
+    });
+    return { ...result, status: "pausada", stopReason: "own_account_paused" };
   }
 
   // 0. Dynamic audience: the saved rule is recalculated once, before the first
@@ -655,14 +684,17 @@ export async function processSmsCampaignTick(
                 o?.insufficientBalance ||
                 o?.expertCap ||
                 o?.expertInactive ||
-                o?.channelDisabled),
+                o?.channelDisabled ||
+                o?.ownAccountPaused),
           );
     if (firstRetryable >= 0) {
       const cut = deferredError === null ? outcomes[firstRetryable] : undefined;
       const noBalance = cut?.insufficientBalance === true;
       const expertStop = cut?.channelDisabled
         ? ("channel_disabled" as const)
-        : cut?.expertInactive
+        : cut?.ownAccountPaused
+          ? ("own_account_paused" as const)
+          : cut?.expertInactive
           ? ("expert_inactive" as const)
           : cut?.expertCap
             ? ("expert_cap" as const)
@@ -672,7 +704,9 @@ export async function processSmsCampaignTick(
           ? SMS_CAMPAIGN_EXPERT_CAP_MESSAGE
           : expertStop === "channel_disabled"
             ? SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE
-            : SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE
+            : expertStop === "own_account_paused"
+              ? SMS_CAMPAIGN_OWN_ACCOUNT_PAUSED_MESSAGE
+              : SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE
         : noBalance
           ? SMS_CAMPAIGN_NO_BALANCE_MESSAGE
           : (deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível");
@@ -705,6 +739,7 @@ export async function processSmsCampaignTick(
     if (stop === "expert_cap") lastError = SMS_CAMPAIGN_EXPERT_CAP_MESSAGE;
     if (stop === "expert_inactive") lastError = SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE;
     if (stop === "channel_disabled") lastError = SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE;
+    if (stop === "own_account_paused") lastError = SMS_CAMPAIGN_OWN_ACCOUNT_PAUSED_MESSAGE;
     result.sent += batchSent;
     result.deduplicated += batchDedup;
     result.failed += batchFailed;
@@ -733,7 +768,7 @@ export async function processSmsCampaignTick(
     ? totalSent + totalDedup === 0
       ? "falhou"
       : "enviado"
-    : stop === "insufficient_balance" || stop === "expert_cap"
+    : stop === "insufficient_balance" || stop === "expert_cap" || stop === "own_account_paused"
       ? "pausada"
       : stop === "expert_inactive" || stop === "channel_disabled"
         ? "cancelada"
@@ -749,7 +784,8 @@ export async function processSmsCampaignTick(
     result.stopReason === "insufficient_balance" ||
     result.stopReason === "expert_cap" ||
     result.stopReason === "expert_inactive" ||
-    result.stopReason === "channel_disabled"
+    result.stopReason === "channel_disabled" ||
+    result.stopReason === "own_account_paused"
   )
     patch.last_error = lastError;
   await deps.updateCampaign(c, patch);

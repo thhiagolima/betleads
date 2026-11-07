@@ -9,6 +9,8 @@ import { dbUuid } from "@/lib/zod-helpers";
 
 export const ackChannelNoticeInput = z.object({
   tenantId: dbUuid(),
+  /** Task 11: "own_revoked" = conta própria pausada pela revogação. */
+  kind: z.enum(["disabled", "own_revoked"]).default("disabled"),
   channel: z.enum(PROVIDER_CHANNELS),
   disabledAt: z.string().datetime({ offset: true }),
 });
