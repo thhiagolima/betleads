@@ -147,14 +147,20 @@ com 8 (cada nome aparecendo uma única vez — se aparecer duas linhas para o
 mesmo nome, o `drop` anterior não limpou a sobrecarga antiga; investigue
 antes de seguir).
 
-**Rollback:** reaplicar os corpos anteriores — `wallet_reserve` de
-`20261210100100_webpush_billing_item.sql`, `expert_wallet_reserve` de
-`20261126100000_expert_campaigns.sql` (`create or replace`, sem o parâmetro
-novo) — e remover a linha de `schema_migrations`:
+**Rollback** (sequência exata do cabeçalho do arquivo — primeiro apagar as
+assinaturas novas de 7/8 argumentos, só depois recriar as antigas; na ordem
+inversa da criação, `expert_wallet_reserve` antes de `wallet_reserve`, porque
+a primeira chama a segunda):
 ```sql
 begin;
--- reaplicar aqui o CREATE OR REPLACE de wallet_reserve (20261210100100) e de
--- expert_wallet_reserve (20261126100000), nessa ordem
+drop function public.expert_wallet_reserve(uuid, uuid, text, integer, text, text, text, uuid);
+drop function public.wallet_reserve(uuid, text, integer, text, text, text, uuid);
+-- recriar as duas com o corpo anterior, sem o 7º/8º parâmetro:
+--   wallet_reserve        <- corpo de 20261210100100_webpush_billing_item.sql
+--   expert_wallet_reserve <- corpo de 20261126100000_expert_campaigns.sql
+-- (CREATE FUNCTION, não CREATE OR REPLACE — a assinatura antiga não existe
+-- mais depois dos DROPs acima) e reaplicar os mesmos grant/revoke execute
+-- que essas duas migrations já tinham para a assinatura antiga.
 delete from supabase_migrations.schema_migrations where version = '20261217100100';
 commit;
 notify pgrst, 'reload schema';
@@ -517,10 +523,27 @@ Short Brasil da 99Bet ou URL copiada errada no Passo 8.
 
 Super admin: Admin → Integrações → Provedor por casa → 99Bet → SMS →
 desligar "Permitir conta própria". Efeito: `tenant_own_provider_grants.allowed
-= false`; o canal SMS da 99Bet pausa; a equipe vê "Pausado: aguardando
-decisão" com as opções "Voltar para a padrão" (remove a ligação, cobrança por
-envio volta) ou "Manter pausado". A conta e as credenciais da 99Bet
-continuam no banco (cifradas), só suspensas — nenhum dado é perdido.
+= false`; o canal SMS da 99Bet pausa. Quem vê o quê, e quem decide, são
+telas diferentes:
+
+- **Quem decide "Voltar para a padrão" ou "Manter pausado": o super admin**,
+  na mesma tela (Admin → Integrações → Provedor por casa), onde a linha da
+  99Bet/SMS passa a mostrar "Pausado: aguardando decisão"
+  (`provider-accounts-panel.tsx`). "Voltar para a padrão" remove a ligação
+  em `tenant_channel_providers` e a cobrança por envio volta; "Manter
+  pausado" só reconhece a decisão e deixa o canal pausado até o super admin
+  mudar de ideia.
+- **O que a 99Bet vê:** na aba Canais (Integrações da casa), o card do canal
+  mostra "Conta própria revogada pela BetLeads — aguardando decisão."
+  (`own-provider-tab.tsx`, `OwnProviderChannelCard`) — a casa **não** vê nem
+  escolhe entre "voltar para a padrão" e "manter pausado" (isso é decisão do
+  super admin, não da casa). O único botão que a casa pode ver ali é "Voltar
+  para a rota da BetLeads", e só aparece se `usingOwnAccount` ainda estiver
+  true (a casa desliga a própria conta por conta própria, independente da
+  decisão do super admin sobre a concessão).
+
+A conta e as credenciais da 99Bet continuam no banco (cifradas), só
+suspensas — nenhum dado é perdido.
 
 Alternativa mais direta: desativar a conta (não a concessão) pela mesma tela
 — o super admin pode desativar (`disabled_reason = 'platform'`), mas não
