@@ -123,8 +123,12 @@ decifrá-las para enviar; quem tem a infraestrutura (banco + chave
   própria (coluna própria, não dentro de credenciais).
 - Token de callback **por conta** (gerado pelo servidor, guardado como hash
   ou cifrado), usado nas URLs de retorno das contas com dono.
-- `wallet_ledger.provider_account_id` (nullable): de qual conta saiu o envio.
-  Ajuda Financeiro e conciliação.
+- De qual conta saiu o envio no ledger: `provider_account_id` e
+  `own_account: true` no `metadata` jsonb da reserva (sem coluna nova, para
+  não mexer na assinatura de `wallet_mutation`). Ajuda Financeiro e
+  conciliação.
+- `provider_accounts.last_callback_at timestamptz`: último retorno aceito da
+  conta (card de saúde).
 - Fatura: `billing_invoices.channel_fees_cents bigint not null default 0`
   (mais um detalhamento por canal, ex. jsonb `channel_fees`), somado em
   `amount_cents`. Alternativa aceitável a critério do builder: tabela de itens.
@@ -233,7 +237,10 @@ decifrá-las para enviar; quem tem a infraestrutura (banco + chave
    (`*.api.infobip.com` e os hosts reais da Short Brasil), sem seguir
    redirect, sem IP privado/link-local; o "Testar" devolve mensagens genéricas
    (sem status HTTP cru nem texto de erro de rede). Vale também para as
-   contas da plataforma.
+   contas da plataforma. Conta com dono da Short Brasil não aceita URL
+   nenhuma: usa sempre os endereços padrão do código (a API legada da Short
+   Brasil é `http://lp01-short.painelsms.com`, por isso "só https" não se
+   aplica a ela; o host continua fixo).
 3. Isolamento de timeout/concorrência (6.3).
 4. Reautenticação + e-mail aos outros admins em mudança de credencial/ativação.
 5. Funções de servidor da casa separadas das do super admin; cada uma checa:
