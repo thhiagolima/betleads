@@ -22,6 +22,8 @@ type Json = Record<string, unknown>;
 // Inserts via service role sem tenant_id caem na casa principal (default da
 // coluna). O tenant de um fluxo nunca muda, então fica em cache por processo.
 const flowTenantCache = new Map<string, string>();
+/** Conta própria (Task 9): a block held back by its account's in-flight limit runs again this soon. */
+export const CALL_FLOW_OWNED_ACCOUNT_BUSY_RETRY_MS = 30_000;
 async function flowTenantId(flowId: string): Promise<string | null> {
   const cached = flowTenantCache.get(flowId);
   if (cached) return cached;
@@ -308,6 +310,28 @@ async function executeCallBlock(progress: any, block: any, player: any): Promise
         error: alertError instanceof Error ? alertError.message : String(alertError),
       }),
     );
+    return;
+  }
+  if (result.errorKind === "owned_account_busy") {
+    // Conta própria (Task 9): the house's own voice account is at its
+    // in-flight limit. Never dialed nor reserved: same block again shortly,
+    // no history row, attempt not consumed, never "waiting" (which the stuck
+    // sweep would complete as no_answer).
+    await logEvent(
+      progress.id,
+      progress.flow_id,
+      progress.player_id,
+      progress.current_block_index,
+      "call_deferred",
+      { reason: "owned_account_busy" },
+    );
+    await supabaseAdmin
+      .from("call_flow_progress")
+      .update({
+        status: "active",
+        next_run_at: new Date(Date.now() + CALL_FLOW_OWNED_ACCOUNT_BUSY_RETRY_MS).toISOString(),
+      } as any)
+      .eq("id", progress.id);
     return;
   }
   const isAuthError = result.status === 401 || result.status === 403;

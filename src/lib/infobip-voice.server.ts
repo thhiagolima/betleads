@@ -262,7 +262,7 @@ export async function callInfobipVoice(
       body: { error: OWNED_ACCOUNT_BUSY_MESSAGE, owned_account_busy: true },
       idempotencyKey,
       providerCallId: null,
-      errorKind: null,
+      errorKind: "owned_account_busy",
       providerAccountId: account.id,
     };
   }

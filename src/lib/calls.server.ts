@@ -328,8 +328,12 @@ export type VoiceDispatchOutcome =
   | "expert_cap"
   | "expert_inactive"
   | "channel_disabled"
+  | "owned_account_busy"
   | "transient"
   | "failed";
+
+/** Conta própria (Task 9): a queued call held back by its account's in-flight limit comes back this soon. */
+export const VOICE_OWNED_ACCOUNT_BUSY_RETRY_MS = 30_000;
 
 /**
  * How a queued call's dispatch result is handled. The wallet refusal
@@ -351,6 +355,9 @@ export function classifyVoiceDispatchResult(result: {
   if (result.errorKind === "expert_inactive") return "expert_inactive";
   // Voice turned off for the house: never dialed nor reserved (status 0).
   if (result.errorKind === "channel_disabled") return "channel_disabled";
+  // Conta própria (Task 9): the house's own account is at its in-flight
+  // limit. Never dialed nor reserved; checked before status 429 (transient).
+  if (result.errorKind === "owned_account_busy") return "owned_account_busy";
   const body = (result.body ?? {}) as { non_json?: boolean };
   if (
     result.status === 0 ||
@@ -614,6 +621,20 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
             error: pushError.message,
           });
         }
+        continue;
+      }
+      if (outcome === "owned_account_busy") {
+        // Never dialed nor reserved, no history row: back to the queue shortly.
+        await supabaseAdmin
+          .from("call_queue")
+          .update({
+            status: "audio_ready",
+            provider_status: "conta_propria_ocupada",
+            scheduled_at: new Date(Date.now() + VOICE_OWNED_ACCOUNT_BUSY_RETRY_MS).toISOString(),
+          } as never)
+          .eq("id", item.id)
+          .eq("status", VOICE_QUEUE_CLAIMED_STATUS);
+        deferred++;
         continue;
       }
       if (outcome === "transient") {

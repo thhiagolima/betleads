@@ -462,6 +462,34 @@ describe("runJourneyDispatcher", () => {
     expect(fake.tables.journey_events.at(-1)).toMatchObject({ event_type: "retry_scheduled" });
   });
 
+  it("conta própria ocupada: 15 recuos seguidos nunca gastam tentativa nem contam no teto", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 429,
+      error: "Conta própria da casa no limite de envios simultâneos",
+      temporary: true,
+      errorKind: "owned_account_busy",
+      providerAccountId: "own-1",
+    });
+    enrollment("e1").metadata = { trigger: "manual" };
+    for (let run = 0; run < 15; run++) {
+      seedClaimAgain();
+      const before = Date.now();
+      const result = await runJourneyDispatcher(1000);
+      expect(result).toMatchObject({ failed: 0, rescheduled: 1 });
+      const row = enrollment("e1");
+      expect(row).toMatchObject({ status: "waiting", current_position: 0, attempts: 1 });
+      expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(before + 29_000);
+    }
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(15);
+    expect(enrollment("e1").metadata).toEqual({ trigger: "manual" });
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "step_deferred",
+      detail: expect.objectContaining({ reason: "owned_account_busy", attempt_consumed: false }),
+    });
+  });
+
   it("counts no-cost defers per step and keeps the rest of the metadata", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({

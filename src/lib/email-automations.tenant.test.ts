@@ -261,6 +261,29 @@ describe("email flow dispatcher — wallet refusal stays per-house (PG3 Task 1 f
   });
 });
 
+describe("email flow dispatcher — conta própria ocupada (Task 9)", () => {
+  it("reagenda o lead, sem tentativa, sem email_send_logs, sem evento failed e sem throttle", async () => {
+    seed("tpl-a", "p-a");
+    vi.mocked(sendInfobipEmail).mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      body: { error: "ocupada", owned_account_busy: true },
+      idempotencyKey: "k",
+      temporary: true,
+      errorKind: "owned_account_busy",
+      providerAccountId: "own-1",
+    } as any);
+    const before = Date.now();
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    const lead = state.tables.email_flow_leads[0];
+    expect(lead).toMatchObject({ status: "running", attempts: 0, locked_by: null });
+    expect(Date.parse(String(lead.next_run_at))).toBeGreaterThanOrEqual(before + 29_000);
+    expect(state.tables.email_send_logs ?? []).toHaveLength(0);
+    expect((state.tables.email_flow_logs ?? []).some((l) => l.event === "failed")).toBe(false);
+    expect(registerThrottle).not.toHaveBeenCalled();
+  });
+});
+
 describe("email flow dispatcher — billing columns (PG3 Task 6)", () => {
   it("logs the wallet reference and the amount charged for the e-mail", async () => {
     seed("tpl-a", "p-a");

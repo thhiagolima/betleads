@@ -89,10 +89,14 @@ import {
 import { sendSmsInternal } from "./sms.functions";
 import { callInfobipVoice } from "./infobip-voice.server";
 import { callInfobipEmail } from "./infobip-email.server";
+import { sendInfobipEmail } from "./email-send.server";
+import { sendSmsBatch } from "./sms-bulk.server";
+import { prepareTrackedEmailHtml, prepareTrackedTextBatch } from "./shortio.server";
 import {
   __resetOwnedAccountIsolationForTests,
   OWNED_ACCOUNT_MAX_INFLIGHT,
   OWNED_ACCOUNT_REQUEST_TIMEOUT_MS,
+  tryAcquireAccountSlot,
 } from "./owned-account-isolation.server";
 import {
   __resetOwnedSmsTimeoutsForTests,
@@ -374,7 +378,12 @@ describe("(b) concorrência por conta com dono", () => {
     const busy = [...results.entries()].filter(([item]) => item.startsWith(HOUSE));
     expect(busy).toHaveLength(10 - OWNED_ACCOUNT_MAX_INFLIGHT);
     for (const [, r] of busy) {
-      expect(r).toMatchObject({ ok: false, status: 429, temporary: true, errorKind: null });
+      expect(r).toMatchObject({
+        ok: false,
+        status: 429,
+        temporary: true,
+        errorKind: "owned_account_busy",
+      });
     }
     expect(reservesFor(HOUSE)).toBe(OWNED_ACCOUNT_MAX_INFLIGHT);
     expect(fake.db.rows("sms_send_logs").filter((r) => r.tenant_id === HOUSE)).toHaveLength(0);
@@ -450,5 +459,119 @@ describe("(c) breaker da conta com dono", () => {
     await until(() => again.done);
     expect(ownedSmsTimeoutCount(OWN_A)).toBe(1);
     expect(breakerReports()).toHaveLength(0);
+  });
+});
+
+describe("ocupado = errorKind owned_account_busy, antes de rastrear, reservar ou registrar", () => {
+  /** Fills every in-flight slot of the account on this instance. */
+  const saturate = (account: { id: string; ownerTenantId: string | null }) =>
+    Array.from({ length: OWNED_ACCOUNT_MAX_INFLIGHT }, () => tryAcquireAccountSlot(account)!);
+  const walletCalls = () => fake.rpcCalls.filter((c) => c.fn.startsWith("wallet_"));
+
+  it("SMS: sendSmsInternal", async () => {
+    const own = infobip(OWN_A, HOUSE);
+    vi.mocked(resolveSmsAccount).mockResolvedValue(own);
+    const slots = saturate(own);
+    const r = await smsSend(HOUSE, key(1));
+    expect(r).toMatchObject({
+      ok: false,
+      status: 429,
+      temporary: true,
+      errorKind: "owned_account_busy",
+    });
+    expect(walletCalls()).toHaveLength(0);
+    expect(fake.db.rows("sms_send_logs")).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    slots.forEach((slot) => slot.release());
+    expect(await smsSend(HOUSE, key(2))).toMatchObject({ ok: true });
+  });
+
+  it("SMS bulk (Short Brasil legado): nenhum write-ahead nem reserva", async () => {
+    const own: ShortBrasilAccount = {
+      ...shortBrasil(OWN_A, HOUSE),
+      shortcodeToken: "",
+      usuario: "u",
+      chave: "c",
+    };
+    vi.mocked(resolveSmsAccount).mockResolvedValue(own);
+    saturate(own);
+    const result = await sendSmsBatch(
+      [1, 2].map((n) => ({
+        tenantId: HOUSE,
+        to: `+55119${String(10000000 + n).slice(-8)}`,
+        content: `Oi ${n}`,
+        deliveryKey: key(n),
+        playerId: null,
+        triggerName: "campanha:Teste",
+        linkTrackingEnabled: false,
+      })),
+    );
+    expect(result.outcomes).toEqual([
+      expect.objectContaining({ ok: false, retryable: true, errorKind: "owned_account_busy" }),
+      expect.objectContaining({ ok: false, retryable: true, errorKind: "owned_account_busy" }),
+    ]);
+    expect(walletCalls()).toHaveLength(0);
+    expect(fake.db.rows("sms_send_logs")).toHaveLength(0);
+    expect(prepareTrackedTextBatch).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("e-mail: sendInfobipEmail", async () => {
+    const own = infobip(OWN_A, HOUSE);
+    vi.mocked(resolveInfobipAccount).mockResolvedValue(own);
+    vi.mocked(prepareTrackedEmailHtml).mockClear();
+    saturate(own);
+    const r = await sendInfobipEmail({
+      to: "jogador@example.test",
+      from: "casa@example.test",
+      subject: "Oi",
+      html: "<p>Oi</p>",
+      tenantId: HOUSE,
+      idempotencyKey: "email-busy-1",
+      linkTracking: {
+        tenantId: HOUSE,
+        sourceType: "campaign",
+        sourceId: "c1",
+        recipientPlayerId: null,
+        messageLogType: "email_send_logs",
+      } as never,
+    });
+    expect(r).toMatchObject({ ok: false, temporary: true, errorKind: "owned_account_busy" });
+    expect(walletCalls()).toHaveLength(0);
+    expect(prepareTrackedEmailHtml).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("e-mail: um envio em andamento ocupa um slot só", async () => {
+    const own = infobip(OWN_A, HOUSE);
+    vi.mocked(resolveInfobipAccount).mockResolvedValue(own);
+    fetchMock.mockImplementation(async () => Response.json({ messages: [{ messageId: "m" }] }));
+    const slots = Array.from({ length: OWNED_ACCOUNT_MAX_INFLIGHT - 1 }, () =>
+      tryAcquireAccountSlot(own)!,
+    );
+    const r = await sendInfobipEmail({
+      to: "jogador@example.test",
+      from: "casa@example.test",
+      subject: "Oi",
+      html: "<p>Oi</p>",
+      tenantId: HOUSE,
+      idempotencyKey: "email-ok-1",
+    });
+    expect(r).toMatchObject({ ok: true });
+    slots.forEach((slot) => slot.release());
+  });
+
+  it("voz: callInfobipVoice", async () => {
+    const own = infobip(OWN_A, HOUSE);
+    vi.mocked(resolveInfobipAccount).mockResolvedValue(own);
+    saturate(own);
+    const r = await callInfobipVoice(
+      "+5511999999999",
+      { type: "tts", text: "Oi" },
+      { tenantId: HOUSE },
+    );
+    expect(r).toMatchObject({ ok: false, status: 429, errorKind: "owned_account_busy" });
+    expect(walletCalls()).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

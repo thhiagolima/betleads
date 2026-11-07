@@ -22,6 +22,11 @@
 //             Journeys hold the step on the same position and retry it in
 //             15 min (`saldo_insuficiente`), no attempt consumed, so a
 //             recharge resumes them.
+//   busy    : conta própria (Task 9) — the house's own provider account is at
+//             its in-flight limit on this instance (errorKind
+//             `owned_account_busy`). Nothing prepared, reserved, logged nor
+//             sent. Back to the queue in OWNED_ACCOUNT_BUSY_RETRY_MS, never
+//             consumes an attempt and never counts toward MAX_NO_COST_DEFERS.
 //   fail    : channel turned off for the house (errorKind
 //             `channel_disabled`, reason `channel_disabled`; final, nothing
 //             sent nor charged), or definitely not accepted (invalid recipient, 4xx, request never
@@ -45,7 +50,13 @@ import { isProviderErrorKind, type ProviderErrorKind } from "./transport-errors"
 
 export type { ProviderErrorKind } from "./transport-errors";
 
-export type ProviderFailureKind = "defer" | "unknown" | "fail" | "provider_account" | "skip";
+export type ProviderFailureKind =
+  | "defer"
+  | "unknown"
+  | "fail"
+  | "provider_account"
+  | "skip"
+  | "busy";
 
 export type ProviderFailureDecision = {
   kind: ProviderFailureKind;
@@ -61,6 +72,7 @@ export type ProviderFailureDecision = {
     | "not_sent"
     | "tenant_blocked"
     | "channel_disabled"
+    | "owned_account_busy"
     | "permanent_error";
   /** Delay before the item becomes due again (defer/unknown only). */
   retryAfterMs: number;
@@ -76,6 +88,8 @@ export const CREDIT_DEFER_MS = 15 * 60_000;
 export const OUTCOME_UNKNOWN_RETRY_MS = 15 * 60_000;
 /** Fallback wait for provider_account when the breaker state is unknown. */
 export const PROVIDER_ACCOUNT_DEFER_MS = 2 * 60_000;
+/** A house-owned account at its in-flight limit: the item comes back this soon. */
+export const OWNED_ACCOUNT_BUSY_RETRY_MS = 30_000;
 /** Consecutive no-cost defers per step before attempts start being consumed. */
 export const MAX_NO_COST_DEFERS = 10;
 const MAX_DEFER_MS = 10 * 60_000;
@@ -129,6 +143,14 @@ export function classifyProviderFailure(error: unknown): ProviderFailureDecision
     return { kind: "fail", reason: "tenant_blocked", retryAfterMs: 0 };
   }
   if (error instanceof ProviderSendError) {
+    // Checked before status 429, which the busy result also carries.
+    if (error.errorKind === "owned_account_busy") {
+      return {
+        kind: "busy",
+        reason: "owned_account_busy",
+        retryAfterMs: OWNED_ACCOUNT_BUSY_RETRY_MS,
+      };
+    }
     if (error.errorKind === "provider_account") {
       return {
         kind: "provider_account",

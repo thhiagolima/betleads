@@ -1331,6 +1331,9 @@ async function holdForBalance(
  *           waits on the same position and is retried in 15 min, no attempt
  *           consumed; the house gets the hourly "Saldo insuficiente" alert.
  *           (Replaces PG3 decision 6, which skipped to the next step.)
+ * - busy    (conta própria: the house's own provider account at its
+ *           in-flight limit): nothing sent; back in 30 s, attempts and the
+ *           no-cost defer counter untouched (never MAX_NO_COST_DEFERS).
  * - fail    : the journey's max_attempts/backoff policy; a misconfigured
  *           provider (missing credentials) is also reported to Sentry.
  */
@@ -1424,6 +1427,27 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
     console.warn("[journey dispatcher] provider refused the account; item deferred", {
       enrollmentId: row.id,
       retryAt,
+    });
+    return;
+  }
+
+  if (decision.kind === "busy") {
+    // The house's own account is at its in-flight limit on this instance:
+    // nothing was prepared, reserved nor sent. Not a provider failure.
+    ctx.counters.rescheduled++;
+    const retryAt = new Date(Date.now() + decision.retryAfterMs).toISOString();
+    await finishOwnExecution(ctx, row.id, {
+      status: "retrying",
+      error: message.slice(0, 1000),
+      completed_at: nowIso(),
+    });
+    // attempts and provider_deferrals intentionally unchanged.
+    await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt });
+    await event(enrollment, "step_deferred", {
+      reason: decision.reason,
+      error: message.slice(0, 500),
+      retry_at: retryAt,
+      attempt_consumed: false,
     });
     return;
   }

@@ -803,6 +803,22 @@ export const dispatchCallQueueItem = createServerFn({ method: "POST" })
       throw new Error(VOICE_INSUFFICIENT_BALANCE_MESSAGE);
     }
 
+    // Conta própria da casa no limite de ligações simultâneas: nada discado nem
+    // reservado, sem histórico e sem throttle global; o item fica pendente.
+    if (outcome === "owned_account_busy") {
+      await supabase
+        .from("call_queue")
+        .update({ status: "audio_ready", provider_status: "conta_propria_ocupada" } as any)
+        .eq("id", q.id);
+      return {
+        ok: false,
+        pending: true,
+        temporary: true,
+        message:
+          "A conta de voz da casa está no limite de ligações simultâneas. A ligação ficou pendente e será retentada.",
+      };
+    }
+
     // 5xx ou body não-JSON (HTML) = falha transitória do provedor.
     // Preservamos o item em audio_ready com provider_status='provider_unavailable'
     // para retentar depois — não marcamos failed nem registramos no histórico.

@@ -1294,6 +1294,13 @@ export async function runCampaignSend(
         pausadaPorCanal = true;
         break;
       }
+      if (!r.ok && r.errorKind === "owned_account_busy") {
+        // Conta própria (Task 9): the house's own account is at its in-flight
+        // limit. Nothing sent nor charged and no log row, so this recipient
+        // is still "remaining": the next batch (e-mail tick) sends it.
+        continuaEmLotes = true;
+        break;
+      }
       const errSnippet = r.ok
         ? null
         : `status=${(r as any).status ?? "?"} body=${

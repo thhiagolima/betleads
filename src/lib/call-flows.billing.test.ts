@@ -27,7 +27,7 @@ vi.mock("./tenant-access.server", () => ({ listDemoTenantIds: vi.fn(async () => 
 const alerts = vi.hoisted(() => ({ notifyNoBalance: vi.fn(async () => false) }));
 vi.mock("./billing/wallet-alerts.server", () => ({ notifyNoBalance: alerts.notifyNoBalance }));
 
-import { advanceProgress } from "./call-flows.server";
+import { advanceProgress, tickFlows } from "./call-flows.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 
@@ -135,4 +135,49 @@ describe("call flow call block wallet reservation", () => {
     expect(progress()).toMatchObject({ status: "waiting" });
     consoleError.mockRestore();
   });
+
+  it("conta própria ocupada: mesmo bloco de novo, sem histórico, sem tentativa, nunca waiting", async () => {
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: false,
+      status: 429,
+      body: { error: "ocupada", owned_account_busy: true },
+      idempotencyKey: "key-1",
+      providerCallId: null,
+      errorKind: "owned_account_busy",
+      providerAccountId: "own-1",
+    });
+    const before = Date.now();
+    await advanceProgress("prog-1");
+    expect(fake.db.rows("call_history")).toEqual([]);
+    expect(history().some((row) => row.event_type === "call_dispatched")).toBe(false);
+    expect(history()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "call_deferred",
+          detail: expect.objectContaining({ reason: "owned_account_busy" }),
+        }),
+      ]),
+    );
+    expect(progress()).toMatchObject({ status: "active", current_block_index: 0, attempts_on_block: 0 });
+    expect(Date.parse(String(progress().next_run_at))).toBeGreaterThanOrEqual(before + 30_000);
+  });
+
+  it("tick: a conta própria ocupada nunca vira no_answer pela varredura de waiting", async () => {
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: false,
+      status: 429,
+      body: { error: "ocupada", owned_account_busy: true },
+      idempotencyKey: "key-1",
+      providerCallId: null,
+      errorKind: "owned_account_busy",
+      providerAccountId: "own-1",
+    });
+    fake.db.onRpc("claim_call_flow_progress", () => ({ data: [{ id: "prog-1" }], error: null }));
+    for (let tick = 0; tick < 3; tick++) await tickFlows(10);
+    expect(voice.callInfobipVoice).toHaveBeenCalledTimes(3);
+    expect(fake.db.rows("call_history")).toEqual([]);
+    expect(progress()).toMatchObject({ status: "active", current_block_index: 0, attempts_on_block: 0 });
+    expect(history().some((row) => row.event_type === "advanced" || row.event_type === "completed")).toBe(false);
+  });
 });
+

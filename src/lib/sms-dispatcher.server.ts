@@ -53,7 +53,10 @@ import {
   resolveSmsAccount,
 } from "./provider-accounts.server";
 import { OWNED_ACCOUNT_MAX_INFLIGHT } from "./owned-account-isolation.server";
-import { PROVIDER_ACCOUNT_DEFER_MS } from "./rate-limit/provider-errors.server";
+import {
+  OWNED_ACCOUNT_BUSY_RETRY_MS,
+  PROVIDER_ACCOUNT_DEFER_MS,
+} from "./rate-limit/provider-errors.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
 import { notifyExpertCapReached } from "./billing/expert-cap-alerts.server";
 import { expertCampaignDeps } from "./expert-sms-campaign.server";
@@ -750,6 +753,15 @@ async function runSmsFlowBatch({
           error: alertError instanceof Error ? alertError.message : String(alertError),
         }),
       );
+    } else if ((r as { errorKind?: unknown }).errorKind === "owned_account_busy") {
+      // Conta própria (Task 9): the house's own account is at its in-flight
+      // limit. Nothing prepared, reserved nor sent: same step shortly,
+      // attempts unchanged, never the global throttle.
+      await holdLead(
+        item.lead.id,
+        new Date(Date.now() + OWNED_ACCOUNT_BUSY_RETRY_MS).toISOString(),
+      );
+      rescheduled++;
     } else if ((r as { errorKind?: unknown }).errorKind === "provider_account") {
       // Account refused (101/505, 401/402/403): not the lead's fault. Same
       // step, attempts unchanged, back when the breaker of the house's
@@ -1025,7 +1037,7 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
       const providerAccount = errorKind === "provider_account";
       // Conta própria (Task 9): the house's own account is at its in-flight
       // limit; nothing was prepared, reserved nor sent.
-      const accountBusy = "accountBusy" in r && r.accountBusy === true;
+      const accountBusy = errorKind === "owned_account_busy";
       return {
         ok: r.ok,
         alreadySent: "alreadySent" in r && r.alreadySent === true,
@@ -1245,16 +1257,12 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
 }
 
 /**
- * Campaign view of the SMS provider breaker of its house's account, asked
- * before each batch. The first ask may get the half-open probe (ONE send);
- * the next ask of the same campaign learns its verdict. A campaign whose
- * account is refused stops before its next batch without moving the cursor;
- * campaigns of houses on other accounts keep sending.
- */
-/**
  * Conta própria (Task 9): a campaign of a house on its own SMS account sends
  * at most OWNED_ACCOUNT_MAX_INFLIGHT at a time (the account's in-flight limit
- * per instance), instead of tripping it and cutting every batch.
+ * per instance), instead of tripping it and cutting every batch. Never aborts
+ * the tick: when the account cannot be resolved here (unavailable account,
+ * DB blip) there is simply no extra bound; each send resolves it again and a
+ * busy send is handed back by the slot itself.
  */
 export async function campaignSendConcurrencyCap(
   campaign: Pick<SmsCampaignRow, "tenant_id">,
@@ -1263,12 +1271,23 @@ export async function campaignSendConcurrencyCap(
     const account = await resolveSmsAccount(campaign.tenant_id);
     return isOwnedAccount(account) ? OWNED_ACCOUNT_MAX_INFLIGHT : null;
   } catch (error) {
-    // Unavailable house account: every send fails as misconfigured anyway.
-    if (error instanceof ProviderAccountUnavailableError) return null;
-    throw error;
+    if (!(error instanceof ProviderAccountUnavailableError)) {
+      console.warn("[sms-campaigns] concurrency cap unknown; no extra bound", {
+        tenantId: campaign.tenant_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return null;
   }
 }
 
+/**
+ * Campaign view of the SMS provider breaker of its house's account, asked
+ * before each batch. The first ask may get the half-open probe (ONE send);
+ * the next ask of the same campaign learns its verdict. A campaign whose
+ * account is refused stops before its next batch without moving the cursor;
+ * campaigns of houses on other accounts keep sending.
+ */
 export async function campaignProviderGate(
   gates: SmsAccountGates,
   campaign: Pick<SmsCampaignRow, "id" | "tenant_id">,

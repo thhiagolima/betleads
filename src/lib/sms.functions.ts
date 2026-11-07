@@ -980,9 +980,8 @@ export async function sendSmsInternal(args: {
       error: OWNED_ACCOUNT_BUSY_MESSAGE,
       temporary: true,
       body: JSON.stringify({ owned_account_busy: true }),
-      errorKind: null as ProviderErrorKind | null,
+      errorKind: "owned_account_busy" as ProviderErrorKind | null,
       providerAccountId: resolvedAccount.account.id as string | null,
-      accountBusy: true as const,
     };
   }
   try {

@@ -450,10 +450,6 @@ async function sendChunk(
     };
   };
 
-  // Conta própria (Task 9): a house-owned account at its in-flight limit is
-  // not called; the chunk is released like a 429 (refunded, retryable).
-  const slot = tryAcquireAccountSlot(account);
-  if (!slot) return wholeChunkFailed(OWNED_ACCOUNT_BUSY_MESSAGE, true, null);
   const sendStartedAt = new Date();
   let call: ProviderCall;
   try {
@@ -464,8 +460,6 @@ async function sendChunk(
     // sendSmsBatch's own guard: nothing left, so the write-ahead rows and
     // credits are released as failed (final, never retried).
     return wholeChunkFailed((error as Error).message, false, null);
-  } finally {
-    slot.release();
   }
   // Repeated timeouts of a house-owned account open its own breaker only.
   await noteOwnedSmsTransport({
@@ -802,7 +796,7 @@ export async function sendSmsBatch(
         const providerAccount = errorKind === "provider_account";
         const noBalance = errorKind === "insufficient_balance";
         // House-owned account at its in-flight limit: nothing sent, resend later.
-        const accountBusy = "accountBusy" in r && r.accountBusy === true;
+        const accountBusy = errorKind === "owned_account_busy";
         outcomes[index] = {
           deliveryKey: item.deliveryKey,
           status: r.ok ? (alreadySent ? "already_sent" : "accepted") : "failed",
@@ -819,252 +813,275 @@ export async function sendSmsBatch(
   // smsBulkTransport only picks the bulk path for a Short Brasil account.
   if (account.provider !== "short_brasil") throw new Error("SMS bulk sem conta Short Brasil");
 
-  // 0. Tenant status (throws -> nothing done).
-  for (const tenantId of new Set(items.map((i) => i.tenantId))) {
-    try {
-      await assertTenantCanOperate(tenantId);
-    } catch (error) {
-      throw new SmsBatchDeferredError(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  // a. Already accepted deliveries are never sent again.
-  const acceptedKeys = await findAcceptedDeliveryKeys(
-    supabaseAdmin as unknown as CampaignDb,
-    items.map((i) => i.deliveryKey),
-  );
-  const seen = new Set<string>();
-  const failLogs: LogRow[] = [];
-  const candidates: Array<{ index: number; item: SmsBatchItem; phone: string; cell: string }> = [];
-  items.forEach((item, index) => {
-    if (acceptedKeys.has(item.deliveryKey) || seen.has(item.deliveryKey)) {
+  // Conta própria (Task 9): the chunks below go out one at a time, so the
+  // batch holds one in-flight slot of the account for its whole duration.
+  // Over the limit nothing is tracked, reserved, logged nor sent: every item
+  // goes back to the caller as retryable (owned_account_busy).
+  const slot = tryAcquireAccountSlot(account);
+  if (!slot) {
+    items.forEach((item, index) => {
       outcomes[index] = {
         deliveryKey: item.deliveryKey,
-        status: "already_sent",
-        ok: true,
-        retryable: false,
-      };
-      return;
-    }
-    seen.add(item.deliveryKey);
-    try {
-      const phone = requireBrazilianPhone(item.to);
-      candidates.push({ index, item, phone, cell: toShortBrasilCell(phone) });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      outcomes[index] = { deliveryKey: item.deliveryKey, status: "failed", ok: false, retryable: false, error: msg };
-      failLogs.push(
-        logRow({
-          id: crypto.randomUUID(),
-          to_phone: item.to,
-          content: item.content,
-          status: "error",
-          provider_response: {},
-          error: msg,
-          idempotency_key: null,
-          provider_message_id: null,
-          delivery_status: "failed",
-          player_id: item.playerId,
-          trigger_name: item.triggerName ?? null,
-          tenant_id: item.tenantId,
-        }),
-      );
-    }
-  });
-
-  // Consent (one query per tenant/chunk).
-  const byTenant = new Map<string, typeof candidates>();
-  for (const c of candidates) byTenant.set(c.item.tenantId, [...(byTenant.get(c.item.tenantId) ?? []), c]);
-  const sendable: typeof candidates = [];
-  for (const [tenantId, list] of byTenant) {
-    const revoked = await revokedSubjects(tenantId, list.map((c) => c.phone));
-    for (const c of list) {
-      if (!revoked.has(normalizeConsentSubject("sms", c.phone))) {
-        sendable.push(c);
-        continue;
-      }
-      outcomes[c.index] = {
-        deliveryKey: c.item.deliveryKey,
         status: "failed",
         ok: false,
-        retryable: false,
-        suppressed: true,
-        error: "Destinatario bloqueado por consentimento",
+        retryable: true,
+        errorKind: "owned_account_busy",
+        error: OWNED_ACCOUNT_BUSY_MESSAGE,
       };
-      failLogs.push(
-        logRow({
-          id: crypto.randomUUID(),
-          to_phone: c.phone,
-          content: c.item.content,
-          status: "error",
-          provider_response: { suppressed: true, reason: "consent_revoked" },
-          error: "Destinatario revogou o consentimento para SMS",
-          idempotency_key: c.item.deliveryKey,
-          provider_message_id: null,
-          delivery_status: "failed",
-          player_id: c.item.playerId,
-          trigger_name: c.item.triggerName ?? null,
-          tenant_id: tenantId,
-        }),
-      );
+    });
+    return result([], 0);
+  }
+  try {
+
+    // 0. Tenant status (throws -> nothing done).
+    for (const tenantId of new Set(items.map((i) => i.tenantId))) {
+      try {
+        await assertTenantCanOperate(tenantId);
+      } catch (error) {
+        throw new SmsBatchDeferredError(error instanceof Error ? error.message : String(error));
+      }
     }
-  }
-  sendable.sort((a, b) => a.index - b.index);
 
-  // c. Tracked links for every sendable item (bulk Short.io + set-based DB).
-  const logIds = sendable.map(() => crypto.randomUUID());
-  const links = await prepareTrackedTextBatch(
-    sendable.map((c, k) => ({
-      content: c.item.content,
-      context: {
-        tenantId: c.item.tenantId,
-        channel: "sms" as const,
-        sourceType: c.item.linkTrackingOrigin?.sourceType ?? "manual",
-        sourceId: c.item.linkTrackingOrigin?.sourceId ?? c.item.triggerName ?? null,
-        journeyStepId: c.item.linkTrackingOrigin?.journeyStepId ?? null,
-        journeyStepPosition: c.item.linkTrackingOrigin?.journeyStepPosition ?? null,
-        shortDomainId: c.item.linkTrackingOrigin?.shortDomainId ?? null,
-        recipientPlayerId: c.item.playerId,
-        recipientHash: c.item.linkTrackingOrigin?.recipientHash ?? null,
-        messageLogType: "sms_send_logs",
-        messageLogId: logIds[k],
-        deliveryKey: c.item.deliveryKey,
-        enabled: c.item.linkTrackingEnabled,
-      },
-    })),
-  );
-  const blocked = links.find(
-    (l): l is Extract<typeof l, { ok: false }> => !l.ok && l.fallbackMode === "block",
-  );
-  if (blocked) {
-    // Tenant chose 'block': do not send untracked; nothing charged yet.
-    throw new SmsBatchDeferredError(`Rastreamento de links indisponível: ${blocked.error}`);
-  }
+    // a. Already accepted deliveries are never sent again.
+    const acceptedKeys = await findAcceptedDeliveryKeys(
+      supabaseAdmin as unknown as CampaignDb,
+      items.map((i) => i.deliveryKey),
+    );
+    const seen = new Set<string>();
+    const failLogs: LogRow[] = [];
+    const candidates: Array<{ index: number; item: SmsBatchItem; phone: string; cell: string }> = [];
+    items.forEach((item, index) => {
+      if (acceptedKeys.has(item.deliveryKey) || seen.has(item.deliveryKey)) {
+        outcomes[index] = {
+          deliveryKey: item.deliveryKey,
+          status: "already_sent",
+          ok: true,
+          retryable: false,
+        };
+        return;
+      }
+      seen.add(item.deliveryKey);
+      try {
+        const phone = requireBrazilianPhone(item.to);
+        candidates.push({ index, item, phone, cell: toShortBrasilCell(phone) });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        outcomes[index] = { deliveryKey: item.deliveryKey, status: "failed", ok: false, retryable: false, error: msg };
+        failLogs.push(
+          logRow({
+            id: crypto.randomUUID(),
+            to_phone: item.to,
+            content: item.content,
+            status: "error",
+            provider_response: {},
+            error: msg,
+            idempotency_key: null,
+            provider_message_id: null,
+            delivery_status: "failed",
+            player_id: item.playerId,
+            trigger_name: item.triggerName ?? null,
+            tenant_id: item.tenantId,
+          }),
+        );
+      }
+    });
 
-  // b. Credits, one deterministic reservation per delivery key.
-  const prepared: Prepared[] = [];
-  await runLimited(
-    sendable.map((c, k) => ({ c, k })),
-    CREDIT_CONCURRENCY,
-    async ({ c, k }) => {
-      const link = links[k];
-      // GSM-7 form: one accent would switch the whole SMS to UCS-2 (see toGsm7Text).
-      const content = toGsm7Text(link.ok ? link.content : c.item.content);
-      const dispatchIds = link.ok ? link.links.map((l) => l.dispatchId) : [];
-      // Segments counted on the FINAL content (post-link), never the template text.
-      const billedUnits = Math.max(1, countSmsSegments(content).segments);
-      // Reserved with the account this batch is sent through (conta própria:
-      // SQL reserves 0 when the house owns it).
-      const reservation = await reserveSmsCreditForDelivery(
-        c.item.tenantId,
-        c.item.deliveryKey,
-        billedUnits,
-        null,
-        account.id,
-      );
-      if (!reservation.ok) {
-        // reserveSmsCreditForDelivery only returns ok:false for the house's
-        // own wallet refusal (any other error throws).
+    // Consent (one query per tenant/chunk).
+    const byTenant = new Map<string, typeof candidates>();
+    for (const c of candidates) byTenant.set(c.item.tenantId, [...(byTenant.get(c.item.tenantId) ?? []), c]);
+    const sendable: typeof candidates = [];
+    for (const [tenantId, list] of byTenant) {
+      const revoked = await revokedSubjects(tenantId, list.map((c) => c.phone));
+      for (const c of list) {
+        if (!revoked.has(normalizeConsentSubject("sms", c.phone))) {
+          sendable.push(c);
+          continue;
+        }
         outcomes[c.index] = {
           deliveryKey: c.item.deliveryKey,
           status: "failed",
           ok: false,
           retryable: false,
-          errorKind: "insufficient_balance",
-          error: reservation.error,
+          suppressed: true,
+          error: "Destinatario bloqueado por consentimento",
         };
         failLogs.push(
           logRow({
-            id: logIds[k],
+            id: crypto.randomUUID(),
             to_phone: c.phone,
-            content,
+            content: c.item.content,
             status: "error",
-            provider_response: { billing_reference_id: reservation.referenceId },
-            error: reservation.error,
-            idempotency_key: null,
+            provider_response: { suppressed: true, reason: "consent_revoked" },
+            error: "Destinatario revogou o consentimento para SMS",
+            idempotency_key: c.item.deliveryKey,
             provider_message_id: null,
             delivery_status: "failed",
             player_id: c.item.playerId,
             trigger_name: c.item.triggerName ?? null,
-            tenant_id: c.item.tenantId,
+            tenant_id: tenantId,
           }),
         );
-        await markTrackedDispatchesFailed(dispatchIds);
-        return;
       }
-      prepared.push({
-        index: c.index,
-        item: c.item,
-        phone: c.phone,
-        cell: c.cell,
-        logId: logIds[k],
-        content,
-        dispatchIds,
-        billingReferenceId: reservation.referenceId,
-        billedUnits,
-      });
-    },
-  );
-  prepared.sort((a, b) => a.index - b.index);
-  if (failLogs.length > 0) await insertLogs(failLogs);
-
-  // d/e/f. One HTTP call per chunk.
-  const lotes: string[] = [];
-  let httpCalls = 0;
-  for (let offset = 0; offset < prepared.length; offset += SMS_BULK_CHUNK_SIZE) {
-    const chunk = prepared.slice(offset, offset + SMS_BULK_CHUNK_SIZE);
-    try {
-      // Write-ahead: the key counts as accepted before the request leaves.
-      await insertLogs(
-        chunk.map((p) =>
-          logRow({
-            id: p.logId,
-            to_phone: p.phone,
-            content: p.content,
-            status: "sent",
-            provider_response: {
-              bulk: true,
-              phase: "submitting",
-              billing_reference_id: p.billingReferenceId,
-              credit_reserved: Boolean(p.billingReferenceId),
-            },
-            error: null,
-            idempotency_key: p.item.deliveryKey,
-            provider_message_id: null,
-            delivery_status: "submitting",
-            player_id: p.item.playerId,
-            trigger_name: p.item.triggerName ?? null,
-            tenant_id: p.item.tenantId,
-            billed_units: p.billedUnits,
-            provider_account_id: account.id,
-          }),
-        ),
-      );
-    } catch (error) {
-      // Nothing sent: release the credits and let the caller retry later.
-      const reason = error instanceof Error ? error.message : String(error);
-      await runLimited(chunk, CREDIT_CONCURRENCY, async (p) => {
-        if (p.billingReferenceId) await refundSmsCredit(p.item.tenantId, p.billingReferenceId, reason);
-      });
-      await markTrackedDispatchesFailed(chunk.flatMap((p) => p.dispatchIds));
-      for (const p of chunk)
-        outcomes[p.index] = {
-          deliveryKey: p.item.deliveryKey,
-          status: "failed",
-          ok: false,
-          retryable: true,
-          error: reason,
-        };
-      continue;
     }
-    httpCalls++;
-    const sent = await sendChunk(account, chunk);
-    if (sent.lote) lotes.push(sent.lote);
-    chunk.forEach((p, k) => {
-      outcomes[p.index] = { deliveryKey: p.item.deliveryKey, logId: p.logId, ...sent.outcomes[k] };
-    });
+    sendable.sort((a, b) => a.index - b.index);
+
+    // c. Tracked links for every sendable item (bulk Short.io + set-based DB).
+    const logIds = sendable.map(() => crypto.randomUUID());
+    const links = await prepareTrackedTextBatch(
+      sendable.map((c, k) => ({
+        content: c.item.content,
+        context: {
+          tenantId: c.item.tenantId,
+          channel: "sms" as const,
+          sourceType: c.item.linkTrackingOrigin?.sourceType ?? "manual",
+          sourceId: c.item.linkTrackingOrigin?.sourceId ?? c.item.triggerName ?? null,
+          journeyStepId: c.item.linkTrackingOrigin?.journeyStepId ?? null,
+          journeyStepPosition: c.item.linkTrackingOrigin?.journeyStepPosition ?? null,
+          shortDomainId: c.item.linkTrackingOrigin?.shortDomainId ?? null,
+          recipientPlayerId: c.item.playerId,
+          recipientHash: c.item.linkTrackingOrigin?.recipientHash ?? null,
+          messageLogType: "sms_send_logs",
+          messageLogId: logIds[k],
+          deliveryKey: c.item.deliveryKey,
+          enabled: c.item.linkTrackingEnabled,
+        },
+      })),
+    );
+    const blocked = links.find(
+      (l): l is Extract<typeof l, { ok: false }> => !l.ok && l.fallbackMode === "block",
+    );
+    if (blocked) {
+      // Tenant chose 'block': do not send untracked; nothing charged yet.
+      throw new SmsBatchDeferredError(`Rastreamento de links indisponível: ${blocked.error}`);
+    }
+
+    // b. Credits, one deterministic reservation per delivery key.
+    const prepared: Prepared[] = [];
+    await runLimited(
+      sendable.map((c, k) => ({ c, k })),
+      CREDIT_CONCURRENCY,
+      async ({ c, k }) => {
+        const link = links[k];
+        // GSM-7 form: one accent would switch the whole SMS to UCS-2 (see toGsm7Text).
+        const content = toGsm7Text(link.ok ? link.content : c.item.content);
+        const dispatchIds = link.ok ? link.links.map((l) => l.dispatchId) : [];
+        // Segments counted on the FINAL content (post-link), never the template text.
+        const billedUnits = Math.max(1, countSmsSegments(content).segments);
+        // Reserved with the account this batch is sent through (conta própria:
+        // SQL reserves 0 when the house owns it).
+        const reservation = await reserveSmsCreditForDelivery(
+          c.item.tenantId,
+          c.item.deliveryKey,
+          billedUnits,
+          null,
+          account.id,
+        );
+        if (!reservation.ok) {
+          // reserveSmsCreditForDelivery only returns ok:false for the house's
+          // own wallet refusal (any other error throws).
+          outcomes[c.index] = {
+            deliveryKey: c.item.deliveryKey,
+            status: "failed",
+            ok: false,
+            retryable: false,
+            errorKind: "insufficient_balance",
+            error: reservation.error,
+          };
+          failLogs.push(
+            logRow({
+              id: logIds[k],
+              to_phone: c.phone,
+              content,
+              status: "error",
+              provider_response: { billing_reference_id: reservation.referenceId },
+              error: reservation.error,
+              idempotency_key: null,
+              provider_message_id: null,
+              delivery_status: "failed",
+              player_id: c.item.playerId,
+              trigger_name: c.item.triggerName ?? null,
+              tenant_id: c.item.tenantId,
+            }),
+          );
+          await markTrackedDispatchesFailed(dispatchIds);
+          return;
+        }
+        prepared.push({
+          index: c.index,
+          item: c.item,
+          phone: c.phone,
+          cell: c.cell,
+          logId: logIds[k],
+          content,
+          dispatchIds,
+          billingReferenceId: reservation.referenceId,
+          billedUnits,
+        });
+      },
+    );
+    prepared.sort((a, b) => a.index - b.index);
+    if (failLogs.length > 0) await insertLogs(failLogs);
+
+    // d/e/f. One HTTP call per chunk.
+    const lotes: string[] = [];
+    let httpCalls = 0;
+    for (let offset = 0; offset < prepared.length; offset += SMS_BULK_CHUNK_SIZE) {
+      const chunk = prepared.slice(offset, offset + SMS_BULK_CHUNK_SIZE);
+      try {
+        // Write-ahead: the key counts as accepted before the request leaves.
+        await insertLogs(
+          chunk.map((p) =>
+            logRow({
+              id: p.logId,
+              to_phone: p.phone,
+              content: p.content,
+              status: "sent",
+              provider_response: {
+                bulk: true,
+                phase: "submitting",
+                billing_reference_id: p.billingReferenceId,
+                credit_reserved: Boolean(p.billingReferenceId),
+              },
+              error: null,
+              idempotency_key: p.item.deliveryKey,
+              provider_message_id: null,
+              delivery_status: "submitting",
+              player_id: p.item.playerId,
+              trigger_name: p.item.triggerName ?? null,
+              tenant_id: p.item.tenantId,
+              billed_units: p.billedUnits,
+              provider_account_id: account.id,
+            }),
+          ),
+        );
+      } catch (error) {
+        // Nothing sent: release the credits and let the caller retry later.
+        const reason = error instanceof Error ? error.message : String(error);
+        await runLimited(chunk, CREDIT_CONCURRENCY, async (p) => {
+          if (p.billingReferenceId) await refundSmsCredit(p.item.tenantId, p.billingReferenceId, reason);
+        });
+        await markTrackedDispatchesFailed(chunk.flatMap((p) => p.dispatchIds));
+        for (const p of chunk)
+          outcomes[p.index] = {
+            deliveryKey: p.item.deliveryKey,
+            status: "failed",
+            ok: false,
+            retryable: true,
+            error: reason,
+          };
+        continue;
+      }
+      httpCalls++;
+      const sent = await sendChunk(account, chunk);
+      if (sent.lote) lotes.push(sent.lote);
+      chunk.forEach((p, k) => {
+        outcomes[p.index] = { deliveryKey: p.item.deliveryKey, logId: p.logId, ...sent.outcomes[k] };
+      });
+    }
+    return result(lotes, httpCalls);
+  } finally {
+    slot.release();
   }
-  return result(lotes, httpCalls);
 }
 
 // ------------------------------------------------------------------

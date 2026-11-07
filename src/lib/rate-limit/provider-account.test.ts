@@ -131,3 +131,25 @@ describe("classifyProviderFailure channel_disabled", () => {
     expect(classifyProviderFailure(error)).toEqual({ kind: "fail", reason: "channel_disabled", retryAfterMs: 0 });
   });
 });
+
+describe("conta própria ocupada (Task 9)", () => {
+  it.each(["sms", "email", "voice"])(
+    "%s: owned_account_busy é recuo próprio (busy), nunca o defer do 429",
+    (channel) => {
+      const decision = classifyProviderFailure(
+        new ProviderSendError({
+          channel,
+          message: "ocupada",
+          status: 429,
+          temporary: true,
+          errorKind: "owned_account_busy",
+        }),
+      );
+      expect(decision).toEqual({
+        kind: "busy",
+        reason: "owned_account_busy",
+        retryAfterMs: 30_000,
+      });
+    },
+  );
+});

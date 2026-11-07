@@ -91,6 +91,39 @@ beforeEach(() => {
   __resetTenantChannelsCacheForTests();
 });
 
+describe("runCampaignSend com a conta própria ocupada (Task 9)", () => {
+  it("para no destinatário ocupado sem log; o próximo lote o envia", async () => {
+    seed(["a@x.com", "b@x.com", "c@x.com"]);
+    vi.mocked(sendInfobipEmail)
+      .mockResolvedValueOnce(ok(1) as never)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        body: { error: "ocupada", owned_account_busy: true },
+        idempotencyKey: "k-busy",
+        temporary: true,
+        errorKind: "owned_account_busy",
+        providerAccountId: "own-1",
+      } as never)
+      .mockResolvedValue(ok(9) as never);
+
+    const first = await runCampaignSend("camp-a");
+    expect(sendInfobipEmail).toHaveBeenCalledTimes(2);
+    expect(first).toMatchObject({ enviados: 1, falhas: 0, pendentes: 0, continuaEmLotes: true });
+    expect(fake.db.rows("email_send_logs")).toHaveLength(1);
+    expect(fake.db.rows("email_campaigns")[0].status).toBe("agendada");
+
+    fake.db.rows("email_campaigns")[0].status = "enviando";
+    vi.mocked(sendInfobipEmail).mockClear();
+    const second = await runCampaignSend("camp-a");
+    expect(vi.mocked(sendInfobipEmail).mock.calls.map((c) => (c[0] as { to: string }).to)).toEqual([
+      "b@x.com",
+      "c@x.com",
+    ]);
+    expect(second).toMatchObject({ enviados: 2, falhas: 0 });
+  });
+});
+
 describe("runCampaignSend without balance", () => {
   it("stops at the first insufficient_balance and pauses the campaign", async () => {
     seed(["a@x.com", "b@x.com", "c@x.com", "d@x.com"]);

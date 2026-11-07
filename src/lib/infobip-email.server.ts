@@ -35,6 +35,11 @@ export type InfobipEmailInput = {
    * reservation and the send always use the same account.
    */
   account?: InfobipAccount;
+  /**
+   * The caller (sendInfobipEmail) already holds this account's in-flight slot
+   * (owned-account-isolation.server.ts): do not take a second one.
+   */
+  slotHeld?: boolean;
 };
 
 export type InfobipEmailResult = {
@@ -159,7 +164,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
   // Conta própria (Task 9): at most OWNED_ACCOUNT_MAX_INFLIGHT requests in
   // flight per house-owned account; over the limit nothing is sent and the
   // 429 item backoff hands it back to the queue.
-  const slot = tryAcquireAccountSlot(account);
+  const slot = input.slotHeld ? { release() {} } : tryAcquireAccountSlot(account);
   if (!slot) {
     return {
       ok: false,
@@ -167,7 +172,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       body: { error: OWNED_ACCOUNT_BUSY_MESSAGE, owned_account_busy: true },
       idempotencyKey,
       temporary: true,
-      errorKind: null,
+      errorKind: "owned_account_busy",
       providerAccountId,
     };
   }

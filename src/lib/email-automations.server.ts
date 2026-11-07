@@ -13,6 +13,7 @@ import { DEFAULT_INFOBIP_ACCOUNT_ID } from "./provider-accounts.server";
 import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
+import { OWNED_ACCOUNT_BUSY_RETRY_MS } from "./rate-limit/provider-errors.server";
 import {
   consumeBudget,
   countQueuePending,
@@ -848,6 +849,24 @@ export async function runEmailFlowDispatcher({
           error: alertError instanceof Error ? alertError.message : String(alertError),
         }),
       );
+      return;
+    }
+
+    if (!result.ok && result.errorKind === "owned_account_busy") {
+      // Conta própria (Task 9): the house's own e-mail account is at its
+      // in-flight limit. Nothing tracked, reserved nor sent: no
+      // email_send_logs row, no failed event, attempts unchanged; the item
+      // simply comes back shortly.
+      rescheduled++;
+      await supabaseAdmin
+        .from("email_flow_leads")
+        .update({
+          status: "running",
+          next_run_at: new Date(Date.now() + OWNED_ACCOUNT_BUSY_RETRY_MS).toISOString(),
+          locked_at: null,
+          locked_by: null,
+        })
+        .eq("id", plan.lead.id);
       return;
     }
 

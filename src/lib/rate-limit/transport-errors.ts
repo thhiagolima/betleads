@@ -34,6 +34,12 @@
 //                     from `provider_account`'s "no_balance" reason, which is
 //                     the provider's OWN account (Short Brasil) out of
 //                     balance.
+//   owned_account_busy: conta própria (Task 9) — the house's own provider
+//                     account already has OWNED_ACCOUNT_MAX_INFLIGHT requests in
+//                     flight on this instance. Nothing was prepared, reserved,
+//                     logged nor sent. Never a failure, never consumes an
+//                     attempt, never counts toward a no-cost defer cap: every
+//                     worker hands the item back to the queue shortly.
 //   expert_cap / expert_inactive: Área do Expert — the reservation of an
 //                     expert campaign send was refused because the expert hit
 //                     the monthly cap (or was deactivated). Nothing was sent
@@ -54,7 +60,8 @@ export type ProviderErrorKind =
   | "insufficient_balance"
   | "expert_cap"
   | "expert_inactive"
-  | "channel_disabled";
+  | "channel_disabled"
+  | "owned_account_busy";
 
 // Failures that happen before a TCP connection exists (nothing was written).
 const NOT_SENT_CODES = new Set([
@@ -117,6 +124,7 @@ export function transportErrorKind(
   | "expert_cap"
   | "expert_inactive"
   | "channel_disabled"
+  | "owned_account_busy"
 > {
   const codes = codesOf(error);
   if (codes.some((code) => NOT_SENT_CODES.has(code))) return "not_sent";
@@ -132,7 +140,8 @@ export function isProviderErrorKind(value: unknown): value is ProviderErrorKind 
     value === "outcome_unknown" ||
     value === "provider_account" ||
     value === "insufficient_balance" ||
-    value === "channel_disabled"
+    value === "channel_disabled" ||
+    value === "owned_account_busy"
   );
 }
 
