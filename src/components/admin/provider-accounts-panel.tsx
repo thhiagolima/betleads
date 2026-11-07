@@ -64,6 +64,7 @@ import {
   type OwnProviderChannel,
 } from "@/lib/own-provider.shared";
 import type { OwnProviderGrantView } from "@/lib/own-provider-admin.server";
+import { brl } from "@/lib/format";
 
 const QUERY_KEY = ["admin", "provider-accounts"] as const;
 const OWN_GRANTS_QUERY_KEY = ["admin", "own-provider-grants"] as const;
@@ -722,6 +723,102 @@ export function ownProviderPauseConfirmMessage(channel: OwnProviderChannel): str
   return `Os envios de ${OWN_PROVIDER_CHANNEL_LABEL[channel]} desta casa vão pausar e a equipe da casa verá um aviso. Nada sai pela rota da BetLeads até você decidir.`;
 }
 
+/** "R$" em texto livre (vírgula ou ponto) -> centavos inteiros, `null` se inválido (vazio, não
+ * numérico, ou negativo). "0" é válido: a taxa pode ser zero. */
+export function parseFeeInputCents(raw: string): number | null {
+  const trimmed = raw.trim().replace(",", ".");
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100);
+}
+
+/** Mensagem de confirmação ao salvar a taxa mensal de um canal (fix round 1: toda mudança de
+ * valor cobrado pede confirmação, como as outras ações de cobrança do painel). */
+export function ownProviderFeeConfirmMessage(channel: OwnProviderChannel, cents: number): string {
+  return `A taxa mensal de ${OWN_PROVIDER_CHANNEL_LABEL[channel]} desta casa passa a ser ${brl(cents / 100)} a partir da próxima fatura.`;
+}
+
+type SetOwnGrantVars = {
+  tenantId: string;
+  channel: OwnProviderChannel;
+  allowed: boolean;
+  monthlyFeeCents: number;
+};
+
+/**
+ * O que o Switch "Permitir conta própria" chama ao mudar (fix round 1): ligar pede a taxa mensal
+ * na hora (sem ela a concessão nunca teria um valor digitado) e manda os dois juntos; desligar
+ * pede a confirmação de pausa de sempre. Função pura e exportada (independente de estado do
+ * componente) para ser testável sem simular um evento de DOM — este repo não tem
+ * @testing-library/react nem jsdom (ver link-domain-dialog.test.tsx).
+ */
+export function createOwnProviderToggleHandler(opts: {
+  tenant: TenantProvidersRow;
+  channel: OwnProviderChannel;
+  feeCents: number;
+  feeDraft: string;
+  onSetGrant: (vars: SetOwnGrantVars) => void;
+}) {
+  return async (next: boolean) => {
+    const { tenant, channel, feeCents, feeDraft, onSetGrant } = opts;
+    if (next) {
+      const typed = await requestTextInput({
+        title: `Permitir conta própria de ${OWN_PROVIDER_CHANNEL_LABEL[channel]} para ${tenant.nome}?`,
+        description:
+          "A casa poderá ligar a conta própria deste canal. Defina a taxa mensal cobrada da casa por isso (pode ser 0).",
+        label: "Taxa mensal (R$)",
+        placeholder: "0,00",
+        initialValue: feeDraft,
+        confirmLabel: "Permitir",
+      });
+      if (typed === null) return;
+      const cents = parseFeeInputCents(typed);
+      if (cents === null) {
+        toast.error("Informe uma taxa válida em R$ (0 ou mais).");
+        return;
+      }
+      onSetGrant({ tenantId: tenant.id, channel, allowed: true, monthlyFeeCents: cents });
+    } else {
+      const ok = await requestConfirmation({
+        title: `Desligar conta própria de ${OWN_PROVIDER_CHANNEL_LABEL[channel]} para ${tenant.nome}?`,
+        description: ownProviderPauseConfirmMessage(channel),
+        confirmLabel: "Desligar",
+        destructive: true,
+      });
+      if (!ok) return;
+      onSetGrant({ tenantId: tenant.id, channel, allowed: false, monthlyFeeCents: feeCents });
+    }
+  };
+}
+
+/**
+ * O que o botão "Salvar" da taxa mensal chama (fix round 1: nunca grava no blur — toda troca de
+ * valor cobrado pede confirmação antes). Mesma razão de ser exportada/pura que o toggle acima.
+ */
+export function createOwnProviderSaveFeeHandler(opts: {
+  tenant: TenantProvidersRow;
+  channel: OwnProviderChannel;
+  allowed: boolean;
+  draftCents: number | null;
+  onSetGrant: (vars: SetOwnGrantVars) => void;
+}) {
+  return async () => {
+    const { tenant, channel, allowed, draftCents, onSetGrant } = opts;
+    if (draftCents === null) {
+      toast.error("Informe uma taxa válida em R$ (0 ou mais).");
+      return;
+    }
+    const ok = await requestConfirmation({
+      title: `Taxa mensal de ${OWN_PROVIDER_CHANNEL_LABEL[channel]}`,
+      description: ownProviderFeeConfirmMessage(channel, draftCents),
+      confirmLabel: "Salvar",
+    });
+    if (!ok) return;
+    onSetGrant({ tenantId: tenant.id, channel, allowed, monthlyFeeCents: draftCents });
+  };
+}
+
 function OwnProviderGrantCell({
   tenant,
   channel,
@@ -733,12 +830,7 @@ function OwnProviderGrantCell({
   tenant: TenantProvidersRow;
   channel: OwnProviderChannel;
   grant: OwnProviderGrantView | undefined;
-  onSetGrant: (vars: {
-    tenantId: string;
-    channel: OwnProviderChannel;
-    allowed: boolean;
-    monthlyFeeCents: number;
-  }) => void;
+  onSetGrant: (vars: SetOwnGrantVars) => void;
   onResolve: (vars: {
     tenantId: string;
     channel: OwnProviderChannel;
@@ -753,30 +845,23 @@ function OwnProviderGrantCell({
     setFeeDraft(String(feeCents / 100));
   }, [feeCents]);
 
-  async function toggleAllowed(next: boolean) {
-    if (!next && allowed) {
-      const ok = await requestConfirmation({
-        title: `Desligar conta própria de ${OWN_PROVIDER_CHANNEL_LABEL[channel]} para ${tenant.nome}?`,
-        description: ownProviderPauseConfirmMessage(channel),
-        confirmLabel: "Desligar",
-        destructive: true,
-      });
-      if (!ok) return;
-    }
-    const cents = Math.round(Number(feeDraft || "0") * 100);
-    onSetGrant({
-      tenantId: tenant.id,
-      channel,
-      allowed: next,
-      monthlyFeeCents: Number.isFinite(cents) && cents >= 0 ? cents : feeCents,
-    });
-  }
+  const draftCents = parseFeeInputCents(feeDraft);
+  const feeChanged = draftCents !== null && draftCents !== feeCents;
 
-  function commitFee() {
-    const cents = Math.round(Number(feeDraft || "0") * 100);
-    if (!Number.isFinite(cents) || cents < 0 || cents === feeCents) return;
-    onSetGrant({ tenantId: tenant.id, channel, allowed, monthlyFeeCents: cents });
-  }
+  const toggleAllowed = createOwnProviderToggleHandler({
+    tenant,
+    channel,
+    feeCents,
+    feeDraft,
+    onSetGrant,
+  });
+  const saveFee = createOwnProviderSaveFeeHandler({
+    tenant,
+    channel,
+    allowed,
+    draftCents,
+    onSetGrant,
+  });
 
   return (
     <div className="mt-2 space-y-1.5 border-t pt-2">
@@ -800,9 +885,17 @@ function OwnProviderGrantCell({
             step="0.01"
             value={feeDraft}
             onChange={(e) => setFeeDraft(e.target.value)}
-            onBlur={commitFee}
             className="h-7 w-24 text-meta"
           />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!feeChanged || pending}
+            onClick={() => void saveFee()}
+          >
+            Salvar
+          </Button>
         </div>
       )}
       <div className="text-meta text-muted-foreground">{ownProviderStateLabel(grant)}</div>

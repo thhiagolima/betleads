@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const queryState = { data: undefined as unknown, isLoading: false };
 /** Task 12: `ProviderAccountsPanel` now also queries the own-provider grants list
@@ -65,13 +65,21 @@ import {
   AccountsCard,
   ProviderAccountsPanel,
   TenantProvidersCard,
+  createOwnProviderSaveFeeHandler,
+  createOwnProviderToggleHandler,
+  ownProviderFeeConfirmMessage,
   ownProviderPauseConfirmMessage,
   ownProviderStateLabel,
+  parseFeeInputCents,
   tenantChannelAccountOptions,
   type TenantProvidersRow,
 } from "./provider-accounts-panel";
+import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import type { ProviderAccountView } from "@/lib/provider-accounts-admin.server";
 import type { OwnProviderGrantView } from "@/lib/own-provider-admin.server";
+
+const mockedRequestConfirmation = requestConfirmation as unknown as ReturnType<typeof vi.fn>;
+const mockedRequestTextInput = requestTextInput as unknown as ReturnType<typeof vi.fn>;
 
 const houses = (sms = 0, email = 0, voice = 0, webpush = 0) => ({ sms, email, voice, webpush });
 const channels = (sms = true, email = true, voice = true, webpush = false) => ({
@@ -581,5 +589,230 @@ describe("tenantChannelAccountOptions", () => {
     const otherChannel = account({ id: "voice-only", channels: ["voice"] });
     const options = tenantChannelAccountOptions([disabled, otherChannel], "sms");
     expect(options).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1: enable asks for the fee up front; the fee field never saves on
+// blur — only an explicit "Salvar" after a confirmation, like every other
+// billing change in this panel.
+// ---------------------------------------------------------------------------
+
+afterEach(() => {
+  mockedRequestConfirmation.mockReset().mockResolvedValue(true);
+  mockedRequestTextInput.mockReset().mockResolvedValue(null);
+});
+
+function tenantGrantRow(overrides: Partial<TenantProvidersRow> = {}): TenantProvidersRow {
+  return tenantRow(overrides);
+}
+
+describe("parseFeeInputCents", () => {
+  it("aceita 0", () => {
+    expect(parseFeeInputCents("0")).toBe(0);
+  });
+
+  it("converte vírgula e ponto para centavos", () => {
+    expect(parseFeeInputCents("75,50")).toBe(7550);
+    expect(parseFeeInputCents("75.50")).toBe(7550);
+  });
+
+  it("rejeita vazio, não numérico e negativo", () => {
+    expect(parseFeeInputCents("")).toBeNull();
+    expect(parseFeeInputCents("  ")).toBeNull();
+    expect(parseFeeInputCents("abc")).toBeNull();
+    expect(parseFeeInputCents("-1")).toBeNull();
+  });
+});
+
+describe("ownProviderFeeConfirmMessage", () => {
+  it("monta a mensagem com o canal e o valor formatado em R$", () => {
+    expect(ownProviderFeeConfirmMessage("sms", 5000)).toBe(
+      "A taxa mensal de SMS desta casa passa a ser R$\u00A050,00 a partir da próxima fatura.",
+    );
+  });
+});
+
+describe("createOwnProviderToggleHandler", () => {
+  it("ligar sem informar a taxa (fecha o diálogo) não chama onSetGrant", async () => {
+    mockedRequestTextInput.mockResolvedValueOnce(null);
+    const onSetGrant = vi.fn();
+    const handler = createOwnProviderToggleHandler({
+      tenant: tenantGrantRow(),
+      channel: "sms",
+      feeCents: 0,
+      feeDraft: "0",
+      onSetGrant,
+    });
+
+    await handler(true);
+
+    expect(mockedRequestTextInput).toHaveBeenCalledTimes(1);
+    expect(onSetGrant).not.toHaveBeenCalled();
+  });
+
+  it("ligar com uma taxa válida chama onSetGrant com allowed:true e a taxa digitada", async () => {
+    mockedRequestTextInput.mockResolvedValueOnce("75,50");
+    const onSetGrant = vi.fn();
+    const handler = createOwnProviderToggleHandler({
+      tenant: tenantGrantRow(),
+      channel: "sms",
+      feeCents: 0,
+      feeDraft: "0",
+      onSetGrant,
+    });
+
+    await handler(true);
+
+    expect(onSetGrant).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      channel: "sms",
+      allowed: true,
+      monthlyFeeCents: 7550,
+    });
+  });
+
+  it("ligar com uma taxa inválida não chama onSetGrant", async () => {
+    mockedRequestTextInput.mockResolvedValueOnce("abc");
+    const onSetGrant = vi.fn();
+    const handler = createOwnProviderToggleHandler({
+      tenant: tenantGrantRow(),
+      channel: "sms",
+      feeCents: 0,
+      feeDraft: "0",
+      onSetGrant,
+    });
+
+    await handler(true);
+
+    expect(onSetGrant).not.toHaveBeenCalled();
+  });
+
+  it("desligar sem confirmar não chama onSetGrant", async () => {
+    mockedRequestConfirmation.mockResolvedValueOnce(false);
+    const onSetGrant = vi.fn();
+    const handler = createOwnProviderToggleHandler({
+      tenant: tenantGrantRow(),
+      channel: "sms",
+      feeCents: 5000,
+      feeDraft: "50",
+      onSetGrant,
+    });
+
+    await handler(false);
+
+    expect(mockedRequestConfirmation).toHaveBeenCalledTimes(1);
+    expect(onSetGrant).not.toHaveBeenCalled();
+  });
+
+  it("desligar e confirmar chama onSetGrant com allowed:false mantendo a taxa gravada", async () => {
+    mockedRequestConfirmation.mockResolvedValueOnce(true);
+    const onSetGrant = vi.fn();
+    const handler = createOwnProviderToggleHandler({
+      tenant: tenantGrantRow(),
+      channel: "sms",
+      feeCents: 5000,
+      feeDraft: "50",
+      onSetGrant,
+    });
+
+    await handler(false);
+
+    expect(onSetGrant).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      channel: "sms",
+      allowed: false,
+      monthlyFeeCents: 5000,
+    });
+  });
+});
+
+describe("createOwnProviderSaveFeeHandler", () => {
+  it("nunca é chamado sozinho (sem clique) — não há onBlur: salvar exige o handler explícito", () => {
+    // This is enforced by the component wiring (no onBlur on the Input any more); the
+    // behavioral guarantee itself — confirm-then-call — is covered by the next two tests.
+    expect(typeof createOwnProviderSaveFeeHandler).toBe("function");
+  });
+
+  it("não chama onSetGrant sem confirmar", async () => {
+    mockedRequestConfirmation.mockResolvedValueOnce(false);
+    const onSetGrant = vi.fn();
+    const handler = createOwnProviderSaveFeeHandler({
+      tenant: tenantGrantRow(),
+      channel: "sms",
+      allowed: true,
+      draftCents: 7550,
+      onSetGrant,
+    });
+
+    await handler();
+
+    expect(mockedRequestConfirmation).toHaveBeenCalledTimes(1);
+    expect(onSetGrant).not.toHaveBeenCalled();
+  });
+
+  it("chama onSetGrant com a taxa digitada só depois de confirmar", async () => {
+    mockedRequestConfirmation.mockResolvedValueOnce(true);
+    const onSetGrant = vi.fn();
+    const handler = createOwnProviderSaveFeeHandler({
+      tenant: tenantGrantRow(),
+      channel: "sms",
+      allowed: true,
+      draftCents: 7550,
+      onSetGrant,
+    });
+
+    await handler();
+
+    expect(mockedRequestConfirmation).toHaveBeenCalledWith(
+      expect.objectContaining({ description: ownProviderFeeConfirmMessage("sms", 7550) }),
+    );
+    expect(onSetGrant).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      channel: "sms",
+      allowed: true,
+      monthlyFeeCents: 7550,
+    });
+  });
+
+  it("taxa inválida nunca chama requestConfirmation nem onSetGrant", async () => {
+    const onSetGrant = vi.fn();
+    const handler = createOwnProviderSaveFeeHandler({
+      tenant: tenantGrantRow(),
+      channel: "sms",
+      allowed: true,
+      draftCents: null,
+      onSetGrant,
+    });
+
+    await handler();
+
+    expect(mockedRequestConfirmation).not.toHaveBeenCalled();
+    expect(onSetGrant).not.toHaveBeenCalled();
+  });
+});
+
+describe("TenantProvidersCard — botão Salvar da taxa mensal", () => {
+  it('mostra o botão "Salvar" desabilitado quando a taxa não mudou', () => {
+    const grant: OwnProviderGrantView = {
+      tenantId: "tenant-1",
+      channel: "sms",
+      allowed: true,
+      monthlyFeeCents: 5000,
+      pendingDecision: false,
+      account: null,
+      active: false,
+    };
+    const html = renderToStaticMarkup(
+      <TenantProvidersCard
+        accounts={[]}
+        tenants={[tenantRow()]}
+        defaults={{} as Record<string, string>}
+        grants={[grant]}
+        loading={false}
+      />,
+    );
+    expect(html).toMatch(/Salvar<\/button>/);
+    expect(html).toMatch(/disabled=""[^]*?Salvar|Salvar[^]*?disabled=""/);
   });
 });
