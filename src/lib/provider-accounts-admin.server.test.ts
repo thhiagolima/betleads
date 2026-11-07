@@ -625,6 +625,65 @@ describe("provider accounts admin", () => {
     });
   });
 
+  describe("adminTestProviderAccountFor re-validates legacy db accounts", () => {
+    // A row saved before the host allowlist existed (Task 7) could still
+    // carry a base_url/URL outside it; "Testar" must re-check a db-sourced
+    // account (not one of the 3 fixed env ids) before any network call, not
+    // just trust what was stored in `config`.
+    it("Infobip: a legacy base_url outside the allowlist returns the generic failure and fetch is never called", async () => {
+      const id = await create(
+        {
+          provider: "infobip",
+          label: "Infobip legada",
+          channels: ["email"],
+          config: { base_url: "https://b.api.infobip.com" },
+          credentials: { api_key: "k" },
+        },
+        "c0c0c0c0-0000-4000-8000-000000000000",
+      );
+      // Simulate a row saved before this allowlist existed.
+      fake.db.rows("provider_accounts").find((r) => r.id === id)!.config = {
+        base_url: "https://evil.example.com",
+      };
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await adminTestProviderAccountFor(ADMIN, { id });
+
+      expect(result).toEqual({
+        ok: false,
+        message: "Não foi possível conectar com essa conta. Confira as credenciais e o endereço.",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("Short Brasil: a legacy single_url outside the allowlist returns the generic failure and the SMS is never sent", async () => {
+      const id = await create(
+        {
+          provider: "short_brasil",
+          label: "Short Brasil legada",
+          channels: ["sms"],
+          credentials: { usuario: "u", chave: "c" },
+        },
+        "c1c1c1c1-0000-4000-8000-000000000000",
+      );
+      // Simulate a row saved before this allowlist existed.
+      fake.db.rows("provider_accounts").find((r) => r.id === id)!.config = {
+        single_url: "https://evil.example.com/single-sms.php",
+      };
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await adminTestProviderAccountFor(ADMIN, { id, phone: "11999999999" });
+
+      expect(result).toEqual({
+        ok: false,
+        message: "Não foi possível conectar com essa conta. Confira as credenciais e o endereço.",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
   describe("platform default per channel", () => {
     it("sets a chosen db account as the default; audits before/after; invalidates the cache", async () => {
       const id = await create(

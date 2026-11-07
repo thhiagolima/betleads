@@ -600,12 +600,19 @@ export async function adminTestProviderAccountFor(
   const account = await loadProviderAccountForAdmin(data.id);
   let result: ProviderAccountTestResult;
 
+  // Contas env (as 3 fixas de id) leem a URL do ambiente; o config salvo no
+  // banco por uma conta anterior a este allowlist pode ainda apontar para um
+  // host fora dele — validar de novo aqui, antes de qualquer chamada, para
+  // que uma conta "legada" não vire um SSRF via "Testar".
+  const isEnvAccount = ENV_ACCOUNT_IDS.has(account.id);
+
   if (account.provider === "infobip") {
     if (!infobipConfigured(account)) {
       result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
     } else {
       try {
-        const response = await providerFetch(`${account.baseUrl}/account/1/balance`, {
+        const baseUrl = isEnvAccount ? account.baseUrl : assertInfobipBaseUrl(account.baseUrl);
+        const response = await providerFetch(`${baseUrl}/account/1/balance`, {
           headers: { Accept: "application/json", Authorization: `App ${account.apiKey}` },
           timeoutMs: TEST_TIMEOUT_MS,
         });
@@ -655,6 +662,12 @@ export async function adminTestProviderAccountFor(
     const phone = requireBrazilianPhone(data.phone);
     const { postShortBrasilSingle } = await import("@/lib/sms.functions");
     try {
+      if (!isEnvAccount) {
+        // A URL que postShortBrasilSingle realmente usa: a da API Short Code
+        // quando há token, senão a de envio individual.
+        if (account.shortcodeToken) assertShortBrasilUrl("shortcode_url", account.shortcodeUrl);
+        else assertShortBrasilUrl("single_url", account.singleUrl);
+      }
       const r = await postShortBrasilSingle(
         account,
         phone,

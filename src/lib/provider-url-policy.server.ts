@@ -66,13 +66,13 @@ export function assertShortBrasilUrl(field: ShortBrasilField, value: string): st
   }
   const host = url.hostname.toLowerCase();
   const hostPolicy = SHORT_BRASIL_HOSTS[host];
-  if (!hostPolicy || url.username !== "" || url.password !== "") {
+  if (!hostPolicy || url.username !== "" || url.password !== "" || url.port !== "") {
     throw new Error(message);
   }
   if (url.protocol !== "https:" && !(url.protocol === "http:" && !hostPolicy.requireHttps)) {
     throw new Error(message);
   }
-  return value;
+  return url.href;
 }
 
 /** Fetch wrapper for connection tests: redirects are never followed (a 3xx

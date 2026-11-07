@@ -2,7 +2,12 @@
 // Each call runs against one Infobip account (provider-accounts.server.ts):
 // the house's e-mail account, defaulting to the platform account.
 import type { DnsRecord } from "@/lib/house-config";
-import { envInfobipAccount, type InfobipAccount } from "@/lib/provider-accounts.server";
+import {
+  envInfobipAccount,
+  ENV_ACCOUNT_IDS,
+  type InfobipAccount,
+} from "@/lib/provider-accounts.server";
+import { assertInfobipBaseUrl } from "@/lib/provider-url-policy.server";
 import { DomainProviderError, type ProviderDomain } from "./shortio-domains.server";
 
 type InfobipDnsRecord = {
@@ -29,7 +34,20 @@ function requireConfig(account: InfobipAccount): { apiKey: string; baseUrl: stri
       "INFOBIP_BASE_URL ou INFOBIP_API_KEY não configurado no servidor",
     );
   }
-  return { apiKey: key, baseUrl: url };
+  // Contas env (as 3 fixas de id) leem a URL do ambiente; o config salvo no
+  // banco por uma conta anterior a este allowlist pode ainda apontar para um
+  // host fora dele — validar de novo aqui, antes de qualquer chamada ao
+  // provedor, para que uma conta "legada" não vire um SSRF.
+  if (ENV_ACCOUNT_IDS.has(account.id)) return { apiKey: key, baseUrl: url };
+  try {
+    return { apiKey: key, baseUrl: assertInfobipBaseUrl(url) };
+  } catch (error) {
+    throw new DomainProviderError(
+      "UNAVAILABLE",
+      0,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 function authHeaders(apiKey: string): Record<string, string> {

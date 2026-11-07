@@ -104,6 +104,12 @@ describe("assertShortBrasilUrl", () => {
     ).toThrow(/Short Brasil/);
   });
 
+  it("rejects a non-default port", () => {
+    expect(() =>
+      assertShortBrasilUrl("shortcode_url", "https://api.shortcode.com.br:8443/messages"),
+    ).toThrow(/Short Brasil/);
+  });
+
   it("rejects an invalid URL", () => {
     expect(() => assertShortBrasilUrl("shortcode_url", "not a url")).toThrow(/Short Brasil/);
   });

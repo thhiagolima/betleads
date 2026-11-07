@@ -160,6 +160,29 @@ describe("createInfobipDomain", () => {
     await expect(createInfobipDomain("mail.x.com")).rejects.toMatchObject({ code: "UNAVAILABLE" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("throws DomainProviderError UNAVAILABLE without calling fetch for a legacy db account whose base_url is outside the allowlist", async () => {
+    // A row saved before the host allowlist existed (Task 7) could still
+    // point anywhere; a db-sourced account (not one of the 3 fixed env ids)
+    // must be re-validated here, not just trusted from `config`.
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const legacyAccount = {
+      id: "11111111-1111-4111-8111-111111111111",
+      provider: "infobip" as const,
+      label: "Infobip legada",
+      ownerTenantId: null,
+      baseUrl: "https://evil.example.com",
+      apiKey: "k",
+      voiceFrom: "",
+      smsFrom: "",
+    };
+
+    await expect(createInfobipDomain("mail.x.com", legacyAccount)).rejects.toMatchObject({
+      code: "UNAVAILABLE",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("getInfobipDomain", () => {
