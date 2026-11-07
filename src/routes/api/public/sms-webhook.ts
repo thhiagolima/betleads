@@ -11,8 +11,13 @@ import {
 } from "@/lib/sms-callback-parse";
 
 // Callback Short Brasil SMS.
-// URL sugerida:
-//   https://seu-dominio.com/api/public/sms-webhook?token=<SHORT_BRASIL_WEBHOOK_SECRET>
+// URL cadastrada na Short Brasil (sem token):
+//   https://seu-dominio.com/api/public/sms-webhook
+//
+// Com ?token= na URL a Short Brasil devolvia só {"lote":[{"token":...}]}, sem
+// id nem status (2026-11-07), então o token deixou de ser obrigatório. Um token
+// enviado ainda precisa estar certo; sem token, a chamada só atualiza envios
+// existentes e nunca cria linha "callback-orphan".
 //
 // A Short Brasil envia callbacks Single via HTTP/GET e pode enviar callbacks
 // Bulk em JSON com { lote: [...] }. Sempre respondemos 200 depois da
@@ -51,19 +56,19 @@ function extractToken(request: Request): string | null {
   return headerToken ? headerToken.trim() : null;
 }
 
-function authorizeCallback(request: Request): Response | null {
-  const expected = process.env.SHORT_BRASIL_WEBHOOK_SECRET;
-  if (!expected) {
-    return Response.json(
-      { ok: false, error: "SHORT_BRASIL_WEBHOOK_SECRET not configured" },
-      { status: 500, headers: CORS },
-    );
-  }
+/** `authenticated` is false for a callback that sent no token at all. */
+function authorizeCallback(
+  request: Request,
+): { rejected: Response; authenticated?: never } | { rejected?: never; authenticated: boolean } {
   const got = extractToken(request);
-  if (!got || !timingSafeEqualStr(got, expected)) {
-    return Response.json({ ok: false, error: "unauthorized" }, { status: 401, headers: CORS });
+  if (!got) return { authenticated: false };
+  const expected = process.env.SHORT_BRASIL_WEBHOOK_SECRET;
+  if (!expected || !timingSafeEqualStr(got, expected)) {
+    return {
+      rejected: Response.json({ ok: false, error: "unauthorized" }, { status: 401, headers: CORS }),
+    };
   }
-  return null;
+  return { authenticated: true };
 }
 
 function pickStr(obj: CallbackPayload, ...keys: string[]): string | null {
@@ -155,7 +160,10 @@ function logUnrecognizedShape(
   });
 }
 
-async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
+async function updateFromPayload(
+  payload: CallbackPayload,
+  options: { allowOrphan: boolean },
+): Promise<boolean> {
   const providerMessageId = pickStr(payload, "id", "message_id", "messageId", "sms_id", "smsId");
   const idempotencyKey = pickStr(payload, "parceiroId", "idempotency_key", "idempotencyKey");
   const status = normalizeShortBrasilStatus(payload);
@@ -224,7 +232,8 @@ async function updateFromPayload(payload: CallbackPayload): Promise<boolean> {
       .like("idempotency_key", `${idempotencyKey}:%`);
   }
 
-  if (!matched) {
+  // An unauthenticated caller can only touch sends that already exist.
+  if (!matched && options.allowOrphan) {
     await supabaseAdmin.from("sms_send_logs").insert({
       to_phone: pickStr(payload, "celular", "to", "phone", "destination") ?? "unknown",
       content: pickStr(payload, "mensagem") ?? "(callback sem envio correspondente)",
@@ -273,8 +282,8 @@ async function saveRawCallback(request: Request, body: string): Promise<number |
 }
 
 async function handleCallback(request: Request): Promise<Response> {
-  const unauthorized = authorizeCallback(request);
-  if (unauthorized) return unauthorized;
+  const auth = authorizeCallback(request);
+  if (auth.rejected) return auth.rejected;
 
   let processed = 0;
   let matched = 0;
@@ -296,7 +305,7 @@ async function handleCallback(request: Request): Promise<Response> {
         continue;
       }
       processed++;
-      if (await updateFromPayload(payload)) matched++;
+      if (await updateFromPayload(payload, { allowOrphan: auth.authenticated })) matched++;
     }
     if (unidentified > 0) logUnrecognizedShape(request, payloads, bodyText);
   } catch (err) {
