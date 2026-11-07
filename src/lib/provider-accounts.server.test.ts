@@ -32,6 +32,7 @@ import {
   DEFAULT_ONESIGNAL_ACCOUNT_ID,
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
   ENV_ACCOUNT_IDS,
+  isOwnedAccount,
   oneSignalAccountById,
   platformDefaultAccountId,
   PROVIDER_ACCOUNTS_CACHE_MS,
@@ -75,6 +76,7 @@ async function ownSmsAccount(overrides: Row = {}): Promise<Row> {
     credentials_encrypted: await encryptProviderCredentials({ shortcode_token: "own-token" }),
     config: { shortcode_url: "https://own.example.test/messages" },
     status: "active",
+    owner_tenant_id: null,
     ...overrides,
   };
 }
@@ -89,6 +91,7 @@ async function ownOneSignalAccount(overrides: Row = {}): Promise<Row> {
     credentials_encrypted: await encryptProviderCredentials({ org_api_key: "own-org-key" }),
     config: { org_id: "own-org-id" },
     status: "active",
+    owner_tenant_id: null,
     ...overrides,
   };
 }
@@ -103,6 +106,7 @@ async function ownInfobipAccount(overrides: Row = {}): Promise<Row> {
     credentials_encrypted: await encryptProviderCredentials({ api_key: "own-key" }),
     config: { base_url: "https://own.api.infobip.test/", voice_from: "+55 11 3000-0000" },
     status: "active",
+    owner_tenant_id: null,
     ...overrides,
   };
 }
@@ -257,6 +261,45 @@ describe("resolveChannelAccount", () => {
     state.failReads = true;
     vi.advanceTimersByTime(PROVIDER_ACCOUNTS_CACHE_MS + 1);
     expect((await resolveSmsAccount(TENANT)).id).toBe(OWN_SMS);
+  });
+
+  it("conta da casa vem com ownerTenantId", async () => {
+    state.tables.provider_accounts.push(await ownSmsAccount({ owner_tenant_id: TENANT }));
+    assign(TENANT, "sms", OWN_SMS);
+    const sms = await resolveSmsAccount(TENANT);
+    expect(sms.ownerTenantId).toBe(TENANT);
+    expect(isOwnedAccount(sms)).toBe(true);
+  });
+
+  it("conta com dono da Short Brasil ignora URLs do config", async () => {
+    state.tables.provider_accounts.push(
+      await ownSmsAccount({
+        owner_tenant_id: TENANT,
+        config: {
+          single_url: "http://evil.example.test/single",
+          bulk_url: "http://evil.example.test/bulk",
+          shortcode_url: "http://evil.example.test/messages",
+        },
+      }),
+    );
+    assign(TENANT, "sms", OWN_SMS);
+    const sms = await resolveSmsAccount(TENANT);
+    expect(sms).toMatchObject({
+      singleUrl: "http://lp01-short.painelsms.com/bot/single-sms.php",
+      bulkUrl: "http://lp01-short.painelsms.com/bot/bulk-sms.php",
+      shortcodeUrl: "https://api.shortcode.com.br/messages",
+    });
+  });
+
+  it("conta da plataforma tem ownerTenantId null", async () => {
+    const sms = await resolveSmsAccount(null);
+    expect(sms.ownerTenantId).toBeNull();
+    expect(isOwnedAccount(sms)).toBe(false);
+
+    state.tables.provider_accounts.push(await ownSmsAccount({ owner_tenant_id: null }));
+    assign(OTHER_TENANT, "sms", OWN_SMS);
+    const other = await resolveSmsAccount(OTHER_TENANT);
+    expect(other.ownerTenantId).toBeNull();
   });
 
   it("an extra 'env' account reuses the env credentials under its own id", async () => {

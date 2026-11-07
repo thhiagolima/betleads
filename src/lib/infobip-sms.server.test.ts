@@ -6,6 +6,7 @@ const ACCOUNT: InfobipAccount = {
   id: "55555555-5555-4555-8555-555555555555",
   provider: "infobip",
   label: "Infobip Casa Um",
+  ownerTenantId: null,
   baseUrl: "https://own.api.infobip.test",
   apiKey: "own-key",
   voiceFrom: "",

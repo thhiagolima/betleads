@@ -43,10 +43,23 @@ const DEFAULT_SHORT_BRASIL_SINGLE_URL = "http://lp01-short.painelsms.com/bot/sin
 const DEFAULT_SHORT_BRASIL_BULK_URL = "http://lp01-short.painelsms.com/bot/bulk-sms.php";
 const DEFAULT_SHORTCODE_MESSAGES_URL = "https://api.shortcode.com.br/messages";
 
+/**
+ * URLs da Short Brasil para contas com dono (conta própria de provedor):
+ * sempre as padrão do módulo, nunca o `config` da linha — o `config` de uma
+ * conta com dono não é confiável para apontar URLs de envio.
+ */
+export const OWNED_SHORT_BRASIL_URLS = {
+  singleUrl: DEFAULT_SHORT_BRASIL_SINGLE_URL,
+  bulkUrl: DEFAULT_SHORT_BRASIL_BULK_URL,
+  shortcodeUrl: DEFAULT_SHORTCODE_MESSAGES_URL,
+} as const;
+
 export type ShortBrasilAccount = {
   id: string;
   provider: "short_brasil";
   label: string;
+  /** Casa dona da conta (conta própria de provedor); null = conta da plataforma. */
+  ownerTenantId: string | null;
   /** API Bearer (Short Code). Vazio = API legada usuario/chave. */
   shortcodeToken: string;
   shortcodeUrl: string;
@@ -60,6 +73,8 @@ export type InfobipAccount = {
   id: string;
   provider: "infobip";
   label: string;
+  /** Casa dona da conta (conta própria de provedor); null = conta da plataforma. */
+  ownerTenantId: string | null;
   /** Sem barra final; vazio quando não configurado. */
   baseUrl: string;
   apiKey: string;
@@ -78,11 +93,18 @@ export type OneSignalAccount = {
   id: string;
   provider: "onesignal";
   label: string;
+  /** Casa dona da conta (conta própria de provedor); null = conta da plataforma. */
+  ownerTenantId: string | null;
   /** Chave da organização (secreta). Vazia = não configurada. */
   orgApiKey: string;
   /** Opcional: várias organizações podem ser atendidas pela mesma chave. */
   orgId: string;
 };
+
+/** True quando a conta pertence a uma casa (conta própria de provedor), não à plataforma. */
+export function isOwnedAccount(account: { ownerTenantId: string | null }): boolean {
+  return account.ownerTenantId !== null;
+}
 
 /**
  * Todas as contas de provedor, SMS/e-mail/voz (ProviderAccount) e OneSignal.
@@ -118,6 +140,7 @@ export function envShortBrasilAccount(): ShortBrasilAccount {
     id: DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
     provider: "short_brasil",
     label: "Short Brasil (padrão)",
+    ownerTenantId: null,
     shortcodeToken: cleanCredential(process.env.SHORTCODE_SMS_TOKEN),
     shortcodeUrl: process.env.SHORTCODE_SMS_URL ?? DEFAULT_SHORTCODE_MESSAGES_URL,
     usuario: cleanCredential(process.env.SHORT_BRASIL_SMS_USUARIO),
@@ -133,6 +156,7 @@ export function envInfobipAccount(): InfobipAccount {
     id: DEFAULT_INFOBIP_ACCOUNT_ID,
     provider: "infobip",
     label: "Infobip (padrão)",
+    ownerTenantId: null,
     baseUrl: trimBaseUrl(process.env.INFOBIP_BASE_URL),
     apiKey: process.env.INFOBIP_API_KEY?.trim() ?? "",
     voiceFrom: process.env.INFOBIP_VOICE_FROM?.replace(/\D/g, "") ?? "",
@@ -146,6 +170,7 @@ export function envOneSignalAccount(): OneSignalAccount {
     id: DEFAULT_ONESIGNAL_ACCOUNT_ID,
     provider: "onesignal",
     label: "OneSignal (padrão)",
+    ownerTenantId: null,
     orgApiKey: cleanCredential(process.env.ONESIGNAL_ORG_API_KEY),
     orgId: cleanCredential(process.env.ONESIGNAL_ORG_ID),
   };
@@ -178,6 +203,7 @@ type AccountRow = {
   credentials_encrypted: string | null;
   config: Record<string, unknown> | null;
   status: string;
+  owner_tenant_id: string | null;
 };
 
 type OverrideRow = { tenant_id: string; channel: string; provider_account_id: string };
@@ -218,7 +244,7 @@ async function loadSnapshot(): Promise<Snapshot> {
     db()
       .from("provider_accounts")
       .select(
-        "id, provider, label, channels, credentials_source, credentials_encrypted, config, status",
+        "id, provider, label, channels, credentials_source, credentials_encrypted, config, status, owner_tenant_id",
       ),
     db().from("tenant_channel_providers").select("tenant_id, channel, provider_account_id"),
     db().from("platform_channel_defaults").select("channel, provider_account_id"),
@@ -292,17 +318,26 @@ async function buildDbAccount(row: AccountRow): Promise<AnyProviderAccount> {
     );
   }
   const config = row.config ?? {};
+  const ownerTenantId = row.owner_tenant_id ?? null;
   if (row.provider === "short_brasil") {
+    const owned = isOwnedAccount({ ownerTenantId });
     return {
       id: row.id,
       provider: "short_brasil",
       label: row.label,
+      ownerTenantId,
       shortcodeToken: cleanCredential(creds.shortcode_token),
-      shortcodeUrl: configString(config, "shortcode_url") ?? DEFAULT_SHORTCODE_MESSAGES_URL,
+      shortcodeUrl: owned
+        ? OWNED_SHORT_BRASIL_URLS.shortcodeUrl
+        : configString(config, "shortcode_url") ?? DEFAULT_SHORTCODE_MESSAGES_URL,
       usuario: cleanCredential(creds.usuario),
       chave: cleanCredential(creds.chave),
-      singleUrl: configString(config, "single_url") ?? DEFAULT_SHORT_BRASIL_SINGLE_URL,
-      bulkUrl: configString(config, "bulk_url") ?? DEFAULT_SHORT_BRASIL_BULK_URL,
+      singleUrl: owned
+        ? OWNED_SHORT_BRASIL_URLS.singleUrl
+        : configString(config, "single_url") ?? DEFAULT_SHORT_BRASIL_SINGLE_URL,
+      bulkUrl: owned
+        ? OWNED_SHORT_BRASIL_URLS.bulkUrl
+        : configString(config, "bulk_url") ?? DEFAULT_SHORT_BRASIL_BULK_URL,
     };
   }
   if (row.provider === "infobip") {
@@ -310,6 +345,7 @@ async function buildDbAccount(row: AccountRow): Promise<AnyProviderAccount> {
       id: row.id,
       provider: "infobip",
       label: row.label,
+      ownerTenantId,
       baseUrl: trimBaseUrl(configString(config, "base_url")),
       apiKey: creds.api_key?.trim() ?? "",
       voiceFrom: configString(config, "voice_from")?.replace(/\D/g, "") ?? "",
@@ -321,6 +357,7 @@ async function buildDbAccount(row: AccountRow): Promise<AnyProviderAccount> {
       id: row.id,
       provider: "onesignal",
       label: row.label,
+      ownerTenantId,
       orgApiKey: cleanCredential(creds.org_api_key),
       orgId: configString(config, "org_id") ?? "",
     };
@@ -484,7 +521,9 @@ export async function loadProviderAccountForAdmin(
   if (accountId === DEFAULT_ONESIGNAL_ACCOUNT_ID) return envOneSignalAccount();
   const { data, error } = await db()
     .from("provider_accounts")
-    .select("id, provider, label, channels, credentials_source, credentials_encrypted, config, status")
+    .select(
+      "id, provider, label, channels, credentials_source, credentials_encrypted, config, status, owner_tenant_id",
+    )
     .eq("id", accountId)
     .maybeSingle();
   if (error) throw new Error(error.message);
