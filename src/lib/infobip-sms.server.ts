@@ -9,6 +9,11 @@
 import { callbackTokenFor } from "./provider-callback-tokens.server";
 import type { InfobipAccount } from "./provider-accounts.server";
 import {
+  fetchTextWithTimeout,
+  isProviderRequestTimeout,
+  requestTimeoutMsFor,
+} from "./owned-account-isolation.server";
+import {
   transportErrorKind,
   type ProviderAccountReason,
   type ProviderErrorKind,
@@ -26,8 +31,11 @@ export type InfobipSmsResult = {
   accountReason: ProviderAccountReason | null;
   /** Operator-facing reason of a refusal. */
   errorSummary: string | null;
+  /** No HTTP response within the request timeout (owned accounts: 8 s). */
+  timedOut?: boolean;
 };
 
+/** Platform accounts; a house-owned account uses OWNED_ACCOUNT_REQUEST_TIMEOUT_MS. */
 const REQUEST_TIMEOUT_MS = 15_000;
 const NOT_SENT_MAX_ATTEMPTS = 3;
 
@@ -153,21 +161,27 @@ export async function postInfobipSms(
     ],
   };
 
+  const timeoutMs = requestTimeoutMsFor(account, REQUEST_TIMEOUT_MS);
   let response: Response;
+  let text: string;
   let attempt = 0;
   while (true) {
     attempt++;
     try {
-      response = await fetch(`${account.baseUrl}/sms/2/text/advanced`, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `App ${account.apiKey}`,
+      ({ response, text } = await fetchTextWithTimeout(
+        `${account.baseUrl}/sms/2/text/advanced`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: `App ${account.apiKey}`,
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
+        timeoutMs,
+        `Infobip não respondeu em ${timeoutMs / 1000}s`,
+      ));
       break;
     } catch (error) {
       // B1: only a request that provably never left is retried; a timeout or
@@ -185,11 +199,12 @@ export async function postInfobipSms(
         body: { error: reason, attempts: attempt },
         errorKind,
         errorSummary: `Sem resposta da Infobip: ${reason}`,
+        timedOut: isProviderRequestTimeout(error),
       };
     }
   }
 
-  const body = parseBody(await response.text());
+  const body = parseBody(text);
   const { status, messageId } = firstMessageStatus(body);
   // PENDING (group 1) is "accepted, waiting for the operator"; anything else
   // in the immediate answer (REJECTED, group 5) did not go out.

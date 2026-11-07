@@ -186,6 +186,12 @@ export type CampaignDispatchDeps = {
   /** SMS provider breaker; absent = always closed. */
   providerGate?: () => Promise<ProviderGateDecision>;
   /**
+   * Conta própria (Task 9): upper bound of concurrent sends for this
+   * campaign's account (a house-owned account's in-flight limit), so the pool
+   * never trips its own limit. null/absent = no extra bound.
+   */
+  sendConcurrencyCap?: (campaign: SmsCampaignRow) => Promise<number | null>;
+  /**
    * Recipients matching a saved audience right now (dynamic audiences): the
    * phone and, when the audience is a selection of players, the player it
    * chose (rule audiences only know phones: playerId null).
@@ -480,7 +486,9 @@ export async function processSmsCampaignTick(
   // 2. Send loop.
   const rate = Math.max(1, c.rate_per_minute ?? SMS_CAMPAIGN_DEFAULT_RATE);
   const quota = campaignTickQuota(rate, opts.tickSeconds ?? SMS_CAMPAIGN_TICK_SECONDS);
-  const concurrency = campaignConcurrency(rate);
+  const cap = deps.sendConcurrencyCap ? await deps.sendConcurrencyCap(c) : null;
+  const concurrency =
+    cap && cap > 0 ? Math.min(campaignConcurrency(rate), cap) : campaignConcurrency(rate);
   const trigger = `campanha:${c.name}:${c.route}`;
   let cursor = Math.max(0, c.sent_cursor ?? 0);
   let processedSendable = 0;

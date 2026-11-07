@@ -67,11 +67,19 @@ import { isChannelEnabled } from "./tenant-channels.server";
 import { CHANNEL_DISABLED_MESSAGE } from "./tenant-channels.shared";
 import {
   envShortBrasilAccount,
+  isOwnedAccount,
   ProviderAccountUnavailableError,
   resolveSmsAccount,
   type ShortBrasilAccount,
   type SmsAccount,
 } from "./provider-accounts.server";
+import {
+  OWNED_ACCOUNT_BUSY_MESSAGE,
+  OWNED_ACCOUNT_MAX_INFLIGHT,
+  requestTimeoutMsFor,
+  tryAcquireAccountSlot,
+} from "./owned-account-isolation.server";
+import { noteOwnedSmsTransport } from "./sms-account-gates.server";
 
 /** Items per HTTP request. The provider accepts 5000; 500 limits the blast radius. */
 export const SMS_BULK_CHUNK_SIZE = 500;
@@ -249,7 +257,14 @@ async function revokedSubjects(tenantId: string, phones: string[]): Promise<Set<
 
 type ProviderCall =
   | { kind: "response"; status: number; body: unknown }
-  | { kind: "transport"; errorKind: "not_sent" | "outcome_unknown"; error: string; attempts: number };
+  | {
+      kind: "transport";
+      errorKind: "not_sent" | "outcome_unknown";
+      error: string;
+      attempts: number;
+      /** Aborted by the request timeout (no HTTP response). */
+      timedOut: boolean;
+    };
 
 /**
  * One Short Brasil bulk request. `tenantIds` are the tenants of every item in
@@ -263,12 +278,14 @@ async function postBulk(
   payload: unknown,
 ): Promise<ProviderCall> {
   const { usuario, chave } = account;
+  // Conta própria (Task 9): a house-owned account gets OWNED_ACCOUNT_REQUEST_TIMEOUT_MS.
+  const timeoutMs = requestTimeoutMsFor(account, SMS_BULK_REQUEST_TIMEOUT_MS);
   let attempt = 0;
   while (true) {
     attempt++;
     await assertBatchTenantsCanSend(tenantIds);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), SMS_BULK_REQUEST_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(account.bulkUrl, {
         method: "POST",
@@ -288,7 +305,7 @@ async function postBulk(
       // B1: only a request that provably never left is retried.
       const errorKind = transportErrorKind(error);
       const message = controller.signal.aborted
-        ? `Short Brasil não respondeu em ${SMS_BULK_REQUEST_TIMEOUT_MS / 1000}s`
+        ? `Short Brasil não respondeu em ${timeoutMs / 1000}s`
         : error instanceof Error
           ? error.message
           : String(error);
@@ -296,7 +313,13 @@ async function postBulk(
         await new Promise((r) => setTimeout(r, 500 * attempt));
         continue;
       }
-      return { kind: "transport", errorKind, error: message, attempts: attempt };
+      return {
+        kind: "transport",
+        errorKind,
+        error: message,
+        attempts: attempt,
+        timedOut: controller.signal.aborted,
+      };
     } finally {
       clearTimeout(timeout);
     }
@@ -427,6 +450,10 @@ async function sendChunk(
     };
   };
 
+  // Conta própria (Task 9): a house-owned account at its in-flight limit is
+  // not called; the chunk is released like a 429 (refunded, retryable).
+  const slot = tryAcquireAccountSlot(account);
+  if (!slot) return wholeChunkFailed(OWNED_ACCOUNT_BUSY_MESSAGE, true, null);
   const sendStartedAt = new Date();
   let call: ProviderCall;
   try {
@@ -437,7 +464,17 @@ async function sendChunk(
     // sendSmsBatch's own guard: nothing left, so the write-ahead rows and
     // credits are released as failed (final, never retried).
     return wholeChunkFailed((error as Error).message, false, null);
+  } finally {
+    slot.release();
   }
+  // Repeated timeouts of a house-owned account open its own breaker only.
+  await noteOwnedSmsTransport({
+    account,
+    timedOut: call.kind === "transport" && call.timedOut,
+    answered: call.kind === "response",
+    sendStartedAt,
+    error: call.kind === "transport" ? call.error : `HTTP ${call.status}`,
+  });
 
   if (call.kind === "transport") {
     if (call.errorKind === "outcome_unknown") return unknown(call.error, "outcome_unknown");
@@ -747,7 +784,8 @@ export async function sendSmsBatch(
     // Bearer (Short Code) API: no per-item bulk endpoint; keep the single path.
     await runLimited(
       items.map((item, index) => ({ item, index })),
-      10,
+      // Conta própria (Task 9): never more than the account's in-flight limit.
+      isOwnedAccount(account) ? OWNED_ACCOUNT_MAX_INFLIGHT : 10,
       async ({ item, index }) => {
         const r = await sendSmsInternal({
           to: item.to,
@@ -763,11 +801,13 @@ export async function sendSmsBatch(
         const errorKind = r.ok ? undefined : (r as { errorKind?: unknown }).errorKind;
         const providerAccount = errorKind === "provider_account";
         const noBalance = errorKind === "insufficient_balance";
+        // House-owned account at its in-flight limit: nothing sent, resend later.
+        const accountBusy = "accountBusy" in r && r.accountBusy === true;
         outcomes[index] = {
           deliveryKey: item.deliveryKey,
           status: r.ok ? (alreadySent ? "already_sent" : "accepted") : "failed",
           ok: r.ok,
-          retryable: providerAccount,
+          retryable: providerAccount || accountBusy,
           ...(providerAccount ? { errorKind: "provider_account" as const } : {}),
           ...(noBalance ? { errorKind: "insufficient_balance" as const } : {}),
           error: r.ok ? undefined : (r as { error?: string }).error,

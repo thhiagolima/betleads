@@ -8,6 +8,16 @@ import {
   type InfobipAccount,
 } from "./provider-accounts.server";
 import { callbackTokenFor } from "./provider-callback-tokens.server";
+import {
+  fetchTextWithTimeout,
+  OWNED_ACCOUNT_BUSY_MESSAGE,
+  OWNED_ACCOUNT_BUSY_STATUS,
+  requestTimeoutMsFor,
+  tryAcquireAccountSlot,
+} from "./owned-account-isolation.server";
+
+/** Platform accounts; a house-owned account uses OWNED_ACCOUNT_REQUEST_TIMEOUT_MS. */
+const REQUEST_TIMEOUT_MS = 20_000;
 
 export type InfobipEmailInput = {
   to: string;
@@ -146,17 +156,37 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
     form.set("notifyContentType", "application/json");
   }
 
+  // Conta própria (Task 9): at most OWNED_ACCOUNT_MAX_INFLIGHT requests in
+  // flight per house-owned account; over the limit nothing is sent and the
+  // 429 item backoff hands it back to the queue.
+  const slot = tryAcquireAccountSlot(account);
+  if (!slot) {
+    return {
+      ok: false,
+      status: OWNED_ACCOUNT_BUSY_STATUS,
+      body: { error: OWNED_ACCOUNT_BUSY_MESSAGE, owned_account_busy: true },
+      idempotencyKey,
+      temporary: true,
+      errorKind: null,
+      providerAccountId,
+    };
+  }
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        Authorization: `App ${apiKey}`,
+    const timeoutMs = requestTimeoutMsFor(account, REQUEST_TIMEOUT_MS);
+    const { response, text } = await fetchTextWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `App ${apiKey}`,
+        },
+        body: form,
       },
-      body: form,
-      signal: AbortSignal.timeout(20_000),
-    });
-    const body = parseBody(await response.text(), response.headers.get("content-type"));
+      timeoutMs,
+      `Infobip não respondeu em ${timeoutMs / 1000}s`,
+    );
+    const body = parseBody(text, response.headers.get("content-type"));
     return {
       ok: response.ok,
       status: response.status,
@@ -175,5 +205,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       errorKind: transportErrorKind(error),
       providerAccountId,
     };
+  } finally {
+    slot.release();
   }
 }

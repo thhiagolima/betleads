@@ -836,3 +836,36 @@ describe("processSmsCampaignTick with the SMS channel disabled for the house", (
     });
   });
 });
+
+describe("conta própria: concorrência da campanha (Task 9)", () => {
+  async function peakConcurrency(cap: number | null) {
+    const recipients: CampaignTarget[] = Array.from({ length: 40 }, (_, i) => ({
+      phone: phone(i * 10),
+      playerId: null,
+    }));
+    const { deps } = world();
+    let inFlight = 0;
+    let peak = 0;
+    const send = deps.send;
+    deps.send = async (args) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setImmediate(resolve));
+      inFlight--;
+      return send(args);
+    };
+    if (cap !== null) deps.sendConcurrencyCap = async () => cap;
+    const r = await processSmsCampaignTick(campaign(recipients, { rate_per_minute: 1000 }), deps, {
+      deadline: 45_000,
+    });
+    return { peak, sent: r.sent };
+  }
+
+  it("a casa com conta própria nunca passa do limite de envios simultâneos da conta", async () => {
+    const owned = await peakConcurrency(4);
+    expect(owned.peak).toBe(4);
+    expect(owned.sent).toBe(40);
+    // Without a cap the pool keeps its own concurrency (25 at 1000/min).
+    expect((await peakConcurrency(null)).peak).toBe(25);
+  });
+});

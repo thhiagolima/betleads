@@ -168,6 +168,7 @@ export async function readSmsBreaker(
 export function describeBreakerReason(reason: string | null): string {
   if (reason === "no_balance") return "sem saldo";
   if (reason === "auth") return "autenticação/sem saldo";
+  if (reason === "timeout") return "sem resposta do provedor";
   return "conta recusada";
 }
 
@@ -226,7 +227,8 @@ function alertOpen(key: string, snapshot: BreakerSnapshot, firstTime: boolean) {
  * Never throws.
  */
 export async function reportSmsProviderAccountFailure(args: {
-  reason: ProviderAccountReason;
+  /** `timeout`: repeated timeouts of a house-owned account (sms-account-gates). */
+  reason: ProviderAccountReason | "timeout";
   error: string;
   sendStartedAt: Date;
   /** smsBreakerKey of the account that sent; default: the platform account. */

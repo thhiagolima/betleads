@@ -7,6 +7,12 @@
 //   probe  : this run holds the half-open probe of that account: exactly ONE
 //            item is sent; the others of that account wait for its verdict.
 // Houses on other accounts are never affected by an account that is down.
+//
+// Conta própria (Task 9): a house-owned account that stops answering (request
+// timeouts, OWNED_ACCOUNT_REQUEST_TIMEOUT_MS) opens ITS breaker after
+// OWNED_SMS_TIMEOUT_BREAKER_THRESHOLD consecutive timeouts on this instance
+// (noteOwnedSmsTransport). Never the platform `sms` breaker, never the global
+// 429 throttle (dispatch_rate_state 'sms').
 
 import {
   ProviderAccountUnavailableError,
@@ -14,15 +20,75 @@ import {
 } from "./provider-accounts.server";
 import {
   acquireSmsSendGate,
+  reportSmsProviderAccountFailure,
   BREAKER_CACHE_MS,
   breakerRetryAt,
   cachedSmsBreaker,
+  PLATFORM_SMS_BREAKER_KEY,
   readSmsBreaker,
   releaseSmsProbe,
   smsBreakerKey,
   smsSuspendedMessage,
   type BreakerSnapshot,
 } from "./sms-provider-breaker.server";
+
+/** Consecutive timeouts of one owned account that open its breaker. */
+export const OWNED_SMS_TIMEOUT_BREAKER_THRESHOLD = 3;
+
+const ownedTimeouts = new Map<string, number>();
+
+/** Consecutive timeouts counted for an owned account on this instance (tests/observability). */
+export function ownedSmsTimeoutCount(accountId: string): number {
+  return ownedTimeouts.get(accountId) ?? 0;
+}
+
+/** Test hook. */
+export function __resetOwnedSmsTimeoutsForTests() {
+  ownedTimeouts.clear();
+}
+
+/**
+ * Transport verdict of one SMS sent through `account`. Only house-owned
+ * accounts are counted (platform accounts: no-op). A timeout is a failure of
+ * the account: at the threshold (or straight away while its breaker is not
+ * closed, e.g. a half-open probe that timed out) the account's own breaker
+ * `sms:<id>` opens. Any HTTP answer resets the count. Never throws.
+ */
+export async function noteOwnedSmsTransport(args: {
+  account: { id: string; ownerTenantId: string | null };
+  /** The request was aborted by the timeout (no HTTP response). */
+  timedOut: boolean;
+  /** The provider answered with an HTTP status (whatever it was). */
+  answered: boolean;
+  sendStartedAt: Date;
+  error: string;
+}): Promise<void> {
+  const { account } = args;
+  if (account.ownerTenantId === null) return;
+  if (args.answered) {
+    ownedTimeouts.delete(account.id);
+    return;
+  }
+  if (!args.timedOut) return;
+  const count = (ownedTimeouts.get(account.id) ?? 0) + 1;
+  const key = smsBreakerKey(account.id);
+  if (key === PLATFORM_SMS_BREAKER_KEY) return;
+  if (count < OWNED_SMS_TIMEOUT_BREAKER_THRESHOLD && cachedSmsBreaker(key).state === "closed") {
+    ownedTimeouts.set(account.id, count);
+    return;
+  }
+  ownedTimeouts.delete(account.id);
+  console.warn("[sms-gates] conta própria sem resposta: breaker da conta", {
+    key,
+    timeouts: count,
+  });
+  await reportSmsProviderAccountFailure({
+    reason: "timeout",
+    error: args.error,
+    sendStartedAt: args.sendStartedAt,
+    key,
+  });
+}
 
 type Gate = {
   mode: "closed" | "open" | "probe";

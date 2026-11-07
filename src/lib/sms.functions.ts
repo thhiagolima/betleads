@@ -83,8 +83,16 @@ import {
   type ShortBrasilAccount,
   type SmsAccount,
 } from "./provider-accounts.server";
-import { smsBreakerKeyForTenant } from "./sms-account-gates.server";
+import { noteOwnedSmsTransport, smsBreakerKeyForTenant } from "./sms-account-gates.server";
 import { postInfobipSms } from "./infobip-sms.server";
+import {
+  fetchWithTimeout,
+  isProviderRequestTimeout,
+  OWNED_ACCOUNT_BUSY_MESSAGE,
+  OWNED_ACCOUNT_BUSY_STATUS,
+  requestTimeoutMsFor,
+  tryAcquireAccountSlot,
+} from "./owned-account-isolation.server";
 
 // Mantém a tentativa abaixo do timeout de uma server function. Sem isso, uma
 // conexão TCP bloqueada pelo provedor pode deixar o envio preso indefinidamente.
@@ -221,19 +229,22 @@ export function renderSmsVariables(
   return renderTemplate(content, vars, house);
 }
 
-async function shortBrasilFetch(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), SHORT_BRASIL_REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`Short Brasil não respondeu em ${SHORT_BRASIL_REQUEST_TIMEOUT_MS / 1000}s`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+/**
+ * Platform accounts: SHORT_BRASIL_REQUEST_TIMEOUT_MS; a house-owned account:
+ * OWNED_ACCOUNT_REQUEST_TIMEOUT_MS.
+ */
+async function shortBrasilFetch(
+  account: ShortBrasilAccount,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const timeoutMs = requestTimeoutMsFor(account, SHORT_BRASIL_REQUEST_TIMEOUT_MS);
+  return fetchWithTimeout(
+    url,
+    init,
+    timeoutMs,
+    `Short Brasil não respondeu em ${timeoutMs / 1000}s`,
+  );
 }
 
 export function getShortBrasilAppStatus(body: unknown): number | null {
@@ -358,7 +369,7 @@ export async function postShortBrasilSingle(
         api: token ? "shortcode-v1" : "short-brasil-legacy",
         attempt,
       });
-      res = await shortBrasilFetch(token ? account.shortcodeUrl : account.singleUrl, {
+      res = await shortBrasilFetch(account, token ? account.shortcodeUrl : account.singleUrl, {
         method: "POST",
         headers: token
           ? {
@@ -392,6 +403,7 @@ export async function postShortBrasilSingle(
         idempotencyKey,
         errorKind: errorKind as ProviderErrorKind,
         providerAccountId,
+        timedOut: isProviderRequestTimeout(err),
       };
     }
     if (res.status >= 500 && res.status <= 599 && attempt < maxAttempts) {
@@ -511,7 +523,7 @@ export async function callShortBrasilSmsBulk(args: {
   while (true) {
     attempt++;
     try {
-      res = await shortBrasilFetch(token ? account.shortcodeUrl : account.bulkUrl, {
+      res = await shortBrasilFetch(account, token ? account.shortcodeUrl : account.bulkUrl, {
         method: "POST",
         headers: token
           ? {
@@ -950,213 +962,247 @@ export async function sendSmsInternal(args: {
       };
     }
   }
-  const renderedContent = renderSmsVariables(args.content, args.variables, args.house);
-  const deliveryKey = args.deliveryKey ?? crypto.randomUUID();
-  let preparedContent = renderedContent;
-  let trackedDispatchIds: string[] = [];
-  if (billingTenantId ?? args.tenantId) {
-    const prepared = await prepareTrackedText(renderedContent, {
-      tenantId: billingTenantId ?? args.tenantId!,
-      channel: "sms",
-      sourceType:
-        args.linkTrackingOrigin?.sourceType ??
-        (args.triggerName?.startsWith("journey:")
-          ? "journey"
-          : args.flowId
-            ? "sms_flow"
-            : args.triggerName === "teste-manual"
-              ? "test"
-              : "manual"),
-      sourceId: args.linkTrackingOrigin?.sourceId ?? args.flowId ?? args.triggerName ?? null,
-      journeyStepId: args.linkTrackingOrigin?.journeyStepId ?? null,
-      journeyStepPosition: args.linkTrackingOrigin?.journeyStepPosition ?? null,
-      shortDomainId: args.linkTrackingOrigin?.shortDomainId ?? null,
-      recipientPlayerId: args.playerId ?? null,
-      recipientHash: args.linkTrackingOrigin?.recipientHash ?? null,
-      messageLogType: "sms_send_logs",
-      deliveryKey,
-      enabled: args.linkTrackingEnabled,
-    });
-    preparedContent = prepared.content;
-    trackedDispatchIds = prepared.links.map((link) => link.dispatchId);
-  }
-  // One accent (a lead named "João") would switch the whole SMS to UCS-2 and
-  // multiply the segments billed; send the GSM-7 form instead.
-  preparedContent = toGsm7Text(preparedContent);
-  let billingReferenceId: string = crypto.randomUUID();
-  let creditReserved = false;
-  // Segments are counted on the FINAL content actually sent (after
-  // variables and link shortening), never the template or preview text.
-  const billedUnits = Math.max(1, countSmsSegments(preparedContent).segments);
   // Conta própria (Review Focus 1): the account is resolved ONCE, before the
   // reservation, and that same object sends. A house account switched on (or
   // off) mid-campaign can never reserve on one account and send on another.
   // An unavailable house account reserves nothing and fails as misconfigured
   // (no fallback to the platform account).
   const resolvedAccount = await smsAccountFor(billingTenantId);
-  if (billingTenantId && resolvedAccount.account) {
-    const reservation = await reserveSmsCreditForDelivery(
-      billingTenantId,
-      args.deliveryKey,
-      billedUnits,
-      args.expertId ?? null,
-      resolvedAccount.account.id,
-    );
-    billingReferenceId = reservation.referenceId;
-    if (!reservation.ok) {
-      await logSend({
-        to: normalized,
-        content: preparedContent,
-        status: "error",
-        provider_response: { billing_reference_id: billingReferenceId },
-        error: reservation.error,
-        idempotency_key: "",
-        player_id: args.playerId,
-        flow_id: args.flowId,
-        trigger_name: args.triggerName,
-        campaign_id: args.campaignId,
-        step_index: args.stepIndex,
-        step_label: args.stepLabel,
-        flow_lead_id: args.flowLeadId,
-        tenant_id: billingTenantId,
-      });
-      // Wallet refusal for THIS house: distinct from a real provider 402
-      // (Short Brasil account out of balance). Never pauses the channel
-      // globally — see errorKind "insufficient_balance".
-      return {
-        ok: false as const,
-        status: 402,
-        error: reservation.error,
-        // An expert refusal (cap / deactivated) pauses only that expert.
-        errorKind: (("refusal" in reservation && reservation.refusal) ||
-          "insufficient_balance") as ProviderErrorKind,
-      };
-    }
-    creditReserved = true;
+  // Conta própria (Task 9): at most OWNED_ACCOUNT_MAX_INFLIGHT requests in
+  // flight per house-owned account. Over the limit nothing is prepared,
+  // reserved, logged nor sent: the 429 item backoff hands it back to the queue
+  // (no attempt consumed; a house account never touches the global throttle).
+  const slot = resolvedAccount.account ? tryAcquireAccountSlot(resolvedAccount.account) : null;
+  if (resolvedAccount.account && !slot) {
+    return {
+      ok: false as const,
+      status: OWNED_ACCOUNT_BUSY_STATUS,
+      error: OWNED_ACCOUNT_BUSY_MESSAGE,
+      temporary: true,
+      body: JSON.stringify({ owned_account_busy: true }),
+      errorKind: null as ProviderErrorKind | null,
+      providerAccountId: resolvedAccount.account.id as string | null,
+      accountBusy: true as const,
+    };
   }
-
-  const sendStartedAt = new Date();
-  const r = resolvedAccount.account
-    ? await callSmsProvider(
-        billingTenantId,
-        normalized,
-        preparedContent,
-        undefined,
+  try {
+    const renderedContent = renderSmsVariables(args.content, args.variables, args.house);
+    const deliveryKey = args.deliveryKey ?? crypto.randomUUID();
+    let preparedContent = renderedContent;
+    let trackedDispatchIds: string[] = [];
+    if (billingTenantId ?? args.tenantId) {
+      const prepared = await prepareTrackedText(renderedContent, {
+        tenantId: billingTenantId ?? args.tenantId!,
+        channel: "sms",
+        sourceType:
+          args.linkTrackingOrigin?.sourceType ??
+          (args.triggerName?.startsWith("journey:")
+            ? "journey"
+            : args.flowId
+              ? "sms_flow"
+              : args.triggerName === "teste-manual"
+                ? "test"
+                : "manual"),
+        sourceId: args.linkTrackingOrigin?.sourceId ?? args.flowId ?? args.triggerName ?? null,
+        journeyStepId: args.linkTrackingOrigin?.journeyStepId ?? null,
+        journeyStepPosition: args.linkTrackingOrigin?.journeyStepPosition ?? null,
+        shortDomainId: args.linkTrackingOrigin?.shortDomainId ?? null,
+        recipientPlayerId: args.playerId ?? null,
+        recipientHash: args.linkTrackingOrigin?.recipientHash ?? null,
+        messageLogType: "sms_send_logs",
         deliveryKey,
-        resolvedAccount.account,
-      )
-    : smsAccountUnavailableResult(resolvedAccount.error);
-  // The Infobip adapter reports its own message id, refusal reason and account
-  // verdict; the Short Brasil fields are read from its body.
-  const viaInfobip = "provider" in r && r.provider === "infobip";
-  const providerMessageId = r.ok
-    ? viaInfobip
-      ? r.providerMessageId
-      : extractProviderMessageId(r.body)
-    : null;
-  const errorSummary = r.ok
-    ? null
-    : viaInfobip
-      ? r.errorSummary
-      : summarizeProviderError(r.status, r.body);
-  // A demo block from the transport guard is final: never "pending"/retried.
-  const demoBlockedAtTransport = "demoBlocked" in r && r.demoBlocked === true;
-  const isTemporary =
-    !r.ok && !demoBlockedAtTransport && (r.status === 0 || r.status === 429 || r.status >= 500);
-  // Account-level refusal (101/505, HTTP 401/402/403): not the lead's fault.
-  // Opens the circuit breaker of the account that sent; workers defer the
-  // houses on that account without consuming attempts.
-  const accountReason =
-    !r.ok && r.errorKind === null && r.status > 0
-      ? viaInfobip
-        ? r.accountReason
-        : smsProviderAccountReason(r.status, r.body)
-      : null;
-  const breakerKey = smsBreakerKey(r.providerAccountId);
-  if (accountReason) {
-    await reportSmsProviderAccountFailure({
-      reason: accountReason,
-      error: errorSummary ?? `HTTP ${r.status}`,
-      sendStartedAt,
-      key: breakerKey,
-    });
-  } else if (r.ok) {
-    await noteSmsProviderSuccess(sendStartedAt, breakerKey);
-  }
-  if (!r.ok && creditReserved && billingTenantId) {
-    await refundSmsCredit(
-      billingTenantId,
-      billingReferenceId,
-      errorSummary ?? `SMS nao aceito pelo provedor: HTTP ${r.status}`,
-    );
-  }
-  // Once the provider accepted the SMS (and the wallet was charged), failing to
-  // write the log must not turn into an error: callers would retry and send it
-  // again (28/10/2026, missing provider_account_id column: 709 attempts for 292
-  // journey items). Reported instead; a refused send still throws.
-  const messageLogId = await logSend({
-    to: normalized,
-    content: preparedContent,
-    status: r.ok ? "sent" : isTemporary ? "pending" : "error",
-    provider_response: {
-      ...(r.body && typeof r.body === "object" && !Array.isArray(r.body)
-        ? (r.body as Record<string, unknown>)
-        : { raw: r.body }),
-      billing_reference_id: billingReferenceId,
-      credit_reserved: creditReserved && r.ok,
-    },
-    error: errorSummary,
-    idempotency_key: r.idempotencyKey,
-    provider_message_id: providerMessageId,
-    player_id: args.playerId,
-    flow_id: args.flowId,
-    trigger_name: args.triggerName,
-    campaign_id: args.campaignId,
-    step_index: args.stepIndex,
-    step_label: args.stepLabel,
-    flow_lead_id: args.flowLeadId,
-    tenant_id: billingTenantId ?? args.tenantId ?? null,
-    billed_units: creditReserved ? billedUnits : null,
-    provider_account_id: r.providerAccountId,
-    provider: viaInfobip ? "infobip" : "short-brasil",
-  }).catch((logError: unknown) => {
-    if (!r.ok) throw logError;
-    captureServerException(logError, {
-      job: "sms_send_log",
-      tenantId: billingTenantId ?? args.tenantId ?? undefined,
-      tags: { reason: "log_after_accepted" },
-    });
-    return null;
-  });
-  if (messageLogId && trackedDispatchIds.length > 0) {
-    const { error: dispatchLogError } = await (supabaseAdmin as any)
-      .from("link_dispatches")
-      .update({ message_log_id: messageLogId })
-      .in("id", trackedDispatchIds);
-    if (dispatchLogError)
-      console.error("Failed to link Short.io dispatches to SMS log", dispatchLogError.message);
-  }
-  if (r.ok) {
-    await markTrackedDispatchesSent(trackedDispatchIds);
-  } else {
-    await markTrackedDispatchesFailed(trackedDispatchIds);
-  }
+        enabled: args.linkTrackingEnabled,
+      });
+      preparedContent = prepared.content;
+      trackedDispatchIds = prepared.links.map((link) => link.dispatchId);
+    }
+    // One accent (a lead named "João") would switch the whole SMS to UCS-2 and
+    // multiply the segments billed; send the GSM-7 form instead.
+    preparedContent = toGsm7Text(preparedContent);
+    let billingReferenceId: string = crypto.randomUUID();
+    let creditReserved = false;
+    // Segments are counted on the FINAL content actually sent (after
+    // variables and link shortening), never the template or preview text.
+    const billedUnits = Math.max(1, countSmsSegments(preparedContent).segments);
+    if (billingTenantId && resolvedAccount.account) {
+      const reservation = await reserveSmsCreditForDelivery(
+        billingTenantId,
+        args.deliveryKey,
+        billedUnits,
+        args.expertId ?? null,
+        resolvedAccount.account.id,
+      );
+      billingReferenceId = reservation.referenceId;
+      if (!reservation.ok) {
+        await logSend({
+          to: normalized,
+          content: preparedContent,
+          status: "error",
+          provider_response: { billing_reference_id: billingReferenceId },
+          error: reservation.error,
+          idempotency_key: "",
+          player_id: args.playerId,
+          flow_id: args.flowId,
+          trigger_name: args.triggerName,
+          campaign_id: args.campaignId,
+          step_index: args.stepIndex,
+          step_label: args.stepLabel,
+          flow_lead_id: args.flowLeadId,
+          tenant_id: billingTenantId,
+        });
+        // Wallet refusal for THIS house: distinct from a real provider 402
+        // (Short Brasil account out of balance). Never pauses the channel
+        // globally — see errorKind "insufficient_balance".
+        return {
+          ok: false as const,
+          status: 402,
+          error: reservation.error,
+          // An expert refusal (cap / deactivated) pauses only that expert.
+          errorKind: (("refusal" in reservation && reservation.refusal) ||
+            "insufficient_balance") as ProviderErrorKind,
+        };
+      }
+      creditReserved = true;
+    }
 
-  return r.ok
-    ? { ok: true as const, status: r.status, response: JSON.stringify(r.body ?? null) }
-    : {
-        ok: false as const,
-        status: r.status,
+    const sendStartedAt = new Date();
+    const r = resolvedAccount.account
+      ? await callSmsProvider(
+          billingTenantId,
+          normalized,
+          preparedContent,
+          undefined,
+          deliveryKey,
+          resolvedAccount.account,
+        )
+      : smsAccountUnavailableResult(resolvedAccount.error);
+    // The request is over: free the account's slot before the bookkeeping.
+    slot?.release();
+    // The Infobip adapter reports its own message id, refusal reason and account
+    // verdict; the Short Brasil fields are read from its body.
+    const viaInfobip = "provider" in r && r.provider === "infobip";
+    const providerMessageId = r.ok
+      ? viaInfobip
+        ? r.providerMessageId
+        : extractProviderMessageId(r.body)
+      : null;
+    const errorSummary = r.ok
+      ? null
+      : viaInfobip
+        ? r.errorSummary
+        : summarizeProviderError(r.status, r.body);
+    // A demo block from the transport guard is final: never "pending"/retried.
+    const demoBlockedAtTransport = "demoBlocked" in r && r.demoBlocked === true;
+    const isTemporary =
+      !r.ok && !demoBlockedAtTransport && (r.status === 0 || r.status === 429 || r.status >= 500);
+    // Account-level refusal (101/505, HTTP 401/402/403): not the lead's fault.
+    // Opens the circuit breaker of the account that sent; workers defer the
+    // houses on that account without consuming attempts.
+    const accountReason =
+      !r.ok && r.errorKind === null && r.status > 0
+        ? viaInfobip
+          ? r.accountReason
+          : smsProviderAccountReason(r.status, r.body)
+        : null;
+    const breakerKey = smsBreakerKey(r.providerAccountId);
+    if (accountReason) {
+      await reportSmsProviderAccountFailure({
+        reason: accountReason,
         error: errorSummary ?? `HTTP ${r.status}`,
-        // provider_account is retryable later (nothing was sent, credit refunded).
-        temporary: isTemporary || accountReason !== null,
-        body: JSON.stringify(r.body ?? null),
-        errorKind: (accountReason
-          ? "provider_account"
-          : (r.errorKind ?? null)) as ProviderErrorKind | null,
-        /** Account that refused; null = the platform account or none. */
-        providerAccountId: r.providerAccountId,
-      };
+        sendStartedAt,
+        key: breakerKey,
+      });
+    } else if (r.ok) {
+      await noteSmsProviderSuccess(sendStartedAt, breakerKey);
+    }
+    // Conta própria (Task 9): repeated timeouts open the breaker of that
+    // account only (never `sms`, never the global throttle).
+    if (resolvedAccount.account) {
+      await noteOwnedSmsTransport({
+        account: resolvedAccount.account,
+        timedOut: "timedOut" in r && r.timedOut === true,
+        answered: r.status > 0,
+        sendStartedAt,
+        error: errorSummary ?? "Sem resposta do provedor",
+      });
+    }
+    if (!r.ok && creditReserved && billingTenantId) {
+      await refundSmsCredit(
+        billingTenantId,
+        billingReferenceId,
+        errorSummary ?? `SMS nao aceito pelo provedor: HTTP ${r.status}`,
+      );
+    }
+    // Once the provider accepted the SMS (and the wallet was charged), failing to
+    // write the log must not turn into an error: callers would retry and send it
+    // again (28/10/2026, missing provider_account_id column: 709 attempts for 292
+    // journey items). Reported instead; a refused send still throws.
+    const messageLogId = await logSend({
+      to: normalized,
+      content: preparedContent,
+      status: r.ok ? "sent" : isTemporary ? "pending" : "error",
+      provider_response: {
+        ...(r.body && typeof r.body === "object" && !Array.isArray(r.body)
+          ? (r.body as Record<string, unknown>)
+          : { raw: r.body }),
+        billing_reference_id: billingReferenceId,
+        credit_reserved: creditReserved && r.ok,
+      },
+      error: errorSummary,
+      idempotency_key: r.idempotencyKey,
+      provider_message_id: providerMessageId,
+      player_id: args.playerId,
+      flow_id: args.flowId,
+      trigger_name: args.triggerName,
+      campaign_id: args.campaignId,
+      step_index: args.stepIndex,
+      step_label: args.stepLabel,
+      flow_lead_id: args.flowLeadId,
+      tenant_id: billingTenantId ?? args.tenantId ?? null,
+      billed_units: creditReserved ? billedUnits : null,
+      provider_account_id: r.providerAccountId,
+      provider: viaInfobip ? "infobip" : "short-brasil",
+    }).catch((logError: unknown) => {
+      if (!r.ok) throw logError;
+      captureServerException(logError, {
+        job: "sms_send_log",
+        tenantId: billingTenantId ?? args.tenantId ?? undefined,
+        tags: { reason: "log_after_accepted" },
+      });
+      return null;
+    });
+    if (messageLogId && trackedDispatchIds.length > 0) {
+      const { error: dispatchLogError } = await (supabaseAdmin as any)
+        .from("link_dispatches")
+        .update({ message_log_id: messageLogId })
+        .in("id", trackedDispatchIds);
+      if (dispatchLogError)
+        console.error("Failed to link Short.io dispatches to SMS log", dispatchLogError.message);
+    }
+    if (r.ok) {
+      await markTrackedDispatchesSent(trackedDispatchIds);
+    } else {
+      await markTrackedDispatchesFailed(trackedDispatchIds);
+    }
+
+    return r.ok
+      ? { ok: true as const, status: r.status, response: JSON.stringify(r.body ?? null) }
+      : {
+          ok: false as const,
+          status: r.status,
+          error: errorSummary ?? `HTTP ${r.status}`,
+          // provider_account is retryable later (nothing was sent, credit refunded).
+          temporary: isTemporary || accountReason !== null,
+          body: JSON.stringify(r.body ?? null),
+          errorKind: (accountReason
+            ? "provider_account"
+            : (r.errorKind ?? null)) as ProviderErrorKind | null,
+          /** Account that refused; null = the platform account or none. */
+          providerAccountId: r.providerAccountId,
+        };
+  } finally {
+    slot?.release();
+  }
 }
 
 // ---------------- Server functions expostas pra UI ----------------

@@ -47,7 +47,12 @@ import {
 import { PLATFORM_SMS_BREAKER_KEY, smsBreakerKey } from "./sms-provider-breaker.server";
 import { SmsAccountGates } from "./sms-account-gates.server";
 import { isChannelEnabled } from "./tenant-channels.server";
-import { ProviderAccountUnavailableError, resolveSmsAccount } from "./provider-accounts.server";
+import {
+  isOwnedAccount,
+  ProviderAccountUnavailableError,
+  resolveSmsAccount,
+} from "./provider-accounts.server";
+import { OWNED_ACCOUNT_MAX_INFLIGHT } from "./owned-account-isolation.server";
 import { PROVIDER_ACCOUNT_DEFER_MS } from "./rate-limit/provider-errors.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
 import { notifyExpertCapReached } from "./billing/expert-cap-alerts.server";
@@ -961,6 +966,7 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
       await persistCampaignUnresolved(campaignDb, campaignId, unresolved);
     },
     acquireSendBudget: acquireCampaignSendBudget,
+    sendConcurrencyCap: campaignSendConcurrencyCap,
     resolveAudienceTargets(tenantId, criteria) {
       // Mesmo avaliador do compositor: seleção carrega a lista do público pelo
       // id + casa (e leva o id de cada jogador); regras vão ao RPC de sempre.
@@ -1017,12 +1023,16 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
       });
       const errorKind = r.ok ? undefined : (r as { errorKind?: unknown }).errorKind;
       const providerAccount = errorKind === "provider_account";
+      // Conta própria (Task 9): the house's own account is at its in-flight
+      // limit; nothing was prepared, reserved nor sent.
+      const accountBusy = "accountBusy" in r && r.accountBusy === true;
       return {
         ok: r.ok,
         alreadySent: "alreadySent" in r && r.alreadySent === true,
         // Account refused (101/505...): nothing sent, credit refunded; the tick
-        // stops before this recipient and resends it later (same key).
-        retryable: providerAccount,
+        // stops before this recipient and resends it later (same key). Same
+        // for a house-owned account at its in-flight limit.
+        retryable: providerAccount || accountBusy,
         providerAccount,
         // PG3 final fix I3: the house's wallet refused; the campaign pauses.
         insufficientBalance: errorKind === "insufficient_balance",
@@ -1241,6 +1251,24 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
  * account is refused stops before its next batch without moving the cursor;
  * campaigns of houses on other accounts keep sending.
  */
+/**
+ * Conta própria (Task 9): a campaign of a house on its own SMS account sends
+ * at most OWNED_ACCOUNT_MAX_INFLIGHT at a time (the account's in-flight limit
+ * per instance), instead of tripping it and cutting every batch.
+ */
+export async function campaignSendConcurrencyCap(
+  campaign: Pick<SmsCampaignRow, "tenant_id">,
+): Promise<number | null> {
+  try {
+    const account = await resolveSmsAccount(campaign.tenant_id);
+    return isOwnedAccount(account) ? OWNED_ACCOUNT_MAX_INFLIGHT : null;
+  } catch (error) {
+    // Unavailable house account: every send fails as misconfigured anyway.
+    if (error instanceof ProviderAccountUnavailableError) return null;
+    throw error;
+  }
+}
+
 export async function campaignProviderGate(
   gates: SmsAccountGates,
   campaign: Pick<SmsCampaignRow, "id" | "tenant_id">,

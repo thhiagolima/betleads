@@ -11,6 +11,16 @@ import {
   type InfobipAccount,
 } from "./provider-accounts.server";
 import { callbackTokenFor } from "./provider-callback-tokens.server";
+import {
+  fetchTextWithTimeout,
+  OWNED_ACCOUNT_BUSY_MESSAGE,
+  OWNED_ACCOUNT_BUSY_STATUS,
+  requestTimeoutMsFor,
+  tryAcquireAccountSlot,
+} from "./owned-account-isolation.server";
+
+/** CML create timeout of platform accounts; a house-owned account uses OWNED_ACCOUNT_REQUEST_TIMEOUT_MS. */
+const REQUEST_TIMEOUT_MS = 20_000;
 
 // Infobip Calls Markup Language (CML) adapter for outbound recorded calls.
 // Voz do CRM é atendida exclusivamente pela Infobip.
@@ -241,6 +251,40 @@ export async function callInfobipVoice(
   // unknown or missing tenant never reaches Infobip. Checked here rather than
   // only in the top-level dispatcher so this also covers every call site.
   await assertTenantNotDemoForSend(options.tenantId);
+  // Conta própria (Task 9): at most OWNED_ACCOUNT_MAX_INFLIGHT requests in
+  // flight per house-owned account. Over the limit: never dialed nor
+  // reserved; the 429 item backoff hands it back to the queue.
+  const slot = tryAcquireAccountSlot(account);
+  if (!slot) {
+    return {
+      ok: false,
+      status: OWNED_ACCOUNT_BUSY_STATUS,
+      body: { error: OWNED_ACCOUNT_BUSY_MESSAGE, owned_account_busy: true },
+      idempotencyKey,
+      providerCallId: null,
+      errorKind: null,
+      providerAccountId: account.id,
+    };
+  }
+  try {
+    return await reserveAndDial(account, to, options, idempotencyKey, {
+      callback,
+      notifyUrl,
+    });
+  } finally {
+    slot.release();
+  }
+}
+
+async function reserveAndDial(
+  account: InfobipAccount,
+  to: string,
+  options: InfobipVoiceOptions,
+  idempotencyKey: string,
+  urls: { callback: string; notifyUrl: string },
+): Promise<InfobipVoiceResult> {
+  const { baseUrl, apiKey, voiceFrom: from } = account;
+  const { callback, notifyUrl } = urls;
   // PG3: reserve the call's blocks from the house's wallet only after the
   // guard (a demo or locked house never reserves) and before dialing. The
   // delivery key is the caller's idempotency key, else the fresh uuid above,
@@ -282,7 +326,16 @@ export async function callInfobipVoice(
     };
   }
   const billing = { referenceId: reservation.referenceId, units };
-  const result = await placeCall(baseUrl, apiKey, from, to, callback, notifyUrl, idempotencyKey);
+  const result = await placeCall(
+    baseUrl,
+    apiKey,
+    from,
+    to,
+    callback,
+    notifyUrl,
+    idempotencyKey,
+    requestTimeoutMsFor(account, REQUEST_TIMEOUT_MS),
+  );
   // Refund on ANY failure, including a timeout that may have placed the call
   // (PG3 spec, decision 5 — same as SMS).
   if (!result.ok) {
@@ -304,25 +357,30 @@ async function placeCall(
   callback: string,
   notifyUrl: string,
   idempotencyKey: string,
+  timeoutMs: number,
 ): Promise<InfobipVoiceResult> {
   try {
-    const response = await fetch(`${baseUrl}/markuplanguage/1/create`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: `App ${apiKey}`,
+    const { response, text } = await fetchTextWithTimeout(
+      `${baseUrl}/markuplanguage/1/create`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `App ${apiKey}`,
+        },
+        body: JSON.stringify({
+          callback: { url: callback, errorUrl: callback, method: "POST" },
+          endpoint: { type: "PHONE", phoneNumber: to.replace(/^\+/, "") },
+          notifyUrl,
+          from,
+          customData: idempotencyKey,
+        }),
       },
-      body: JSON.stringify({
-        callback: { url: callback, errorUrl: callback, method: "POST" },
-        endpoint: { type: "PHONE", phoneNumber: to.replace(/^\+/, "") },
-        notifyUrl,
-        from,
-        customData: idempotencyKey,
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    const body = jsonBody(await response.text());
+      timeoutMs,
+      `Infobip não respondeu em ${timeoutMs / 1000}s`,
+    );
+    const body = jsonBody(text);
     const data = body as { callId?: string; id?: string } | null;
     return {
       ok: response.ok,
@@ -338,7 +396,7 @@ async function placeCall(
       body: { error: error instanceof Error ? error.message : String(error) },
       idempotencyKey,
       providerCallId: null,
-      // A 20 s timeout or reset may still have placed the call (no
+      // A timeout (20 s; 8 s on a house-owned account) or reset may still have placed the call (no
       // idempotency header on the CML create endpoint).
       errorKind: transportErrorKind(error),
     };
