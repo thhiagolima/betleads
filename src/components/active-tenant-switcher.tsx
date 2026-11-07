@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { Building2, ChevronDown, Users2 } from "lucide-react";
 
@@ -44,16 +45,26 @@ export function ActiveTenantSwitcher({ compact = false }: { compact?: boolean })
   const { data, tenants, active, isLoading } = useActiveTenant();
   const { groups, active: activeGroup, setActive: setActiveGroup } = useActiveGroup();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const onGroupRoute = isGroupPath(pathname);
   const [pendingTenantId, setPendingTenantId] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
 
+  // The server honours the stored house only when it is one of this user's;
+  // otherwise it falls back to their first house. Persist that fallback, or
+  // a value left by the previous login on this browser keeps going out as
+  // `X-Active-Tenant` and screens that refuse foreign houses (Área do Expert)
+  // fail while the header shows the right one. The house just changed under
+  // every query already sent, so refetch them with the corrected header.
   useEffect(() => {
-    if (data?.activeTenantId && !window.localStorage.getItem("betleads:active-tenant")) {
-      window.localStorage.setItem("betleads:active-tenant", data.activeTenantId);
-    }
-  }, [data?.activeTenantId]);
+    const resolved = data?.activeTenantId;
+    if (!resolved) return;
+    const stored = window.localStorage.getItem("betleads:active-tenant");
+    if (stored === resolved) return;
+    window.localStorage.setItem("betleads:active-tenant", resolved);
+    if (stored) void queryClient.invalidateQueries();
+  }, [data?.activeTenantId, queryClient]);
 
   const pending = tenants.find((tenant) => tenant.id === pendingTenantId) ?? null;
 
