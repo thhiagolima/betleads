@@ -97,6 +97,18 @@ describe("exclusão da casa", () => {
     );
     const conta = rows[0].id;
 
+    // Liga a conta própria ao canal da própria casa antes de excluir — exercita
+    // a ordem das duas cascatas de ON DELETE CASCADE a partir de tenants
+    // (tenant_channel_providers.tenant_id e provider_accounts.owner_tenant_id)
+    // na mesma exclusão, como o brief pede (Step 3). (A,'sms') pode já estar
+    // ligado por um teste anterior nesta casa; substitui a ligação.
+    await db.query(
+      `insert into public.tenant_channel_providers (tenant_id, channel, provider_account_id)
+       values ($1, 'sms', $2)
+       on conflict (tenant_id, channel) do update set provider_account_id = excluded.provider_account_id`,
+      [TENANT_A, conta],
+    );
+
     await db.query(`delete from public.tenants where id = $1`, [TENANT_A]);
 
     const { rows: after } = await db.query<{ count: string }>(
@@ -104,6 +116,12 @@ describe("exclusão da casa", () => {
       [conta],
     );
     expect(Number(after[0].count)).toBe(0);
+
+    const { rows: link } = await db.query<{ count: string }>(
+      `select count(*) from public.tenant_channel_providers where provider_account_id = $1`,
+      [conta],
+    );
+    expect(Number(link[0].count)).toBe(0);
   });
 });
 
