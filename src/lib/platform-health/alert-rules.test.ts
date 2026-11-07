@@ -61,6 +61,21 @@ describe("jobAlerts", () => {
     expect(alerts[0].key).toBe("job:sms_tick");
   });
 
+  it("platform_alerts not started for 20 min (3x 300s = 900s) is critical (late)", () => {
+    const rows = [
+      baseJobRow({
+        job: "platform_alerts",
+        last_started_at: minutesAgo(20),
+        seconds_since_last_start: 20 * 60,
+      }),
+    ];
+    const alerts = jobAlerts(rows, NOW);
+    expect(JOB_EXPECTED_PERIOD_S.platform_alerts).toBe(300);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].severity).toBe("critical");
+    expect(alerts[0].key).toBe("job:platform_alerts");
+  });
+
   it("shortio_sync not started for 20 min (3x 300s = 900s) is critical (late)", () => {
     const rows = [
       baseJobRow({

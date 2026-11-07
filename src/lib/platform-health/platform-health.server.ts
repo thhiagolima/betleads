@@ -24,6 +24,7 @@ import { presetRange } from "@/lib/finance/calc";
 import type { ActivityDayRow, FinanceDayRow } from "@/lib/finance/finance-data.server";
 import { fetchActivityDays, fetchFinanceDays } from "@/lib/finance/finance-data.server";
 
+import type { StoredAlert } from "./alert-lifecycle";
 import {
   billingAlerts,
   jobAlerts,
@@ -58,10 +59,17 @@ type LooseDb = any;
 
 const db = () => supabaseAdmin as LooseDb;
 
+/** The stored row's lifecycle fields (Task 5/F3), joined onto each computed alert by key. */
+export type StoredAlertInfo = {
+  openedAt: string;
+  acknowledgedAt: string | null;
+  silencedUntil: string | null;
+};
+
 export type PlatformHealth = {
   checkedAt: string;
   window: HealthWindows["current"];
-  alerts: PlatformAlert[];
+  alerts: Array<PlatformAlert & { stored: StoredAlertInfo | null }>;
   houses: HouseHealthRow[];
   quietHouses: Array<{ tenantId: string; name: string }>;
   /** `finance_days` (or `tenants`) failed: `houses`/`quietHouses` are empty, not "sem movimento". */
@@ -85,6 +93,18 @@ let inflight: Promise<PlatformHealth> | null = null;
 
 /** Test hook: forget the cached result so the next call fetches fresh. */
 export function __resetPlatformHealthCacheForTests(): void {
+  cache = null;
+  inflight = null;
+}
+
+/**
+ * Forgets the cached result so the next `adminPlatformHealthFor` call fetches
+ * fresh. Called after a write that the cache can't see on its own (Task 5
+ * fix round 1: acknowledging/silencing an alert), so the tab's next refetch
+ * — and the acting admin's own `invalidateQueries` — doesn't serve a stale
+ * `acknowledgedAt`/`silencedUntil` for up to `CACHE_MS`.
+ */
+export function invalidatePlatformHealthCache(): void {
   cache = null;
   inflight = null;
 }
@@ -187,6 +207,18 @@ async function fetchRunwayCandidates(): Promise<RunwayRow[]> {
   });
   if (error) throw new Error(errorText(error));
   return (data ?? []) as RunwayRow[];
+}
+
+/**
+ * Every open stored alert (Task 3's `alert-store.server.ts`), dynamically
+ * imported so this module and `alert-store.server.ts` (which imports
+ * `computePlatformHealth` from here for its cron) don't form a static
+ * circular import — same precedent as `billing-admin.functions.ts`'s
+ * dynamic imports of its sibling `*.server.ts` files.
+ */
+async function fetchStoredAlerts(): Promise<StoredAlert[]> {
+  const { loadOpenAlerts } = await import("./alert-store.server");
+  return loadOpenAlerts();
 }
 
 /**
@@ -336,7 +368,7 @@ export async function adminPlatformHealthFor(
     if (inflight) return inflight;
   }
 
-  const load = loadPlatformHealth(opts.now ?? new Date());
+  const load = computePlatformHealth(opts.now ?? new Date());
   if (opts.fresh) return load;
   inflight = load;
   try {
@@ -346,7 +378,13 @@ export async function adminPlatformHealthFor(
   }
 }
 
-async function loadPlatformHealth(now: Date): Promise<PlatformHealth> {
+/**
+ * One full health computation at `now`: no auth check and no cache. Used by
+ * `adminPlatformHealthFor` (behind `assertSuperAdmin` + the 60 s cache) and
+ * by the platform-alerts cron (`alert-store.server.ts`), which is already
+ * behind `requireSharedSecret`.
+ */
+export async function computePlatformHealth(now: Date): Promise<PlatformHealth> {
   const windows = healthWindows(presetRange("today", now).from);
   const alerts: PlatformAlert[] = [];
   const failed = new Set<string>();
@@ -395,6 +433,7 @@ async function loadPlatformHealth(now: Date): Promise<PlatformHealth> {
     billingReport,
     webhookStats,
     zeroBalanceHouses,
+    storedAlerts,
   ] = await Promise.all([
     fromSource<FinanceDayRow[]>("finance_days", fetchFinanceDays(tenantIds, range), []),
     fromSource<ActivityDayRow[]>("finance_activity_days", fetchActivityDays(tenantIds, range), []),
@@ -426,6 +465,7 @@ async function loadPlatformHealth(now: Date): Promise<PlatformHealth> {
       [],
     ),
     fromSource("tenant_wallets", fetchZeroBalanceHouses(houseTenants), []),
+    fromSource<StoredAlert[]>("platform_alerts", fetchStoredAlerts(), []),
   ]);
 
   const housesUnavailable = failed.has("tenants") || failed.has("finance_days");
@@ -459,28 +499,46 @@ async function loadPlatformHealth(now: Date): Promise<PlatformHealth> {
       .map((row) => row.tenantId),
   );
 
+  // Task 5/F3: join each alert with its stored lifecycle row (by key), so the UI can show
+  // acknowledged/silenced state and act on it. Applied before `sortAlerts` so a rule-less
+  // `since` (filled from `stored.openedAt`) still sorts correctly.
+  const storedByKey = new Map(storedAlerts.map((row) => [row.alertKey, row]));
+  function withStored(alert: PlatformAlert): PlatformAlert & { stored: StoredAlertInfo | null } {
+    const row = storedByKey.get(alert.key);
+    const stored: StoredAlertInfo | null = row
+      ? {
+          openedAt: row.openedAt,
+          acknowledgedAt: row.acknowledgedAt,
+          silencedUntil: row.silencedUntil,
+        }
+      : null;
+    return { ...alert, since: alert.since ?? stored?.openedAt ?? null, stored };
+  }
+
   const result: PlatformHealth = {
     checkedAt: now.toISOString(),
     window: windows.current,
-    alerts: sortAlerts([
-      ...alerts,
-      ...jobAlerts(jobRows, now),
-      ...webhookAlerts(
-        webhookStats
-          .filter((stat) => houseIds.has(stat.tenantId))
-          .map((stat) => ({ ...stat, hasMovement: housesWithMovement.has(stat.tenantId) })),
-        now,
-      ),
-      ...queueAlerts(
-        queueRows.filter((row) => houseIds.has(row.tenant_id)),
-        houseNames,
-        now,
-      ),
-      ...providerAlerts({ breakers: breakerRows, rateStates: rateRows, shortioRuns }, now),
-      ...runwayAlerts(runwayRows.filter((row) => houseIds.has(row.tenant_id))),
-      ...zeroBalanceAlerts(zeroBalanceHouses),
-      ...billingAlerts(billingReport),
-    ]),
+    alerts: sortAlerts(
+      [
+        ...alerts,
+        ...jobAlerts(jobRows, now),
+        ...webhookAlerts(
+          webhookStats
+            .filter((stat) => houseIds.has(stat.tenantId))
+            .map((stat) => ({ ...stat, hasMovement: housesWithMovement.has(stat.tenantId) })),
+          now,
+        ),
+        ...queueAlerts(
+          queueRows.filter((row) => houseIds.has(row.tenant_id)),
+          houseNames,
+          now,
+        ),
+        ...providerAlerts({ breakers: breakerRows, rateStates: rateRows, shortioRuns }, now),
+        ...runwayAlerts(runwayRows.filter((row) => houseIds.has(row.tenant_id))),
+        ...zeroBalanceAlerts(zeroBalanceHouses),
+        ...billingAlerts(billingReport),
+      ].map(withStored),
+    ),
     houses: sortHouses(houseRows),
     quietHouses,
     housesUnavailable,

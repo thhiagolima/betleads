@@ -29,6 +29,7 @@ import {
   checklistProgressLabel,
   type SetupChecklist,
 } from "@/components/onboarding/house-setup-checklist";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 
 export type WizardStepId = "casa" | "encurtador" | "email" | "pronto";
 
@@ -39,10 +40,16 @@ export const WIZARD_STEPS: { id: WizardStepId; label: string }[] = [
   { id: "pronto", label: "Pronto" },
 ];
 
-/** One step forward; clamped — `pronto` is the last step. */
-export function nextWizardStep(current: WizardStepId): WizardStepId {
-  const idx = WIZARD_STEPS.findIndex((s) => s.id === current);
-  const next = WIZARD_STEPS[Math.min(idx + 1, WIZARD_STEPS.length - 1)];
+/** One step forward; clamped — `pronto` is the last step. `steps` defaults
+ * to `WIZARD_STEPS`; the house wizard passes the channel-filtered list so
+ * "Avançar" from "encurtador" skips straight to "pronto" when e-mail is
+ * disabled, instead of landing on a step that isn't shown. */
+export function nextWizardStep(
+  current: WizardStepId,
+  steps: { id: WizardStepId }[] = WIZARD_STEPS,
+): WizardStepId {
+  const idx = steps.findIndex((s) => s.id === current);
+  const next = steps[Math.min(idx + 1, steps.length - 1)];
   return next.id;
 }
 
@@ -66,10 +73,14 @@ export type WizardEffect =
   | { kind: "complete" };
 
 /** Pure state transition for one wizard action — no I/O, no React. */
-export function reduceWizard(current: WizardStepId, action: WizardAction): WizardEffect {
+export function reduceWizard(
+  current: WizardStepId,
+  action: WizardAction,
+  steps: { id: WizardStepId }[] = WIZARD_STEPS,
+): WizardEffect {
   if (action.type === "skip") return { kind: "skip" };
   if (action.type === "complete") return { kind: "complete" };
-  return { kind: "advance", step: nextWizardStep(current) };
+  return { kind: "advance", step: nextWizardStep(current, steps) };
 }
 
 /** Ruling R10: "Avançar" on the Casa step first saves the unsaved site URL /
@@ -84,13 +95,17 @@ export function shouldSaveBeforeAdvance(step: WizardStepId, action: WizardAction
 export async function runWizardPrimary(
   step: WizardStepId,
   action: WizardAction,
-  opts: { save: () => Promise<boolean>; apply: (effect: WizardEffect) => void },
+  opts: {
+    save: () => Promise<boolean>;
+    apply: (effect: WizardEffect) => void;
+    steps?: { id: WizardStepId }[];
+  },
 ): Promise<boolean> {
   if (shouldSaveBeforeAdvance(step, action.type)) {
     const ok = await opts.save();
     if (!ok) return false;
   }
-  opts.apply(reduceWizard(step, action));
+  opts.apply(reduceWizard(step, action, opts.steps));
   return true;
 }
 
@@ -172,7 +187,12 @@ export function HouseSetupWizard({
   onStepChange?: (step: WizardStepId) => void;
 }) {
   const qc = useQueryClient();
-  const [stepState, setStepState] = useState<WizardStepId>(initialStep);
+  const { isEnabled } = useEnabledChannels();
+  // "E-mail" some do assistente quando o canal está desligado para a casa.
+  const visibleSteps = WIZARD_STEPS.filter((s) => s.id !== "email" || isEnabled("email"));
+  const [stepState, setStepState] = useState<WizardStepId>(() =>
+    visibleSteps.some((s) => s.id === initialStep) ? initialStep : "casa",
+  );
   const setStep = (next: WizardStepId) => {
     setStepState(next);
     onStepChange?.(next);
@@ -212,7 +232,7 @@ export function HouseSetupWizard({
     });
 
   function dispatch(action: WizardAction) {
-    applyEffect(reduceWizard(step, action));
+    applyEffect(reduceWizard(step, action, visibleSteps));
   }
 
   async function primary(action: WizardAction) {
@@ -221,6 +241,7 @@ export function HouseSetupWizard({
       await runWizardPrimary(step, action, {
         save: () => siteSaveRef.current?.saveIfDirty() ?? Promise.resolve(true),
         apply: applyEffect,
+        steps: visibleSteps,
       });
     } finally {
       setSavingStep(false);
@@ -238,7 +259,7 @@ export function HouseSetupWizard({
           className="flex flex-wrap items-center gap-2"
           {...tourAnchor("onboarding.header.markers")}
         >
-          {WIZARD_STEPS.map((s, i) => (
+          {visibleSteps.map((s, i) => (
             <span
               key={s.id}
               className={

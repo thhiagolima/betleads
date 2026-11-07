@@ -132,3 +132,13 @@ precisar.
   (`EMAIL_DOMAIN_NOT_VERIFIED`).
 - Campanhas em andamento ao trocar de conta: novos envios usam a conta nova; o
   que já foi enviado é reconciliado pela conta gravada no log.
+
+## Conta padrão escolhível e canais por casa (2026-11-05)
+
+Continuação deste escopo: conta padrão por canal deixa de ser fixa no código
+(super admin escolhe qual conta ativa é a padrão, inclusive para o OneSignal),
+CRUD de contas completo (criar/editar/desativar/reativar/excluir) e canais
+ativos por casa (`sms`, `email`, `voice`, `webpush` — padrão sem linha: os três
+primeiros ligados, `webpush` desligado). Canal desligado some do painel da
+casa, com aviso "Ciente" uma única vez. Detalhes, decisões e fases em
+`docs/superpowers/specs/2026-11-05-contas-padrao-canais-por-casa-design.md`.

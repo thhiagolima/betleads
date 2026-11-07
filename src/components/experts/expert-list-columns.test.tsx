@@ -17,6 +17,9 @@ vi.mock("@/hooks/use-is-demo-tenant", () => ({ useIsDemoTenant: () => false }));
 vi.mock("@/lib/expert-campaigns.functions", () => ({}));
 vi.mock("@/lib/expert-campaigns-admin.functions", () => ({}));
 vi.mock("@/lib/experts-admin.functions", () => ({}));
+vi.mock("@/hooks/use-enabled-channels", () => ({
+  useEnabledChannels: () => ({ isEnabled: () => true }),
+}));
 
 import { ExpertEnvioCell, ExpertTetoCell, ExpertUsageCell } from "./expert-list-columns";
 

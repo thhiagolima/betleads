@@ -44,6 +44,7 @@ import {
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
 } from "./provider-accounts.server";
 import { encryptProviderCredentials } from "./secret-box.server";
+import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 const CAMPAIGN = "11111111-1111-4111-8111-111111111111";
@@ -139,6 +140,7 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
   beforeEach(() => {
     fake.db.reset();
     __resetShortenerDomainCacheForTests();
+    __resetTenantChannelsCacheForTests();
     credits = installCreditLedger(fake.db);
     budgetCalls = [];
     fake.db.onRpc("consume_channel_budget", (args) => {
@@ -241,6 +243,27 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     } finally {
       guard.mockImplementation(async () => undefined);
     }
+  });
+
+  it("a house with the SMS channel disabled: its items fail final (channel_disabled) before any reservation; other houses still send", async () => {
+    settings("block");
+    const OFF = "00000000-0000-4000-8000-0000000000ee";
+    fake.db.rows("tenant_channels").push({ tenant_id: OFF, channel: "sms", enabled: false, disabled_at: null });
+    const r = await sendSmsBatch([item(1, { tenantId: OFF }), item(2)]);
+
+    expect(r.outcomes[0]).toMatchObject({
+      status: "failed",
+      ok: false,
+      retryable: false,
+      errorKind: "channel_disabled",
+      error: "O canal SMS está desabilitado para esta casa.",
+    });
+    expect(r.outcomes[1]).toMatchObject({ status: "accepted", ok: true });
+    expect(smsCalls).toHaveLength(1);
+    expect(smsCalls[0].bulk.map((b) => b.parceiroId)).toEqual([key(2)]);
+    expect(logFor(key(1))).toHaveLength(0);
+    expect(credits.ledger().some((l) => l.tenant_id === OFF)).toBe(false);
+    expect(credits.charged()).toBe(1);
   });
 
   it("a whole batch of a locked house: nothing is sent and no item is retryable", async () => {
@@ -681,6 +704,54 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
     });
     expect(raw[1]).toMatchObject({ method: "GET", body: "" });
     expect(raw[1].query_string).toBe(`parceiroId=${key(2)}&statusConfirmacao=CONFIRMADO`);
+  });
+
+  it("callbacks without a token are accepted but never create orphan rows; a wrong token is rejected", async () => {
+    settings("block");
+    const r = await sendSmsBatch([item(1)]);
+    expect(r.outcomes[0].status).toBe("accepted");
+    const handlers = (
+      SmsWebhookRoute as unknown as {
+        options: {
+          server: {
+            handlers: {
+              GET: (i: { request: Request }) => Promise<Response>;
+              POST: (i: { request: Request }) => Promise<Response>;
+            };
+          };
+        };
+      }
+    ).options.server.handlers;
+
+    // Short Brasil example shape, URL registered without ?token=.
+    const get = await handlers.GET({
+      request: new Request(
+        `https://app.example/api/public/sms-webhook?parceiroId=${key(1)}&celular=11988887777&statusConfirmacao=4&confirmacaoDescricao=CONFIRMADO&confirmacaoData=2026-11-07+18%3A02%3A40`,
+      ),
+    });
+    expect(get.status).toBe(200);
+    expect(await get.json()).toMatchObject({ processed: 1, matched: 1 });
+    expect(logFor(key(1))[0].delivery_status).toBe("delivered");
+
+    // Unknown message without a token: kept raw, no orphan send log.
+    const post = await handlers.POST({
+      request: new Request("https://app.example/api/public/sms-webhook", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lote: [{ id: "forged-id", parceiroId: key(99), statusConfirmacao: "5" }] }),
+      }),
+    });
+    expect(await post.json()).toMatchObject({ processed: 1, matched: 0 });
+    expect(logs().some((l) => l.trigger_name === "callback-orphan")).toBe(false);
+    expect(fake.db.rows("sms_callback_raw")).toHaveLength(2);
+
+    const wrong = await handlers.GET({
+      request: new Request(
+        `https://app.example/api/public/sms-webhook?token=wrong&parceiroId=${key(1)}&statusConfirmacao=5`,
+      ),
+    });
+    expect(wrong.status).toBe(401);
+    expect(logFor(key(1))[0].delivery_status).toBe("delivered");
   });
 
   it("B1: bulk is OFF unless SMS_BULK_ENABLED is exactly true", () => {

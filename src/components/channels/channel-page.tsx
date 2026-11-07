@@ -9,25 +9,41 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { PageTabs } from "@/components/ui-premium/page-tabs";
 import type { DispatchChannel } from "@/lib/dispatch-pause.functions";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 
-import { CHANNEL_TABS, resolveChannelHash, type ChannelId, type ChannelTab } from "./channel-tabs";
+import { ChannelDisabledState } from "./channel-disabled-state";
+import {
+  CHANNEL_ID_TO_PROVIDER_CHANNEL,
+  CHANNEL_TABS,
+  resolveChannelHash,
+  type ChannelId,
+  type ChannelTab,
+} from "./channel-tabs";
 import { tourAnchor } from "@/help/anchor";
 
-const CHANNEL_ROUTE = { sms: "/sms", email: "/email", voz: "/ligacoes" } as const;
-const PAUSE_CHANNEL: Record<ChannelId, DispatchChannel> = {
+const CHANNEL_ROUTE = {
+  sms: "/sms",
+  email: "/email",
+  voz: "/ligacoes",
+  webpush: "/webpush",
+} as const;
+// Web push has no provider pause switch (dispatch_pause covers sms/email/call),
+// so it shows no paused banner.
+const PAUSE_CHANNEL: Partial<Record<ChannelId, DispatchChannel>> = {
   sms: "sms",
   email: "email",
   voz: "call",
 };
 // The campaigns composer opens on the channel the user came from.
-const NEW_CAMPAIGN_CHANNEL: Record<ChannelId, "sms" | "email" | "voice"> = {
+const NEW_CAMPAIGN_CHANNEL: Record<ChannelId, "sms" | "email" | "voice" | "webpush"> = {
   sms: "sms",
   email: "email",
   voz: "voice",
+  webpush: "webpush",
 };
 
 /**
- * The shell shared by SMS, Email and Voz: header, channel status strip
+ * The shell shared by SMS, Email, Voz and Web Push: header, channel status strip
  * (paused banner, wallet notice, then send window), visible tabs synced with the URL hash,
  * then the active tab. Clicking a tab pushes a history entry, so the browser
  * "back" button goes back to the previous tab.
@@ -36,12 +52,18 @@ export function ChannelPage<C extends ChannelId>({
   channel,
   subtitle,
   actions,
+  notReady,
   children,
 }: {
   channel: C;
   subtitle: string;
   /** Channel-specific actions shown after "Nova campanha". */
   actions?: ReactNode;
+  /**
+   * Shown instead of the status strip and tabs, without "Nova campanha",
+   * while the channel is on but can't send yet (web push not installed).
+   */
+  notReady?: ReactNode;
   children: (tab: ChannelTab<C>, setTab: (tab: ChannelTab<C>) => void) => ReactNode;
 }) {
   const navigate = useNavigate();
@@ -57,6 +79,7 @@ export function ChannelPage<C extends ChannelId>({
       void navigate({
         to: resolution.redirect.to,
         search: resolution.redirect.search as never,
+        ...(resolution.redirect.hash ? { hash: resolution.redirect.hash } : {}),
         replace: true,
       });
     } else if (!resolution.canonical) {
@@ -70,6 +93,29 @@ export function ChannelPage<C extends ChannelId>({
     void navigate({ to: route, hash: next });
   };
 
+  const { isEnabled } = useEnabledChannels();
+  const providerChannel = CHANNEL_ID_TO_PROVIDER_CHANNEL[channel];
+  if (!isEnabled(providerChannel)) {
+    // Direct route hit (link, bookmark, old automation) on a channel the
+    // super admin turned off: no tabs, no actions, just the guard.
+    return (
+      <Page>
+        <PageHeader subtitle={subtitle} />
+        <ChannelDisabledState channel={providerChannel} />
+      </Page>
+    );
+  }
+
+  if (notReady) {
+    return (
+      <Page>
+        <PageHeader subtitle={subtitle} actions={actions} />
+        {notReady}
+      </Page>
+    );
+  }
+
+  const pauseChannel = PAUSE_CHANNEL[channel];
   return (
     <Page>
       <PageHeader
@@ -86,11 +132,12 @@ export function ChannelPage<C extends ChannelId>({
           </>
         }
       />
-      <ProvidersPausedBanner channel={PAUSE_CHANNEL[channel]} />
+      {pauseChannel ? <ProvidersPausedBanner channel={pauseChannel} /> : null}
       {/* PG3: empty/low balance for the active house, with its own threshold.
           SMS already shows it in its overview, next to the balance KPI. */}
       {channel === "sms" ? null : <ActiveTenantWalletNotice />}
-      <SendWindowCard compact />
+      {/* The web push dispatcher doesn't follow the send window. */}
+      {channel === "webpush" ? null : <SendWindowCard compact />}
       <div {...tourAnchor("canal.abas")}>
         <PageTabs
           value={tab}

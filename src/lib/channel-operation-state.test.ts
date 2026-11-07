@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   audienceFromSearch,
   campaignStopReason,
+  friendlyChannelReason,
   getChannelOperationState,
   groupVoiceQueueItems,
   isFinishedCampaignStatus,
   isPausedCampaignStatus,
 } from "./channel-operation-state";
+import { EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON } from "./tenant-channels.shared";
 
 describe("getChannelOperationState", () => {
   it("traduz os estados operacionais exigidos em linguagem de produto", () => {
@@ -80,6 +82,17 @@ describe("getChannelOperationState", () => {
     expect(campaignStopReason("pausada", null, null)).toBeNull();
   });
 
+  it("traduz o código bruto de canal desligado em vez de mostrá-lo cru", () => {
+    expect(campaignStopReason("pausada", EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON, null)).toBe(
+      "Canal E-mail desabilitado para a casa.",
+    );
+    expect(campaignStopReason("cancelada", EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON, null)).toBe(
+      "Canal E-mail desabilitado para a casa.",
+    );
+    // Other reasons go through untouched.
+    expect(campaignStopReason("pausada", "Saldo insuficiente", null)).toBe("Saldo insuficiente");
+  });
+
   it("sempre fornece uma próxima ação navegável", () => {
     for (const channel of ["sms", "email", "voice"] as const) {
       const state = getChannelOperationState("unknown", channel);
@@ -98,6 +111,20 @@ describe("getChannelOperationState", () => {
     expect(webpush.actionTo).toBe("/plano-e-creditos");
     expect(webpush.actionTo).toBe(sms.actionTo);
     expect(webpush.actionLabel).toBe("Ver saldo");
+  });
+});
+
+describe("friendlyChannelReason", () => {
+  it("mapeia o código bruto do e-mail para uma frase legível", () => {
+    expect(friendlyChannelReason(EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON)).toBe(
+      "Canal E-mail desabilitado para a casa.",
+    );
+  });
+
+  it("não altera outros motivos, incluindo null/undefined", () => {
+    expect(friendlyChannelReason("Saldo insuficiente")).toBe("Saldo insuficiente");
+    expect(friendlyChannelReason(null)).toBeNull();
+    expect(friendlyChannelReason(undefined)).toBeUndefined();
   });
 });
 

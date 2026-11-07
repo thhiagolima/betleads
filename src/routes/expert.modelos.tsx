@@ -42,6 +42,8 @@ import {
   EXPERT_SUPPORTED_VARIABLE_KEYS,
 } from "@/lib/expert-template-variables";
 import { variablesForChannel } from "@/lib/message-variables";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
+import { ChannelDisabledState } from "@/components/channels/channel-disabled-state";
 
 export const Route = createFileRoute("/expert/modelos")({
   component: ExpertTemplatesPage,
@@ -170,6 +172,7 @@ function TemplateFormDialog({
 
 function ExpertTemplatesPage() {
   const qc = useQueryClient();
+  const { isEnabled } = useEnabledChannels();
   const listFn = useServerFn(listExpertTemplates);
   const templatesQuery = useQuery({
     queryKey: TEMPLATES_QUERY_KEY,
@@ -228,6 +231,16 @@ function ExpertTemplatesPage() {
             {expertAccessErrorMessage(templatesQuery.error)}
           </CardContent>
         </Card>
+      </Page>
+    );
+  }
+
+  // Estes modelos são de SMS; sem o canal, a página inteira não faz sentido.
+  if (!isEnabled("sms")) {
+    return (
+      <Page>
+        <PageHeader />
+        <ChannelDisabledState channel="sms" />
       </Page>
     );
   }

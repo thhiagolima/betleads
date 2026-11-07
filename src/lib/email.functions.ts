@@ -29,6 +29,8 @@ import {
   resolveOperationalTenantId,
 } from "./tenant-access.server";
 import { isSendBlockedError } from "./billing/billing-locked-error";
+import { assertChannelEnabled, isChannelEnabled } from "./tenant-channels.server";
+import { EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON } from "./tenant-channels.shared";
 import { bindTrackedDispatchesToMessageLog } from "./shortio.server";
 import { conversionFunnelSnapshot, type ConversionObjective } from "./conversion-funnel";
 import { tenantReads } from "@/lib/active-tenant-filter";
@@ -111,6 +113,7 @@ export const sendTestEmail = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => SendTestEmailSchema.parse(d))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    await assertChannelEnabled(tenantId, "email");
     // Always the house's verified default sender: sender/provider overrides
     // in the request are deliberately ignored at this boundary.
     const sender = await resolveSender({ tenantId });
@@ -680,6 +683,12 @@ export const saveEmailCampaign = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => CampanhaInputSchema.parse(d))
   .handler(async ({ data, context }) => {
     const smtpIdNorm = data.smtpId ?? null;
+    // Salvar com um status diferente de rascunho (agendar) recusa canal
+    // de e-mail desligado para a casa (Task 7).
+    if (data.status !== "rascunho") {
+      const tenantId = await resolveOperationalTenantId(context.supabase);
+      await assertChannelEnabled(tenantId, "email");
+    }
     let refColumns: { sender_id?: string | null; short_domain_id?: string | null } = {};
     if (data.senderId !== undefined || data.shortDomainId !== undefined) {
       const tenantId = await resolveOperationalTenantId(context.supabase);
@@ -764,6 +773,11 @@ export const updateEmailCampaignStatus = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
+    // Agendar/retomar o envio recusa canal de e-mail desligado (Task 7).
+    if (data.status === "agendada" || data.status === "enviando") {
+      const tenantId = await resolveOperationalTenantId(context.supabase);
+      await assertChannelEnabled(tenantId, "email");
+    }
     const { error } = await context.supabase
       .from("email_campaigns")
       .update(emailCampaignStatusPatch(data.status))
@@ -893,6 +907,7 @@ export const sendEmailCampaignNow = createServerFn({ method: "POST" })
     await assertNotExpertEmailCampaign(data.campaignId);
     // Before the claim: a demo campaign is never moved to "enviando".
     await assertTenantNotDemoForSend(tenantId);
+    await assertChannelEnabled(tenantId, "email");
     const lockToken = await claimEmailCampaignForSendNow(data.campaignId, tenantId);
     if (!lockToken) throw new Error(EMAIL_CAMPAIGN_ALREADY_SENDING_MESSAGE);
     try {
@@ -1004,6 +1019,21 @@ export async function runCampaignSend(
   // Demo guard once, before any write (campaign status/stats, frequency-cap
   // 'pending' rows, email_send_logs): a demo campaign never starts.
   await assertTenantNotDemoForSend(camp.tenant_id);
+
+  // E-mail channel turned off for the house: pause (same blocked_reason Task
+  // 5 writes on agendada campaigns) before anything is resolved or sent.
+  if (!(await isChannelEnabled(camp.tenant_id, "email"))) {
+    await supabaseAdmin
+      .from("email_campaigns")
+      .update({
+        status: "pausada",
+        blocked_reason: EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON,
+        locked_at: null,
+        locked_by: null,
+      })
+      .eq("id", campaignId);
+    return { enviados: 0, falhas: 0, pendentes: 0, total: 0, jaEnviados: 0, pausadaPorSaldo: false, pausadaPorTeto: false, continuaEmLotes: false };
+  }
 
   // Área do Expert: re-checked at every run (approval, owner active, scope).
   const expertOwner = await loadExpertEmailOwner(camp as any);
@@ -1200,6 +1230,8 @@ export async function runCampaignSend(
   // Área do Expert: the expert's monthly cap (or deactivation) refused a send.
   let pausadaPorTeto = false;
   let expertStopReason: string | null = null;
+  // The e-mail channel was turned off for the house while running.
+  let pausadaPorCanal = false;
   // Paused/cancelled (or taken over) while running: stop, keep that status.
   let interrompida = false;
   let processed = 0;
@@ -1255,6 +1287,11 @@ export async function runCampaignSend(
       if (!r.ok && r.errorKind === "insufficient_balance") {
         // Nothing was sent nor charged: not a delivery attempt, no log row.
         pausadaPorSaldo = true;
+        break;
+      }
+      if (!r.ok && r.errorKind === "channel_disabled") {
+        // Channel turned off meanwhile: nothing sent nor charged, no log row.
+        pausadaPorCanal = true;
         break;
       }
       const errSnippet = r.ok
@@ -1319,7 +1356,7 @@ export async function runCampaignSend(
 
   if (!interrompida) {
     // Conditional: a pause/cancel after the last check is never overwritten.
-    const paused = pausadaPorSaldo || pausadaPorTeto;
+    const paused = pausadaPorSaldo || pausadaPorTeto || pausadaPorCanal;
     const nextBatch = continuaEmLotes && !paused;
     const finished = await updateOwnRun({
       // Falhas temporárias ficam como pendentes no log; não contam como falha
@@ -1329,6 +1366,7 @@ export async function runCampaignSend(
       ...(nextBatch ? { scheduled_at: new Date().toISOString() } : {}),
       ...(pausadaPorSaldo ? { blocked_reason: EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE } : {}),
       ...(pausadaPorTeto ? { blocked_reason: expertStopReason } : {}),
+      ...(pausadaPorCanal ? { blocked_reason: EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON } : {}),
       stats: stats(enviados, falhas, paused ? continuation || continuaEmLotes : nextBatch),
       locked_at: null,
       locked_by: null,
@@ -1356,7 +1394,8 @@ export async function runCampaignSend(
     pausadaPorSaldo,
     pausadaPorTeto,
     /** More recipients remain: the e-mail tick sends the next batches. */
-    continuaEmLotes: continuaEmLotes && !pausadaPorSaldo && !pausadaPorTeto && !interrompida,
+    continuaEmLotes:
+      continuaEmLotes && !pausadaPorSaldo && !pausadaPorTeto && !pausadaPorCanal && !interrompida,
     interrompida,
   };
 }
@@ -1405,6 +1444,11 @@ export function emailCampaignStatusPatch(
     ...(status === "pausada" ? { locked_at: null, locked_by: null } : {}),
   };
 }
+
+/** blocked_reason of an e-mail campaign paused because the house's e-mail channel was turned off.
+ * Defined in tenant-channels.shared.ts (client-safe) and re-exported here for callers already
+ * importing it from this module. */
+export { EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON };
 
 /** blocked_reason of an e-mail campaign paused because the house ran out of balance. */
 export const EMAIL_CAMPAIGN_NO_BALANCE_MESSAGE =

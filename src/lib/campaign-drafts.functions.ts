@@ -5,6 +5,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Json } from "@/integrations/supabase/types";
 import { campaignAudienceCriteriaInput } from "@/lib/sms-audience-criteria";
 import { resolveCurrentTenantId } from "@/lib/tenant-access.server";
+import { assertChannelEnabled } from "@/lib/tenant-channels.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 const channelSchema = z.enum(["sms", "email", "voice"]);
@@ -172,6 +173,16 @@ export const submitCampaignDraft = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => z.object({ id: dbUuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
+    const { data: draft, error: draftError } = await (context.supabase as any)
+      .from("campaign_drafts")
+      .select("id,channel")
+      .eq("id", data.id)
+      .eq("tenant_id", tenantId)
+      .is("expert_id", null)
+      .eq("status", "draft")
+      .maybeSingle();
+    if (draftError || !draft) throw new Error("O rascunho já não pode ser enviado.");
+    await assertChannelEnabled(tenantId, draft.channel);
     const { data: updated, error } = await (context.supabase as any)
       .from("campaign_drafts")
       .update({ status: "submitted", submitted_at: new Date().toISOString() })

@@ -37,6 +37,7 @@ vi.mock("./tenant-access.server", () => ({
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { classifyVoiceDispatchResult, runVoiceQueueDispatcher } from "./calls.server";
+import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
 
@@ -59,6 +60,7 @@ const queueItem = () => fake.db.rows("call_queue")[0];
 beforeEach(() => {
   fake.db.reset();
   voice.callInfobipVoice.mockReset();
+  __resetTenantChannelsCacheForTests();
 });
 
 describe("classifyVoiceDispatchResult", () => {
@@ -438,5 +440,39 @@ describe("runVoiceQueueDispatcher claim (double dial)", () => {
     const result = await runVoiceQueueDispatcher(10);
     expect(result.deferred).toBe(1);
     expect(queueItem()).toMatchObject({ status: "audio_ready", provider_status: "provider_unavailable" });
+  });
+});
+
+describe("runVoiceQueueDispatcher with the voice channel disabled for the house", () => {
+  it("cancels the due item without dialing", async () => {
+    seedQueueItem();
+    fake.db.rows("tenant_channels").push({ tenant_id: TENANT, channel: "voice", enabled: false, disabled_at: null });
+    const result = await runVoiceQueueDispatcher(10);
+    expect(voice.callInfobipVoice).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ dispatched: 0, failed: 0, channelDisabled: 1 });
+    expect(queueItem()).toMatchObject({ status: "cancelled", provider_status: "channel_disabled" });
+    expect(fake.db.rows("call_history")).toHaveLength(0);
+  });
+
+  it("a call refused as channel_disabled (turned off meanwhile) is cancelled, not failed", async () => {
+    seedQueueItem();
+    voice.callInfobipVoice.mockResolvedValue({
+      ok: false,
+      status: 0,
+      body: { error: "O canal Voz está desabilitado para esta casa." },
+      idempotencyKey: "key-1",
+      providerCallId: null,
+      errorKind: "channel_disabled",
+    });
+    const result = await runVoiceQueueDispatcher(10);
+    expect(result).toMatchObject({ dispatched: 0, failed: 0, deferred: 0, channelDisabled: 1 });
+    expect(queueItem()).toMatchObject({ status: "cancelled", provider_status: "channel_disabled" });
+    expect(fake.db.rows("call_history")).toHaveLength(0);
+  });
+
+  it("classifies channel_disabled before the status-0 transient rule", () => {
+    expect(
+      classifyVoiceDispatchResult({ ok: false, status: 0, body: {}, errorKind: "channel_disabled" }),
+    ).toBe("channel_disabled");
   });
 });

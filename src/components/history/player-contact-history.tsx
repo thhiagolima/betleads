@@ -11,6 +11,8 @@ import { getPlayerContactHistory, type ChannelKey } from "@/lib/history.function
 import { IdentityIcon } from "@/components/identity/identity-badge";
 import { CHANNEL_IDENTITY, CHANNEL_LABEL, type ChannelKind } from "@/components/identity/identity";
 import { StatusBadge } from "./status-badge";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
+import type { ProviderChannel } from "@/lib/tenant-channels.shared";
 
 const KIND: Record<ChannelKey, ChannelKind> = {
   whatsapp: "whatsapp",
@@ -31,12 +33,17 @@ export function PlayerContactHistoryDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const fn = useServerFn(getPlayerContactHistory);
+  const { isEnabled } = useEnabledChannels();
   const q = useQuery({
     queryKey: ["player-contact-history", playerId],
     queryFn: () => fn({ data: { playerId: playerId!, limit: 80 } }),
     enabled: !!playerId && open,
   });
-  const items = q.data?.items ?? [];
+  // Envios antigos continuam no banco; só não aparecem enquanto o canal
+  // estiver desligado para a casa (whatsapp não é um canal que se desliga).
+  const items = (q.data?.items ?? []).filter(
+    (it) => it.channel === "whatsapp" || isEnabled(KIND[it.channel] as ProviderChannel),
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

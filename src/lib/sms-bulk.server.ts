@@ -63,6 +63,8 @@ import {
   toShortBrasilCell,
 } from "./sms.functions";
 import { countSmsSegments, toGsm7Text } from "./sms-segments";
+import { isChannelEnabled } from "./tenant-channels.server";
+import { CHANNEL_DISABLED_MESSAGE } from "./tenant-channels.shared";
 import {
   envShortBrasilAccount,
   ProviderAccountUnavailableError,
@@ -616,7 +618,8 @@ export class SmsBatchDeferredError extends Error {
  * item belongs to a demo or unknown tenant. Items of a house with an
  * effective billing lock come back failed, final (`retryable: false`), with
  * the lock copy and nothing written or charged; the other tenants' items are
- * sent normally.
+ * sent normally. Items of a house with the SMS channel disabled fail the same
+ * way, with errorKind `channel_disabled`.
  */
 export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResult> {
   const outcomes: Array<SmsBatchOutcome | undefined> = new Array(items.length);
@@ -633,11 +636,26 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
   // billing-locked house's items fail here, final, before anything is written.
   const billingLocked = new Map<string, string>();
   await assertBatchTenantsCanSend(items.map((i) => i.tenantId), billingLocked);
-  if (billingLocked.size > 0) {
+  // Channel SMS turned off for the house (tenant_channels): final, before any
+  // log, link or credit reservation.
+  const channelOff = new Set<string>();
+  for (const tenantId of new Set(items.map((i) => i.tenantId))) {
+    if (!billingLocked.has(tenantId) && !(await isChannelEnabled(tenantId, "sms"))) channelOff.add(tenantId);
+  }
+  if (billingLocked.size > 0 || channelOff.size > 0) {
     const keep: Array<{ item: SmsBatchItem; index: number }> = [];
     items.forEach((item, index) => {
       const reason = billingLocked.get(item.tenantId);
-      if (reason === undefined) keep.push({ item, index });
+      if (channelOff.has(item.tenantId))
+        outcomes[index] = {
+          deliveryKey: item.deliveryKey,
+          status: "failed",
+          ok: false,
+          retryable: false,
+          errorKind: "channel_disabled",
+          error: CHANNEL_DISABLED_MESSAGE("sms"),
+        };
+      else if (reason === undefined) keep.push({ item, index });
       else
         outcomes[index] = {
           deliveryKey: item.deliveryKey,

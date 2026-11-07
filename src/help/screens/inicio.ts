@@ -1,7 +1,8 @@
 // Help article for "Início" (/), a tela sem abas. Fonte: src/routes/index.tsx
-// (o componente Dashboard e os subcomponentes CashflowChart, CrmCard,
-// SecondaryMetrics, LiveFeed, todos no mesmo arquivo),
-// src/components/home/{home-cards,period-picker}.tsx,
+// (o componente Dashboard), os blocos em src/components/home/dashboard-blocks.tsx
+// (HomeHeader, HomeKpiCards, CashflowChart, CrmCard, SecondaryMetrics, LiveFeed —
+// compartilhados com o Início do expert, /expert, que tem artigo próprio
+// pendente), src/components/home/{home-cards,period-picker}.tsx,
 // src/components/onboarding/{domain-verified-notice,house-setup-checklist}.tsx
 // e as regras de cálculo em src/lib/{home-dashboard,dashboard.functions}.ts.
 import type { HelpScreen } from "../types";
@@ -98,7 +99,7 @@ const screen: HelpScreen = {
       items: [
         {
           label: 'Cartão "Recuperado pelo CRM"',
-          what: 'Mostra o valor recuperado e, abaixo, "<N> jogador(es) que estavam parados depositaram até 7 dias depois de clicar num link de campanha ou jornada" (ou "Ainda não há depósitos após clique em link no período.", quando não houve nenhum). Em seguida, quatro linhas: "Gasto em SMS" (preço por segmento vezes os segmentos enviados no período), "Retorno sobre o envio" (recuperado ÷ gasto em SMS, em verde quando positivo, ou "—" sem gasto), "Em jornada agora" (quantos jogadores estão em jornada neste momento e quantas jornadas estão ativas do total) e "Saldo" ("Isenta" para casa isenta de cobrança, ou o saldo em R$).',
+          what: 'Mostra o valor recuperado e, abaixo, "<N> jogador(es) que estavam parados depositaram até 7 dias depois de clicar num link de campanha ou jornada" (ou "Ainda não há depósitos após clique em link no período.", quando não houve nenhum). Em seguida, quatro linhas: "Gasto em SMS" (preço por segmento vezes os segmentos enviados no período; só aparece quando o canal SMS está liberado para a casa), "Retorno sobre o envio" (recuperado ÷ gasto em SMS, em verde quando positivo, ou "—" sem gasto), "Em jornada agora" (quantos jogadores estão em jornada neste momento e quantas jornadas estão ativas do total) e "Saldo" ("Isenta" para casa isenta de cobrança, ou o saldo em R$).',
           notes:
             'Recuperado pelo CRM considera só depósitos feitos em até 7 dias depois de um clique humano (não de robô) num link de campanha ou jornada, e não conta quem já estava ativo antes do clique. Casas que não operam em reais (moeda diferente de BRL) sempre veem "—" em "Retorno sobre o envio": o gasto em SMS é sempre em reais, e não faz sentido dividir um valor recuperado em outra moeda por ele.',
         },

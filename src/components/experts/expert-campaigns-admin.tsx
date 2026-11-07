@@ -54,6 +54,8 @@ import {
 } from "@/components/experts/expert-campaigns-admin-model";
 import { useExpertCampaignsAdmin } from "@/components/experts/use-expert-campaigns-admin";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
+import { friendlyChannelReason } from "@/lib/channel-operation-state";
 import {
   approveExpertCampaign,
   pauseExpertCampaign,
@@ -198,7 +200,7 @@ export function ExpertCampaignsTable({
               c.status === "recusada"
                 ? c.rejectionReason
                 : c.status === "pausada"
-                  ? c.lastError
+                  ? friendlyChannelReason(c.lastError)
                   : null;
             return (
               <TableRow key={`${c.channel}:${c.id}`}>
@@ -415,7 +417,9 @@ export function ExpertCampaignReviewBody({
             </p>
           )}
           {detail.lastError && detail.status !== "recusada" && (
-            <p className="text-sm text-muted-foreground">{detail.lastError}</p>
+            <p className="text-sm text-muted-foreground">
+              {friendlyChannelReason(detail.lastError)}
+            </p>
           )}
           <CampaignContentPreview detail={detail} />
           {decidable && (
@@ -633,13 +637,14 @@ export function ExpertCampaignsQueue({
   emptyText: string;
 }) {
   const isDemo = useIsDemoTenant();
+  const { isEnabled } = useEnabledChannels();
   const invalidate = useInvalidateExpertCampaigns();
   const pauseFn = useServerFn(pauseExpertCampaign);
   const resumeFn = useServerFn(resumeExpertCampaign);
   const [reviewing, setReviewing] = useState<Target | null>(null);
 
   const query = useExpertCampaignsAdmin({ expertId, pendingOnly });
-  const items = query.data?.items ?? [];
+  const items = (query.data?.items ?? []).filter((item) => isEnabled(item.channel));
 
   const pause = useMutation({
     mutationFn: (target: Target) => pauseFn({ data: target }),

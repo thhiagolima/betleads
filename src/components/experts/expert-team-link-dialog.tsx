@@ -25,20 +25,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PAPEL_EQUIPE_LABEL } from "@/components/experts/expert-badges";
+import { PAPEL_EQUIPE_LABEL, RESTRITO_EQUIPE_AVISO } from "@/components/experts/expert-badges";
 import { EXPERTS_QUERY_KEY } from "@/components/experts/experts-query";
-import { linkExpertToTeamMember, listTeamMembersForLinking } from "@/lib/experts-admin.functions";
+import {
+  linkExpertToTeamMember,
+  listTeamMembersForLinking,
+  type ExpertAdminRow,
+} from "@/lib/experts-admin.functions";
 
 export function ExpertTeamLinkDialog({
   open,
   onOpenChange,
   expertId,
   expertNome,
+  expertTipo,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   expertId: string | null;
   expertNome: string;
+  expertTipo: ExpertAdminRow["tipo"] | null;
 }) {
   const qc = useQueryClient();
   const listFn = useServerFn(listTeamMembersForLinking);
@@ -78,6 +84,14 @@ export function ExpertTeamLinkDialog({
             O perfil passa a medir o rendimento dessa pessoa. O acesso dela à casa não muda.
           </DialogDescription>
         </DialogHeader>
+        {expertTipo === "restrito" && (
+          <p
+            role="note"
+            className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-label text-warning"
+          >
+            {RESTRITO_EQUIPE_AVISO}
+          </p>
+        )}
         <div className="space-y-2">
           <Label htmlFor="expert-team-member">Pessoa da equipe</Label>
           <Select value={userId} onValueChange={setUserId}>

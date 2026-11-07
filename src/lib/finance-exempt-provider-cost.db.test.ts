@@ -29,6 +29,17 @@ const MIGRATION_EXEMPT = readFileSync(
   "utf8",
 );
 
+// 20261218100000 redefines finance_send_usage and finance_betleads_usage with
+// a MATERIALIZED houses CTE (statement timeout fix); every case here runs on it.
+const MIGRATION_MATERIALIZE = readFileSync(
+  resolve(
+    __dirname,
+    "../..",
+    "supabase/migrations/20261218100000_finance_usage_materialize_exempt.sql",
+  ),
+  "utf8",
+);
+
 const EXEMPT = "00000000-0000-4000-8000-00000000e0a1";
 const PAYING = "00000000-0000-4000-8000-00000000e0a2";
 const NO_PLAN = "00000000-0000-4000-8000-00000000e0a3";
@@ -78,6 +89,8 @@ const SCHEMA = `
     entry_type text NOT NULL CHECK (
       entry_type IN ('purchase', 'manual_adjustment', 'usage_reservation', 'usage_refund', 'migration')
     ),
+    -- item: read by finance_send_usage, which 20261218100000 also redefines.
+    item text NULL,
     units integer NULL,
     provider_unit_cost numeric(12,4) NULL,
     amount numeric(14,4) NOT NULL,
@@ -127,6 +140,7 @@ beforeAll(async () => {
   await db.exec(MIGRATION_EXEMPT);
   // Idempotent: a second run changes nothing and does not fail.
   await db.exec(MIGRATION_EXEMPT);
+  await db.exec(MIGRATION_MATERIALIZE);
   await db.exec(`
     INSERT INTO public.tenants (id, nome, plano) VALUES
       ('${EXEMPT}', 'Casa Interna', 'interno'),

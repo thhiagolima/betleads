@@ -81,3 +81,12 @@ export const setTenantChannelProviderInput = z.object({
   /** null = back to the platform account. */
   accountId: dbUuid().nullable(),
 });
+
+export const setPlatformDefaultInput = z.object({
+  channel: z.enum(PROVIDER_CHANNELS),
+  accountId: dbUuid(),
+});
+
+export const deleteProviderAccountInput = z.object({
+  id: dbUuid(),
+});

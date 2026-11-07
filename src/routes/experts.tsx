@@ -56,7 +56,7 @@ import {
 } from "@/lib/experts-admin.functions";
 import type { ExpertAdminRow } from "@/lib/experts-admin.functions";
 import { getExpertClickWindowHours } from "@/lib/expert-metrics.functions";
-import { acessoBadge, TIPO_LABEL } from "@/components/experts/expert-badges";
+import { acessoBadge, RESTRITO_EQUIPE_AVISO, TIPO_LABEL } from "@/components/experts/expert-badges";
 import {
   EXPERT_CLICK_WINDOW_QUERY_KEY,
   EXPERTS_QUERY_KEY,
@@ -272,6 +272,14 @@ function ExpertsPage() {
                   </TableCell>
                   <TableCell>
                     {acessoBadge(expert.acesso, expert.papelEquipe, expert.ativo)}
+                    {expert.tipo === "restrito" && expert.acesso === "equipe" && (
+                      <p
+                        className="mt-1 max-w-56 text-label text-warning"
+                        title={RESTRITO_EQUIPE_AVISO}
+                      >
+                        Vê a casa inteira: Restrito não vale para a equipe.
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -463,6 +471,7 @@ function ExpertsPage() {
         onOpenChange={(open) => !open && setTeamLinkExpertRow(null)}
         expertId={teamLinkExpertRow?.id ?? null}
         expertNome={teamLinkExpertRow?.nome ?? ""}
+        expertTipo={teamLinkExpertRow?.tipo ?? null}
       />
       <ExpertSettingsDialog
         open={settingsOpen}

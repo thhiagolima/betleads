@@ -401,6 +401,10 @@ export function computeSetupChecklist(input: {
   shortenerStatuses: DomainStatus[];
   emailStatuses: DomainStatus[];
   hasVerifiedSender: boolean;
+  /** E-mail desligado para a casa: o item "email" some do checklist (nada a
+   * configurar enquanto o canal está desligado). Default `true` (sem
+   * quebrar chamadores existentes que não passam o canal). */
+  emailChannelEnabled?: boolean;
 }): { items: { id: "house" | "shortener" | "email"; state: SetupItemState }[]; complete: boolean } {
   const houseState: SetupItemState = input.siteUrl ? "done" : "todo";
   const shortenerState = statusesState(input.shortenerStatuses);
@@ -418,7 +422,7 @@ export function computeSetupChecklist(input: {
   const items: { id: "house" | "shortener" | "email"; state: SetupItemState }[] = [
     { id: "house", state: houseState },
     { id: "shortener", state: shortenerState },
-    { id: "email", state: emailState },
+    ...(input.emailChannelEnabled ?? true ? [{ id: "email" as const, state: emailState }] : []),
   ];
 
   const complete = items.every((i) => i.state === "done");

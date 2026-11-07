@@ -11,6 +11,8 @@ import { createFakeDb, installCreditLedger } from "./sms-bulk.test-support";
 const fake = vi.hoisted(() => ({
   db: null as unknown as ReturnType<typeof createFakeDb>,
   rpcCalls: [] as Array<{ fn: string; args: Record<string, unknown> }>,
+  /** email_send_logs id findAcceptedEmail returns (null: none accepted). */
+  acceptedLogId: null as string | null,
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -25,12 +27,15 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   const { createFakeDb } = await import("./sms-bulk.test-support");
   fake.db = createFakeDb();
   // findAcceptedEmail filters with PostgREST `.or(...)`, which the fake DB
-  // does not model: no earlier accepted send in these tests.
+  // does not model: it answers `fake.acceptedLogId` (none by default).
   const noAcceptedSend: any = {
     select: () => noAcceptedSend,
     eq: () => noAcceptedSend,
     or: () => noAcceptedSend,
-    limit: async () => ({ data: [], error: null }),
+    limit: async () => ({
+      data: fake.acceptedLogId ? [{ id: fake.acceptedLogId }] : [],
+      error: null,
+    }),
   };
   return {
     supabaseAdmin: {
@@ -59,6 +64,7 @@ vi.mock("./shortio.server", () => ({
 }));
 
 import { __resetDemoTenantCacheForTests } from "./tenant-access.server";
+import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";
 import { sendInfobipEmail, type SendEmailInput } from "./email-send.server";
 
 const NORMAL = "00000000-0000-4000-8000-000000000001";
@@ -93,7 +99,9 @@ const accepted = (key = "k") => ({
 beforeEach(() => {
   fake.db.reset();
   fake.rpcCalls.length = 0;
+  fake.acceptedLogId = null;
   __resetDemoTenantCacheForTests();
+  __resetTenantChannelsCacheForTests();
   fake.db.rows("tenants").push(
     { id: NORMAL, status: "active", is_demo: false },
     { id: DEMO, status: "active", is_demo: true },
@@ -266,6 +274,49 @@ describe("sendInfobipEmail wallet reservation", () => {
     await expect(
       sendInfobipEmail(input({ tenantId: LOCKED, linkTracking: undefined })),
     ).rejects.toThrow();
+    expect(wallet.ledger()).toHaveLength(0);
+    expect(mocks.provider).not.toHaveBeenCalled();
+  });
+
+  it("a house with the e-mail channel disabled: channel_disabled, never reserved nor sent", async () => {
+    fake.db.rows("tenant_channels").push({ tenant_id: NORMAL, channel: "email", enabled: false, disabled_at: null });
+    const result = await sendInfobipEmail(input());
+    expect(result).toMatchObject({
+      ok: false,
+      temporary: false,
+      errorKind: "channel_disabled",
+      body: { error: "O canal E-mail está desabilitado para esta casa." },
+    });
+    expect(wallet.ledger()).toHaveLength(0);
+    expect(fake.rpcCalls).toHaveLength(0);
+    expect(mocks.consent).not.toHaveBeenCalled();
+    expect(mocks.provider).not.toHaveBeenCalled();
+  });
+
+  it("the house only in linkTracking (no tenantId) with the channel on still sends", async () => {
+    fake.db.rows("tenant_channels").push({ tenant_id: NORMAL, channel: "email", enabled: true, disabled_at: null });
+    const result = await sendInfobipEmail(input({ tenantId: undefined }));
+    expect(result.ok).toBe(true);
+    expect(mocks.provider).toHaveBeenCalledOnce();
+  });
+
+  it("the house only in linkTracking (no tenantId) is the one checked: channel off refuses", async () => {
+    fake.db.rows("tenant_channels").push({ tenant_id: NORMAL, channel: "email", enabled: false, disabled_at: null });
+    const result = await sendInfobipEmail(input({ tenantId: undefined }));
+    expect(result).toMatchObject({ ok: false, errorKind: "channel_disabled" });
+    expect(mocks.provider).not.toHaveBeenCalled();
+  });
+
+  it("an already-accepted key re-processed after the channel is off returns already-sent, not channel_disabled", async () => {
+    fake.acceptedLogId = "log-1";
+    fake.db.rows("tenant_channels").push({ tenant_id: NORMAL, channel: "email", enabled: false, disabled_at: null });
+    const result = await sendInfobipEmail(input({ idempotencyKey: "journey-key-1" }));
+    expect(result).toMatchObject({
+      ok: true,
+      alreadySent: true,
+      body: { already_sent: true, email_log_id: "log-1" },
+    });
+    expect(result.errorKind).toBeUndefined();
     expect(wallet.ledger()).toHaveLength(0);
     expect(mocks.provider).not.toHaveBeenCalled();
   });

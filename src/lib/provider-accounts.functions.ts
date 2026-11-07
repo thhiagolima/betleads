@@ -3,11 +3,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
+  deleteProviderAccountInput,
   saveProviderAccountInput,
+  setPlatformDefaultInput,
   setProviderAccountStatusInput,
   setTenantChannelProviderInput,
   testProviderAccountInput,
 } from "./provider-accounts.shared";
+import { setTenantChannelInput, tenantChannelImpactInput } from "./tenant-channels.shared";
 
 export const adminListProviderAccounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -46,4 +49,36 @@ export const adminSetTenantChannelProvider = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { adminSetTenantChannelProviderFor } = await import("./provider-accounts-admin.server");
     return adminSetTenantChannelProviderFor(context, data);
+  });
+
+export const adminSetPlatformDefault = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => setPlatformDefaultInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const { adminSetPlatformDefaultFor } = await import("./provider-accounts-admin.server");
+    return adminSetPlatformDefaultFor(context, data);
+  });
+
+export const adminDeleteProviderAccount = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => deleteProviderAccountInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const { adminDeleteProviderAccountFor } = await import("./provider-accounts-admin.server");
+    return adminDeleteProviderAccountFor(context, data);
+  });
+
+export const adminTenantChannelImpact = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => tenantChannelImpactInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const { adminTenantChannelImpactFor } = await import("./tenant-channels-admin.server");
+    return adminTenantChannelImpactFor(context, data);
+  });
+
+export const adminSetTenantChannel = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => setTenantChannelInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const { adminSetTenantChannelFor } = await import("./tenant-channels-admin.server");
+    return adminSetTenantChannelFor(context, data);
   });

@@ -121,6 +121,11 @@ export type SendOutcome = {
   expertCap?: boolean;
   /** Área do Expert: the owner was deactivated meanwhile; the campaign is cancelled. */
   expertInactive?: boolean;
+  /**
+   * The SMS channel was turned off for the house (errorKind
+   * "channel_disabled"): nothing sent nor charged; the campaign is cancelled.
+   */
+  channelDisabled?: boolean;
   error?: string;
 };
 
@@ -131,6 +136,8 @@ export const SMS_CAMPAIGN_EXPERT_CAP_MESSAGE = "Teto mensal do expert atingido";
 /** last_error of an expert campaign whose owner was deactivated. */
 export const SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE =
   "O expert dono desta campanha foi desativado; nada será enviado.";
+/** last_error of a campaign cancelled because the house's SMS channel was turned off. */
+export const SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE = "Canal SMS desabilitado para a casa.";
 
 /**
  * SMS provider circuit breaker, asked before every batch:
@@ -186,6 +193,8 @@ export type CampaignDispatchDeps = {
   resolveAudienceTargets?: (tenantId: string, criteria: unknown) => Promise<AudienceTarget[]>;
   /** External lists: which of these phones registered as players meanwhile. */
   findRegisteredPhones?: (tenantId: string, phones: string[]) => Promise<Set<string>>;
+  /** SMS channel on for the house (tenant_channels); absent = always on. */
+  channelEnabled?: (tenantId: string) => Promise<boolean>;
 };
 
 export type CampaignTickResult = {
@@ -208,7 +217,8 @@ export type CampaignTickResult = {
     | "provider_unavailable"
     | "insufficient_balance"
     | "expert_cap"
-    | "expert_inactive";
+    | "expert_inactive"
+    | "channel_disabled";
   /** ENV-10: sends whose provider outcome is unknown (counted in `sent`). */
   pendingConfirmation?: number;
 };
@@ -281,6 +291,19 @@ export async function processSmsCampaignTick(
     status: "enviando",
     stopReason: "done",
   };
+
+  // Channel turned off for the house: an 'enviando' campaign (Task 5 only
+  // cancels agendada/pausada ones) stops here, before anything is resolved,
+  // sent or charged. Re-enabling the channel never brings it back.
+  if (deps.channelEnabled && !(await deps.channelEnabled(c.tenant_id))) {
+    await deps.updateCampaign(c, {
+      status: "cancelada",
+      last_error: SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE,
+      locked_at: null,
+      locked_by: null,
+    });
+    return { ...result, status: "cancelada", stopReason: "channel_disabled" };
+  }
 
   // 0. Dynamic audience: the saved rule is recalculated once, before the first
   // send, so players who entered (or left) it since scheduling are included
@@ -620,20 +643,28 @@ export async function processSmsCampaignTick(
         : outcomes.findIndex(
             (o) =>
               !o?.ok &&
-              (o?.retryable || o?.insufficientBalance || o?.expertCap || o?.expertInactive),
+              (o?.retryable ||
+                o?.insufficientBalance ||
+                o?.expertCap ||
+                o?.expertInactive ||
+                o?.channelDisabled),
           );
     if (firstRetryable >= 0) {
       const cut = deferredError === null ? outcomes[firstRetryable] : undefined;
       const noBalance = cut?.insufficientBalance === true;
-      const expertStop = cut?.expertInactive
-        ? ("expert_inactive" as const)
-        : cut?.expertCap
-          ? ("expert_cap" as const)
-          : null;
+      const expertStop = cut?.channelDisabled
+        ? ("channel_disabled" as const)
+        : cut?.expertInactive
+          ? ("expert_inactive" as const)
+          : cut?.expertCap
+            ? ("expert_cap" as const)
+            : null;
       lastError = expertStop
         ? expertStop === "expert_cap"
           ? SMS_CAMPAIGN_EXPERT_CAP_MESSAGE
-          : SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE
+          : expertStop === "channel_disabled"
+            ? SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE
+            : SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE
         : noBalance
           ? SMS_CAMPAIGN_NO_BALANCE_MESSAGE
           : (deferredError ?? outcomes[firstRetryable]?.error ?? "Provedor SMS indisponível");
@@ -665,6 +696,7 @@ export async function processSmsCampaignTick(
     if (stop === "insufficient_balance") lastError = SMS_CAMPAIGN_NO_BALANCE_MESSAGE;
     if (stop === "expert_cap") lastError = SMS_CAMPAIGN_EXPERT_CAP_MESSAGE;
     if (stop === "expert_inactive") lastError = SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE;
+    if (stop === "channel_disabled") lastError = SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE;
     result.sent += batchSent;
     result.deduplicated += batchDedup;
     result.failed += batchFailed;
@@ -695,7 +727,7 @@ export async function processSmsCampaignTick(
       : "enviado"
     : stop === "insufficient_balance" || stop === "expert_cap"
       ? "pausada"
-      : stop === "expert_inactive"
+      : stop === "expert_inactive" || stop === "channel_disabled"
         ? "cancelada"
         : "enviando";
   result.stopReason = isDone ? "done" : (stop ?? "quota");
@@ -708,7 +740,8 @@ export async function processSmsCampaignTick(
     result.stopReason === "provider_unavailable" ||
     result.stopReason === "insufficient_balance" ||
     result.stopReason === "expert_cap" ||
-    result.stopReason === "expert_inactive"
+    result.stopReason === "expert_inactive" ||
+    result.stopReason === "channel_disabled"
   )
     patch.last_error = lastError;
   await deps.updateCampaign(c, patch);

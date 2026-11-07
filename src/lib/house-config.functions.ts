@@ -36,6 +36,7 @@ import {
 } from "@/lib/tenant-domains.server";
 import { renderDnsInstructionsEmail, sendPlatformEmail } from "@/lib/platform-email.server";
 import { invalidateHouseLinks } from "@/lib/house-links.server";
+import { isChannelEnabled } from "@/lib/tenant-channels.server";
 
 // ============ Pure helpers (exported for unit tests) ============
 
@@ -392,14 +393,16 @@ export const getHouseSetupStatus = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
 
-    const [tenant, domains, senderRows, isAdmin, isSuperAdmin, noticeRows] = await Promise.all([
-      fetchTenantRow(tenantId),
-      listTenantDomains(tenantId),
-      fetchSenders(tenantId),
-      checkTenantAdmin(context.supabase, tenantId),
-      checkSuperAdmin(context.supabase, context.userId),
-      fetchNoticeRows(tenantId),
-    ]);
+    const [tenant, domains, senderRows, isAdmin, isSuperAdmin, noticeRows, emailChannelEnabled] =
+      await Promise.all([
+        fetchTenantRow(tenantId),
+        listTenantDomains(tenantId),
+        fetchSenders(tenantId),
+        checkTenantAdmin(context.supabase, tenantId),
+        checkSuperAdmin(context.supabase, context.userId),
+        fetchNoticeRows(tenantId),
+        isChannelEnabled(tenantId, "email"),
+      ]);
 
     const shortenerStatuses = domains.filter((d) => d.kind === "shortener").map((d) => d.status);
     const emailDomains = domains.filter((d) => d.kind === "email");
@@ -415,6 +418,7 @@ export const getHouseSetupStatus = createServerFn({ method: "GET" })
       shortenerStatuses,
       emailStatuses,
       hasVerifiedSender,
+      emailChannelEnabled,
     });
 
     const showWizard = computeShowWizard({

@@ -2,7 +2,9 @@
 // name, type, affiliate-id chips (with suggestions from the house's
 // unassigned affiliate ids), send mode, monthly cap and claim deadline.
 // Saves through `saveExpert` (Task 6); the demo tenant's refusal reaches the
-// caller as a toast via the mutation's `onError`.
+// caller as a toast via the mutation's `onError`. Creating an expert can also
+// create its login ("Acesso (opcional)"): `inviteExpert` runs after the save,
+// and its failure keeps the expert saved (the admin retries via Convidar).
 import { useEffect, useId, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -26,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { saveExpert } from "@/lib/experts-admin.functions";
+import { inviteExpert, saveExpert } from "@/lib/experts-admin.functions";
 import type { ExpertAdminRow } from "@/lib/experts-admin.functions";
 import {
   EXPERT_USAGE_ADMIN_QUERY_KEY,
@@ -35,6 +37,14 @@ import {
 } from "@/components/experts/experts-query";
 import { useExpertUsageAdmin } from "@/components/experts/use-expert-campaigns-admin";
 import { formatBrlInput, parseBrlInput } from "@/lib/brl-input";
+import { ExpertAccessFields } from "@/components/experts/expert-access-fields";
+import {
+  canSubmitExpertAccess,
+  expertAccessAfterSaveError,
+  expertAccessFeedback,
+  expertAccessPassword,
+  type ExpertAccessMode,
+} from "@/components/experts/expert-access-model";
 
 type ExpertTipo = "restrito" | "total";
 type ExpertEnvioModo = "livre" | "aprovacao";
@@ -95,6 +105,7 @@ export function ExpertFormDialog({
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveExpert);
+  const inviteFn = useServerFn(inviteExpert);
   const fieldId = useId();
   const ids = {
     nome: `${fieldId}-nome`,
@@ -115,6 +126,9 @@ export function ExpertFormDialog({
   const [envioModo, setEnvioModo] = useState<ExpertEnvioModo>("livre");
   const [tetoMensal, setTetoMensal] = useState("");
   const [assumirPrazoDias, setAssumirPrazoDias] = useState("3");
+  const [accessEmail, setAccessEmail] = useState("");
+  const [accessMode, setAccessMode] = useState<ExpertAccessMode>("convite");
+  const [accessPassword, setAccessPassword] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -126,6 +140,9 @@ export function ExpertFormDialog({
     setEnvioModo(expert?.envioModo ?? "livre");
     setTetoMensal(formatBrlInput(expert?.tetoMensal));
     setAssumirPrazoDias(String(expert?.assumirPrazoDias ?? 3));
+    setAccessEmail("");
+    setAccessMode("convite");
+    setAccessPassword("");
   }, [open, expert, initialAffiliateId]);
 
   // Com aprovação → Livre não libera as pendentes: avisa quantas continuam na fila.
@@ -137,7 +154,10 @@ export function ExpertFormDialog({
   const nomeHint = nomeError(nome);
   const tetoHint = tetoMensalError(tetoMensal);
   const prazoHint = assumirPrazoDiasError(assumirPrazoDias);
+  // Access step: create mode only, and only when an e-mail was typed.
+  const wantsAccess = !expert && !!accessEmail.trim();
   const canSave =
+    (!wantsAccess || canSubmitExpertAccess(accessEmail, accessMode, accessPassword)) &&
     !!nome.trim() &&
     !nomeHint &&
     !tetoHint &&
@@ -145,10 +165,10 @@ export function ExpertFormDialog({
     affiliateIds.length <= AFFILIATE_IDS_MAX_COUNT;
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const teto = parseBrlInput(tetoMensal);
       const prazo = Number(assumirPrazoDias.trim());
-      return saveFn({
+      const saved = await saveFn({
         data: {
           id: expert?.id,
           nome: nome.trim(),
@@ -159,9 +179,34 @@ export function ExpertFormDialog({
           assumirPrazoDias: prazo,
         },
       });
+      if (!wantsAccess) return { access: null, accessError: null };
+      // The expert is saved from here on: an access failure must not look like
+      // a save failure (the admin would re-create a duplicate).
+      try {
+        const access = await inviteFn({
+          data: {
+            expertId: saved.id,
+            email: accessEmail.trim(),
+            password: expertAccessPassword(accessMode, accessPassword),
+          },
+        });
+        return { access, accessError: null };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return { access: null, accessError: reason || "erro desconhecido" };
+      }
     },
-    onSuccess: () => {
-      toast.success(expert ? "Expert atualizado" : "Expert cadastrado");
+    onSuccess: ({ access, accessError }) => {
+      if (accessError) {
+        toast.error(expertAccessAfterSaveError(accessError));
+      } else if (access) {
+        const feedback = expertAccessFeedback(access);
+        toast.success("Expert cadastrado");
+        if (feedback.kind === "info") toast.info(feedback.message);
+        else toast.success(feedback.message);
+      } else {
+        toast.success(expert ? "Expert atualizado" : "Expert cadastrado");
+      }
       qc.invalidateQueries({ queryKey: EXPERTS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: UNASSIGNED_AFFILIATES_QUERY_KEY });
       qc.invalidateQueries({ queryKey: EXPERT_USAGE_ADMIN_QUERY_KEY });
@@ -292,6 +337,22 @@ export function ExpertFormDialog({
               </div>
             )}
           </div>
+
+          {!expert && (
+            <fieldset className="space-y-2 rounded-md border border-border/60 p-3">
+              <legend className="px-1 text-sm font-medium">Acesso (opcional)</legend>
+              <ExpertAccessFields
+                email={accessEmail}
+                onEmailChange={setAccessEmail}
+                mode={accessMode}
+                onModeChange={setAccessMode}
+                password={accessPassword}
+                onPasswordChange={setAccessPassword}
+                emailLabel="E-mail do expert"
+                emailOptional
+              />
+            </fieldset>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor={ids.envio}>Envio de campanhas</Label>

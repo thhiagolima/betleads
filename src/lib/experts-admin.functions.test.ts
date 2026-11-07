@@ -8,6 +8,8 @@ const fake = vi.hoisted(() => ({
   authUsers: [] as Array<{ id: string; email: string; last_sign_in_at?: string | null }>,
   invited: [] as Array<{ email: string; options: unknown }>,
   appMetadata: {} as Record<string, unknown>,
+  created: [] as Array<Record<string, unknown>>,
+  passwordUpdates: [] as string[],
   emails: [] as Array<{ to: string; subject: string; html: string }>,
   // Runs inside the invite (generateLink): lets a test act "concurrently" between
   // the invite's checks and its writes.
@@ -34,7 +36,11 @@ vi.mock("@/integrations/supabase/client.server", async () => {
             fake.onInvite?.();
             let user = fake.authUsers.find((u) => u.email === params.email);
             if (!user) {
-              user = { id: `invited-${fake.invited.length}`, email: params.email, last_sign_in_at: null };
+              user = {
+                id: `invited-${fake.invited.length}`,
+                email: params.email,
+                last_sign_in_at: null,
+              };
               fake.authUsers.push(user);
             }
             return {
@@ -42,7 +48,21 @@ vi.mock("@/integrations/supabase/client.server", async () => {
               error: null,
             };
           },
-          updateUserById: async (id: string, attrs: { app_metadata?: unknown }) => {
+          createUser: async (attrs: { email: string } & Record<string, unknown>) => {
+            fake.created.push(attrs);
+            const user = {
+              id: `created-${fake.created.length}`,
+              email: attrs.email,
+              last_sign_in_at: null,
+            };
+            fake.authUsers.push(user);
+            return { data: { user }, error: null };
+          },
+          updateUserById: async (
+            id: string,
+            attrs: { app_metadata?: unknown; password?: string },
+          ) => {
+            if (attrs.password) fake.passwordUpdates.push(id);
             fake.appMetadata[id] = attrs.app_metadata;
             return { data: { user: { id } }, error: null };
           },
@@ -127,6 +147,8 @@ beforeEach(() => {
   fake.authUsers.length = 0;
   fake.invited.length = 0;
   fake.appMetadata = {};
+  fake.created.length = 0;
+  fake.passwordUpdates.length = 0;
   fake.emails.length = 0;
   fake.onInvite = null;
   __resetDemoTenantCacheForTests();
@@ -287,6 +309,102 @@ describe("experts admin server functions", () => {
     expect(fake.invited).toEqual([]);
     expect(fake.emails).toEqual([]);
     expect(fake.admin.rows("experts")[0].user_id).toBe("u-active");
+  });
+
+  it("invite with a password creates a confirmed login and sends no e-mail", async () => {
+    addExpert();
+    const result = await inviteExpertFor(ctxFor(ADMIN), {
+      expertId: EXPERT_ID,
+      email: "Novo@Casa.com",
+      password: "senha-temp-123",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      created: true,
+      mode: "senha",
+      passwordIgnored: false,
+      invitedAgain: false,
+    });
+    expect(fake.created).toEqual([
+      {
+        email: "novo@casa.com",
+        password: "senha-temp-123",
+        email_confirm: true,
+        user_metadata: { invited_by: ADMIN, tenant_id: TENANT },
+        app_metadata: { force_password_change: true },
+      },
+    ]);
+    expect(fake.invited).toEqual([]);
+    expect(fake.emails).toEqual([]);
+    expect(fake.admin.rows("experts")[0].user_id).toBe("created-1");
+    expect(fake.admin.rows("user_roles")).toEqual([
+      expect.objectContaining({ user_id: "created-1", tenant_id: TENANT, role: "expert" }),
+    ]);
+    const audit = fake.admin.rows("tenant_audit_logs");
+    expect(audit.map((r) => r.action)).toEqual(["expert.invited"]);
+    expect(audit[0].metadata).toEqual({
+      auth_user_created: true,
+      mode: "senha",
+      password_ignored: false,
+    });
+    expect(JSON.stringify(audit)).not.toContain("senha-temp-123");
+  });
+
+  it("invite with a password never changes an existing account's password", async () => {
+    addExpert();
+    fake.authUsers.push({
+      id: "u-active",
+      email: "active@casa.com",
+      last_sign_in_at: "2026-10-20T00:00:00Z",
+    });
+    const result = await inviteExpertFor(ctxFor(ADMIN), {
+      expertId: EXPERT_ID,
+      email: "active@casa.com",
+      password: "senha-temp-123",
+    });
+
+    expect(result).toMatchObject({ created: false, mode: "senha", passwordIgnored: true });
+    expect(fake.created).toEqual([]);
+    expect(fake.passwordUpdates).toEqual([]);
+    expect(fake.appMetadata["u-active"]).toBeUndefined();
+    expect(fake.emails).toEqual([]);
+    expect(fake.admin.rows("experts")[0].user_id).toBe("u-active");
+    const audit = fake.admin.rows("tenant_audit_logs");
+    expect(audit[0].metadata).toEqual({
+      auth_user_created: false,
+      mode: "senha",
+      password_ignored: true,
+    });
+    expect(JSON.stringify(audit)).not.toContain("senha-temp-123");
+  });
+
+  it("invite without a password audits mode convite", async () => {
+    addExpert();
+    const result = await inviteExpertFor(ctxFor(ADMIN), {
+      expertId: EXPERT_ID,
+      email: "novo@casa.com",
+    });
+    expect(result).toMatchObject({ created: true, mode: "convite", passwordIgnored: false });
+    expect(fake.created).toEqual([]);
+    expect(fake.admin.rows("tenant_audit_logs")[0].metadata).toEqual({
+      auth_user_created: true,
+      mode: "convite",
+      password_ignored: false,
+    });
+  });
+
+  it("invite refuses a password shorter than 8 characters", async () => {
+    addExpert();
+    await expect(
+      inviteExpertFor(ctxFor(ADMIN), {
+        expertId: EXPERT_ID,
+        email: "novo@casa.com",
+        password: "curta",
+      }),
+    ).rejects.toThrow();
+    expect(fake.created).toEqual([]);
+    expect(fake.invited).toEqual([]);
   });
 
   it("invite loses a race to a concurrent invite: no orphan expert role", async () => {

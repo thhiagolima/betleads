@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Mail, MessageSquare, Phone, Plus, Send, UserRound, X } from "lucide-react";
@@ -41,6 +41,7 @@ import { sendTestSms } from "@/lib/sms.functions";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 import { getBillingPrices } from "@/lib/billing/billing.functions";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import { countSmsSegments, toGsm7Text } from "@/lib/sms-segments";
 import { brl } from "@/lib/format";
 
@@ -80,7 +81,25 @@ export function IndividualSmsDialog({
   const listVoiceAssets = useServerFn(listJourneyVoiceAssets);
   const getPrices = useServerFn(getBillingPrices);
   const queryClient = useQueryClient();
+  const { isEnabled } = useEnabledChannels();
+  const channelOptions = (
+    [
+      ["sms", "SMS", MessageSquare],
+      ["email", "E-mail", Mail],
+      ["voice", "Voz", Phone],
+    ] as const
+  ).filter(([value]) => isEnabled(value));
   const [channel, setChannel] = useState<Channel>("sms");
+  // If the current channel gets disabled while the dialog is open (or opens
+  // already seeded on one that is), fall back to the first one still
+  // offered. If none is, leave the state as-is: the picker below renders no
+  // option at all (nothing selectable) and the send button is disabled.
+  useEffect(() => {
+    if (!open) return;
+    if (!channelOptions.some(([value]) => value === channel) && channelOptions.length > 0) {
+      setChannel(channelOptions[0][0]);
+    }
+  }, [open, channel, channelOptions]);
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -230,12 +249,13 @@ export function IndividualSmsDialog({
     onError: (error: Error) => toast.error(tenantSafeChannelError(error)),
   });
   const canSend =
-    channel === "email"
+    channelOptions.length > 0 &&
+    (channel === "email"
       ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && Boolean(subject.trim() && message.trim())
       : digits.length >= 10 &&
         (channel === "voice"
           ? Boolean(voiceMode === "script" ? scriptId : voiceAssetId)
-          : Boolean(message.trim()));
+          : Boolean(message.trim())));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -249,13 +269,7 @@ export function IndividualSmsDialog({
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-2" {...tourAnchor("campanhas.teste.canal")}>
-            {(
-              [
-                ["sms", "SMS", MessageSquare],
-                ["email", "E-mail", Mail],
-                ["voice", "Voz", Phone],
-              ] as const
-            ).map(([value, label, Icon]) => (
+            {channelOptions.map(([value, label, Icon]) => (
               <Button
                 key={value}
                 type="button"
@@ -266,6 +280,11 @@ export function IndividualSmsDialog({
               </Button>
             ))}
           </div>
+          {channelOptions.length === 0 && (
+            <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-sm text-warning">
+              Nenhum canal está disponível para envio nesta casa.
+            </p>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             {channel === "email" ? (
               <div className="space-y-1.5">

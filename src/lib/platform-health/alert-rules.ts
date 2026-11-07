@@ -87,6 +87,7 @@ export const JOB_EXPECTED_PERIOD_S: Record<string, number> = {
   journey_dispatch: 60,
   journey_level_outbox: 60,
   journey_scan: 60,
+  platform_alerts: 300,
   recovery: 60,
   shortio_sync: 300,
   sms_tick: 60,
@@ -522,8 +523,12 @@ export function sourceFailureAlert(source: string): PlatformAlert {
 
 const SEVERITY_RANK: Record<AlertSeverity, number> = { critical: 0, warning: 1 };
 
-/** Critical first, then warning; within a severity, oldest `since` first (null last). */
-export function sortAlerts(alerts: PlatformAlert[]): PlatformAlert[] {
+/**
+ * Critical first, then warning; within a severity, oldest `since` first (null last). Generic so
+ * a caller carrying extra fields on each alert (Task 5/F3: `stored`) keeps them typed through
+ * the sort.
+ */
+export function sortAlerts<T extends PlatformAlert>(alerts: T[]): T[] {
   return [...alerts].sort((a, b) => {
     if (SEVERITY_RANK[a.severity] !== SEVERITY_RANK[b.severity]) {
       return SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];

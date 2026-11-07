@@ -13,6 +13,7 @@ import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { DomainsSection } from "@/components/house-config/domains-section";
 import { EmailSendersSection } from "@/components/house-config/email-senders-section";
 import { HouseSiteSection } from "@/components/house-config/house-site-section";
+import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import { HOUSE_CONFIG_QUERY_KEY } from "@/components/house-config/house-config-query";
 import { getHouseConfig } from "@/lib/house-config.functions";
 
@@ -39,8 +40,11 @@ export function HouseConfigReadOnlyNotice({ canEdit }: { canEdit: boolean | unde
 
 function HouseConfigPage() {
   const navigate = useNavigate();
+  const { isEnabled } = useEnabledChannels();
+  const visibleViews = VIEWS.filter((item) => item.value !== "email" || isEnabled("email"));
   const hash = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
-  const view: View = VIEWS.find((item) => item.value === hash)?.value ?? "casa";
+  const rawView = VIEWS.find((item) => item.value === hash)?.value ?? "casa";
+  const view: View = visibleViews.some((item) => item.value === rawView) ? rawView : "casa";
   const setView = (next: View) =>
     void navigate({ to: "/configuracoes/casa", hash: next === "casa" ? undefined : next });
 
@@ -60,7 +64,7 @@ function HouseConfigPage() {
         value={view}
         onValueChange={setView}
         label="Seções da configuração da casa"
-        items={VIEWS}
+        items={visibleViews}
       />
 
       <div role="tabpanel" aria-labelledby={`tab-${view}`} className="space-y-4">

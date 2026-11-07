@@ -786,3 +786,53 @@ describe("processSmsCampaignTick with an external phone list", () => {
     expect(String(lastPatch(state.patches).last_error)).toContain("Nenhum número da lista");
   });
 });
+
+describe("processSmsCampaignTick with the SMS channel disabled for the house", () => {
+  const players = (n: number): CampaignTarget[] =>
+    Array.from({ length: n }, (_, i) => ({ phone: phone(i + 1), playerId: pid(i + 1) }));
+
+  it("an 'enviando' campaign sends nothing and is cancelled with the channel message", async () => {
+    const { state, deps } = world();
+    const seen: string[] = [];
+    deps.channelEnabled = async (tenantId) => {
+      seen.push(tenantId);
+      return false;
+    };
+    const r = await processSmsCampaignTick(campaign(players(3), { sent_cursor: 1, sent_count: 1 }), deps, {
+      deadline: 45_000,
+    });
+    expect(seen).toEqual(["00000000-0000-4000-8000-000000000001"]);
+    expect(state.sendCalls).toEqual([]);
+    expect(r).toMatchObject({ status: "cancelada", stopReason: "channel_disabled", sent: 0 });
+    expect(state.patches).toEqual([
+      {
+        status: "cancelada",
+        last_error: "Canal SMS desabilitado para a casa.",
+        locked_at: null,
+        locked_by: null,
+      },
+    ]);
+  });
+
+  it("a send refused mid-tick as channel disabled cuts the batch and cancels (cursor kept before it)", async () => {
+    const { state, deps } = world();
+    deps.channelEnabled = async () => true;
+    const send = deps.send;
+    let calls = 0;
+    deps.send = async (args) => {
+      calls++;
+      if (calls >= 2) return { ok: false, channelDisabled: true, error: "O canal SMS está desabilitado para esta casa." };
+      return send(args);
+    };
+    deps.loadPlayerVariables = async () => new Map();
+    const r = await processSmsCampaignTick(campaign(players(3), { rate_per_minute: 1 }), deps, {
+      deadline: 45_000,
+      tickSeconds: 180,
+    });
+    expect(r).toMatchObject({ status: "cancelada", stopReason: "channel_disabled", sent: 1, failed: 0 });
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "cancelada",
+      last_error: "Canal SMS desabilitado para a casa.",
+    });
+  });
+});

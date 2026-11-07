@@ -1,37 +1,43 @@
 // Área do Expert (Fase 1, Task 9; cartão "Para chamar hoje" na Fase 2, Task
-// 8; números do período, gráfico diário e lista completa na Fase 3, Task 5):
-// tela "Início" do expert — saudação, tipo de acesso e casa, seletor de
-// período, cartões de métricas (`ExpertMetricCards`), gráfico de depositado
-// por dia, a lista "Para chamar hoje" (retornos, entraram em risco, clicaram
-// e não depositaram) e o total de leads visíveis com um botão para a
-// listagem (/expert/leads). Relatório de rendimento, Task 6: atalho "Ver
-// relatório completo" para /expert/rendimento.
-import { useState } from "react";
+// 8; relatório de rendimento, Task 6): tela "Início" do expert. O topo tem a
+// mesma cara do Início da casa (blocos de dashboard-blocks.tsx: os 4
+// cartões com tendência, depósitos e saques por dia, Recuperado, métricas
+// secundárias e Ao vivo, com o mesmo seletor de período), mas só com os
+// números dos leads do expert (`getExpertHomeSummary`: restrito = os
+// affiliate_ids dele, total = a casa inteira). Sem o que é só da casa
+// (checklist de configuração, aviso de domínio, gasto em SMS, retorno sobre
+// o envio, jornadas ativas/total, saldo). Abaixo ficam os blocos do expert:
+// "Para chamar hoje" (retornos, entraram em risco, clicaram e não
+// depositaram), o consumo do mês, o total de leads com o botão para
+// /expert/leads e o atalho "Ver relatório completo" (/expert/rendimento,
+// créditos e comissão).
+import { useMemo } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ArrowRight } from "lucide-react";
 import { toast } from "sonner";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
+import {
+  CashflowChart,
+  CrmCard,
+  DashboardError,
+  DashboardSkeleton,
+  HomeHeader,
+  HomeKpiCards,
+  LiveFeed,
+  SecondaryMetrics,
+} from "@/components/home/dashboard-blocks";
+import { HomeCard } from "@/components/home/home-cards";
+import { PeriodPicker } from "@/components/home/period-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-import { Page, PageHeader } from "@/components/ui-premium/page-header";
-import { CentralPeriodPicker } from "@/components/crm-results/shared";
 import { actionErrorMessage, formatDueDate } from "@/components/expert/sheet-format";
-import { ExpertMetricCards } from "@/components/expert/expert-metric-cards";
 import { ExpertUsageCard } from "@/components/campaigns/expert-usage-card";
 import { getExpertCampaignUsage } from "@/lib/expert-campaigns.functions";
 import { EXPERT_USAGE_QUERY_KEY, type ExpertCampaignUsageData } from "@/lib/expert-campaign-usage";
-import { CHART_COLORS, chartAxisProps, chartGridProps } from "@/lib/chart-theme";
-import { expertAccessErrorMessage } from "@/lib/expert-access-message";
+import { HOUSE_UNAVAILABLE_MESSAGE, expertAccessErrorMessage } from "@/lib/expert-access-message";
 import {
   completeExpertFollowup,
   listExpertClickedNoDeposit,
@@ -41,20 +47,16 @@ import {
   type ExpertLeadClickedNoDeposit,
   type ExpertLeadEnteredRisk,
 } from "@/lib/expert-lead-actions.functions";
+import { getExpertHomeSummary } from "@/lib/expert-home.functions";
 import { getExpertHome } from "@/lib/expert-leads.functions";
-import { getExpertDashboard } from "@/lib/expert-metrics.functions";
-import { DEFAULT_EXPERT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
 import { num } from "@/lib/format";
-import { useMoney } from "@/hooks/use-tenant-currency";
+import { greetingFor } from "@/lib/home-dashboard";
+import { brtDayKeyLocal, useHomePeriod } from "@/hooks/use-home-period";
+import { POLL_INTERVALS, useUpdatedAgo } from "@/hooks/use-updated-ago";
 
 const FOLLOWUPS_DUE_QUERY_KEY = ["expert-followups-due"];
 const ENTERED_RISK_QUERY_KEY = ["expert-leads-entered-risk"];
 const CLICKED_NO_DEPOSIT_QUERY_KEY = ["expert-clicked-no-deposit"];
-
-/** "aaaa-mm-dd" (dia da série) -> "dd/mm". */
-function dayLabel(dia: string): string {
-  return `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
-}
 
 /** Instante ISO -> "hh:mm" no fuso de São Paulo. */
 function timeLabel(iso: string): string {
@@ -63,56 +65,6 @@ function timeLabel(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-const CHART_CONFIG: ChartConfig = {
-  depositado: { label: "Depositado", color: CHART_COLORS.primary },
-};
-
-function DepositedChart({ serie }: { serie: { dia: string; depositado: number }[] }) {
-  // Depósitos atribuídos são valores da casa: moeda dela, não BRL.
-  const { money } = useMoney();
-  if (serie.every((d) => d.depositado === 0)) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Depositado por dia</CardTitle>
-        </CardHeader>
-        <CardContent className="py-10 text-center text-muted-foreground">
-          Nenhum depósito atribuído no período.
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const points = serie.map((d) => ({ dia: dayLabel(d.dia), depositado: d.depositado }));
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Depositado por dia</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ChartContainer config={CHART_CONFIG} className="aspect-auto h-72 w-full">
-          <BarChart data={points}>
-            <CartesianGrid {...chartGridProps} />
-            <XAxis dataKey="dia" {...chartAxisProps} />
-            <YAxis {...chartAxisProps} width={80} tickFormatter={(value) => money(Number(value))} />
-            <ChartTooltip
-              content={
-                <ChartTooltipContent
-                  formatter={(value) => money(Number(value))}
-                  labelKey="dia"
-                  nameKey="depositado"
-                />
-              }
-            />
-            <Bar dataKey="depositado" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ChartContainer>
-      </CardContent>
-    </Card>
-  );
 }
 
 function RetornosSection({ followups }: { followups: ExpertFollowupDue[] }) {
@@ -304,8 +256,15 @@ function MeuConsumoCard() {
   );
 }
 
+/** Erro do resumo: casa indisponível como veio; o resto, uma mensagem genérica. */
+function summaryErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message === HOUSE_UNAVAILABLE_MESSAGE) return error.message;
+  return "Não foi possível carregar os dados do painel.";
+}
+
 function ExpertHomePage() {
-  const [period, setPeriod] = useState<PeriodKey>(DEFAULT_EXPERT_PERIOD);
+  const period = useHomePeriod();
+  const { from, to, includesToday } = period;
 
   const getExpertHomeFn = useServerFn(getExpertHome);
   const homeQuery = useQuery({
@@ -313,67 +272,92 @@ function ExpertHomePage() {
     queryFn: () => getExpertHomeFn(),
   });
 
-  const getExpertDashboardFn = useServerFn(getExpertDashboard);
-  const dashboardQuery = useQuery({
-    queryKey: ["expert-dashboard", period],
-    queryFn: () => getExpertDashboardFn({ data: { period } }),
+  const getSummaryFn = useServerFn(getExpertHomeSummary);
+  const summaryQuery = useQuery({
+    queryKey: ["expert-home-summary", brtDayKeyLocal(from), brtDayKeyLocal(to)],
+    queryFn: () => getSummaryFn({ data: { from: from.toISOString(), to: to.toISOString() } }),
+    enabled: homeQuery.isSuccess,
+    staleTime: includesToday ? 20_000 : 5 * 60_000,
+    refetchInterval: includesToday ? POLL_INTERVALS.dashboard : false,
+    placeholderData: (previous) => previous,
+    retry: 1,
   });
+  const updatedAgo = useUpdatedAgo(summaryQuery.dataUpdatedAt || undefined);
+  const greeting = useMemo(() => greetingFor(), []);
+  const data = summaryQuery.data;
+  const sparkline = useMemo(
+    () => (data?.cashflowChart ?? []).map((row) => ({ value: row.deposits })),
+    [data?.cashflowChart],
+  );
 
   if (homeQuery.isError) {
     return (
-      <Page>
-        <PageHeader />
+      <div className="mx-auto max-w-[1600px] pb-4">
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             {expertAccessErrorMessage(homeQuery.error)}
           </CardContent>
         </Card>
-      </Page>
+      </div>
     );
   }
 
-  if (homeQuery.isLoading || !homeQuery.data) {
-    return (
-      <Page>
-        <PageHeader />
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">Carregando…</CardContent>
-        </Card>
-      </Page>
-    );
-  }
+  if (homeQuery.isLoading || !homeQuery.data) return <DashboardSkeleton />;
 
   const { nome, tipo, tenantNome, totalLeads } = homeQuery.data;
 
   return (
-    <Page>
-      <PageHeader
-        title={`Olá, ${nome}`}
-        subtitle={
-          <span className="inline-flex flex-wrap items-center gap-2">
+    <div
+      className="mx-auto max-w-[1600px] space-y-4 pb-4 sm:space-y-5"
+      aria-busy={summaryQuery.isFetching}
+    >
+      <HomeHeader
+        title={`${greeting}, ${nome}`}
+        meta={
+          <>
             <Badge variant="secondary">{TIPO_LABEL[tipo]}</Badge>
             <span>{tenantNome}</span>
-          </span>
+          </>
         }
-        actions={
-          <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
+        rangeText={period.rangeText}
+        isFetching={summaryQuery.isFetching}
+        updatedAgo={updatedAgo}
+        includesToday={includesToday}
+        picker={
+          <PeriodPicker preset={period.preset} range={period.range} onChange={period.onChange} />
         }
       />
 
-      {dashboardQuery.data && (
+      {summaryQuery.isLoading ? (
+        <DashboardSkeleton />
+      ) : !data ? (
+        <DashboardError
+          message={summaryErrorMessage(summaryQuery.error)}
+          onRetry={() => void summaryQuery.refetch()}
+        />
+      ) : (
         <>
-          <ExpertMetricCards metrics={dashboardQuery.data.metrics} />
-          <DepositedChart serie={dashboardQuery.data.serie} />
-          <p className="text-xs text-muted-foreground">
-            Depósitos contam para você quando o lead clica no seu link e deposita em até{" "}
-            {dashboardQuery.data.janelaHoras}h, ou quando chega pelo seu ID de afiliado.
+          <HomeKpiCards data={data} sparkline={sparkline} />
+
+          <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <div className="order-2 min-w-0 lg:order-1">
+              <CashflowChart data={data} />
+            </div>
+            <div className="order-1 lg:order-2">
+              <CrmCard data={data} />
+            </div>
+          </div>
+
+          <SecondaryMetrics data={data} />
+
+          <LiveFeed events={data.liveEvents} />
+
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Só entram os seus leads
+            {tipo === "total" ? " (com acesso total, todos os jogadores da casa)" : ""}. Recuperado
+            pelo CRM considera depósitos feitos em até 7 dias depois de um clique humano em link de
+            campanha ou jornada, sem quem já estava ativo. Datas no fuso de Brasília.
           </p>
-          <Button asChild variant="outline" className="w-fit gap-2">
-            <Link to="/expert/rendimento">
-              Ver relatório completo
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </Button>
         </>
       )}
 
@@ -381,19 +365,30 @@ function ExpertHomePage() {
 
       <MeuConsumoCard />
 
-      <Card className="w-fit">
-        <CardHeader>
-          <CardTitle>Seus leads: {num(totalLeads)}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Button asChild className="gap-2">
+      <div className="flex flex-wrap gap-3 sm:gap-4">
+        <HomeCard className="w-fit p-4 sm:p-5">
+          <h2 className="text-[15px] font-semibold">Seus leads: {num(totalLeads)}</h2>
+          <Button asChild className="mt-3 gap-2">
             <Link to="/expert/leads">
               Ver leads
               <ArrowRight className="h-4 w-4" />
             </Link>
           </Button>
-        </CardContent>
-      </Card>
-    </Page>
+        </HomeCard>
+        <HomeCard className="w-fit max-w-md p-4 sm:p-5">
+          <h2 className="text-[15px] font-semibold">Seu rendimento</h2>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">
+            Depósitos creditados a você (clique no seu link ou seu ID de afiliado), a base da sua
+            comissão.
+          </p>
+          <Button asChild variant="outline" className="mt-3 gap-2">
+            <Link to="/expert/rendimento">
+              Ver relatório completo
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        </HomeCard>
+      </div>
+    </div>
   );
 }

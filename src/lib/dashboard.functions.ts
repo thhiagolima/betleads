@@ -11,7 +11,7 @@ const inputSchema = z.object({
   to: z.string().datetime(),
 });
 
-type DashboardRpc = {
+export type DashboardRpc = {
   depositAmount?: number | string;
   previousDepositAmount?: number | string;
   depositCount?: number;
@@ -73,14 +73,14 @@ type DashboardDb = {
   from: <T = unknown>(table: string) => DashboardQuery<T>;
 };
 
-const DASHBOARD_REQUEST_TIMEOUT_MS = 25_000;
+export const DASHBOARD_REQUEST_TIMEOUT_MS = 25_000;
 
 /**
  * A agregação diária pode aguardar locks do banco durante picos de ingestão.
  * Não deixamos uma requisição HTTP (nem o cache de promises pendentes) prender
  * o dashboard indefinidamente nesse caso.
  */
-function withTimeout<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+export function withTimeout<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
@@ -102,12 +102,38 @@ function pctChange(current: number, previous: number) {
 }
 
 /**
- * Maps the raw `dashboard_summary_v2` RPC payload to the shape the home
- * dashboard consumes. Pulled out of the handler (PG1 final review, item 1)
- * so the new wallet/exempt fields and the removed legacy-credit fallback
- * can be unit tested without going through requireSupabaseAuth/Supabase.
+ * Período atual e anterior do Início, a partir do intervalo escolhido no
+ * PeriodPicker: dias inteiros de Brasília, o período anterior com o mesmo
+ * número de dias logo antes, e o TTL do cache (curto quando inclui hoje).
+ * Compartilhado com o Início do expert (expert-home.functions.ts).
  */
-export function mapDashboardRpc(value: DashboardRpc, periodDays: number) {
+export function dashboardPeriodBounds(from: string, to: string, now: Date = new Date()) {
+  const startDate = brtDayStart(new Date(from));
+  const endDate = brtDayEnd(new Date(to));
+  const periodMs = brtDayStart(endDate).getTime() - brtDayStart(startDate).getTime();
+  const periodDays = Math.max(1, Math.round(periodMs / 86_400_000) + 1);
+  const prevEndDate = new Date(startDate.getTime() - 1);
+  const prevStartDate = new Date(prevEndDate.getTime() - (periodDays - 1) * 86_400_000);
+  const currentDay = brtDayStart(now).getTime();
+  const includesToday = brtDayStart(endDate).getTime() >= currentDay;
+  return {
+    startDate,
+    endDate,
+    periodDays,
+    prevFrom: brtDayStart(prevStartDate).toISOString(),
+    prevTo: brtDayEnd(prevEndDate).toISOString(),
+    ttlMs: includesToday ? 20_000 : 5 * 60_000,
+  };
+}
+
+/**
+ * The part of the home payload that only depends on players and their
+ * money (deposits, withdrawals, PIX, recovered, journeys queue, live feed).
+ * Shared by the house home (`mapDashboardRpc`) and the expert home
+ * (`expert_home_summary`, already scoped to the expert's leads), which has
+ * none of the house-only fields (SMS cost, wallet, journey counts).
+ */
+export function mapLeadScopedDashboardRpc(value: DashboardRpc, periodDays: number) {
   const depositAmount = number(value.depositAmount);
   const previousDepositAmount = number(value.previousDepositAmount);
   const depositCount = number(value.depositCount);
@@ -127,11 +153,6 @@ export function mapDashboardRpc(value: DashboardRpc, periodDays: number) {
   const recoveredAmount = number(value.recoveredAmount);
   const recoveredNew = number(value.recoveredNew);
   const recoveredReactivated = number(value.recoveredReactivated);
-  const smsSent = number(value.smsSent);
-  // smsSent/messageCost now come straight from crm_results_daily
-  // (already on the price book and billed_units -- segments, not
-  // sends -- since Task 6), so there's no fallback to compute here.
-  const messageCost = number(value.messageCost);
 
   return {
     periodDays,
@@ -157,8 +178,6 @@ export function mapDashboardRpc(value: DashboardRpc, periodDays: number) {
     recoveredReactivated,
     recoveredReturning: Math.max(0, recoveredAmount - recoveredNew - recoveredReactivated),
     recoveredPlayers: number(value.recoveredPlayers),
-    messageCost,
-    messageRoi: messageCost > 0 ? recoveredAmount / messageCost : 0,
     withdrawalAmount: number(value.withdrawalAmount),
     cashflowChart: (value.cashflowChart ?? []).map((row) => ({
       ...row,
@@ -171,16 +190,41 @@ export function mapDashboardRpc(value: DashboardRpc, periodDays: number) {
       number(value.pixGenerated) > 0 ? (depositCount / number(value.pixGenerated)) * 100 : 0,
     pixUnpaid: Math.max(0, number(value.pixGenerated) - depositCount),
     reactivationQueue: number(value.reactivationQueue),
+    liveEvents: (value.liveEvents ?? []).slice(0, 8).map((event) => ({
+      ...event,
+      amount: event.amount == null ? undefined : number(event.amount),
+    })),
+  };
+}
+
+export type LeadScopedDashboard = ReturnType<typeof mapLeadScopedDashboardRpc>;
+
+/**
+ * Maps the raw `dashboard_summary_v2` RPC payload to the shape the home
+ * dashboard consumes. Pulled out of the handler (PG1 final review, item 1)
+ * so the new wallet/exempt fields and the removed legacy-credit fallback
+ * can be unit tested without going through requireSupabaseAuth/Supabase.
+ * The lead-scoped part lives in `mapLeadScopedDashboardRpc` (shared with
+ * the expert home); this adds the house-only fields on top.
+ */
+export function mapDashboardRpc(value: DashboardRpc, periodDays: number) {
+  const base = mapLeadScopedDashboardRpc(value, periodDays);
+  const smsSent = number(value.smsSent);
+  // smsSent/messageCost now come straight from crm_results_daily
+  // (already on the price book and billed_units -- segments, not
+  // sends -- since Task 6), so there's no fallback to compute here.
+  const messageCost = number(value.messageCost);
+
+  return {
+    ...base,
+    messageCost,
+    messageRoi: messageCost > 0 ? base.recoveredAmount / messageCost : 0,
     activeFlows: number(value.activeFlows),
     totalFlows: number(value.totalFlows),
     pausedFlows: number(value.pausedFlows),
     smsSent,
     walletBalance: number(value.walletBalance),
     exempt: value.exempt === true,
-    liveEvents: (value.liveEvents ?? []).slice(0, 8).map((event) => ({
-      ...event,
-      amount: event.amount == null ? undefined : number(event.amount),
-    })),
   };
 }
 
@@ -193,15 +237,10 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
       context.userId,
       data.tenantId,
     );
-    const startDate = brtDayStart(new Date(data.from));
-    const endDate = brtDayEnd(new Date(data.to));
-    const periodMs = brtDayStart(endDate).getTime() - brtDayStart(startDate).getTime();
-    const periodDays = Math.max(1, Math.round(periodMs / 86_400_000) + 1);
-    const prevEndDate = new Date(startDate.getTime() - 1);
-    const prevStartDate = new Date(prevEndDate.getTime() - (periodDays - 1) * 86_400_000);
-    const currentDay = brtDayStart(new Date()).getTime();
-    const includesToday = brtDayStart(endDate).getTime() >= currentDay;
-    const ttlMs = includesToday ? 20_000 : 5 * 60_000;
+    const { startDate, endDate, periodDays, prevFrom, prevTo, ttlMs } = dashboardPeriodBounds(
+      data.from,
+      data.to,
+    );
     const cacheKey = ["dashboard", tenantId, startDate.toISOString(), endDate.toISOString()].join(
       ":",
     );
@@ -222,8 +261,8 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
             _tenant: tenantId,
             _from: startDate.toISOString(),
             _to: endDate.toISOString(),
-            _prev_from: brtDayStart(prevStartDate).toISOString(),
-            _prev_to: brtDayEnd(prevEndDate).toISOString(),
+            _prev_from: prevFrom,
+            _prev_to: prevTo,
             _reset_at:
               (settings as { reset_at?: string } | null)?.reset_at ?? "1970-01-01T00:00:00Z",
           });

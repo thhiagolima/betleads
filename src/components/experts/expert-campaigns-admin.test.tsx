@@ -25,6 +25,9 @@ vi.mock("@/lib/expert-campaigns-admin.functions", () => ({
   getExpertCampaignForAdmin: vi.fn(),
   listExpertUsageForAdmin: vi.fn(),
 }));
+vi.mock("@/hooks/use-enabled-channels", () => ({
+  useEnabledChannels: () => ({ isEnabled: () => true }),
+}));
 
 import {
   ExpertCampaignReviewBody,

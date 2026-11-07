@@ -321,6 +321,30 @@ describe("computeSetupChecklist", () => {
     });
     expect(result.complete).toBe(true);
   });
+
+  it("drops the email item when the e-mail channel is disabled for the house", () => {
+    const result = computeSetupChecklist({
+      siteUrl: "https://suacasa.bet.br",
+      shortenerStatuses: ["verified"],
+      emailStatuses: [],
+      hasVerifiedSender: false,
+      emailChannelEnabled: false,
+    });
+    expect(result.items.map((i) => i.id)).toEqual(["house", "shortener"]);
+    expect(result.complete).toBe(true);
+  });
+
+  it("keeps the email item when the channel is enabled (explicit or default)", () => {
+    const result = computeSetupChecklist({
+      siteUrl: "https://suacasa.bet.br",
+      shortenerStatuses: ["verified"],
+      emailStatuses: [],
+      hasVerifiedSender: false,
+      emailChannelEnabled: true,
+    });
+    expect(result.items.map((i) => i.id)).toEqual(["house", "shortener", "email"]);
+    expect(result.complete).toBe(false);
+  });
 });
 
 describe("isReservedPlatformHostname", () => {

@@ -25,6 +25,8 @@ import {
 } from "./shortio.server";
 import type { Json } from "@/integrations/supabase/types";
 import { isChannelRevoked } from "./consent.server";
+import { assertChannelEnabled, isChannelEnabled } from "./tenant-channels.server";
+import { CHANNEL_DISABLED_MESSAGE } from "./tenant-channels.shared";
 import { requireBrazilianPhone } from "./phone-normalization";
 import {
   isShortBrasilRefusal,
@@ -89,6 +91,22 @@ import { postInfobipSms } from "./infobip-sms.server";
 const SHORT_BRASIL_REQUEST_TIMEOUT_MS = 8_000;
 
 const campaignDb = () => supabaseAdmin as unknown as CampaignDb;
+
+/**
+ * Guard sequence shared by `sendBulkSms`/`scheduleBulkSms`, extracted so it
+ * can be unit-tested directly (createServerFn handlers can't: the TanStack
+ * Start compiler swaps their body for a client-side stub — same reasoning
+ * as `journeys.functions.ts`'s `assertNoNewDisabledChannelSteps`). Covers
+ * the brief's Task 7 case: a disabled SMS channel throws
+ * `CHANNEL_DISABLED_MESSAGE("sms")` before any campaign row or recipient
+ * resolution.
+ */
+export async function assertBulkSmsCanSend(tenantId: string): Promise<void> {
+  await assertTenantCanOperate(tenantId);
+  // Demo guard once, before the campaign row, stats or any per-recipient send.
+  await assertTenantNotDemoForSend(tenantId);
+  await assertChannelEnabled(tenantId, "sms");
+}
 
 /**
  * ENV-06: campaigns send to every recipient that resolves to a player of the
@@ -884,6 +902,17 @@ export async function sendSmsInternal(args: {
 
   if (billingTenantId) {
     await assertTenantCanOperate(billingTenantId);
+    // Channel turned off for the house (tenant_channels): before link
+    // tracking and the credit reservation, so nothing is created nor charged.
+    if (!(await isChannelEnabled(billingTenantId, "sms"))) {
+      return {
+        ok: false as const,
+        status: 0,
+        error: CHANNEL_DISABLED_MESSAGE("sms"),
+        temporary: false,
+        errorKind: "channel_disabled" as ProviderErrorKind,
+      };
+    }
     if (await isChannelRevoked(billingTenantId, "sms", normalized)) {
       await logSend({
         to: normalized,
@@ -1135,6 +1164,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    await assertChannelEnabled(tenantId, "sms");
     const house = await loadHouseLinks(tenantId);
     let variables: Record<string, string> | null = null;
     if (data.playerId) {
@@ -1194,6 +1224,7 @@ export const triggerSmsFlowNow = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
+    await assertChannelEnabled(tenantId, "sms");
     const { data: flow } = await supabaseAdmin
       .from("sms_flows")
       .select("id, trigger_name, is_active, tenant_id")
@@ -1273,9 +1304,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
 
-    await assertTenantCanOperate(tenantId);
-    // Demo guard once, before the campaign row, stats or any per-recipient send.
-    await assertTenantNotDemoForSend(tenantId);
+    await assertBulkSmsCanSend(tenantId);
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)
@@ -2072,6 +2101,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await requireActiveTenantAdmin(context.supabase, RESEND_ADMIN_ONLY);
     await assertTenantCanOperate(tenantId);
+    await assertChannelEnabled(tenantId, "sms");
     const { start, end } = brtDayWindow(data.date);
 
     type Row = {
@@ -2312,9 +2342,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
 
     const tenantId = await resolveCurrentTenantId(context.supabase);
 
-    await assertTenantCanOperate(tenantId);
-    // Demo guard once, before the campaign row, stats or any per-recipient send.
-    await assertTenantNotDemoForSend(tenantId);
+    await assertBulkSmsCanSend(tenantId);
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)

@@ -13,6 +13,7 @@ import {
   tickFlows,
 } from "./call-flows.server";
 import { resolveOperationalTenantId } from "./tenant-access.server";
+import { assertChannelEnabled } from "./tenant-channels.server";
 import { tenantReads } from "@/lib/active-tenant-filter";
 
 const SmsConditionSchema = z.enum([
@@ -101,11 +102,54 @@ export const getCallFlow = createServerFn({ method: "POST" })
     return { flow };
   });
 
+/** A ligação é o único bloco que usa voz; blocos podem ser só delay. */
+function hasCallBlock(blocks: Array<{ block_type: string }>): boolean {
+  return blocks.some((b) => b.block_type === "call");
+}
+
+/**
+ * Guard for `saveCallFlow` when the flow is active, extracted so it can be
+ * unit-tested directly (createServerFn handlers can't — see
+ * journeys.functions.ts's `assertNoNewDisabledChannelSteps`). Only checks a
+ * channel the flow's blocks actually use — a flow with only delay blocks
+ * doesn't need voice (Task 7 review fix #2's same reasoning, applied here
+ * for symmetry with `enrollPlayerInCallFlow`'s guard below).
+ */
+export async function assertActiveCallFlowCanSend(
+  tenantId: string,
+  blocks: Array<{ block_type: string; sms?: Array<unknown> }>,
+): Promise<void> {
+  const hasCall = hasCallBlock(blocks);
+  const hasSms = blocks.some((b) => b.block_type === "call" && (b.sms?.length ?? 0) > 0);
+  if (hasCall) await assertChannelEnabled(tenantId, "voice");
+  if (hasSms) await assertChannelEnabled(tenantId, "sms");
+}
+
+/**
+ * Guard for `enrollPlayerInCallFlow`, extracted for the same reason. The
+ * flow's blocks can be any order/mix (not "always starts with a call" —
+ * review fix #2), so voice is only checked when the flow actually has a
+ * call block.
+ */
+export async function assertCallFlowEnrollmentCanSend(
+  tenantId: string,
+  blocks: Array<{ block_type: string }>,
+): Promise<void> {
+  if (hasCallBlock(blocks)) await assertChannelEnabled(tenantId, "voice");
+}
+
 export const saveCallFlow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => FlowInputSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase } = context;
+    // Um fluxo ativo com bloco de ligação/SMS de canal desligado é recusado
+    // ao salvar (Task 7). O fluxo substitui todos os blocos a cada save, sem
+    // a distinção "passo antigo inalterado" que a jornada tem.
+    if (data.is_active) {
+      const tenantId = await resolveOperationalTenantId(supabase);
+      await assertActiveCallFlowCanSend(tenantId, data.blocks);
+    }
     const flowPayload = {
       name: data.name,
       trigger_name: data.trigger_name ?? null,
@@ -247,7 +291,7 @@ export const enrollPlayerInCallFlow = createServerFn({ method: "POST" })
     const [{ data: flow }, { data: player }] = await Promise.all([
       context.supabase
         .from("call_flows")
-        .select("id")
+        .select("id, call_flow_blocks(block_type)")
         .eq("id", data.flow_id)
         .eq("tenant_id", tenantId)
         .maybeSingle(),
@@ -259,6 +303,10 @@ export const enrollPlayerInCallFlow = createServerFn({ method: "POST" })
         .maybeSingle(),
     ]);
     if (!flow || !player) throw new Error("Fluxo ou player não encontrado nesta tenant");
+    await assertCallFlowEnrollmentCanSend(
+      tenantId,
+      (flow as { call_flow_blocks?: Array<{ block_type: string }> }).call_flow_blocks ?? [],
+    );
     return enrollPlayerInFlow(data.flow_id, data.player_id);
   });
 

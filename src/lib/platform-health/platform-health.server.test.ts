@@ -17,12 +17,14 @@ vi.mock("@/lib/billing/billing-health.server", async (importOriginal) => {
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { todaySaoPaulo } from "@/lib/finance/finance-data.server";
 
+import { acknowledgeAlert } from "./alert-store.server";
 import { healthWindows } from "./house-health";
 import { sortAlerts } from "./alert-rules";
 import {
   __resetPlatformHealthCacheForTests,
   adminPlatformHealthFor,
   estimateEventsPerDay,
+  invalidatePlatformHealthCache,
 } from "./platform-health.server";
 
 const SUPER_ADMIN = "00000000-0000-4000-8000-0000000000aa";
@@ -416,6 +418,45 @@ describe("adminPlatformHealthFor", () => {
     const warningIdx = result.alerts.findIndex((a) => a.severity === "warning");
     expect(criticalIdx).toBeGreaterThanOrEqual(0);
     expect(warningIdx).toBeGreaterThan(criticalIdx);
+  });
+
+  it("fix round 1: invalidatePlatformHealthCache() makes the next call see a just-acknowledged alert", async () => {
+    pushHouses();
+    registerFinanceAndActivity();
+    registerNoOpObservability();
+    fake.admin.onRpc("observability_job_health", () => ({
+      data: [
+        {
+          job: "sms_tick",
+          last_started_at: "2026-01-01T00:00:00.000Z",
+          last_status: "running",
+          seconds_since_last_start: null,
+          stale_running: 1,
+          oldest_running_heartbeat_at: "2026-01-01T00:00:00.000Z",
+          runs_last_hour: 0,
+          failed_last_hour: 0,
+          partial_last_hour: 0,
+        },
+      ],
+      error: null,
+    }));
+
+    const first = await adminPlatformHealthFor(ctxFor(SUPER_ADMIN));
+    const jobAlert = first.alerts.find((a) => a.kind === "job");
+    expect(jobAlert).toBeDefined();
+    expect(jobAlert!.stored).toBeNull();
+
+    await acknowledgeAlert(jobAlert!.key, SUPER_ADMIN, jobAlert!, new Date());
+
+    // Still cached: the write is invisible without invalidating.
+    const stillStale = await adminPlatformHealthFor(ctxFor(SUPER_ADMIN));
+    expect(stillStale.alerts.find((a) => a.key === jobAlert!.key)?.stored).toBeNull();
+
+    invalidatePlatformHealthCache();
+
+    const fresh = await adminPlatformHealthFor(ctxFor(SUPER_ADMIN));
+    const freshAlert = fresh.alerts.find((a) => a.key === jobAlert!.key);
+    expect(freshAlert?.stored?.acknowledgedAt).not.toBeNull();
   });
 });
 

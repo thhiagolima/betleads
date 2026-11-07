@@ -40,6 +40,7 @@ import { Route as SmsRouteImport } from './routes/sms'
 import { Route as TenantsRouteImport } from './routes/tenants'
 import { Route as TreinoIaRouteImport } from './routes/treino-ia'
 import { Route as WebhooksRouteImport } from './routes/webhooks'
+import { Route as WebpushRouteImport } from './routes/webpush'
 import { Route as WhatsappRouteImport } from './routes/whatsapp'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known/oauth-authorization-server'
 import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known/oauth-protected-resource'
@@ -91,6 +92,8 @@ import { Route as ApiPublicHooksJourneyCrossingRouteImport } from './routes/api/
 import { Route as ApiPublicHooksJourneyScanRouteImport } from './routes/api/public/hooks/journey-scan'
 import { Route as ApiPublicHooksMorningCheckRouteImport } from './routes/api/public/hooks/morning-check'
 import { Route as ApiPublicHooksOrchestrateRouteImport } from './routes/api/public/hooks/orchestrate'
+import { Route as ApiPublicHooksPlatformAlertsRouteImport } from './routes/api/public/hooks/platform-alerts'
+import { Route as ApiPublicHooksPlatformDigestRouteImport } from './routes/api/public/hooks/platform-digest'
 import { Route as ApiPublicHooksRecoveryRouteImport } from './routes/api/public/hooks/recovery'
 import { Route as ApiPublicHooksSmsRefreshStatusRouteImport } from './routes/api/public/hooks/sms-refresh-status'
 import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/public/hooks/webhook-replay'
@@ -266,6 +269,11 @@ const TreinoIaRoute = TreinoIaRouteImport.update({
 const WebhooksRoute = WebhooksRouteImport.update({
   id: '/webhooks',
   path: '/webhooks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WebpushRoute = WebpushRouteImport.update({
+  id: '/webpush',
+  path: '/webpush',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WhatsappRoute = WhatsappRouteImport.update({
@@ -540,6 +548,18 @@ const ApiPublicHooksOrchestrateRoute =
     path: '/api/public/hooks/orchestrate',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksPlatformAlertsRoute =
+  ApiPublicHooksPlatformAlertsRouteImport.update({
+    id: '/api/public/hooks/platform-alerts',
+    path: '/api/public/hooks/platform-alerts',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicHooksPlatformDigestRoute =
+  ApiPublicHooksPlatformDigestRouteImport.update({
+    id: '/api/public/hooks/platform-digest',
+    path: '/api/public/hooks/platform-digest',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksRecoveryRoute = ApiPublicHooksRecoveryRouteImport.update({
   id: '/api/public/hooks/recovery',
   path: '/api/public/hooks/recovery',
@@ -693,6 +713,7 @@ export interface FileRoutesByFullPath {
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
+  '/webpush': typeof WebpushRoute
   '/whatsapp': typeof WhatsappRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
@@ -744,6 +765,8 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/journey-scan': typeof ApiPublicHooksJourneyScanRoute
   '/api/public/hooks/morning-check': typeof ApiPublicHooksMorningCheckRoute
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
+  '/api/public/hooks/platform-alerts': typeof ApiPublicHooksPlatformAlertsRoute
+  '/api/public/hooks/platform-digest': typeof ApiPublicHooksPlatformDigestRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
@@ -798,6 +821,7 @@ export interface FileRoutesByTo {
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
+  '/webpush': typeof WebpushRoute
   '/whatsapp': typeof WhatsappRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
@@ -849,6 +873,8 @@ export interface FileRoutesByTo {
   '/api/public/hooks/journey-scan': typeof ApiPublicHooksJourneyScanRoute
   '/api/public/hooks/morning-check': typeof ApiPublicHooksMorningCheckRoute
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
+  '/api/public/hooks/platform-alerts': typeof ApiPublicHooksPlatformAlertsRoute
+  '/api/public/hooks/platform-digest': typeof ApiPublicHooksPlatformDigestRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
@@ -904,6 +930,7 @@ export interface FileRoutesById {
   '/tenants': typeof TenantsRoute
   '/treino-ia': typeof TreinoIaRoute
   '/webhooks': typeof WebhooksRoute
+  '/webpush': typeof WebpushRoute
   '/whatsapp': typeof WhatsappRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
@@ -955,6 +982,8 @@ export interface FileRoutesById {
   '/api/public/hooks/journey-scan': typeof ApiPublicHooksJourneyScanRoute
   '/api/public/hooks/morning-check': typeof ApiPublicHooksMorningCheckRoute
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
+  '/api/public/hooks/platform-alerts': typeof ApiPublicHooksPlatformAlertsRoute
+  '/api/public/hooks/platform-digest': typeof ApiPublicHooksPlatformDigestRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
@@ -1011,6 +1040,7 @@ export interface FileRouteTypes {
     | '/tenants'
     | '/treino-ia'
     | '/webhooks'
+    | '/webpush'
     | '/whatsapp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
@@ -1062,6 +1092,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/journey-scan'
     | '/api/public/hooks/morning-check'
     | '/api/public/hooks/orchestrate'
+    | '/api/public/hooks/platform-alerts'
+    | '/api/public/hooks/platform-digest'
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
@@ -1116,6 +1148,7 @@ export interface FileRouteTypes {
     | '/tenants'
     | '/treino-ia'
     | '/webhooks'
+    | '/webpush'
     | '/whatsapp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
@@ -1167,6 +1200,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/journey-scan'
     | '/api/public/hooks/morning-check'
     | '/api/public/hooks/orchestrate'
+    | '/api/public/hooks/platform-alerts'
+    | '/api/public/hooks/platform-digest'
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
@@ -1221,6 +1256,7 @@ export interface FileRouteTypes {
     | '/tenants'
     | '/treino-ia'
     | '/webhooks'
+    | '/webpush'
     | '/whatsapp'
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
@@ -1272,6 +1308,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/journey-scan'
     | '/api/public/hooks/morning-check'
     | '/api/public/hooks/orchestrate'
+    | '/api/public/hooks/platform-alerts'
+    | '/api/public/hooks/platform-digest'
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
@@ -1327,6 +1365,7 @@ export interface RootRouteChildren {
   TenantsRoute: typeof TenantsRoute
   TreinoIaRoute: typeof TreinoIaRoute
   WebhooksRoute: typeof WebhooksRoute
+  WebpushRoute: typeof WebpushRoute
   WhatsappRoute: typeof WhatsappRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   DotwellKnownOauthProtectedResourceRoute: typeof DotwellKnownOauthProtectedResourceRouteWithChildren
@@ -1360,6 +1399,8 @@ export interface RootRouteChildren {
   ApiPublicHooksJourneyScanRoute: typeof ApiPublicHooksJourneyScanRoute
   ApiPublicHooksMorningCheckRoute: typeof ApiPublicHooksMorningCheckRoute
   ApiPublicHooksOrchestrateRoute: typeof ApiPublicHooksOrchestrateRoute
+  ApiPublicHooksPlatformAlertsRoute: typeof ApiPublicHooksPlatformAlertsRoute
+  ApiPublicHooksPlatformDigestRoute: typeof ApiPublicHooksPlatformDigestRoute
   ApiPublicHooksRecoveryRoute: typeof ApiPublicHooksRecoveryRoute
   ApiPublicHooksSmsRefreshStatusRoute: typeof ApiPublicHooksSmsRefreshStatusRoute
   ApiPublicHooksWebhookReplayRoute: typeof ApiPublicHooksWebhookReplayRoute
@@ -1600,6 +1641,13 @@ declare module '@tanstack/react-router' {
       path: '/webhooks'
       fullPath: '/webhooks'
       preLoaderRoute: typeof WebhooksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/webpush': {
+      id: '/webpush'
+      path: '/webpush'
+      fullPath: '/webpush'
+      preLoaderRoute: typeof WebpushRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/whatsapp': {
@@ -1959,6 +2007,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksOrchestrateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/platform-alerts': {
+      id: '/api/public/hooks/platform-alerts'
+      path: '/api/public/hooks/platform-alerts'
+      fullPath: '/api/public/hooks/platform-alerts'
+      preLoaderRoute: typeof ApiPublicHooksPlatformAlertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/hooks/platform-digest': {
+      id: '/api/public/hooks/platform-digest'
+      path: '/api/public/hooks/platform-digest'
+      fullPath: '/api/public/hooks/platform-digest'
+      preLoaderRoute: typeof ApiPublicHooksPlatformDigestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/recovery': {
       id: '/api/public/hooks/recovery'
       path: '/api/public/hooks/recovery'
@@ -2292,6 +2354,7 @@ const rootRouteChildren: RootRouteChildren = {
   TenantsRoute: TenantsRoute,
   TreinoIaRoute: TreinoIaRoute,
   WebhooksRoute: WebhooksRoute,
+  WebpushRoute: WebpushRoute,
   WhatsappRoute: WhatsappRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
@@ -2327,6 +2390,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksJourneyScanRoute: ApiPublicHooksJourneyScanRoute,
   ApiPublicHooksMorningCheckRoute: ApiPublicHooksMorningCheckRoute,
   ApiPublicHooksOrchestrateRoute: ApiPublicHooksOrchestrateRoute,
+  ApiPublicHooksPlatformAlertsRoute: ApiPublicHooksPlatformAlertsRoute,
+  ApiPublicHooksPlatformDigestRoute: ApiPublicHooksPlatformDigestRoute,
   ApiPublicHooksRecoveryRoute: ApiPublicHooksRecoveryRoute,
   ApiPublicHooksSmsRefreshStatusRoute: ApiPublicHooksSmsRefreshStatusRoute,
   ApiPublicHooksWebhookReplayRoute: ApiPublicHooksWebhookReplayRoute,

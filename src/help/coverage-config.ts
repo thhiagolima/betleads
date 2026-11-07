@@ -109,4 +109,12 @@ export const VIRTUAL_SCREENS = ["onboarding", "shell"] as const;
  * and shrinks this list. Starts empty; Task 15's shell article cites
  * "shell.header.help" (Task 4), so this stays empty again.
  */
-export const ANCHORS_PENDING_ARTICLE: string[] = [];
+export const ANCHORS_PENDING_ARTICLE: string[] = [
+  // "/webhooks#webpush" is in PENDING_ROUTES above — the ticket wizard
+  // (webpush-setup-wizard.tsx) added these anchors ahead of that article.
+  "webhooks.webpush.copiar-instrucoes",
+  "webhooks.webpush.bloco-arquivo",
+  "webhooks.webpush.bloco-script",
+  "webhooks.webpush.bloco-jogador",
+  "webhooks.webpush.status",
+];

@@ -29,6 +29,11 @@ describe("nextWizardStep", () => {
   it("stays on 'pronto' once there — it's the last step", () => {
     expect(nextWizardStep("pronto")).toBe("pronto");
   });
+
+  it("skips 'email' straight to 'pronto' when the step list doesn't include it", () => {
+    const steps = WIZARD_STEPS.filter((s) => s.id !== "email");
+    expect(nextWizardStep("encurtador", steps)).toBe("pronto");
+  });
 });
 
 describe("wizardStepButtons", () => {
@@ -90,6 +95,19 @@ describe("reduceWizard + applyWizardEffect", () => {
     expect(onAdvance).toHaveBeenCalledWith("encurtador");
     expect(onSkip).not.toHaveBeenCalled();
     expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it("'Fazer depois' on 'encurtador' advances to 'pronto' when 'email' is filtered out of the steps", () => {
+    const onAdvance = vi.fn();
+    const steps = WIZARD_STEPS.filter((s) => s.id !== "email");
+
+    applyWizardEffect(reduceWizard("encurtador", { type: "later" }, steps), {
+      onAdvance,
+      onSkip: vi.fn(),
+      onComplete: vi.fn(),
+    });
+
+    expect(onAdvance).toHaveBeenCalledWith("pronto");
   });
 
   it("'Concluir' on the last step calls onComplete (wired to completeOnboarding) and nothing else", () => {
