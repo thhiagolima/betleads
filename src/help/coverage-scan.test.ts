@@ -3,6 +3,7 @@ import {
   countRawDataTourUsages,
   extractTermIds,
   extractTourAnchorCalls,
+  findAnchorWrappedPeriodPicker,
   findTermInsideChipLabel,
   isTestFile,
 } from "./coverage-scan";
@@ -32,6 +33,15 @@ describe("coverage-scan", () => {
     expect(isTestFile("-coverage.test.ts")).toBe(true);
     expect(isTestFile("resolve.ts")).toBe(false);
   });
+  it("findAnchorWrappedPeriodPicker acha a âncora numa div em volta do seletor de período", () => {
+    const wrapped = `<div {...tourAnchor("rendimento.header.periodo")}>
+              <CentralPeriodPicker value={period} onChange={setPeriod} />
+            </div>`;
+    expect(findAnchorWrappedPeriodPicker(wrapped)).toEqual(["rendimento.header.periodo"]);
+    const direct = `<CentralPeriodPicker value={period} {...tourAnchor("equipe.periodo")} />`;
+    expect(findAnchorWrappedPeriodPicker(direct)).toEqual([]);
+  });
+
   it("findTermInsideChipLabel acha <Term> dentro do label={…} de um *Chip", () => {
     const src = `
       <RuleChip

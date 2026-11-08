@@ -145,15 +145,21 @@ export function CentralPeriodPicker<K extends string = PeriodKey>({
   value,
   onChange,
   periods,
+  ...rest
 }: {
   value: K;
   onChange: (value: K) => void;
   /** Presets; default `PERIODS` da Central (as telas do expert somam meses). */
   periods?: readonly { key: K; label: string }[];
+  /** Passthrough for `tourAnchor(...)` (data-tour): anchoring the picker
+   * itself instead of a wrapper div keeps it shrinkable (and scrolling
+   * inside itself) as a flex item on narrow screens. */
+  "data-tour"?: string;
 }) {
   const items = (periods ?? PERIODS) as readonly { key: K; label: string }[];
   return (
     <div
+      {...rest}
       role="group"
       aria-label="Período"
       className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"

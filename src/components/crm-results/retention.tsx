@@ -69,9 +69,11 @@ export function RetentionPanel() {
   });
   return (
     <div className="space-y-4">
-      <div {...tourAnchor("midia.retencao.periodo")}>
-        <CentralPeriodPicker value={period.key} onChange={setPeriodKey} />
-      </div>
+      <CentralPeriodPicker
+        value={period.key}
+        onChange={setPeriodKey}
+        {...tourAnchor("midia.retencao.periodo")}
+      />
       {query.isLoading ? (
         <Skeleton className="h-64 rounded-xl" />
       ) : query.isError || !query.data ? (

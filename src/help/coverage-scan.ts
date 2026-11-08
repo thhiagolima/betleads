@@ -82,3 +82,14 @@ export function findTermInsideChipLabel(source: string): string[] {
   }
   return out;
 }
+
+const WRAPPED_PERIOD_PICKER_RE = /<div\s+\{\.\.\.tourAnchor\("([^"]+)"\)\}\s*>\s*<CentralPeriodPicker\b/g;
+
+/** Anchors put on a plain `<div>` wrapping a `CentralPeriodPicker`. As a
+ * flex item (a PageHeader's actions) that wrapper keeps the picker's
+ * min-content width, so on a phone the picker overflows instead of
+ * scrolling inside itself: pass the anchor to the picker (its `data-tour`
+ * passthrough) instead. */
+export function findAnchorWrappedPeriodPicker(source: string): string[] {
+  return matchAll(source, WRAPPED_PERIOD_PICKER_RE);
+}

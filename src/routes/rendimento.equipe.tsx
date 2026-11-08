@@ -97,10 +97,13 @@ function RendimentoEquipePage() {
             : "Os créditos são calculados a cada 10 minutos."
         }
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <div {...tourAnchor("equipe.periodo")}>
-              <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
-            </div>
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+            <CentralPeriodPicker
+              value={period}
+              onChange={setPeriod}
+              periods={EXPERT_PERIODS}
+              {...tourAnchor("equipe.periodo")}
+            />
             <Button
               variant="outline"
               className="gap-2"

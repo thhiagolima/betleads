@@ -92,12 +92,11 @@ export function CentralResults() {
             </>
           }
         />
-        <div {...tourAnchor("resultados.periodo.picker")}>
-          <CentralPeriodPicker
-            value={period.key}
-            onChange={(key) => setSearch({ periodo: key })}
-          />
-        </div>
+        <CentralPeriodPicker
+          value={period.key}
+          onChange={(key) => setSearch({ periodo: key })}
+          {...tourAnchor("resultados.periodo.picker")}
+        />
       </div>
 
       {query.isLoading ? (

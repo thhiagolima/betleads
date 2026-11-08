@@ -13,6 +13,7 @@ import {
   countRawDataTourUsages,
   extractTermIds,
   extractTourAnchorCalls,
+  findAnchorWrappedPeriodPicker,
   findTermInsideChipLabel,
   isTestFile,
 } from "./coverage-scan";
@@ -289,6 +290,16 @@ describe("help coverage", () => {
     }
     expect([...declared].sort()).toEqual(Object.keys(HELP_TAB_SEARCH_PARAMS).sort());
   }, LOAD_ALL_TIMEOUT_MS);
+
+  it("âncora do seletor de período vai no próprio CentralPeriodPicker, nunca numa div em volta", () => {
+    for (const file of sourceFiles) {
+      const wrapped = findAnchorWrappedPeriodPicker(fs.readFileSync(file, "utf8"));
+      expect(
+        wrapped,
+        `${path.relative(SRC_ROOT, file)}: âncora ${wrapped.join(", ")} numa div em volta do CentralPeriodPicker — passe {...tourAnchor(...)} ao próprio seletor (a div impede que ele encolha no celular)`,
+      ).toEqual([]);
+    }
+  });
 
   it("<Term> nunca vai dentro do label={…} de um *Chip (botão dentro de botão)", () => {
     for (const file of sourceFiles) {

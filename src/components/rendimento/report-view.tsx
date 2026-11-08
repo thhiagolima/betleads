@@ -209,9 +209,12 @@ export function ReportView({ expertId, tabs }: { expertId?: string; tabs?: React
         }
         actions={
           <>
-            <div {...tourAnchor("rendimento.header.periodo")}>
-              <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
-            </div>
+            <CentralPeriodPicker
+              value={period}
+              onChange={setPeriod}
+              periods={EXPERT_PERIODS}
+              {...tourAnchor("rendimento.header.periodo")}
+            />
             <ExportStatementButton expertId={expertId} period={period} />
             {expertId && <AdminActions expertId={expertId} />}
           </>
