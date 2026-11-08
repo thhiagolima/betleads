@@ -10,9 +10,12 @@
 // Relies on a TooltipProvider above it (the dashboard root). Os valores em
 // dinheiro da casa vêm na moeda dela (`currency`); os envios, em BRL.
 
+import type { ReactNode } from "react";
+
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
 import { formatCount, formatInt, formatMoneyIn, formatPct } from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
+import { Term } from "@/components/help/term";
 import { tourAnchor } from "@/help/anchor";
 import type { TenantCurrency } from "@/lib/currency";
 import type { FinanceKpis, PeriodSummary, SendLine } from "@/lib/finance/types";
@@ -29,7 +32,7 @@ type Format = "money" | "int" | "pct" | "decimal";
 
 type KpiRow = {
   key: string;
-  label: string;
+  label: ReactNode;
   term?: TermKey;
   format: Format;
   current: number | null;
@@ -242,7 +245,7 @@ export function KpiBlocks({
       ? [
           {
             key: "ctr",
-            label: "CTR",
+            label: <Term id="ctr">CTR</Term>,
             format: "pct",
             current: k.ctr,
             previous: pk.ctr,
@@ -343,7 +346,7 @@ export function KpiBlocks({
       <KpiBlock
         id="ggr"
         anchorAttrs={tourAnchor("financeiro.painel.kpi-ggr")}
-        title="GGR"
+        title={<Term id="ggr">GGR</Term>}
         description="Perdas na casa e a taxa cobrada sobre elas."
       >
         {rows(ggr)}

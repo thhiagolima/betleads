@@ -4,6 +4,7 @@
 // (allocateMonthlyGgr); while it exists the daily GGR column is read-only.
 // Clearing the value removes the total and the month goes back to daily GGR.
 import { formatMoneyIn } from "@/components/finance/format";
+import { Term } from "@/components/help/term";
 import { tourAnchor } from "@/help/anchor";
 import type { TenantCurrency } from "@/lib/currency";
 import { Button } from "@/components/ui/button";
@@ -129,7 +130,9 @@ export function MonthlyGgrFields({
       {canEdit ? (
         <div className="flex flex-wrap items-end gap-3">
           <label className="space-y-1">
-            <span className="block text-xs text-muted-foreground">{MONTHLY_GGR_LABEL}</span>
+            <span className="block text-xs text-muted-foreground">
+              <Term id="ggr">{MONTHLY_GGR_LABEL}</Term>
+            </span>
             <Input
               type="text"
               inputMode="decimal"
@@ -162,7 +165,9 @@ export function MonthlyGgrFields({
           </Button>
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">{MONTHLY_GGR_LABEL}</p>
+        <p className="text-xs text-muted-foreground">
+          <Term id="ggr">{MONTHLY_GGR_LABEL}</Term>
+        </p>
       )}
       <p className="text-xs text-muted-foreground">{monthlyGgrStatus(current, currency)}</p>
       {canEdit && error && <p className="text-xs text-destructive">{error}</p>}

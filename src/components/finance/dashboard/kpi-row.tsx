@@ -18,7 +18,7 @@ export function KpiBlock({
   /** tourAnchor built at the call site (financeiro.painel.kpi-*) so the
    * literal string stays visible to the coverage scanner (anchor.ts). */
   anchorAttrs?: { "data-tour": string };
-  title: string;
+  title: ReactNode;
   description: string;
   children: ReactNode;
 }) {

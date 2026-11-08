@@ -102,7 +102,7 @@ const screen: HelpScreen = {
           label: '"Do depósito ao lucro"',
           what: "O gráfico em colunas que mostra, em ordem, Depósitos → Saques → Net (subtotal) → Taxa de GGR → Taxa de movimentação → Anúncios → Envios → Mensalidade → Outros custos → Lucro líquido (total). Entradas em azul-acinzentado, saídas e custos em vermelho, o subtotal (Net) em cinza e o total em verde ou vermelho conforme o sinal; o valor de cada coluna aparece acima dela (ou abaixo, quando a coluna fica sob a linha zero). A legenda e a nota \"Passos sem valor no período não aparecem.\" ficam abaixo do gráfico.",
           notes:
-            'Fora de um mês fechado, aparece "Resultado sem a mensalidade do mês (entra no fechamento do mês)." — a mensalidade só entra quando o período é exatamente um mês já terminado. Fora do BRL, a cascata para antes dos Envios, com a nota de câmbio seguida de "Envios e mensalidade (BRL) ficam fora do gráfico." Sem nenhum valor no período, aparece só "Sem dados no período."',
+            'Fora de um mês fechado, aparece "Resultado sem a mensalidade do mês (entra no fechamento do mês)." — a mensalidade só entra quando o período é exatamente um mês já terminado. Quando algum envio do período não tem custo de provedor cadastrado, a coluna muda o nome para "Envios (parcial)" e aparece mesmo que o valor calculado seja R$ 0. Fora do BRL, a cascata para antes dos Envios, com a nota de câmbio seguida de "Envios e mensalidade (BRL) ficam fora do gráfico." Sem nenhum valor no período, aparece só "Sem dados no período."',
         },
         {
           anchor: "financeiro.painel.kpi-movimentacao",
@@ -209,6 +209,7 @@ const screen: HelpScreen = {
         {
           label: 'Confirmação "Descartar alterações?"',
           what: 'Aparece ao fechar o modal do dia (ou trocar o mês) com algo digitado e ainda não salvo. Texto: "O que você digitou neste dia ainda não foi salvo e será perdido.", com os botões "Cancelar" e "Descartar".',
+          roles: ["admin"],
           notes:
             "Enquanto um salvamento está em andamento, fechar o modal ou trocar de dia espera ele terminar em vez de perguntar.",
         },
@@ -386,8 +387,20 @@ const screen: HelpScreen = {
     {
       id: "erro-ao-carregar",
       title: 'Não foi possível carregar o painel. / Não foi possível carregar o financeiro.',
-      what: "Mostrado no lugar do Painel ou de Lançamentos quando a tela não conseguiu carregar os dados do financeiro (ex.: perda de conexão); quando o erro traz uma mensagem própria, ela aparece no lugar deste texto padrão.",
+      what: "Mostrado no lugar do Painel ou de Lançamentos quando a tela não conseguiu carregar os dados do financeiro (ex.: perda de conexão); quando o erro traz uma mensagem própria (como as duas abaixo), ela aparece no lugar deste texto padrão.",
       action: "Recarregue a tela; se persistir, tente novamente em alguns minutos.",
+    },
+    {
+      id: "sem-permissao",
+      title: "Sem permissão",
+      what: 'Mensagem de erro (no lugar do painel, da lista de dias ou ao salvar) quando o acesso ao financeiro desta casa foi revogado durante o uso — por exemplo, um administrador desligou a liberação do gestor, ou a casa ativa foi trocada para uma em que o usuário não tem mais acesso ao financeiro — entre o momento em que a tela abriu e o clique que disparou essa checagem no servidor.',
+      action: "Recarregue a tela. Se o acesso continuar negado, peça a um administrador da casa para liberar de novo em Configurações → Liberação para gestores.",
+    },
+    {
+      id: "casa-nao-encontrada",
+      title: "Casa não encontrada",
+      what: "Mensagem de erro quando a casa ativa (lida da sessão) deixou de existir ou de estar associada à conta — por exemplo, foi removida ou a casa ativa guardada no navegador ficou desatualizada.",
+      action: "Recarregue a tela ou troque a casa ativa pelo seletor; se persistir, peça ajuda a um administrador.",
     },
     {
       id: "sem-dados-periodo",
