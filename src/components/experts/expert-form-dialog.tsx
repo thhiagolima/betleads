@@ -281,7 +281,9 @@ export function ExpertFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>IDs de afiliado</Label>
+            <Label>
+              <Term id="id-de-afiliado">IDs de afiliado</Term>
+            </Label>
             <div className="flex flex-wrap gap-1.5">
               {affiliateIds.map((id) => (
                 <span

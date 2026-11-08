@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { Term } from "@/components/help/term";
 import { tourAnchor } from "@/help/anchor";
 import { getMyMcpStatus, revokeMyConnection } from "@/lib/mcp/mcp.functions";
 
@@ -55,7 +56,7 @@ function McpPage() {
         <PageHeader title="Conectar ao Claude" />
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            MCP desligado neste ambiente.
+            <Term id="mcp">MCP</Term> desligado neste ambiente.
           </CardContent>
         </Card>
       </Page>
@@ -68,7 +69,7 @@ function McpPage() {
         <PageHeader title="Conectar ao Claude" />
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            Seu usuário não tem acesso ao MCP. Peça ao super admin.
+            Seu usuário não tem acesso ao <Term id="mcp">MCP</Term>. Peça ao super admin.
           </CardContent>
         </Card>
       </Page>

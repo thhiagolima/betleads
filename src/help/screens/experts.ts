@@ -260,7 +260,7 @@ const screen: HelpScreen = {
         },
         {
           label: "Senha temporária",
-          what: 'Só aparece com "Definir senha agora" escolhido. Campo com o ícone de olho para mostrar/ocultar a senha.',
+          what: 'Só aparece com "Definir senha agora" escolhido. O botão de olho ao lado do campo alterna entre "Mostrar senha" e "Ocultar senha" (o rótulo também é o texto lido por leitor de tela).',
           notes:
             'Ajuda: "A pessoa troca a senha no primeiro acesso. Nenhum e-mail é enviado. Se o e-mail já tiver conta, a senha dele não é alterada." Erros possíveis: "A senha precisa ter pelo menos 8 caracteres." e "A senha pode ter até 200 caracteres."',
         },
@@ -321,7 +321,8 @@ const screen: HelpScreen = {
         {
           label: "Cancelar / Salvar",
           what: 'Salvar grava a nova janela e recalcula os créditos dos últimos 8 dias no servidor (toast "Janela de clique atualizada.").',
-          notes: "Desabilitado na casa demo (o botão Regras de crédito continua clicável, mas salvar é bloqueado).",
+          notes:
+            'Na casa demo, os campos continuam habilitados, mas salvar é recusado: o toast "Ambiente de demonstração: esta ação não está disponível" aparece no lugar de "Janela de clique atualizada.".',
         },
       ],
     },

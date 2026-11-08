@@ -33,6 +33,7 @@ const screen: HelpScreen = {
     "reativado",
     "redeposito",
     "teto",
+    "id-de-afiliado",
   ],
   sections: [
     {
