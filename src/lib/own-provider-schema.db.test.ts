@@ -1,5 +1,5 @@
 // PGlite test for
-// supabase/migrations/20261217100000_own_provider_accounts.sql:
+// supabase/migrations/20261219100000_own_provider_accounts.sql:
 // provider_accounts.owner_tenant_id/own_unit_cost/callback_token_encrypted/
 // last_callback_at, tenant_own_provider_grants, and the owner checks added
 // to tenant_channel_providers_check_channel and platform_channel_defaults_check.
@@ -15,7 +15,7 @@ const { createMigratedDb } = (await import(/* @vite-ignore */ migratedPglitePath
 
 const TENANT_A = "7a3f4d5c-0001-4000-9000-000000000001";
 const TENANT_B = "7a3f4d5c-0001-4000-9000-000000000002";
-// Uma conta própria por casa e canal (20261217100400): cada teste que cria
+// Uma conta própria por casa e canal (20261219100400): cada teste que cria
 // uma conta de SMS com dono usa a sua própria casa.
 const TENANT_C = "7a3f4d5c-0001-4000-9000-000000000003";
 const TENANT_D = "7a3f4d5c-0001-4000-9000-000000000004";

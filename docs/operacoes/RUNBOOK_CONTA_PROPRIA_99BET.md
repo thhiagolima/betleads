@@ -24,8 +24,11 @@ conectar.
 
 ## Visão geral da ordem (não pule nem inverta)
 
-**As 5 migrations (`20261217100000`..`20261217100400`) têm que ser aplicadas,
-nesta ordem, ANTES do deploy do app novo.** Cada uma é aditiva (não objetiva
+**As 5 migrations (`20261219100000`..`20261219100400`) têm que ser aplicadas,
+nesta ordem, ANTES do deploy do app novo.** Elas foram renumeradas para
+ordenar depois de `20261218100000_finance_usage_materialize_exempt` (do
+`main`); confirme que essa já está em `supabase_migrations.schema_migrations`
+antes do Passo 1. Cada uma é aditiva (não objetiva
 — global constraints) e o app antigo ignora as colunas/tabelas novas, mas o
 app **novo** lê `owner_tenant_id`, `tenant_own_provider_grants`,
 `disabled_reason` e o parâmetro novo de `wallet_reserve` desde o primeiro
@@ -34,11 +37,11 @@ do super admin e a aba "Canais" da 99Bet quebram, e o envio de SMS por conta
 com dono cai no `catch` genérico (a UI mostra erro, não envia — não há
 fallback para a rota BetLeads, por constraint).
 
-1. Migration `20261217100000_own_provider_accounts` (Passo 1).
-2. Migration `20261217100100_wallet_reserve_own_account` (Passo 2).
-3. Migration `20261217100200_billing_channel_fees` (Passo 3).
-4. Migration `20261217100300_crm_results_own_cost` (Passo 4).
-5. Migration `20261217100400_own_provider_disabled_reason` (Passo 5).
+1. Migration `20261219100000_own_provider_accounts` (Passo 1).
+2. Migration `20261219100100_wallet_reserve_own_account` (Passo 2).
+3. Migration `20261219100200_billing_channel_fees` (Passo 3).
+4. Migration `20261219100300_crm_results_own_cost` (Passo 4).
+5. Migration `20261219100400_own_provider_disabled_reason` (Passo 5).
 6. `npm run build` local, merge para `main`, deploy (Passo 6).
 7. Super admin libera SMS para a 99Bet com a taxa mensal (Passo 7).
 8. Admin da 99Bet cadastra a conta Short Brasil, configura o webhook, testa e
@@ -51,7 +54,7 @@ fallback para a rota BetLeads, por constraint).
 
 ---
 
-## Passo 1 — Migration `20261217100000_own_provider_accounts` (requer autorização)
+## Passo 1 — Migration `20261219100000_own_provider_accounts` (requer autorização)
 
 Cria `provider_accounts.owner_tenant_id` (NULL = conta da BetLeads;
 preenchido = conta própria de uma casa, só ligável à própria casa, nunca
@@ -65,9 +68,9 @@ Pelo pooler, em uma conexão de escrita:
 
 ```sql
 begin;
--- cole o conteúdo INTEGRAL de supabase/migrations/20261217100000_own_provider_accounts.sql aqui
+-- cole o conteúdo INTEGRAL de supabase/migrations/20261219100000_own_provider_accounts.sql aqui
 insert into supabase_migrations.schema_migrations (version, name, statements)
-values ('20261217100000', 'own_provider_accounts', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
+values ('20261219100000', 'own_provider_accounts', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
 commit;
 ```
 
@@ -83,7 +86,7 @@ nesta máquina para `supabase db push`.
 **Verificação:**
 ```sql
 select version from supabase_migrations.schema_migrations
-where version = '20261217100000';
+where version = '20261219100000';
 
 select column_name from information_schema.columns
 where table_schema = 'public' and table_name = 'provider_accounts'
@@ -103,7 +106,7 @@ alter table public.provider_accounts drop column if exists last_callback_at;
 alter table public.provider_accounts drop column if exists callback_token_encrypted;
 alter table public.provider_accounts drop column if exists own_unit_cost;
 alter table public.provider_accounts drop column if exists owner_tenant_id;
-delete from supabase_migrations.schema_migrations where version = '20261217100000';
+delete from supabase_migrations.schema_migrations where version = '20261219100000';
 commit;
 notify pgrst, 'reload schema';
 ```
@@ -112,7 +115,7 @@ notify pgrst, 'reload schema';
 
 ---
 
-## Passo 2 — Migration `20261217100100_wallet_reserve_own_account` (requer autorização)
+## Passo 2 — Migration `20261219100100_wallet_reserve_own_account` (requer autorização)
 
 `wallet_reserve` ganha o 7º parâmetro `_provider_account_id uuid default
 null`; `expert_wallet_reserve`, o 8º. Quando a conta informada pertence à
@@ -128,9 +131,9 @@ funcionando, resolvidas por nome em tempo de chamada.
 
 ```sql
 begin;
--- cole o conteúdo INTEGRAL de supabase/migrations/20261217100100_wallet_reserve_own_account.sql aqui
+-- cole o conteúdo INTEGRAL de supabase/migrations/20261219100100_wallet_reserve_own_account.sql aqui
 insert into supabase_migrations.schema_migrations (version, name, statements)
-values ('20261217100100', 'wallet_reserve_own_account', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
+values ('20261219100100', 'wallet_reserve_own_account', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
 commit;
 ```
 
@@ -139,7 +142,7 @@ commit;
 **Verificação:**
 ```sql
 select version from supabase_migrations.schema_migrations
-where version = '20261217100100';
+where version = '20261219100100';
 
 select proname, pronargs from pg_proc
 where proname in ('wallet_reserve', 'expert_wallet_reserve');
@@ -163,7 +166,7 @@ drop function public.wallet_reserve(uuid, text, integer, text, text, text, uuid)
 -- (CREATE FUNCTION, não CREATE OR REPLACE — a assinatura antiga não existe
 -- mais depois dos DROPs acima) e reaplicar os mesmos grant/revoke execute
 -- que essas duas migrations já tinham para a assinatura antiga.
-delete from supabase_migrations.schema_migrations where version = '20261217100100';
+delete from supabase_migrations.schema_migrations where version = '20261219100100';
 commit;
 notify pgrst, 'reload schema';
 ```
@@ -172,7 +175,7 @@ notify pgrst, 'reload schema';
 
 ---
 
-## Passo 3 — Migration `20261217100200_billing_channel_fees` (requer autorização)
+## Passo 3 — Migration `20261219100200_billing_channel_fees` (requer autorização)
 
 `billing_invoices` ganha `channel_fees_cents` (bigint, >= 0, default 0) e
 `channel_fees` (jsonb, default `'{}'`). `billing_channel_fees(_tenant)` soma
@@ -190,9 +193,9 @@ desconto continua incidindo só sobre a base do plano).
 
 ```sql
 begin;
--- cole o conteúdo INTEGRAL de supabase/migrations/20261217100200_billing_channel_fees.sql aqui
+-- cole o conteúdo INTEGRAL de supabase/migrations/20261219100200_billing_channel_fees.sql aqui
 insert into supabase_migrations.schema_migrations (version, name, statements)
-values ('20261217100200', 'billing_channel_fees', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
+values ('20261219100200', 'billing_channel_fees', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
 commit;
 ```
 
@@ -201,7 +204,7 @@ commit;
 **Verificação:**
 ```sql
 select version from supabase_migrations.schema_migrations
-where version = '20261217100200';
+where version = '20261219100200';
 
 select column_name from information_schema.columns
 where table_schema = 'public' and table_name = 'billing_invoices'
@@ -221,7 +224,7 @@ begin;
 alter table public.billing_invoices drop column if exists channel_fees_cents;
 alter table public.billing_invoices drop column if exists channel_fees;
 drop function if exists public.billing_channel_fees(uuid);
-delete from supabase_migrations.schema_migrations where version = '20261217100200';
+delete from supabase_migrations.schema_migrations where version = '20261219100200';
 commit;
 notify pgrst, 'reload schema';
 ```
@@ -233,7 +236,7 @@ Só rode este rollback se nenhuma fatura já tiver sido emitida com
 
 ---
 
-## Passo 4 — Migration `20261217100300_crm_results_own_cost` (requer autorização)
+## Passo 4 — Migration `20261219100300_crm_results_own_cost` (requer autorização)
 
 `refresh_crm_results_day` recriada (corpo de
 `20261129100000_supabase_consumo_p0.sql:33`): o custo do SMS, por linha, passa
@@ -245,9 +248,9 @@ linha e o envio custa pelo preço de venda (Review Focus 4).
 
 ```sql
 begin;
--- cole o conteúdo INTEGRAL de supabase/migrations/20261217100300_crm_results_own_cost.sql aqui
+-- cole o conteúdo INTEGRAL de supabase/migrations/20261219100300_crm_results_own_cost.sql aqui
 insert into supabase_migrations.schema_migrations (version, name, statements)
-values ('20261217100300', 'crm_results_own_cost', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
+values ('20261219100300', 'crm_results_own_cost', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
 commit;
 ```
 
@@ -256,7 +259,7 @@ commit;
 **Verificação:**
 ```sql
 select version from supabase_migrations.schema_migrations
-where version = '20261217100300';
+where version = '20261219100300';
 ```
 **Esperado:** a versão. (Sem efeito visível ainda — nenhum envio por conta
 própria existe até o Passo 9.)
@@ -264,14 +267,14 @@ própria existe até o Passo 9.)
 **Rollback:** reaplicar `20261129100000_supabase_consumo_p0.sql` (`create or
 replace` devolve o corpo anterior) e:
 ```sql
-delete from supabase_migrations.schema_migrations where version = '20261217100300';
+delete from supabase_migrations.schema_migrations where version = '20261219100300';
 ```
 
 **Resultado:** _______________________________________________
 
 ---
 
-## Passo 5 — Migration `20261217100400_own_provider_disabled_reason` (requer autorização)
+## Passo 5 — Migration `20261219100400_own_provider_disabled_reason` (requer autorização)
 
 Antes de aplicar, confirme que não há duas contas com dono da mesma casa no
 mesmo canal (não deveria haver — conta própria ainda não foi liberada para
@@ -292,9 +295,9 @@ no máximo uma conta própria por casa e canal.
 
 ```sql
 begin;
--- cole o conteúdo INTEGRAL de supabase/migrations/20261217100400_own_provider_disabled_reason.sql aqui
+-- cole o conteúdo INTEGRAL de supabase/migrations/20261219100400_own_provider_disabled_reason.sql aqui
 insert into supabase_migrations.schema_migrations (version, name, statements)
-values ('20261217100400', 'own_provider_disabled_reason', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
+values ('20261219100400', 'own_provider_disabled_reason', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
 commit;
 ```
 
@@ -303,7 +306,7 @@ commit;
 **Verificação:**
 ```sql
 select version from supabase_migrations.schema_migrations
-where version = '20261217100400';
+where version = '20261219100400';
 
 select indexname from pg_indexes
 where schemaname = 'public' and indexname = 'provider_accounts_owner_channel_key';
@@ -319,7 +322,7 @@ where table_schema = 'public' and table_name = 'provider_accounts'
 begin;
 drop index if exists public.provider_accounts_owner_channel_key;
 alter table public.provider_accounts drop column if exists disabled_reason;
-delete from supabase_migrations.schema_migrations where version = '20261217100400';
+delete from supabase_migrations.schema_migrations where version = '20261219100400';
 commit;
 notify pgrst, 'reload schema';
 ```

@@ -20,7 +20,7 @@
 - Taxa mensal em centavos, `>= 0`; entra na fatura só se na emissão a concessão estiver ativa **e** a conta própria estiver ativa e ligada ao canal. Congelada na fatura. Desconto do plano não incide sobre ela.
 - Envio por conta com dono: reserva com valor 0, sem franquia, `provider_unit_cost` 0, `metadata.provider_account_id` + `metadata.own_account = true`.
 - Novas tabelas: RLS ligada sem políticas; `revoke all ... from public, anon, authenticated`; grant só a `service_role`.
-- Migrations novas numeradas a partir de `20261217100000` e aplicadas **antes** do app. Cada uma com cabeçalho no padrão das existentes (O QUE FAZ / COMPATIBILIDADE / ROLLBACK).
+- Migrations novas numeradas a partir de `20261219100000` e aplicadas **antes** do app. Cada uma com cabeçalho no padrão das existentes (O QUE FAZ / COMPATIBILIDADE / ROLLBACK).
 - Toda mudança de concessão, conta com dono, ativação/desativação vai para `tenant_audit_logs` (sem credenciais). Ações do super admin continuam também em `admin_audit_logs`.
 - Texto de UI e mensagens de erro em pt-BR.
 - Antes de merge: `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build` (o build pega vazamento de `*.server` para o cliente).
@@ -39,7 +39,7 @@
 ### Task 1: Schema de conta com dono e concessões
 
 **Files:**
-- Create: `supabase/migrations/20261217100000_own_provider_accounts.sql`
+- Create: `supabase/migrations/20261219100000_own_provider_accounts.sql`
 - Test: `src/lib/own-provider-schema.db.test.ts`
 
 **Interfaces:**
@@ -72,7 +72,7 @@
 ### Task 2: `wallet_reserve` reconhece conta com dono
 
 **Files:**
-- Create: `supabase/migrations/20261217100100_wallet_reserve_own_account.sql`
+- Create: `supabase/migrations/20261219100100_wallet_reserve_own_account.sql`
 - Test: `src/lib/billing/wallet-own-account.db.test.ts`
 
 **Interfaces:**
@@ -101,7 +101,7 @@
 ### Task 3: Taxa mensal na fatura
 
 **Files:**
-- Create: `supabase/migrations/20261217100200_billing_channel_fees.sql`
+- Create: `supabase/migrations/20261219100200_billing_channel_fees.sql`
 - Test: `src/lib/billing/billing-channel-fees.db.test.ts`
 
 **Interfaces:**
@@ -132,7 +132,7 @@
 ### Task 4: Custo informado na Central
 
 **Files:**
-- Create: `supabase/migrations/20261217100300_crm_results_own_cost.sql`
+- Create: `supabase/migrations/20261219100300_crm_results_own_cost.sql`
 - Test: `src/lib/crm-results-own-cost.db.test.ts`
 
 **Interfaces:**
@@ -391,7 +391,7 @@
 
 **Files:**
 - Modify: `docs/ESCOPO_PROVEDORES_POR_CASA_2026-10-28.md` (decisões "Dono das contas", "Visibilidade" e "Webhooks sem segredo por conta" com ponteiro para o spec novo)
-- Create: `docs/operacoes/RUNBOOK_CONTA_PROPRIA_99BET.md` — ordem: aplicar as 4 migrations (`20261217100000..100300`) e registrar em `schema_migrations`; deploy; super admin libera SMS da 99Bet com a taxa; admin da 99Bet cadastra a conta Short Brasil dela, configura no painel dela a URL com o token da conta, testa e ativa; conferir o primeiro envio (`sms_send_logs.provider_account_id`, ledger com `own_account`) e o primeiro retorno (`last_callback_at`).
+- Create: `docs/operacoes/RUNBOOK_CONTA_PROPRIA_99BET.md` — ordem: aplicar as 4 migrations (`20261219100000..100300`) e registrar em `schema_migrations`; deploy; super admin libera SMS da 99Bet com a taxa; admin da 99Bet cadastra a conta Short Brasil dela, configura no painel dela a URL com o token da conta, testa e ativa; conferir o primeiro envio (`sms_send_logs.provider_account_id`, ledger com `own_account`) e o primeiro retorno (`last_callback_at`).
 
 - [ ] **Step 1:** `npm run test` — Expected: tudo verde, exceto a falha pré-existente `scripts/demo/seed-demo-finance.db.test.ts`, se ainda existir.
 - [ ] **Step 2:** `npm run typecheck`, `npm run lint`, `npm run build` — sem erros.

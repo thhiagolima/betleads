@@ -204,7 +204,7 @@ type AccountRow = {
   config: Record<string, unknown> | null;
   status: string;
   owner_tenant_id: string | null;
-  /** 20261217100400: 'platform' | 'revoked' | null (why a disabled account is off). */
+  /** 20261219100400: 'platform' | 'revoked' | null (why a disabled account is off). */
   disabled_reason?: string | null;
 };
 
