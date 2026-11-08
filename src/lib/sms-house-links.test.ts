@@ -23,6 +23,11 @@ vi.mock("@/integrations/supabase/client.server", () => {
     sms_send_logs: () => state.smsLogs,
     wallet_ledger: () => state.ledger,
     link_dispatches: () => [],
+    // No house-owned accounts: the provider-account snapshot loads empty
+    // (without it a house send fails closed, I2).
+    provider_accounts: () => [],
+    tenant_channel_providers: () => [],
+    platform_channel_defaults: () => [],
   };
   function from(table: string) {
     const filters: Filter[] = [];

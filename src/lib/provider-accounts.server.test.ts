@@ -34,6 +34,7 @@ import {
   ENV_ACCOUNT_IDS,
   isOwnedAccount,
   oneSignalAccountById,
+  ownAccountPausedByRevocation,
   platformDefaultAccountId,
   PROVIDER_ACCOUNTS_CACHE_MS,
   ProviderAccountUnavailableError,
@@ -41,6 +42,7 @@ import {
   resolveInfobipAccount,
   resolveOneSignalAccount,
   resolveSmsAccount,
+  revokedOwnChannelKeys,
 } from "./provider-accounts.server";
 import { decryptProviderCredentials, encryptProviderCredentials } from "./secret-box.server";
 
@@ -248,10 +250,12 @@ describe("resolveChannelAccount", () => {
     expect(state.reads).toBe(6);
   });
 
-  it("keeps the last snapshot when the tables cannot be read, else the platform account", async () => {
+  it("keeps the last snapshot when the tables cannot be read; none yet fails closed", async () => {
     vi.useFakeTimers();
     state.failReads = true;
-    expect((await resolveSmsAccount(TENANT)).id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
+    await expect(resolveSmsAccount(TENANT)).rejects.toThrow(
+      "Contas de provedor indisponíveis no momento",
+    );
 
     state.failReads = false;
     state.tables.provider_accounts.push(await ownSmsAccount());
@@ -351,9 +355,25 @@ describe("platform_channel_defaults: tenant without an override uses the chosen 
     );
   });
 
-  it("a read failure with no snapshot yet uses the env account", async () => {
+  it("a read failure with no snapshot yet fails closed for a house, env without one (I2)", async () => {
     state.failReads = true;
-    expect((await resolveChannelAccount(TENANT, "sms")).id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
+    for (const channel of ["sms", "email", "voice"] as const) {
+      await expect(resolveChannelAccount(TENANT, channel)).rejects.toBeInstanceOf(
+        ProviderAccountUnavailableError,
+      );
+    }
+    await expect(resolveOneSignalAccount(TENANT)).rejects.toThrow(
+      "Contas de provedor indisponíveis no momento",
+    );
+    await expect(resolveInfobipAccount(TENANT, "email")).rejects.toBeInstanceOf(
+      ProviderAccountUnavailableError,
+    );
+    // Sends without a house keep the env account.
+    expect((await resolveChannelAccount(null, "sms")).id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
+    expect((await resolveOneSignalAccount(null)).id).toBe(DEFAULT_ONESIGNAL_ACCOUNT_ID);
+    // The revocation helpers read the same (missing) snapshot without crashing.
+    expect(await ownAccountPausedByRevocation(TENANT, "sms")).toBe(false);
+    expect(await revokedOwnChannelKeys()).toEqual([]);
   });
 
   it("the house's own override wins over the chosen default", async () => {

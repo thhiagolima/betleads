@@ -16,7 +16,11 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: {} }));
+// Only the provider-account snapshot reads the db here: empty tables (no
+// house-owned account; without a snapshot a house send fails closed, I2).
+vi.mock("@/integrations/supabase/client.server", () => ({
+  supabaseAdmin: { from: () => ({ select: async () => ({ data: [], error: null }) }) },
+}));
 // The demo send guard has its own coverage (demo-send-guard.channels.test.ts).
 vi.mock("./tenant-access.server", () => ({
   assertTenantNotDemoForSend: vi.fn(async () => undefined),

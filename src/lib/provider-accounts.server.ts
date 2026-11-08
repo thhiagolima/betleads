@@ -498,20 +498,30 @@ export async function revokedOwnChannelKeys(): Promise<string[]> {
   return keys;
 }
 
+export const PROVIDER_ACCOUNTS_UNAVAILABLE_MESSAGE = "Contas de provedor indisponíveis no momento";
+
+/** Envio de casa sem snapshot (contas nunca carregaram): falha fechado. */
+function requireSnapshot(snap: Snapshot | null): Snapshot {
+  if (!snap) throw new ProviderAccountUnavailableError(PROVIDER_ACCOUNTS_UNAVAILABLE_MESSAGE);
+  return snap;
+}
+
 /**
  * Conta que envia pelo canal para a casa. Sem casa (e-mails da plataforma),
  * a conta env (não a padrão escolhida — chamada do usuário: envios sem casa
  * continuam na conta env de hoje). Sem configuração própria da casa, a
  * padrão escolhida pelo super admin. Lança ProviderAccountUnavailableError
  * quando a conta configurada para a casa (ou a padrão escolhida) não pode
- * ser usada.
+ * ser usada — inclusive quando as contas nunca carregaram neste processo
+ * (sem snapshot): sem saber se a casa tem conta própria, nunca cai na conta
+ * env (sem fallback; a revogação também pausaria sem isso).
  */
 export async function resolveChannelAccount(
   tenantId: string | null | undefined,
   channel: Exclude<ProviderChannel, "webpush">,
 ): Promise<ProviderAccount> {
   if (!tenantId) return defaultAccountFor(channel);
-  const snap = await currentSnapshot();
+  const snap = requireSnapshot(await currentSnapshot());
   const overrideId = snap?.overrides.get(`${tenantId}:${channel}`);
   if (overrideId) {
     const row = snap!.accounts.get(overrideId);
@@ -538,7 +548,7 @@ export async function resolveOneSignalAccount(
   tenantId: string | null | undefined,
 ): Promise<OneSignalAccount> {
   if (!tenantId) return envOneSignalAccount();
-  const snap = await currentSnapshot();
+  const snap = requireSnapshot(await currentSnapshot());
   const overrideId = snap?.overrides.get(`${tenantId}:webpush`);
   let account: AnyProviderAccount;
   if (overrideId) {
