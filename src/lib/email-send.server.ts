@@ -322,6 +322,7 @@ export async function sendInfobipEmail(input: SendEmailInput): Promise<SendEmail
       temporary: true,
       errorKind: "owned_account_busy",
       providerAccountId: account.id,
+      providerAccountOwnerTenantId: account.ownerTenantId ?? null,
     };
   }
   try {

@@ -9,7 +9,6 @@ import {
   sendInfobipEmail,
 } from "./email-send.server";
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
-import { DEFAULT_INFOBIP_ACCOUNT_ID } from "./provider-accounts.server";
 import { loadHouseLinks } from "./house-links.server";
 import { deferIfOutsideWindow } from "./send-window.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
@@ -916,8 +915,9 @@ export async function runEmailFlowDispatcher({
       // provider 402 (no errorKind) reaches here and pauses every tenant.
       // The channel-wide throttle/pause belong to the platform Infobip
       // account: a house's own account refusing only reschedules its lead.
-      const platformAccount =
-        (result.providerAccountId ?? DEFAULT_INFOBIP_ACCOUNT_ID) === DEFAULT_INFOBIP_ACCOUNT_ID;
+      // Platform = the account has no owner house (any platform account, not
+      // only the env default); no account at all counts as the platform's.
+      const platformAccount = (result.providerAccountOwnerTenantId ?? null) === null;
       const providerOutOfFunds = isInsufficientFunds(result.status, result.body);
       const insufficient = platformAccount && providerOutOfFunds;
       const authError = result.status === 401 || result.status === 403;

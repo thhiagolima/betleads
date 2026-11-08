@@ -259,6 +259,38 @@ describe("email flow dispatcher — wallet refusal stays per-house (PG3 Task 1 f
     expect(pauseChannelForInsufficientFunds).toHaveBeenCalledTimes(1);
     expect(pauseChannelForInsufficientFunds).toHaveBeenCalledWith("email", expect.any(String));
   });
+
+  it("M2: a 402 from any platform account (owner null, not only the env one) pauses globally", async () => {
+    seed("tpl-a", "p-a");
+    vi.mocked(sendInfobipEmail).mockResolvedValueOnce({
+      ok: false,
+      status: 402,
+      body: { error: "INSUFFICIENT_FUNDS" },
+      idempotencyKey: "k",
+      temporary: false,
+      providerAccountId: "platform-extra-infobip",
+      providerAccountOwnerTenantId: null,
+    } as any);
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    expect(pauseChannelForInsufficientFunds).toHaveBeenCalledTimes(1);
+  });
+
+  it("M2: a 402 from a house-owned account only reschedules its lead", async () => {
+    seed("tpl-a", "p-a");
+    vi.mocked(sendInfobipEmail).mockResolvedValueOnce({
+      ok: false,
+      status: 402,
+      body: { error: "INSUFFICIENT_FUNDS" },
+      idempotencyKey: "k",
+      temporary: false,
+      providerAccountId: "own-1",
+      providerAccountOwnerTenantId: "00000000-0000-4000-8000-000000000001",
+    } as any);
+    await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });
+    expect(pauseChannelForInsufficientFunds).not.toHaveBeenCalled();
+    expect(registerThrottle).not.toHaveBeenCalled();
+    expect(state.tables.email_flow_leads[0].status).toBe("running");
+  });
 });
 
 describe("email flow dispatcher — conta própria ocupada (Task 9)", () => {
@@ -272,6 +304,7 @@ describe("email flow dispatcher — conta própria ocupada (Task 9)", () => {
       temporary: true,
       errorKind: "owned_account_busy",
       providerAccountId: "own-1",
+      providerAccountOwnerTenantId: "00000000-0000-4000-8000-000000000001",
     } as any);
     const before = Date.now();
     await runEmailFlowDispatcher({ onlyLeadId: "lead-1" });

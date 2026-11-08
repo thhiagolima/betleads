@@ -54,6 +54,8 @@ export type InfobipEmailResult = {
   errorKind?: ProviderErrorKind | null;
   /** Conta de provedor usada; null quando nenhuma conta foi usada. */
   providerAccountId?: string | null;
+  /** Casa dona da conta usada (conta própria); null = conta da plataforma. */
+  providerAccountOwnerTenantId?: string | null;
 };
 
 function endpoint(account: InfobipAccount): string | null {
@@ -116,6 +118,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
     }
   }
   const providerAccountId = account.id;
+  const providerAccountOwnerTenantId = account.ownerTenantId ?? null;
   const url = endpoint(account);
   const apiKey = account.apiKey;
   if (!url || !apiKey) {
@@ -127,6 +130,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       temporary: false,
       errorKind: "misconfigured",
       providerAccountId,
+      providerAccountOwnerTenantId,
     };
   }
 
@@ -154,6 +158,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       temporary: false,
       errorKind: "misconfigured",
       providerAccountId,
+      providerAccountOwnerTenantId,
     };
   }
   if (deliveryUrl) {
@@ -174,6 +179,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       temporary: true,
       errorKind: "owned_account_busy",
       providerAccountId,
+      providerAccountOwnerTenantId,
     };
   }
   try {
@@ -199,6 +205,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       idempotencyKey,
       temporary: response.status === 429 || response.status >= 500,
       providerAccountId,
+      providerAccountOwnerTenantId,
     };
   } catch (error) {
     return {
@@ -209,6 +216,7 @@ export async function callInfobipEmail(input: InfobipEmailInput): Promise<Infobi
       temporary: true,
       errorKind: transportErrorKind(error),
       providerAccountId,
+      providerAccountOwnerTenantId,
     };
   } finally {
     slot.release();
