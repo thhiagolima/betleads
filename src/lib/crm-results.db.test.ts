@@ -49,6 +49,10 @@ const LATE_DAYS_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261202100000_crm_results_late_days.sql"),
   "utf8",
 );
+const SUPERSET_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261220100000_crm_influenced_superset.sql"),
+  "utf8",
+);
 const CONSUMO_P0_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261129100000_supabase_consumo_p0.sql"),
   "utf8",
@@ -199,6 +203,8 @@ beforeAll(async () => {
   await db.exec(`begin; ${CONSUMO_P0_MIGRATION}; commit;`);
   await db.exec(`begin; ${LATE_DAYS_MIGRATION}; commit;`);
   await db.exec(`begin; ${LATE_DAYS_MIGRATION}; commit;`);
+  await db.exec(`begin; ${SUPERSET_MIGRATION}; commit;`);
+  await db.exec(`begin; ${SUPERSET_MIGRATION}; commit;`);
   // The home dashboard function reads tables this schema does not model.
   const reports = `begin; set local check_function_bodies = off; ${REPORTS_MIGRATION}; commit;`;
   await db.exec(reports);
@@ -642,5 +648,132 @@ describe("other CRM screens use the same rule (conversion reports)", () => {
     const row = (await rows()).find((r) => r.source_type === "campaign");
     expect(row).toMatchObject({ direct_players: 0, direct_active_players: 1 });
     expect(Number(row?.direct_active_revenue)).toBe(40);
+  });
+});
+
+describe("Reativações após SMS is a superset of the Recuperado pelo CRM (rule_version 5)", () => {
+  const T2 = "00000000-0000-4000-8000-000000000002";
+  const JR = "00000000-0000-4000-8000-0000000000a9";
+  const CLICKED = "00000000-0000-4000-8000-000000000101"; // stopped, clicked, deposited twice
+  const EXPOSED = "00000000-0000-4000-8000-000000000102"; // stopped at the SMS, came back 5 days later without clicking
+  const BUSY = "00000000-0000-4000-8000-000000000103"; // deposited the day before the SMS
+  const NEWBIE = "00000000-0000-4000-8000-000000000104"; // FTD minutes after a clicked welcome SMS
+  const LDX = "00000000-0000-4000-8000-0000000001d1";
+  const LDN = "00000000-0000-4000-8000-0000000001d2";
+  const D1 = "2026-10-20";
+  const D3 = "2026-10-22";
+  const ts = (day: string, time: string) => `${day}T${time}:00-03:00`;
+
+  type Totals = {
+    direct_players: number;
+    direct_revenue: string;
+    influenced_players: number;
+    influenced_deposits: number;
+    influenced_revenue: string;
+  };
+  const totals = async (from: string, to: string) =>
+    (
+      await db.query<Totals>(
+        `select coalesce(sum(direct_players), 0)::int direct_players,
+                coalesce(sum(direct_revenue), 0) direct_revenue,
+                coalesce(sum(influenced_players), 0)::int influenced_players,
+                coalesce(sum(influenced_deposits), 0)::int influenced_deposits,
+                coalesce(sum(influenced_revenue), 0) influenced_revenue
+         from crm_results_daily where tenant_id = $1 and metric_date between $2 and $3`,
+        [T2, from, to],
+      )
+    ).rows[0];
+
+  beforeAll(async () => {
+    await db.exec(`
+      insert into tenants (id, slug) values ('${T2}', 'superset');
+      insert into journeys values ('${JR}', '${T2}');
+      insert into players (id, tenant_id, ftd_em, created_at) values
+        ('${CLICKED}', '${T2}', '2026-09-01', '2026-08-01'),
+        ('${EXPOSED}', '${T2}', '2026-09-01', '2026-08-01'),
+        ('${BUSY}', '${T2}', '2026-09-01', '2026-08-01'),
+        ('${NEWBIE}', '${T2}', '${ts(D1, "09:10")}', '${ts(D1, "09:00")}');
+      insert into deposits (tenant_id, player_id, valor, status, created_at) values
+        ('${T2}', '${CLICKED}', 10, 'aprovado', '2026-10-10T10:00:00-03:00'),
+        ('${T2}', '${CLICKED}', 100, 'aprovado', '${ts(D1, "12:00")}'),
+        ('${T2}', '${CLICKED}', 40, 'aprovado', '${ts(D3, "12:00")}'),
+        ('${T2}', '${EXPOSED}', 30, 'aprovado', '2026-10-12T10:00:00-03:00'),
+        ('${T2}', '${EXPOSED}', 50, 'aprovado', '${ts(D1, "14:00")}'),
+        ('${T2}', '${EXPOSED}', 20, 'aprovado', '${ts(D3, "09:00")}'),
+        ('${T2}', '${BUSY}', 15, 'aprovado', '2026-10-17T10:00:00-03:00'),
+        ('${T2}', '${BUSY}', 60, 'aprovado', '${ts(D1, "12:00")}'),
+        ('${T2}', '${NEWBIE}', 25, 'aprovado', '${ts(D1, "09:10")}');
+      insert into sms_send_logs (tenant_id, player_id, status, trigger_name, idempotency_key, created_at) values
+        ('${T2}', '${CLICKED}', 'sent', 'journey:${JR}', 'k-x1', '${ts(D1, "10:00")}'),
+        -- 5 days before the return: outside the old 72 h window.
+        ('${T2}', '${EXPOSED}', 'sent', 'journey:${JR}', 'k-x2', '2026-10-15T10:00:00-03:00'),
+        -- 24 h after a deposit: active at the send (the old rule credited it).
+        ('${T2}', '${BUSY}', 'sent', 'journey:${JR}', 'k-x3', '2026-10-18T10:00:00-03:00'),
+        ('${T2}', '${NEWBIE}', 'sent', 'journey:${JR}', 'k-x4', '${ts(D1, "09:01")}');
+      insert into link_dispatches values
+        ('${LDX}', '${T2}', 'journey', '${JR}', 0, '${CLICKED}', '${ts(D1, "10:00")}', '${ts(D1, "10:00")}'),
+        ('${LDN}', '${T2}', 'journey', '${JR}', 0, '${NEWBIE}', '${ts(D1, "09:01")}', '${ts(D1, "09:01")}');
+      insert into click_events (tenant_id, link_dispatch_id, is_human, occurred_at) values
+        ('${T2}', '${LDX}', true, '${ts(D1, "10:05")}'),
+        ('${T2}', '${LDN}', true, '${ts(D1, "09:02")}');
+      insert into conversion_attributions (tenant_id, link_dispatch_id, source_type, source_id, player_id, window_started_at, classification, event_type, monetary_value, occurred_at) values
+        ('${T2}', '${LDX}', 'journey', '${JR}', '${CLICKED}', '${ts(D1, "10:05")}', 'direct', 'deposit_approved', 100, '${ts(D1, "12:00")}'),
+        ('${T2}', '${LDX}', 'journey', '${JR}', '${CLICKED}', '${ts(D1, "10:05")}', 'direct', 'deposit_approved', 40, '${ts(D3, "12:00")}'),
+        ('${T2}', '${LDN}', 'journey', '${JR}', '${NEWBIE}', '${ts(D1, "09:02")}', 'direct', 'deposit_approved', 25, '${ts(D1, "09:10")}');
+    `);
+    for (const day of ["2026-10-20", "2026-10-21", "2026-10-22"])
+      await db.query(`select refresh_crm_results_day($1, $2::date)`, [T2, day]);
+  });
+
+  it("keeps influenced >= direct on every row, for players and value", async () => {
+    const { rows: all } = await db.query<Totals & { rule_version: number }>(
+      `select * from crm_results_daily where tenant_id = $1`,
+      [T2],
+    );
+    expect(all.length).toBeGreaterThan(0);
+    for (const row of all) {
+      expect(row.rule_version).toBe(5);
+      expect(row.influenced_players).toBeGreaterThanOrEqual(row.direct_players);
+      expect(Number(row.influenced_revenue)).toBeGreaterThanOrEqual(Number(row.direct_revenue));
+    }
+  });
+
+  it("adds who came back without clicking, within 7 days, with every deposit of the 7 days", async () => {
+    const period = await totals(D1, D3);
+    // Direct: CLICKED (100 + 40) and NEWBIE (25).
+    expect(period.direct_players).toBe(2);
+    expect(Number(period.direct_revenue)).toBe(165);
+    // Influenced: the same plus EXPOSED (50 on the return, 20 two days later).
+    // BUSY was active at the SMS; the click deposits are never counted twice.
+    expect(period.influenced_players).toBe(3);
+    expect(period.influenced_deposits).toBe(5);
+    expect(Number(period.influenced_revenue)).toBe(235);
+    const lastDay = await totals(D3, D3);
+    expect(lastDay.influenced_players).toBe(0);
+    expect(Number(lastDay.influenced_revenue)).toBe(60);
+  });
+
+  it("counts distinct people over the period, superset of the click players", async () => {
+    const { rows: period } = await db.query<{
+      converted_players: number;
+      influenced_players: number;
+    }>(`select * from crm_click_players_period($1, $2::date, $3::date)`, [T2, D1, D3]);
+    expect(Number(period[0].converted_players)).toBe(2);
+    expect(Number(period[0].influenced_players)).toBe(3);
+  });
+
+  it("rebuilds days without losing or duplicating people", async () => {
+    await db.query(`select refresh_crm_results_day($1, $2::date)`, [T2, D1]);
+    const { rows: people } = await db.query<{ n: number }>(
+      `select count(*)::int n from crm_influenced_players_daily where tenant_id = $1 and metric_date = $2`,
+      [T2, D1],
+    );
+    expect(people[0].n).toBe(3);
+    const { rows: rebuilt } = await db.query<{ n: number }>(
+      `select crm_results_rebuild_range($1, $2::date, $3::date) n`,
+      [T2, D1, D3],
+    );
+    expect(rebuilt[0].n).toBe(3);
+    expect((await totals(D1, D3)).influenced_players).toBe(3);
   });
 });

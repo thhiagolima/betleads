@@ -6,8 +6,9 @@ import { InfoTip } from "./shared";
 
 /**
  * Broad view (influenced): returns after any SMS, with or without a click.
- * Lives in "Prova e método", away from the Recuperado pelo CRM, because its
- * window, unit and value differ and the two numbers must never be summed.
+ * Same ruler as the Recuperado pelo CRM (2 days stopped, 7 days, people,
+ * every deposit) and contains it, so it is the upper end of a range and the
+ * two numbers must never be summed.
  */
 export function Reactivations({ data }: { data: Data }) {
   const { money } = useMoney();
@@ -17,18 +18,18 @@ export function Reactivations({ data }: { data: Data }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-1.5">
           Reativações após SMS
-          <InfoTip text="Conta quem estava há 2 dias ou mais sem depositar (ou se cadastrou há 2 dias ou mais sem depositar) e depositou em até 3 dias depois de um SMS, mesmo sem clicar. Conta voltas, não pessoas: quem voltou duas vezes conta duas. Voltar depois do SMS não prova que o SMS causou a volta; o efeito real aparece no Teste de controle abaixo." />
+          <InfoTip text="Conta quem estava há 2 dias ou mais sem depositar quando recebeu o SMS (ou se cadastrou há 2 dias ou mais sem depositar) e voltou a depositar em até 7 dias depois dele, mesmo sem clicar. Soma todos os depósitos dos 7 dias a partir da volta e conta cada jogador uma vez no período. Voltar depois do SMS não prova que o SMS causou a volta; o efeito real aparece no Teste de controle abaixo." />
         </CardTitle>
         <CardDescription>
-          Jogadores parados que voltaram a depositar até 3 dias depois de receber um SMS, com ou sem
+          Jogadores parados que voltaram a depositar até 7 dias depois de receber um SMS, com ou sem
           clique.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap gap-6 tabular-nums">
           {[
-            [num(totals.influencedPlayers), "reativações"],
-            [money(totals.influencedRevenue), "1º depósito na volta"],
+            [num(totals.influencedPlayers), "jogadores reativados"],
+            [money(totals.influencedRevenue), "depositado em 7 dias"],
             [cost(totals.costPerRecovered), "custo por reativação"],
           ].map(([value, label]) => (
             <div key={label}>
@@ -38,9 +39,9 @@ export function Reactivations({ data }: { data: Data }) {
           ))}
         </div>
         <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
-          Outra régua: conta voltas (não pessoas), só o 1º depósito e janela de 3 dias. Por isso
-          pode ser maior em jogadores e menor em valor que o Recuperado pelo CRM. Muitos jogadores
-          estão nos dois números: não some.
+          Mesma régua do Recuperado pelo CRM (2 dias parado, 7 dias, pessoas, todos os depósitos):
+          inclui todo o Recuperado pelo CRM e mais quem voltou sem clicar no link. Por isso é sempre
+          igual ou maior. Não some os dois.
         </p>
       </CardContent>
     </Card>
