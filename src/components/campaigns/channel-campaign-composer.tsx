@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { CHANNEL_IDENTITY } from "@/components/identity/identity";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -208,6 +208,12 @@ export function ChannelCampaignComposer({
   initialAudienceId?: string;
 }) {
   const queryClient = useQueryClient();
+  // Ids tying the "Domínio do encurtador"/"Remetente" labels (which carry a
+  // <Term>) to their selects.
+  const fieldId = useId();
+  const smsDomainId = `${fieldId}-sms-dominio`;
+  const emailSenderFieldId = `${fieldId}-email-remetente`;
+  const emailDomainId = `${fieldId}-email-dominio`;
   // House or expert data source, by the shell role (campaign-data-source.ts).
   // The expert sends the audience criteria and the server resolves it; the
   // house-only controls are hidden for the expert below.
@@ -1539,7 +1545,9 @@ export function ChannelCampaignComposer({
                   </div>
                   {isExpert ? null : (
                     <div className="space-y-2">
-                      <Label><Term id="encurtador">Domínio do encurtador</Term></Label>
+                      <Label htmlFor={smsDomainId}>
+                        <Term id="encurtador">Domínio do encurtador</Term>
+                      </Label>
                       <ShortenerFallbackNotice
                         isSuccess={composerOptions.isSuccess}
                         isError={composerOptions.isError}
@@ -1548,6 +1556,7 @@ export function ChannelCampaignComposer({
                       />
                       <div {...tourAnchor("campanhas.compositor.sms-dominio")}>
                         <ShortDomainSelect
+                          id={smsDomainId}
                           domains={shortDomains}
                           value={shortDomainId}
                           onChange={setShortDomainId}
@@ -1609,7 +1618,9 @@ export function ChannelCampaignComposer({
                   {isExpert ? null : (
                     <>
                       <div className="space-y-2">
-                        <Label><Term id="remetente">Remetente</Term></Label>
+                        <Label htmlFor={emailSenderFieldId}>
+                          <Term id="remetente">Remetente</Term>
+                        </Label>
                         <EmailBlockedNotice
                           isSuccess={composerOptions.isSuccess}
                           isError={composerOptions.isError}
@@ -1617,6 +1628,7 @@ export function ChannelCampaignComposer({
                         />
                         <div {...tourAnchor("campanhas.compositor.email-remetente")}>
                           <EmailSenderSelect
+                            id={emailSenderFieldId}
                             senders={emailSenders}
                             value={senderId}
                             onChange={setSenderId}
@@ -1624,7 +1636,9 @@ export function ChannelCampaignComposer({
                         </div>
                       </div>
                       <div className="space-y-2">
-                        <Label><Term id="encurtador">Domínio do encurtador</Term></Label>
+                        <Label htmlFor={emailDomainId}>
+                          <Term id="encurtador">Domínio do encurtador</Term>
+                        </Label>
                         <ShortenerFallbackNotice
                           isSuccess={composerOptions.isSuccess}
                           isError={composerOptions.isError}
@@ -1633,6 +1647,7 @@ export function ChannelCampaignComposer({
                         />
                         <div {...tourAnchor("campanhas.compositor.email-dominio")}>
                           <ShortDomainSelect
+                            id={emailDomainId}
                             domains={shortDomains}
                             value={shortDomainId}
                             onChange={setShortDomainId}

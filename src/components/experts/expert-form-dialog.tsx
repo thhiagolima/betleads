@@ -110,6 +110,7 @@ export function ExpertFormDialog({
   const fieldId = useId();
   const ids = {
     nome: `${fieldId}-nome`,
+    affiliate: `${fieldId}-affiliate`,
     envio: `${fieldId}-envio`,
     envioHelp: `${fieldId}-envio-help`,
     envioPending: `${fieldId}-envio-pending`,
@@ -281,7 +282,7 @@ export function ExpertFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>
+            <Label htmlFor={ids.affiliate}>
               <Term id="id-de-afiliado">IDs de afiliado</Term>
             </Label>
             <div className="flex flex-wrap gap-1.5">
@@ -303,6 +304,7 @@ export function ExpertFormDialog({
               ))}
             </div>
             <Input
+              id={ids.affiliate}
               value={affiliateInput}
               onChange={(e) => {
                 setAffiliateInput(e.target.value.slice(0, AFFILIATE_ID_MAX_LENGTH));

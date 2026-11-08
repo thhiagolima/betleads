@@ -3,6 +3,8 @@
 // the day it is valid through. The server spreads it over the month's days
 // (allocateMonthlyGgr); while it exists the daily GGR column is read-only.
 // Clearing the value removes the total and the month goes back to daily GGR.
+import { useId } from "react";
+
 import { formatMoneyIn } from "@/components/finance/format";
 import { Term } from "@/components/help/term";
 import { tourAnchor } from "@/help/anchor";
@@ -114,6 +116,9 @@ export function MonthlyGgrFields({
   onChange: (value: MonthlyGgrFormValue) => void;
   onSave: () => void;
 }) {
+  // The label carries a <Term> (a button): htmlFor keeps the label on the
+  // input instead of the Term.
+  const ggrId = useId();
   const { first, last } = monthBounds(month);
   const max = last < today ? last : today;
   const error = monthlyGgrFormError({ ...value, month }, today);
@@ -129,11 +134,12 @@ export function MonthlyGgrFields({
     >
       {canEdit ? (
         <div className="flex flex-wrap items-end gap-3">
-          <label className="space-y-1">
+          <label htmlFor={ggrId} className="space-y-1">
             <span className="block text-xs text-muted-foreground">
               <Term id="ggr">{MONTHLY_GGR_LABEL}</Term>
             </span>
             <Input
+              id={ggrId}
               type="text"
               inputMode="decimal"
               value={value.ggr}

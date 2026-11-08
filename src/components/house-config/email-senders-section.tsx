@@ -2,7 +2,7 @@
 // the sender a local part / from name / optional reply-to, and mark it as
 // default. Flags senders sitting on a domain that isn't verified yet (the
 // domain section above is what actually verifies them).
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Send } from "lucide-react";
@@ -64,6 +64,7 @@ export async function confirmAndRemoveSender(
 }
 
 export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "wizard" }) {
+  const fromNameId = useId();
   const isDemo = useIsDemoTenant();
   const qc = useQueryClient();
   const getConfig = useServerFn(getHouseConfig);
@@ -222,10 +223,11 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
               </div>
             </div>
             <div>
-              <Label>
+              <Label htmlFor={fromNameId}>
                 Nome do <Term id="remetente">remetente</Term>
               </Label>
               <Input
+                id={fromNameId}
                 value={fromName}
                 onChange={(e) => setFromName(e.target.value)}
                 placeholder="Promo SuaCasa"

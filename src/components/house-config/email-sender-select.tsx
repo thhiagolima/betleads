@@ -23,12 +23,15 @@ export function EmailSenderSelect({
   value,
   onChange,
   disabled,
+  id,
 }: {
   senders: EmailSenderOption[];
   /** `null` = "padrão da casa" (the tenant's default verified sender). */
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean;
+  /** The trigger's id, for a `<Label htmlFor>` next to the select. */
+  id?: string;
 }) {
   const defaultSender = senders.find((s) => s.isDefault) ?? senders[0];
   const defaultLabel = defaultSender
@@ -41,7 +44,7 @@ export function EmailSenderSelect({
       onValueChange={(next) => onChange(next === "__default" ? null : next)}
       disabled={disabled || senders.length === 0}
     >
-      <SelectTrigger aria-label="Remetente de e-mail">
+      <SelectTrigger id={id} aria-label="Remetente de e-mail">
         <SelectValue placeholder={defaultLabel} />
       </SelectTrigger>
       <SelectContent>

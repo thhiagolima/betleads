@@ -15,6 +15,7 @@ import {
   extractTourAnchorCalls,
   findAnchorWrappedPeriodPicker,
   findTermInsideChipLabel,
+  findTermInsideLabelWithoutFor,
   isTestFile,
 } from "./coverage-scan";
 import {
@@ -297,6 +298,16 @@ describe("help coverage", () => {
       expect(
         wrapped,
         `${path.relative(SRC_ROOT, file)}: âncora ${wrapped.join(", ")} numa div em volta do CentralPeriodPicker — passe {...tourAnchor(...)} ao próprio seletor (a div impede que ele encolha no celular)`,
+      ).toEqual([]);
+    }
+  });
+
+  it("<Term> dentro de <label>/<Label> só com htmlFor (senão o Term toma o rótulo do campo)", () => {
+    for (const file of sourceFiles) {
+      const labels = findTermInsideLabelWithoutFor(fs.readFileSync(file, "utf8"));
+      expect(
+        labels,
+        `<Term> dentro de ${labels.join(", ")} sem htmlFor em ${path.relative(SRC_ROOT, file)} — dê um id ao campo e htmlFor ao rótulo, ou tire o Term do rótulo`,
       ).toEqual([]);
     }
   });

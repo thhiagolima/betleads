@@ -93,3 +93,39 @@ const WRAPPED_PERIOD_PICKER_RE = /<div\s+\{\.\.\.tourAnchor\("([^"]+)"\)\}\s*>\s
 export function findAnchorWrappedPeriodPicker(source: string): string[] {
   return matchAll(source, WRAPPED_PERIOD_PICKER_RE);
 }
+
+const LABEL_TAG_RE = /<(label|Label)(?=[\s>])/g;
+
+/**
+ * `<label>`/`<Label>` elements without `htmlFor` that contain a `<Term`
+ * between their opening and closing tag (same source chunk). Without
+ * `htmlFor`, a label labels its first labelable descendant — and `<Term>`
+ * renders a `<button>`, so the Term steals the label from the field (the
+ * input loses its accessible name, and clicking the text focuses the "i").
+ * Give the field an `id` and the label `htmlFor`, or take the Term out.
+ * Returns one "<tag>@<line>" per offender.
+ */
+export function findTermInsideLabelWithoutFor(source: string): string[] {
+  const out: string[] = [];
+  const tagRe = new RegExp(LABEL_TAG_RE.source, LABEL_TAG_RE.flags);
+  let match: RegExpExecArray | null;
+  // eslint-disable-next-line no-cond-assign
+  while ((match = tagRe.exec(source))) {
+    const tag = match[1];
+    // Walk the opening tag up to its closing ">" outside any `{…}`.
+    let i = match.index + match[0].length;
+    while (i < source.length && source[i] !== ">") {
+      i = source[i] === "{" ? skipBraces(source, i) : i + 1;
+    }
+    const openTag = source.slice(match.index, i);
+    if (openTag.endsWith("/")) continue; // self-closing: no children
+    if (/\bhtmlFor\s*=/.test(openTag)) continue;
+    const close = source.indexOf(`</${tag}>`, i);
+    if (close === -1) continue;
+    if (source.slice(i, close).includes("<Term")) {
+      const line = source.slice(0, match.index).split("\n").length;
+      out.push(`${tag}@${line}`);
+    }
+  }
+  return out;
+}

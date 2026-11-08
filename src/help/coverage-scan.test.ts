@@ -5,6 +5,7 @@ import {
   extractTourAnchorCalls,
   findAnchorWrappedPeriodPicker,
   findTermInsideChipLabel,
+  findTermInsideLabelWithoutFor,
   isTestFile,
 } from "./coverage-scan";
 
@@ -40,6 +41,27 @@ describe("coverage-scan", () => {
     expect(findAnchorWrappedPeriodPicker(wrapped)).toEqual(["rendimento.header.periodo"]);
     const direct = `<CentralPeriodPicker value={period} {...tourAnchor("equipe.periodo")} />`;
     expect(findAnchorWrappedPeriodPicker(direct)).toEqual([]);
+  });
+
+  it("findTermInsideLabelWithoutFor acha <Term> em <label>/<Label> sem htmlFor", () => {
+    const bad = `
+      <label className="space-y-1">
+        <span><Term id="ggr">GGR do mês</Term></span>
+        <Input value={v} />
+      </label>
+      <Label>
+        <Term id="id-de-afiliado">IDs de afiliado</Term>
+      </Label>`;
+    expect(findTermInsideLabelWithoutFor(bad)).toEqual(["label@2", "Label@6"]);
+    const ok = `
+      <label htmlFor={ids.ggr} className="space-y-1">
+        <Term id="ggr">GGR do mês</Term>
+      </label>
+      <Label htmlFor="x" onClick={() => a > b}><Term id="teto">Teto</Term></Label>
+      <Label>Nome</Label>
+      <Label />
+      <Term id="ftd">FTD</Term>`;
+    expect(findTermInsideLabelWithoutFor(ok)).toEqual([]);
   });
 
   it("findTermInsideChipLabel acha <Term> dentro do label={…} de um *Chip", () => {

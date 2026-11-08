@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { getSendWindowStatus, updateSendWindow } from "@/lib/send-window.functions";
@@ -42,6 +42,7 @@ function formatDateTimeBR(iso: string | null, timezone: string): string {
 }
 
 export function SendWindowCard({ compact = false }: { compact?: boolean }) {
+  const tzId = useId();
   const qc = useQueryClient();
   const fetchStatus = useServerFn(getSendWindowStatus);
   const saveFn = useServerFn(updateSendWindow);
@@ -191,10 +192,11 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
             </div>
           </div>
           <div>
-            <Label className="text-label text-muted-foreground">
+            <Label htmlFor={tzId} className="text-label text-muted-foreground">
               <Term id="fuso-horario">Fuso horário</Term>
             </Label>
             <Input
+              id={tzId}
               value={tz}
               onChange={(e) => setTz(e.target.value)}
               className="mt-2 bg-background/60"
