@@ -130,8 +130,8 @@ const screen: HelpScreen = {
         },
         {
           anchor: "sms.templates.links",
-          label: 'Formulário — "Inserir link" (chips)',
-          what: 'Clique num chip ("URL da casa" ou uma das URLs rápidas cadastradas) para inserir o link na posição do cursor da Mensagem.',
+          label: 'Formulário — "Inserir link — clique para inserir" (chips)',
+          what: 'Clique num chip ("URL da casa" ou uma das URLs rápidas cadastradas) para inserir o link na posição do cursor da Mensagem. O título do bloco é "Inserir link — clique para inserir"; passar o mouse sobre um chip mostra o mesmo aviso com o nome daquele link, por exemplo "URL da casa — clique para inserir".',
           notes:
             'Sem a URL da casa cadastrada, o bloco mostra "Cadastre a URL da casa para inserir links na mensagem." em vez dos chips (veja os estados da tela) — o link leva para /configuracoes/casa.',
         },
@@ -221,7 +221,7 @@ const screen: HelpScreen = {
         },
         {
           label: "Gaveta de detalhe",
-          what: 'Abre ao clicar numa linha da tabela: canal e status no topo, data completa, e os campos Jogador, Contato, Jornada, Dia da jornada, Template e Mensagem. Quando o envio falhou, mostra "Falha no envio" com o erro; quando o jogador depositou depois, mostra o aviso de conversão (72h).',
+          what: 'Abre ao clicar numa linha da tabela: canal e status no topo, data completa, e os campos Jogador, Contato, Jornada, Dia da jornada, "Template / assunto" e Mensagem. Quando o envio falhou, mostra "Falha no envio" com o erro; quando o jogador depositou depois, mostra o aviso de conversão (72h).',
           notes:
             'Os botões "Ver jogador" (abre a ficha do jogador numa aba nova), "Copiar mensagem" (mostra "Mensagem copiada") e "Copiar erro" (quando há erro, mostra "Erro copiado") ficam na parte de baixo da gaveta.',
         },

@@ -389,7 +389,7 @@ const screen: HelpScreen = {
         },
         {
           label: "Gaveta de detalhe",
-          what: 'Abre ao clicar numa linha da tabela: canal e status no topo, data completa, e os campos Jogador, Contato, Jornada, Dia da jornada, Template/assunto e Mensagem. Quando o envio falhou, mostra "Falha no envio" com o erro; quando o jogador depositou depois, mostra o aviso de conversão (72h).',
+          what: 'Abre ao clicar numa linha da tabela: canal e status no topo, data completa, e os campos Jogador, Contato, Jornada, Dia da jornada, "Template / assunto" e Mensagem. Quando o envio falhou, mostra "Falha no envio" com o erro; quando o jogador depositou depois, mostra o aviso de conversão (72h).',
           notes:
             'Os botões "Ver jogador" (abre a ficha do jogador numa aba nova), "Copiar mensagem" e "Copiar erro" (quando há erro) ficam na parte de baixo da gaveta.',
         },
@@ -409,6 +409,12 @@ const screen: HelpScreen = {
       title: '"Seu saldo acabou" / "Saldo baixo"',
       what: "Aviso mostrado só para casas que pagam por SMS/voz (não isentas) com saldo zerado ou perto do limite de aviso. Não afeta o envio de e-mail, que continua dentro da franquia mensal.",
       action: 'Compre créditos por Pix em "Saldo e consumo" (quando disponível) ou fale com o suporte.',
+    },
+    {
+      id: "canal-desabilitado",
+      title: "Canal E-mail desabilitado",
+      what: 'Tela cheia mostrada no lugar de toda a página (sem abas, sem "Nova campanha") quando o super admin desligou o canal E-mail desta casa e alguém chega em /email por um link, favorito ou automação antiga. A mensagem exata é "O canal E-mail está desabilitado para esta casa."',
+      action: "Fale com o suporte para reativar o canal, se precisar dele de volta.",
     },
     {
       id: "templates-vazio",

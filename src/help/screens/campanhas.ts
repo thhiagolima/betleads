@@ -39,20 +39,21 @@ const screen: HelpScreen = {
       id: "hub",
       title: "Lista de campanhas",
       intro:
-        "Todas as campanhas de SMS, e-mail, voz e Web Push dos últimos 30 dias (os indicadores no topo) e todas as campanhas da lista, sem limite de data. Atualiza sozinha a cada 30 segundos.",
+        "Todas as campanhas de SMS, e-mail, voz e Web Push dos últimos 30 dias (os indicadores no topo) e todas as campanhas da lista, sem limite de data. Atualiza sozinha a cada 30 segundos. Uma campanha de um canal que o super admin desligou para a casa some da lista (os indicadores também deixam de contá-la).",
       items: [
         {
           anchor: "campanhas.hub.envio-teste",
           label: "Envio de teste",
           what: "Abre o diálogo para mandar SMS, e-mail ou voz a um único número/e-mail, sem criar uma campanha.",
-          notes: "Não existe envio de teste de Web Push: o teste só oferece SMS, E-mail e Voz.",
+          notes:
+            "Não existe envio de teste de Web Push: o teste só oferece SMS, E-mail e Voz. O botão desaparece quando SMS, e-mail e voz estão todos desligados para a casa.",
         },
         {
           anchor: "campanhas.hub.nova-campanha",
           label: "Nova campanha",
           what: "Abre o compositor para criar uma campanha de SMS, e-mail, voz ou Web Push.",
           notes:
-            "O compositor sempre abre no canal SMS. Web Push só aparece como opção de canal quando a casa já configurou o Web Push em Integrações → Web Push.",
+            "O compositor abre no primeiro canal ligado para a casa. Web Push só aparece como opção de canal quando o canal está ligado e a casa já configurou o Web Push em Integrações → Web Push; os demais canais só aparecem como opção quando o super admin os deixou ligados para a casa.",
         },
         {
           label: "Indicadores Enviados / Falhas / Em envio",
@@ -95,7 +96,11 @@ const screen: HelpScreen = {
         },
         {
           label: "Selo \"Bloqueada\"",
-          what: 'Aparece ao lado do status quando o último envio de uma campanha de e-mail foi bloqueado — por exemplo porque o remetente escolhido perdeu a verificação do domínio. Passe o mouse (ou veja o rótulo para leitor de tela) para o motivo completo.',
+          what: 'Aparece ao lado do status quando o último envio de uma campanha de e-mail foi bloqueado — por exemplo porque o remetente escolhido perdeu a verificação do domínio, ou porque o canal E-mail foi desabilitado para a casa ("Canal E-mail desabilitado para a casa."). Passe o mouse (ou veja o rótulo para leitor de tela) para o motivo completo.',
+        },
+        {
+          label: '"Motivo:" / "Motivo da recusa:"',
+          what: 'Linha abaixo dos detalhes da campanha com o motivo de uma recusa, falha, cancelamento ou pausa — por exemplo, "Saldo insuficiente" ou, quando o canal E-mail foi desabilitado para a casa, "Canal E-mail desabilitado para a casa."',
         },
         {
           label: 'Selo "N não enviados"',
@@ -144,7 +149,7 @@ const screen: HelpScreen = {
           label: "Canal",
           what: "Escolhe entre SMS, E-mail, Voz ou Web Push. Troca os campos de conteúdo mostrados abaixo.",
           notes:
-            'A opção "Web Push" só aparece quando a casa tem o Web Push configurado em Integrações → Web Push; sem isso, ela não aparece (e um link antigo que tente abrir o compositor já em Web Push volta sozinho para SMS). Ao escolher Web Push, o seletor "Público" comum some e dá lugar aos campos próprios do Web Push, descritos abaixo. O compositor do expert nunca oferece Web Push.',
+            'Só aparecem os canais que o super admin deixou ligados para a casa. A opção "Web Push" também exige que a casa tenha o Web Push configurado em Integrações → Web Push; sem isso (ou com o canal desligado), ela não aparece (e um link antigo que tente abrir o compositor já em Web Push volta sozinho para o primeiro canal ainda disponível). Se o canal escolhido for desligado enquanto o compositor está aberto, ele volta sozinho para o primeiro canal ainda disponível. Ao escolher Web Push, o seletor "Público" comum some e dá lugar aos campos próprios do Web Push, descritos abaixo. O compositor do expert nunca oferece Web Push.',
         },
         {
           anchor: "campanhas.compositor.nome",
@@ -352,6 +357,8 @@ const screen: HelpScreen = {
           anchor: "campanhas.teste.canal",
           label: "Canal (SMS / E-mail / Voz)",
           what: "Escolhe o canal do envio de teste.",
+          notes:
+            "Só aparecem os canais ligados para a casa. Se o canal escolhido for desligado enquanto o diálogo está aberto, ele volta sozinho para o primeiro canal ainda disponível.",
         },
         {
           anchor: "campanhas.teste.telefone",
@@ -545,6 +552,16 @@ const screen: HelpScreen = {
       title:
         "Seu domínio personalizado ainda não foi verificado — os links estão saindo pelo encurtador padrão do CRM.",
       what: "Aviso no compositor quando a casa não tem domínio próprio do encurtador verificado. O envio continua funcionando; só o domínio do link encurtado muda.",
+    },
+    {
+      id: "compositor-sem-canal",
+      title: "Nenhum canal está disponível para campanhas nesta casa.",
+      what: "Aviso no compositor, abaixo do seletor de Canal, quando o super admin desligou SMS, e-mail, voz e Web Push (ou Web Push nunca foi configurado) — não há nenhum canal para escolher e a campanha não pode ser criada.",
+    },
+    {
+      id: "teste-sem-canal",
+      title: "Nenhum canal está disponível para envio nesta casa.",
+      what: 'Aviso no diálogo "Envio de teste", abaixo do seletor de Canal, quando SMS, e-mail e voz estão todos desligados para a casa.',
     },
     {
       id: "opcoes-de-envio-erro",

@@ -26,7 +26,7 @@ const screen: HelpScreen = {
   defaultTab: "jornadas",
   title: "Automações",
   purpose:
-    "O painel de jornadas: criar, ativar/pausar, acompanhar quem está em cada etapa, ver falhas e conflitos de prioridade, a lista de leads mortos e os fluxos de ligação (voz).",
+    "O painel de jornadas: criar, ativar/pausar, acompanhar quem está em cada etapa, ver falhas e conflitos de prioridade, a lista de leads mortos e os fluxos de ligação (voz). A aba Fluxos de voz só aparece com o canal de voz ligado para a casa.",
   roles: ["admin", "gestor", "member", "expert"],
   terms: [
     "grupo-de-controle",
@@ -178,7 +178,7 @@ const screen: HelpScreen = {
       title: "Automações legadas",
       tab: "jornadas",
       intro:
-        'Aparece só quando a casa ainda tem automações antigas de SMS ou e-mail (de antes das jornadas). Converta, revise o rascunho, ative a jornada e só então desative a origem — novas automações são sempre criadas como jornadas.',
+        'Aparece só quando a casa ainda tem automações antigas de SMS ou e-mail (de antes das jornadas) de um canal que está ligado para a casa. Converta, revise o rascunho, ative a jornada e só então desative a origem — novas automações são sempre criadas como jornadas.',
       items: [
         {
           anchor: "automacoes.legado.item",
@@ -342,7 +342,7 @@ const screen: HelpScreen = {
       title: "Fluxos de voz",
       tab: "fluxos-de-voz",
       intro:
-        'As automações de ligação da casa — o cartão por dentro chama a si mesmo de "Fluxos de ligação": gatilho → sequência de ligações, delays e SMS condicionais → condições de saída. Não é uma jornada e não aparece nas outras abas; não mostra "Limites de contato" nem "Como contamos" no topo.',
+        'As automações de ligação da casa — o cartão por dentro chama a si mesmo de "Fluxos de ligação": gatilho → sequência de ligações, delays e SMS condicionais → condições de saída. Não é uma jornada e não aparece nas outras abas; não mostra "Limites de contato" nem "Como contamos" no topo. Esta aba só aparece quando o canal de voz está ligado para a casa; com o canal desligado, ela desaparece do seletor de abas, mesmo com fluxos já criados.',
       items: [
         {
           anchor: "automacoes.fluxos.novo",

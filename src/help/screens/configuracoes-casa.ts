@@ -211,7 +211,7 @@ const screen: HelpScreen = {
       title: "E-mail",
       tab: "email",
       intro:
-        "Domínio próprio de e-mail (para enviar com @suacasa.bet.br em vez de um domínio genérico) e os remetentes que de fato mandam as campanhas e jornadas por e-mail.",
+        "Domínio próprio de e-mail (para enviar com @suacasa.bet.br em vez de um domínio genérico) e os remetentes que de fato mandam as campanhas e jornadas por e-mail. Esta aba só aparece quando o canal E-mail está ligado para a casa; com o canal desligado, ela desaparece do seletor de abas.",
       items: [
         {
           anchor: "casa.email.hostname",

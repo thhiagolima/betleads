@@ -39,7 +39,7 @@ const screen: HelpScreen = {
           label: "Histórico de contatos",
           what: 'Abre o diálogo "Histórico de contatos" deste jogador: tudo que já foi enviado a ele por WhatsApp, SMS, e-mail e ligação, do mais recente ao mais antigo, com canal, data/hora, status, jornada/campanha de origem e um resumo do conteúdo. "Nenhum contato registrado para esse lead ainda." quando não há nada.',
           notes:
-            "O mesmo diálogo abre pela lista de Jogadores (aba Acompanhamento) — sem âncora própria, porque o tour nunca abre diálogos.",
+            "O mesmo diálogo abre pela lista de Jogadores (aba Acompanhamento) — sem âncora própria, porque o tour nunca abre diálogos. Contatos de um canal (SMS, e-mail ou ligação) que o super admin desligou para a casa ficam de fora da lista — eles continuam gravados, só não aparecem enquanto o canal estiver desligado; o WhatsApp sempre aparece, por não ser um canal que se desliga.",
         },
         {
           anchor: "jogador.kpis",

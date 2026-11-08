@@ -327,6 +327,8 @@ const screen: HelpScreen = {
           anchor: "webhooks.webpush.status",
           label: "Status: Arquivo / Script / Jogador logado",
           what: 'Três verificações. "Arquivo": botão "Verificar agora" que confere se o arquivo está no ar; mostra "Arquivo encontrado" ou o motivo do erro ("Não encontramos o arquivo nesse endereço. Confira se a pasta é push/onesignal e o nome do arquivo não mudou.", "O site devolveu uma página em vez do arquivo. Confira se o arquivo foi enviado para a pasta certa.", "O arquivo está lá, mas o servidor não o entrega como JavaScript. Peça para servir .js como application/javascript.", "O arquivo foi alterado. Baixe de novo e envie sem editar." ou "Não conseguimos acessar o site agora. Tente de novo em alguns minutos."). "Script": mostra "Script detectado" assim que alguém acessa o site com o script instalado, ou "Aguardando o primeiro acesso ao site" com um botão "Verificar". "Jogador logado": mostra "Jogador identificado" ou "Ainda não identificado (opcional)".',
+          notes:
+            'Se "Verificar agora" falhar por um motivo fora da lista acima (por exemplo, um erro inesperado do servidor), aparece um aviso mostrando o próprio motivo devolvido pelo servidor, em vez de uma das frases fixas.',
         },
         {
           anchor: "webhooks.webpush.proxima-etapa",
@@ -339,7 +341,7 @@ const screen: HelpScreen = {
           label: "Etapa 2 — Teste",
           what: 'Pede para abrir o site da casa no mesmo navegador e aceitar as notificações; lista as inscrições recentes (navegador e se já está identificado com um jogador), cada uma com um botão "Enviar teste".',
           notes:
-            'Sem nenhuma inscrição ainda: "Nenhuma inscrição ainda." Enquanto envia, o botão mostra "Enviando…"; ao terminar, "Teste enviado". Um teste enviado com sucesso é o que faz a casa avançar para o resumo "concluído".',
+            'Sem nenhuma inscrição ainda: "Nenhuma inscrição ainda." Enquanto envia, o botão mostra "Enviando…"; ao terminar, "Teste enviado". Se o envio falhar, aparece um aviso mostrando o próprio motivo devolvido pelo servidor. Um teste enviado com sucesso é o que faz a casa avançar para o resumo "concluído".',
         },
         {
           anchor: "webhooks.webpush.concluido",
