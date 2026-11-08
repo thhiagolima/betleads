@@ -1,7 +1,11 @@
 import { AlertTriangle, ExternalLink } from "lucide-react";
+import type { ReactNode } from "react";
+
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 
 // Guia de preparação (MB3-08): passos com link direto no Business Manager.
-const STEPS: { text: string; href?: string; linkLabel?: string }[] = [
+const STEPS: { text: ReactNode; href?: string; linkLabel?: string }[] = [
   {
     text: "Nas Configurações do negócio, abra Usuários → Usuários do sistema e crie um Usuário do Sistema (função Administrador ou Funcionário) para esta operação.",
     href: "https://business.facebook.com/settings/system-users",
@@ -13,17 +17,22 @@ const STEPS: { text: string; href?: string; linkLabel?: string }[] = [
     linkLabel: "Abrir Contas de anúncio",
   },
   {
-    text: "Clique em Gerar token, escolha o app da operação, marque a permissão ads_read e deixe a validade como “Nunca”.",
+    text: (
+      <>
+        Clique em Gerar token, escolha o app da operação, marque a permissão{" "}
+        <Term id="ads-read">ads_read</Term> e deixe a validade como “Nunca”.
+      </>
+    ),
   },
   { text: "Copie a chave gerada e cole aqui. Ela só aparece uma vez na Meta." },
 ];
 
 export function MetaSetupGuide() {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" {...tourAnchor("webhooks.meta.guia")}>
       <ol className="space-y-2 text-meta text-muted-foreground">
         {STEPS.map((step, index) => (
-          <li key={step.text} className="flex gap-2 rounded-lg bg-muted/40 p-3">
+          <li key={index} className="flex gap-2 rounded-lg bg-muted/40 p-3">
             <span className="font-bold text-primary">{index + 1}</span>
             <span className="min-w-0">
               {step.text}

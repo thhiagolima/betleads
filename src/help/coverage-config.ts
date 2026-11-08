@@ -55,12 +55,6 @@ export const EXCLUDED_ROUTES: string[] = [
  * every phase-1 route — Tasks 9-15 remove each one as its article ships.
  */
 export const PENDING_ROUTES: string[] = [
-  // --- Fase 1: "/webhooks" has an article (Task 15), but only the "links"
-  // tab/section — "plataforma", "meta" and "webpush" are still pending, per tab. ---
-  "/webhooks#plataforma",
-  "/webhooks#meta",
-  "/webhooks#webpush",
-
   // --- Fase 3 ---
   "/resultados",
   "/resultados/comparar",
@@ -97,14 +91,8 @@ export const VIRTUAL_SCREENS = ["onboarding", "shell"] as const;
  * Anchors (ids passed to the `tourAnchor` helper) that exist in the code but aren't cited
  * by any article yet — Task 7 populates articles for the touched screens
  * and shrinks this list. Starts empty; Task 15's shell article cites
- * "shell.header.help" (Task 4), so this stays empty again.
+ * "shell.header.help" (Task 4), so this stays empty again. Task 9's
+ * webhooks.ts article cites the 5 webhooks.webpush.* anchors that used to be
+ * listed here (the ticket wizard added them ahead of that article).
  */
-export const ANCHORS_PENDING_ARTICLE: string[] = [
-  // "/webhooks#webpush" is in PENDING_ROUTES above — the ticket wizard
-  // (webpush-setup-wizard.tsx) added these anchors ahead of that article.
-  "webhooks.webpush.copiar-instrucoes",
-  "webhooks.webpush.bloco-arquivo",
-  "webhooks.webpush.bloco-script",
-  "webhooks.webpush.bloco-jogador",
-  "webhooks.webpush.status",
-];
+export const ANCHORS_PENDING_ARTICLE: string[] = [];

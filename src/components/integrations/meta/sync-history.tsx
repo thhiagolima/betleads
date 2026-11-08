@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { tourAnchor } from "@/help/anchor";
 import { getMetaSyncRunJobs, getMetaSyncRuns } from "@/lib/meta.functions";
 import { cn } from "@/lib/utils";
 import { ToneBadge, type Tone } from "./meta-badges";
@@ -139,7 +140,11 @@ export function SyncHistoryList({
   failed?: boolean;
 }) {
   return (
-    <section aria-labelledby="meta-sync-history-title" className="space-y-3">
+    <section
+      aria-labelledby="meta-sync-history-title"
+      className="space-y-3"
+      {...tourAnchor("webhooks.meta.historico")}
+    >
       <div className="min-w-0">
         <h3 id="meta-sync-history-title" className="font-semibold">
           Histórico de sincronizações

@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2 } from "lucide-react";
 
 import { Progress } from "@/components/ui/progress";
 import type { ProgressStep } from "@/components/integrations/meta-connection-model";
+import { tourAnchor } from "@/help/anchor";
 import { cn } from "@/lib/utils";
 import { firstReadFailedText, incrementalText } from "./meta-copy";
 
@@ -33,7 +34,11 @@ export function ProgressStrip({
 }) {
   const current = STEPS.findIndex((item) => item.step === step);
   return (
-    <ol aria-label="Progresso da conexão" className="grid gap-2 sm:grid-cols-4">
+    <ol
+      aria-label="Progresso da conexão"
+      className="grid gap-2 sm:grid-cols-4"
+      {...tourAnchor("webhooks.meta.progresso")}
+    >
       {STEPS.map((item, index) => {
         const done = index < current || (step === "done" && item.step === "done");
         const active = index === current && step !== "done";

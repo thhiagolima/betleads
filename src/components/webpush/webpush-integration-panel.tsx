@@ -12,6 +12,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { PageTabs } from "@/components/ui-premium/page-tabs";
+import { tourAnchor } from "@/help/anchor";
 import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
 import { getWebpushIntegrationFn } from "@/lib/webpush/webpush.functions";
 import { WEBPUSH_INTEGRATION_QUERY_KEY } from "@/components/webpush/webpush-query";
@@ -78,12 +79,14 @@ export function WebpushIntegrationPanel() {
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <PageTabs
-        label="Web Push"
-        value={innerTab}
-        onValueChange={setInnerTab}
-        items={INNER_TABS}
-      />
+      <div {...tourAnchor("webhooks.webpush.abas")}>
+        <PageTabs
+          label="Web Push"
+          value={innerTab}
+          onValueChange={setInnerTab}
+          items={INNER_TABS}
+        />
+      </div>
 
       {innerTab === "assistente" && (
         <>

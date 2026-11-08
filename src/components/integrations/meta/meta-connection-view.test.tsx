@@ -16,6 +16,9 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
+vi.mock("@/components/help/term", () => ({
+  Term: ({ children }: { children?: ReactNode }) => <>{children}</>,
+}));
 vi.mock("@/lib/meta.functions", () => ({
   connectMetaSystemUserToken: vi.fn(),
   disconnectMetaConnection: vi.fn(),

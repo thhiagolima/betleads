@@ -354,7 +354,12 @@ export function InstallationStepView({
       </div>
 
       <div className="pt-2">
-        <Button type="button" disabled={!canAdvance} onClick={onNext}>
+        <Button
+          type="button"
+          disabled={!canAdvance}
+          onClick={onNext}
+          {...tourAnchor("webhooks.webpush.proxima-etapa")}
+        >
           Próxima etapa
         </Button>
       </div>
@@ -383,7 +388,7 @@ export function TestStepView({
   onSendTest: (subscriptionRowId: string) => void;
 }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" {...tourAnchor("webhooks.webpush.teste")}>
       <p className="text-sm text-muted-foreground">
         Abra o site da casa neste navegador e aceite as notificações.
       </p>
@@ -439,7 +444,7 @@ export function CompletedSummaryView({
   onRedo: () => void;
 }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" {...tourAnchor("webhooks.webpush.concluido")}>
       <div className="space-y-2">
         {apps.map((app) => (
           <div

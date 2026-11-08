@@ -3,6 +3,8 @@ import { AlertTriangle, Loader2, Lock, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -192,6 +194,7 @@ export function MetaConnectionView({
                 className="gap-2"
                 disabled={locked}
                 onClick={() => setSheetMode({ kind: "add" })}
+                {...tourAnchor("webhooks.meta.adicionar")}
               >
                 <Plus aria-hidden className="h-4 w-4" />
                 Adicionar Usuário do Sistema
@@ -204,6 +207,7 @@ export function MetaConnectionView({
                 className="gap-2"
                 disabled={locked || persistedIds.length === 0 || actions.syncPending}
                 onClick={() => actions.sync()}
+                {...tourAnchor("webhooks.meta.sincronizar")}
               >
                 {actions.syncPending ? (
                   <Loader2 aria-hidden className="h-4 w-4 animate-spin" />
@@ -242,7 +246,8 @@ export function MetaConnectionView({
             <div className="rounded-xl border border-border/60 bg-background/40 p-4">
               <p className="font-semibold">Conectar a primeira chave</p>
               <p className="mb-4 text-meta text-muted-foreground">
-                Prepare um Usuário do Sistema no Business Manager e cole a chave dele aqui.
+                Prepare um <Term id="usuario-do-sistema">Usuário do Sistema</Term> no{" "}
+                <Term id="bm">Business Manager</Term> e cole a chave dele aqui.
               </p>
               <ConnectKeyForm
                 locked={locked}
@@ -255,7 +260,11 @@ export function MetaConnectionView({
 
         {hasConnections && (
           <>
-            <section aria-label="Chaves conectadas" className="grid gap-3 lg:grid-cols-2">
+            <section
+              aria-label="Chaves conectadas"
+              className="grid gap-3 lg:grid-cols-2"
+              {...tourAnchor("webhooks.meta.chaves")}
+            >
               {cards.map((card) => (
                 <ConnectionCard
                   key={card.connection.id}

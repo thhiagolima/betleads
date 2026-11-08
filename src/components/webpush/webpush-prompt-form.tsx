@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { tourAnchor } from "@/help/anchor";
 import { saveWebpushPromptFn } from "@/lib/webpush/webpush.functions";
 import type { PromptConfig } from "@/lib/webpush/shared";
 import { WEBPUSH_INTEGRATION_QUERY_KEY } from "@/components/webpush/webpush-query";
@@ -81,7 +82,7 @@ export function WebpushPromptForm({
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_auto]">
       <div className="space-y-4">
-        <div className="space-y-1.5">
+        <div className="space-y-1.5" {...tourAnchor("webhooks.webpush.convite-texto")}>
           <Label htmlFor="webpush-prompt-text">Texto do convite</Label>
           <Input
             id="webpush-prompt-text"
@@ -91,7 +92,7 @@ export function WebpushPromptForm({
             onChange={(e) => setDraft((d) => ({ ...d, promptText: e.target.value }))}
           />
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2" {...tourAnchor("webhooks.webpush.convite-rotulos")}>
           <div className="space-y-1.5">
             <Label htmlFor="webpush-accept-label">Rótulo de aceitar</Label>
             <Input
@@ -113,7 +114,7 @@ export function WebpushPromptForm({
             />
           </div>
         </div>
-        <div className="space-y-1.5">
+        <div className="space-y-1.5" {...tourAnchor("webhooks.webpush.convite-icone")}>
           <Label htmlFor="webpush-icon-url">Ícone (URL https, opcional)</Label>
           <Input
             id="webpush-icon-url"
@@ -124,12 +125,17 @@ export function WebpushPromptForm({
           />
         </div>
         {canEdit && (
-          <Button type="button" disabled={save.isPending} onClick={() => save.mutate()}>
+          <Button
+            type="button"
+            disabled={save.isPending}
+            onClick={() => save.mutate()}
+            {...tourAnchor("webhooks.webpush.convite-salvar")}
+          >
             {save.isPending ? "Salvando…" : "Salvar"}
           </Button>
         )}
       </div>
-      <div className="space-y-1.5">
+      <div className="space-y-1.5" {...tourAnchor("webhooks.webpush.convite-preview")}>
         <p className="text-label text-muted-foreground">Pré-visualização</p>
         <WebpushPromptPreview prompt={draft} />
       </div>

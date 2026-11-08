@@ -12,6 +12,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { tourAnchor } from "@/help/anchor";
 import { connectKeyCopy, replaceCreatedNewWarning, type ConnectKeyMode } from "./meta-copy";
 import { MetaSetupGuide } from "./setup-guide";
 
@@ -68,6 +69,7 @@ export function ConnectKeyForm({
           value={token}
           disabled={locked}
           onChange={(event) => setToken(event.target.value)}
+          {...tourAnchor("webhooks.meta.chave-input")}
         />
         <p className="text-meta text-muted-foreground">
           A chave fica guardada de forma criptografada e não volta a aparecer.
@@ -77,6 +79,7 @@ export function ConnectKeyForm({
             type="submit"
             className="w-full gap-2 sm:w-auto"
             disabled={locked || pending || token.trim().length < MIN_TOKEN_LENGTH}
+            {...tourAnchor("webhooks.meta.validar")}
           >
             {pending ? (
               <Loader2 aria-hidden className="h-4 w-4 animate-spin" />

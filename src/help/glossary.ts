@@ -311,4 +311,24 @@ export const GLOSSARY: GlossaryTerm[] = [
     long:
       "Cada canal tem sua própria franquia (ou nenhuma — SMS e Voz não têm). Ela reinicia a cada mês: o que não foi usado não acumula para o mês seguinte. Em \"Consumo do mês\", o texto \"X de Y grátis\" mostra quanto da franquia já foi usado; em \"Preços vigentes\", a coluna \"Franquia mensal\" mostra o tamanho dela (\"-\" quando o canal não tem).",
   },
+
+  // --- Integrações: Plataforma, Meta Ads, Web push (fase 2, Task 9) ---
+  {
+    id: "bm",
+    term: "BM",
+    short:
+      "Sigla de \"Business Manager\", o painel da Meta (Facebook/Instagram) onde a operação administra contas de anúncio, usuários e permissões. É nele que você cria o Usuário do Sistema e dá a ele acesso às contas de anúncio.",
+  },
+  {
+    id: "usuario-do-sistema",
+    term: "Usuário do Sistema",
+    short:
+      "Um tipo de usuário da Meta feito para integrações automáticas (não é uma pessoa). A chave de acesso dele não expira em poucas semanas como a de um usuário comum, por isso é a chave certa para conectar o CRM.",
+  },
+  {
+    id: "ads-read",
+    term: "ads_read",
+    short:
+      "A permissão que a chave de acesso do Usuário do Sistema precisa ter para o CRM funcionar: só deixa ler o desempenho dos anúncios (gastos, resultados). Ela não permite publicar, pausar ou alterar nada nos anúncios.",
+  },
 ];

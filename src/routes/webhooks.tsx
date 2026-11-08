@@ -25,6 +25,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { useState } from "react";
+import { tourAnchor } from "@/help/anchor";
 import { num, timeAgo } from "@/lib/format";
 import { WEBHOOK_EVENTS, describeEventType } from "@/lib/webhook-events";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
@@ -301,6 +302,7 @@ function PlatformSection() {
       <section
         className="grid grid-cols-2 gap-3 lg:grid-cols-4"
         aria-label="Recebimentos da plataforma nas últimas 24 horas"
+        {...tourAnchor("webhooks.plataforma.cartoes")}
       >
         <MetricCard
           label="Recebidos"
@@ -372,7 +374,7 @@ function PlatformSection() {
                   página ou contate o suporte.
                 </div>
               ))}
-            <div className="mb-5">
+            <div className="mb-5" {...tourAnchor("webhooks.plataforma.endereco-base")}>
               <p className="mb-1.5 text-label text-muted-foreground">
                 Endereço base (cada evento acrescenta o seu final)
               </p>
@@ -404,7 +406,7 @@ function PlatformSection() {
                 />
               </div>
             </div>
-            <div className="space-y-6">
+            <div className="space-y-6" {...tourAnchor("webhooks.plataforma.eventos")}>
               {categorias.map((cat) => (
                 <div key={cat}>
                   <p className="text-label font-semibold text-muted-foreground mb-2.5">{cat}</p>
@@ -475,7 +477,10 @@ function PlatformSection() {
           icon={<Terminal className="h-4 w-4" />}
           bodyClassName="p-3"
         >
-          <div className="space-y-1.5 max-h-[700px] overflow-y-auto pr-1">
+          <div
+            className="space-y-1.5 max-h-[700px] overflow-y-auto pr-1"
+            {...tourAnchor("webhooks.plataforma.recebimentos")}
+          >
             {isLoading &&
               Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-12 rounded-md" />
@@ -532,7 +537,10 @@ function PlatformSection() {
       </div>
 
       <Collapsible className="rounded-2xl border border-border bg-card/80">
-        <CollapsibleTrigger className="group flex w-full items-start justify-between gap-4 rounded-2xl px-4 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5">
+        <CollapsibleTrigger
+          className="group flex w-full items-start justify-between gap-4 rounded-2xl px-4 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5"
+          {...tourAnchor("webhooks.plataforma.seguranca")}
+        >
           <div className="min-w-0">
             <h2 className="text-section">Segurança avançada: assinatura dos envios</h2>
             <p className="mt-0.5 text-label text-muted-foreground">
@@ -566,6 +574,7 @@ function PlatformSection() {
                 variant="outline"
                 disabled={isDemo || hmacUnknown || provision.isPending}
                 onClick={() => void confirmRotate()}
+                {...tourAnchor("webhooks.plataforma.chave")}
               >
                 {provision.isPending
                   ? "Gerando..."
@@ -581,6 +590,7 @@ function PlatformSection() {
                   variant="outline"
                   disabled={isDemo || hmacUnknown || enforceHmac.isPending}
                   onClick={() => void confirmAllowUnsigned()}
+                  {...tourAnchor("webhooks.plataforma.exigir")}
                 >
                   Aceitar sem assinatura por enquanto
                 </Button>
@@ -593,6 +603,7 @@ function PlatformSection() {
                     isDemo || hmacUnknown || !tokenInfo?.hmacConfigured || enforceHmac.isPending
                   }
                   onClick={() => void confirmEnforce()}
+                  {...tourAnchor("webhooks.plataforma.exigir")}
                 >
                   Exigir assinatura
                 </Button>
