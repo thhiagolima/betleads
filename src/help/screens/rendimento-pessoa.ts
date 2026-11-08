@@ -150,16 +150,20 @@ const screen: HelpScreen = {
         {
           label: "Revisar",
           what: 'Em campanhas aguardando aprovação, abre o diálogo de revisão para decidir (ver abaixo). Em campanhas já decididas sem outra ação disponível, o botão aparece como "Ver" (mesmo diálogo, sem os botões de decisão).',
+          notes:
+            'Erro possível, nesta ação e em Aprovar/Recusar/Pausar/Retomar: "Campanha não encontrada." — a campanha foi excluída ou é de outra casa entre a fila carregar e a ação ser feita; recarregue a fila. Numa falha sem mensagem própria do servidor, o texto genérico "Não foi possível concluir. Tente de novo." aparece no lugar.',
         },
         {
           label: "Pausar",
           what: "Pausa uma campanha de SMS/e-mail agendada ou enviando, ou de voz enfileirada. Toast \"Campanha pausada.\"",
-          notes: 'Desabilitado na casa demo.',
+          notes:
+            'Erro possível: "Esta campanha não está em andamento ou agendada." — aparece se a campanha já tiver mudado de status (por exemplo, terminou de enviar ou já foi pausada) entre a tela carregar e você clicar; recarregue a fila para ver o status atual. Desabilitado na casa demo.',
         },
         {
           label: "Retomar",
           what: 'Retoma uma campanha pausada (inclusive pausada pelo teto, depois de o teto ser liberado ou aumentado). Toast "Campanha retomada."',
-          notes: 'Desabilitado na casa demo.',
+          notes:
+            'Erros possíveis: "Esta campanha não está pausada." (ela já mudou de status — recarregue a fila); "O expert está desativado: a campanha não pode ser retomada." (ative a pessoa primeiro, em "Ativar" no cabeçalho); "O expert continua no teto mensal. Aumente o teto na tela Experts ou aguarde a virada do mês." (o teto mensal dela ainda não tem saldo — aumente o teto em Editar ou espere o mês virar). Desabilitado na casa demo.',
         },
       ],
     },
@@ -178,7 +182,7 @@ const screen: HelpScreen = {
           label: "Aprovar",
           what: 'Aprova a campanha pendente: o CRM confere de novo o público, os links e o teto mensal da pessoa antes de liberar — a contagem de destinatários e o custo podem mudar em relação ao que foi visto antes. Toast "Campanha aprovada: N destinatários, custo estimado R$ X."',
           notes:
-            'Erros possíveis: "Esta campanha não está aguardando aprovação." (alguém já decidiu), "A campanha mudou depois que você abriu. Recarregue e confira antes de aprovar." (o conteúdo foi editado depois que o diálogo abriu), "O expert está desativado: a campanha não pode ser aprovada.", "Nenhum jogador do seu público pode receber esta campanha." (ninguém elegível depois de reconferir) e o aviso de teto ("Esta campanha custaria cerca de R$ X, mas restam R$ Y do teto mensal de R$ Z. Reduza o público ou peça ao admin para aumentar o teto." — aqui é o próprio admin quem vê esse aviso, ao tentar aprovar). Desabilitado na casa demo.',
+            'Erros possíveis: "Esta campanha não está aguardando aprovação." (alguém já decidiu), "A campanha mudou depois que você abriu. Recarregue e confira antes de aprovar." (o conteúdo foi editado depois que o diálogo abriu), "O expert está desativado: a campanha não pode ser aprovada.", "Nenhum jogador do seu público pode receber esta campanha." (ninguém elegível depois de reconferir) e o aviso de teto ("Esta campanha custaria cerca de R$ X, mas restam R$ Y do seu teto mensal de R$ Z. Reduza o público ou peça ao admin para aumentar o teto." — o texto fala "seu" porque é o mesmo aviso mostrado ao expert ao tentar enviar; aqui é o admin quem vê, ao tentar aprovar). Desabilitado na casa demo.',
         },
         {
           label: "Recusar",
