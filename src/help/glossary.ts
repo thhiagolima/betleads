@@ -340,4 +340,48 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "A permissão que a chave de acesso do Usuário do Sistema precisa ter para o CRM funcionar: só deixa ler o desempenho dos anúncios (gastos, resultados). Ela não permite publicar, pausar ou alterar nada nos anúncios.",
   },
+
+  // --- Aquisição e LTV (fase 3, Task 2) ---
+  {
+    id: "roas",
+    term: "ROAS líquido",
+    short:
+      "Depósitos menos saques dos jogadores vindos de anúncio, dividido pelo que foi investido nesse anúncio no mesmo período. Acima de 1x, o anúncio devolveu mais do que custou.",
+    long:
+      "Sigla de \"return on ad spend\" (retorno sobre o investimento em anúncios). O ROAS líquido usa o depósito líquido (depósitos − saques); o ROAS bruto, mostrado ao lado como referência, usa só os depósitos, sem subtrair os saques — por isso o bruto é sempre igual ou maior que o líquido.",
+  },
+  {
+    id: "cpa-cac",
+    term: "CPA / CAC",
+    short:
+      'Quanto custou, em mídia, cada 1º depósito (CPA, "custo por aquisição") ou cada cadastro (CAC, "custo de aquisição de cliente") trazido por anúncio. Na tela aparecem com os nomes "Custo por 1º depósito" e "Custo por cadastro".',
+    long:
+      "CPA é investido ÷ 1º depósitos vindos de anúncio; CAC é investido ÷ cadastros vindos de anúncio. Os dois só contam jogadores ligados a um anúncio ou campanha das contas conectadas — cadastros ou depósitos \"na casa\" (sem anúncio) aparecem ao lado só como referência, sem entrar na conta.",
+  },
+  {
+    id: "ctr",
+    term: "CTR",
+    short:
+      'Sigla de "click-through rate" (taxa de clique): cliques no link do anúncio dividido pelas impressões, em porcentagem. Mostra quantas vezes, de cada 100 pessoas que viram o anúncio, alguma clicou.',
+  },
+  {
+    id: "impressoes",
+    term: "Impressões",
+    short:
+      "Quantas vezes um anúncio foi mostrado para alguém, no Feed, Stories etc. Uma mesma pessoa pode ver (e contar) mais de uma impressão.",
+  },
+  {
+    id: "cohort",
+    term: "Cohort",
+    short:
+      'Um grupo de jogadores que fizeram o 1º depósito na mesma semana, acompanhado ao longo do tempo para comparar o quanto cada grupo retornou (o 2º depósito, por exemplo). Na tela aparece como "semana do 1º depósito", sem usar a palavra em inglês.',
+  },
+  {
+    id: "ltv",
+    term: "LTV",
+    short:
+      'Sigla de "lifetime value" (valor ao longo da vida): quanto, no total, um jogador trazido por mídia deposita enquanto continua ativo.',
+    long:
+      "O CRM ainda não mostra um número único de LTV. A aba Retenção (base agora, evolução, funil e cohorts) é a visão que aproxima essa resposta: quanto do grupo volta a depositar, e por quanto tempo, depois do 1º depósito.",
+  },
 ];

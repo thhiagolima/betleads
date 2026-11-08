@@ -59,7 +59,6 @@ export const PENDING_ROUTES: string[] = [
   "/rendimento",
   "/rendimento/equipe",
   "/rendimento/equipe/$expertId",
-  "/midia-ltv",
   "/financeiro",
   "/inteligencia",
   "/treino-ia",

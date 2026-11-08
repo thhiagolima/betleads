@@ -17,6 +17,7 @@ import { PLAYER_STATE_LABELS, RECOVERABLE_STATES } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
 import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 import {
   CHART_COLORS,
   chartAxisProps,
@@ -68,7 +69,9 @@ export function RetentionPanel() {
   });
   return (
     <div className="space-y-4">
-      <CentralPeriodPicker value={period.key} onChange={setPeriodKey} />
+      <div {...tourAnchor("midia.retencao.periodo")}>
+        <CentralPeriodPicker value={period.key} onChange={setPeriodKey} />
+      </div>
       {query.isLoading ? (
         <Skeleton className="h-64 rounded-xl" />
       ) : query.isError || !query.data ? (
@@ -398,7 +401,9 @@ function Acquisition({
       <Card>
         <CardHeader>
           <CardTitle>Por origem do cadastro</CardTitle>
-          <CardDescription>Origem informada no cadastro (utm_source).</CardDescription>
+          <CardDescription>
+            Origem informada no cadastro (<Term id="utm">utm_source</Term>).
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
           <Table>

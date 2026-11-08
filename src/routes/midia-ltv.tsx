@@ -12,7 +12,7 @@ import {
   Target,
   Wallet,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type HTMLAttributes } from "react";
 import {
   Area,
   AreaChart,
@@ -67,6 +67,8 @@ import {
   type MetaSummary,
 } from "@/components/integrations/meta-summary";
 import { AdAccountFilter, AdAccountFilterNote } from "@/components/midia-ltv/ad-account-filter";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/midia-ltv")({
@@ -255,10 +257,15 @@ function MediaLtvPage() {
   return (
     <Page>
       <PageHeader
+        title={
+          <>
+            Aquisição e <Term id="ltv">LTV</Term>
+          </>
+        }
         subtitle="Cada jogador carrega o anúncio que o trouxe. Veja quem trouxe cadastro barato, quem trouxe dinheiro e quem continua depositando."
         actions={
           view === "midia" && noMetaConnection ? (
-            <Button asChild size="sm" className="gap-2">
+            <Button asChild size="sm" className="gap-2" {...tourAnchor("midia.header.conectar-meta")}>
               <Link to="/webhooks" hash="meta">
                 <Target className="h-3.5 w-3.5" />
                 Conectar Meta
@@ -338,13 +345,14 @@ function Kpi({
   detail,
   tone = "default",
   className,
+  ...rest
 }: {
   title: string;
   value: string;
   detail: string;
   tone?: "default" | "success" | "info";
   className?: string;
-}) {
+} & HTMLAttributes<HTMLElement>) {
   const icon =
     tone === "success" ? (
       <Wallet className="h-4 w-4" />
@@ -359,6 +367,7 @@ function Kpi({
       value={value}
       hint={detail}
       icon={icon}
+      {...rest}
       accent={tone === "success" ? "success" : "primary"}
       className={className}
     />
@@ -433,6 +442,7 @@ function VisualizacaoSection({
             className="gap-2"
             disabled={isDemo || readOnly || syncPending || accounts.length === 0}
             onClick={onSync}
+            {...tourAnchor("midia.sync.atualizar")}
           >
             {syncPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -488,7 +498,10 @@ function VisualizacaoSection({
           )}
           {syncRuns.length > 1 && (
             <details className="mt-3 text-xs text-muted-foreground">
-              <summary className="cursor-pointer font-medium text-foreground">
+              <summary
+                className="cursor-pointer font-medium text-foreground"
+                {...tourAnchor("midia.sync.historico")}
+              >
                 Ver histórico recente
               </summary>
               <div className="mt-2 space-y-1.5">
@@ -524,7 +537,7 @@ function VisualizacaoSection({
           aria-label="Período"
           className="flex max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
         >
-          {(Object.keys(periodLabels) as PeriodPreset[]).map((key) => (
+          {(Object.keys(periodLabels) as PeriodPreset[]).map((key, index) => (
             <button
               key={key}
               type="button"
@@ -536,6 +549,7 @@ function VisualizacaoSection({
                   ? "bg-secondary text-foreground"
                   : "text-muted-foreground hover:text-foreground",
               )}
+              {...(index === 0 ? tourAnchor("midia.periodo.presets") : {})}
             >
               {periodLabels[key]}
             </button>
@@ -552,6 +566,7 @@ function VisualizacaoSection({
             onChange={(event) =>
               onCustomRangeChange({ from: event.target.value, to: customRange?.to ?? range.to })
             }
+            {...tourAnchor("midia.periodo.data-inicial")}
           />
           <span className="text-xs text-muted-foreground">até</span>
           <Input
@@ -633,6 +648,7 @@ function VisualizacaoSection({
           title="Investido no período"
           value={brl(totals?.spend)}
           detail={`${brl((totals?.spend ?? 0) / Math.max(1, range.days))} por dia, em média`}
+          {...tourAnchor("midia.kpis.investido")}
         />
         <Kpi
           title="ROAS líquido"
@@ -643,16 +659,19 @@ function VisualizacaoSection({
               : `depósitos − saques ÷ investido · bruto ${ratio(totals?.roasGross)}`
           }
           tone="info"
+          {...tourAnchor("midia.kpis.roas")}
         />
         <Kpi
           title="Custo por 1º depósito"
           value={totals?.cpaFtd == null ? "-" : brl2(totals.cpaFtd)}
           detail={`${num(totals?.paidFtd)} vindos de anúncio · ${num(totals?.ftd)} na casa`}
+          {...tourAnchor("midia.kpis.custo-1o-deposito")}
         />
         <Kpi
           title="Custo por cadastro"
           value={totals?.cacSignup == null ? "-" : brl2(totals.cacSignup)}
           detail={`${num(totals?.paidPlayers)} cadastros de anúncio · ${num(totals?.players)} na casa`}
+          {...tourAnchor("midia.kpis.custo-cadastro")}
         />
         <Kpi
           title="Depósito líquido"
@@ -660,11 +679,12 @@ function VisualizacaoSection({
           detail={`${house(totals?.revenue)} depositados − ${house(totals?.withdrawals)} sacados`}
           tone="success"
           className="col-span-2 xl:col-span-1"
+          {...tourAnchor("midia.kpis.deposito-liquido")}
         />
       </div>
 
       <p className="text-meta text-muted-foreground">
-        Como o ROAS é calculado:{" "}
+        Como o <Term id="roas">ROAS</Term> é calculado:{" "}
         <strong className="text-foreground">{house(totals?.ftdRevenue)}</strong> em{" "}
         {num(totals?.paidFtd)} primeiros depósitos
         <span className="px-1">+</span>
@@ -683,7 +703,9 @@ function VisualizacaoSection({
 
       <Tabs value={reportView} onValueChange={(value) => setReportView(value as typeof reportView)}>
         <TabsList className="app-scrollbar h-auto max-w-full justify-start overflow-x-auto">
-          <TabsTrigger value="creatives">Por criativo</TabsTrigger>
+          <TabsTrigger value="creatives" {...tourAnchor("midia.subabas.tabs")}>
+            Por criativo
+          </TabsTrigger>
           <TabsTrigger value="audiences">Por público da Meta</TabsTrigger>
           <TabsTrigger value="campaigns">Por campanha da Meta</TabsTrigger>
           <TabsTrigger value="evolution">Evolução</TabsTrigger>
@@ -749,7 +771,12 @@ function VisualizacaoSection({
       {reportView === "diagnostics" && adAccountIds.length === 0 && (
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-            <Kpi title="Cadastros" value={num(data?.attributionHealth.total)} detail="no período" />
+            <Kpi
+              title="Cadastros"
+              value={num(data?.attributionHealth.total)}
+              detail="no período"
+              {...tourAnchor("midia.diagnostico.kpis")}
+            />
             <Kpi
               title="Com marcação"
               value={num(data?.attributionHealth.marked)}
@@ -931,6 +958,7 @@ function MoneyMapCard({ rows }: { rows: MoneyRow[] }) {
                     size="sm"
                     className="h-9 w-9 p-0"
                     onClick={() => setPage(n)}
+                    {...(index === 0 ? tourAnchor("midia.evolucao.money-map-paginacao") : {})}
                   >
                     {n}
                   </Button>
@@ -999,7 +1027,9 @@ function BusinessHeads() {
       <TableHead className="text-right">1º dep.</TableHead>
       <TableHead className="text-right">Custo por 1º dep.</TableHead>
       <TableHead className="text-right">Depósito líquido</TableHead>
-      <TableHead className="text-right">ROAS líquido</TableHead>
+      <TableHead className="text-right">
+        <Term id="roas">ROAS líquido</Term>
+      </TableHead>
     </>
   );
 }
@@ -1233,7 +1263,9 @@ function OrphanAttributionTable({
               <TableHead className="text-right">1º dep.</TableHead>
               <TableHead className="text-right">Depósitos</TableHead>
               <TableHead className="text-right">Investido</TableHead>
-              <TableHead className="text-right">ROAS</TableHead>
+              <TableHead className="text-right">
+                <Term id="roas">ROAS</Term>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1314,7 +1346,9 @@ function CreativeTable({
                   <TableHead className="text-right">1º dep.</TableHead>
                   <TableHead className="text-right">Custo por 1º dep.</TableHead>
                   <TableHead className="text-right">Depósito líquido</TableHead>
-                  <TableHead className="text-right">ROAS líquido</TableHead>
+                  <TableHead className="text-right">
+                    <Term id="roas">ROAS líquido</Term>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1390,9 +1424,11 @@ function CreativeTable({
             </Table>
           </div>
           <p className="text-meta text-muted-foreground">
-            Gasto, impressões e cliques vêm da Meta. Cadastros, 1º depósito e depósitos vêm da
-            integração da casa, só de jogadores cadastrados no período que foram ligados a este
-            anúncio. Jogadores ligados só à campanha aparecem em “Por campanha da Meta”.
+            Gasto, <Term id="impressoes">impressões</Term> e cliques (o <Term id="ctr">CTR</Term>{" "}
+            que aparece junto é a parte dessas impressões que gerou clique) vêm da Meta. Cadastros,
+            1º depósito e depósitos vêm da integração da casa, só de jogadores cadastrados no
+            período que foram ligados a este anúncio. Jogadores ligados só à campanha aparecem em
+            “Por campanha da Meta”.
           </p>
         </div>
       )}
