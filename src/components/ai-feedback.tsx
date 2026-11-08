@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { tourAnchor } from "@/help/anchor";
 
 type Props = {
   aiLogId?: string | null;
@@ -70,6 +71,7 @@ export function AIFeedback({ aiLogId, pergunta, respostaSummary }: Props) {
         <div className="flex items-center justify-end gap-1 text-muted-foreground">
           <span className="text-meta mr-1">Essa resposta ajudou?</span>
           <button
+            {...tourAnchor("ia.feedback.bom")}
             onClick={sendGood}
             className="p-1.5 rounded-md hover:bg-success/10 hover:text-success transition-colors"
             title="Boa resposta"
@@ -78,6 +80,7 @@ export function AIFeedback({ aiLogId, pergunta, respostaSummary }: Props) {
             <ThumbsUp className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <button
+            {...tourAnchor("ia.feedback.ruim")}
             onClick={() => setShowBad(true)}
             className="p-1.5 rounded-md hover:bg-danger/10 hover:text-danger transition-colors"
             title="Resposta ruim"
@@ -90,6 +93,7 @@ export function AIFeedback({ aiLogId, pergunta, respostaSummary }: Props) {
         <div className="space-y-2 rounded-lg border border-danger/30 bg-danger/5 p-3">
           <p className="text-xs font-medium">O que estava errado?</p>
           <Textarea
+            {...tourAnchor("ia.feedback.motivo")}
             value={motivo}
             onChange={(e) => setMotivo(e.target.value)}
             placeholder="Ex: trouxe todos em vez de filtrar pelo expert..."
@@ -100,6 +104,7 @@ export function AIFeedback({ aiLogId, pergunta, respostaSummary }: Props) {
             Como deveria ter respondido? (vai virar exemplo de treino)
           </p>
           <Textarea
+            {...tourAnchor("ia.feedback.resposta-ideal")}
             value={respostaIdeal}
             onChange={(e) => setRespostaIdeal(e.target.value)}
             placeholder="Resposta ideal em texto livre..."
@@ -110,7 +115,7 @@ export function AIFeedback({ aiLogId, pergunta, respostaSummary }: Props) {
             <Button size="sm" variant="ghost" onClick={() => setShowBad(false)} disabled={saving}>
               Cancelar
             </Button>
-            <Button size="sm" onClick={saveBad} disabled={saving}>
+            <Button {...tourAnchor("ia.feedback.enviar")} size="sm" onClick={saveBad} disabled={saving}>
               {saving && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
               Enviar
             </Button>

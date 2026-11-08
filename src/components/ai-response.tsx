@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { AIFeedback } from "@/components/ai-feedback";
+import { tourAnchor } from "@/help/anchor";
 
 export type AIPlayer = {
   id?: string;
@@ -168,7 +169,7 @@ function InsightCard({ i }: { i: AIInsight }) {
   );
 }
 
-function PlayerCard({ p }: { p: AIPlayer }) {
+function PlayerCard({ p, anchorFirst }: { p: AIPlayer; anchorFirst?: boolean }) {
   const { money } = useMoney();
   const dep = p.total_depositado ?? 0;
   const saq = p.total_sacado ?? 0;
@@ -182,7 +183,10 @@ function PlayerCard({ p }: { p: AIPlayer }) {
   const cls = priorityColor(classificacaoPrioridade(classificacao));
 
   return (
-    <div className="rounded-xl border border-border/50 bg-background/40 hover:border-primary/40 hover:bg-background/60 transition-colors p-4">
+    <div
+      {...(anchorFirst ? tourAnchor("ia.resposta.cartao-jogador") : {})}
+      className="rounded-xl border border-border/50 bg-background/40 hover:border-primary/40 hover:bg-background/60 transition-colors p-4"
+    >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -340,14 +344,17 @@ export function AIResponse({ data }: { data: AIAnswer }) {
   return (
     <div className="space-y-4">
       {summary && (
-        <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex gap-3">
+        <div
+          {...tourAnchor("ia.resposta.resumo")}
+          className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex gap-3"
+        >
           <Lightbulb className="h-4 w-4 text-primary shrink-0 mt-0.5" />
           <p className="text-sm text-foreground leading-relaxed">{summary}</p>
         </div>
       )}
 
       {metrics.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div {...tourAnchor("ia.resposta.metricas")} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {metrics.map((m, i) => (
             <MetricCard key={i} m={m} />
           ))}
@@ -355,7 +362,7 @@ export function AIResponse({ data }: { data: AIAnswer }) {
       )}
 
       {insights.length > 0 && (
-        <div className="grid sm:grid-cols-2 gap-2">
+        <div {...tourAnchor("ia.resposta.insights")} className="grid sm:grid-cols-2 gap-2">
           {insights.map((i, idx) => (
             <InsightCard key={idx} i={i} />
           ))}
@@ -377,11 +384,12 @@ export function AIResponse({ data }: { data: AIAnswer }) {
           </div>
           <div className="space-y-2">
             {visible.map((p, i) => (
-              <PlayerCard key={p.id ?? i} p={p} />
+              <PlayerCard key={p.id ?? i} p={p} anchorFirst={i === 0} />
             ))}
           </div>
           {shown < players.length && (
             <button
+              {...tourAnchor("ia.resposta.ver-mais")}
               onClick={() => setShown((s) => s + PAGE)}
               className="w-full rounded-lg border border-border/50 bg-muted/20 hover:bg-muted/40 py-2 text-xs font-medium transition-colors"
             >

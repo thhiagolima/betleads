@@ -42,6 +42,8 @@ export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpSc
   "/resultados": () => import("./screens/resultados"),
   "/resultados/comparar": () => import("./screens/resultados-comparar"),
   "/midia-ltv": () => import("./screens/midia-ltv"),
+  "/inteligencia": () => import("./screens/inteligencia"),
+  "/treino-ia": () => import("./screens/treino-ia"),
   onboarding: () => import("./screens/onboarding"),
   shell: () => import("./screens/shell"),
 };

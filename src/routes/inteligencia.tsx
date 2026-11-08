@@ -11,6 +11,7 @@ import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_AI_UNAVAILABLE_TEXT } from "@/lib/demo-tenant";
+import { tourAnchor } from "@/help/anchor";
 
 export const Route = createFileRoute("/inteligencia")({
   component: IAPage,
@@ -102,7 +103,11 @@ function IAPage() {
       <PageHeader subtitle="Pergunte sobre os jogadores da casa. A resposta usa os dados de agora." />
       <div className="grid min-h-[480px] gap-4 lg:h-[calc(100dvh-240px)] lg:min-h-[560px] lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="flex min-h-[480px] flex-col overflow-hidden rounded-2xl border border-border bg-card/80">
-          <div ref={scrollRef} className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
+          <div
+            ref={scrollRef}
+            {...tourAnchor("ia.conversa")}
+            className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6"
+          >
             {msgs.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-center max-w-md mx-auto">
                 <div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-secondary text-muted-foreground">
@@ -186,6 +191,7 @@ function IAPage() {
               className="flex gap-2 items-end"
             >
               <Textarea
+                {...tourAnchor("ia.pergunta")}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={
@@ -204,6 +210,7 @@ function IAPage() {
               />
               <DemoDisabledTooltip active={isDemo} text={DEMO_AI_UNAVAILABLE_TEXT}>
                 <Button
+                  {...tourAnchor("ia.enviar")}
                   type="submit"
                   aria-label="Enviar pergunta"
                   disabled={isDemo || !input.trim() || mutation.isPending}
@@ -217,6 +224,7 @@ function IAPage() {
         </div>
 
         <section
+          {...tourAnchor("ia.sugestoes")}
           aria-labelledby="ia-suggestions"
           className="order-first flex flex-col overflow-hidden rounded-2xl border border-border bg-card/80 lg:order-none"
         >
@@ -225,9 +233,10 @@ function IAPage() {
           </h2>
           {/* Phone: a row of chips that scrolls sideways; desktop: a list. */}
           <div className="flex flex-1 gap-1.5 overflow-x-auto p-3 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible [scrollbar-width:none]">
-            {suggestions.map((s) => (
+            {suggestions.map((s, i) => (
               <button
                 key={s.question}
+                {...(i === 0 ? tourAnchor("ia.sugestao") : {})}
                 type="button"
                 onClick={() => send(s.question, s.label)}
                 disabled={isDemo || mutation.isPending}
