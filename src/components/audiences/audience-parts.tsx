@@ -21,7 +21,8 @@ export function RuleGroup({
   children,
 }: {
   title: string;
-  help?: string;
+  /** Texto de ajuda sob o título; aceita nó (ex.: <Term>), já que fica fora dos chips. */
+  help?: ReactNode;
   /** Classe de cor do grupo (FILTER_GROUP_DOT). */
   dot?: string;
   children: ReactNode;
@@ -51,8 +52,9 @@ export function RuleChip({
 }: {
   active: boolean;
   onClick: () => void;
-  /** Normalmente um texto; aceita nó (ex.: <Term>) quando o rótulo tem jargão a explicar. */
-  label: ReactNode;
+  /** Só texto: o chip é um <button>, e um <Term> (outro botão) aqui dentro seria
+   * botão dentro de botão — ponha o Term no `help` do RuleGroup. */
+  label: string;
   count?: number;
   loading?: boolean;
   /** Classe de cor da bolinha (tipo do filtro). */

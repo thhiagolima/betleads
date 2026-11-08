@@ -65,6 +65,8 @@ const screen: HelpScreen = {
           anchor: "publicos.editor.pix-nao-pago",
           label: "Gerou PIX e não pagou",
           what: "Chip liga/desliga: só entram os jogadores que geraram um código Pix de depósito e não chegaram a pagá-lo.",
+          notes:
+            'Abaixo do título do grupo "Pendências" aparece "PIX gerado e não pago, ou saque ainda em aberto.", com um "i" ao lado de PIX que explica o termo.',
         },
         {
           anchor: "publicos.editor.saque-pendente",

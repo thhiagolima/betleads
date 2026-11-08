@@ -36,3 +36,49 @@ export function extractTermIds(source: string): string[] {
 export function isTestFile(filename: string): boolean {
   return filename.includes(".test.");
 }
+
+const CHIP_TAG_RE = /<([A-Z][A-Za-z0-9]*Chip)\b/g;
+
+/** Reads a `{…}` expression starting at `source[open] === "{"`; returns the
+ * index just past its matching `}` (or the source length if unbalanced). */
+function skipBraces(source: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return source.length;
+}
+
+/**
+ * Names of `*Chip` components (RuleChip, FilterChip, …) whose `label={…}`
+ * prop contains a `<Term`. Those chips render their label inside a
+ * `<button>`, and `<Term>` renders its own `<button>` — a button inside a
+ * button is invalid HTML and tapping the "i" toggles the chip. Put the Term
+ * next to the chip (or in the group's title/help) instead.
+ */
+export function findTermInsideChipLabel(source: string): string[] {
+  const out: string[] = [];
+  const tagRe = new RegExp(CHIP_TAG_RE.source, CHIP_TAG_RE.flags);
+  let match: RegExpExecArray | null;
+  // eslint-disable-next-line no-cond-assign
+  while ((match = tagRe.exec(source))) {
+    // Walk the opening tag up to its closing ">" outside any `{…}`.
+    let i = match.index + match[0].length;
+    while (i < source.length && source[i] !== ">") {
+      if (source[i] === "{") {
+        const end = skipBraces(source, i);
+        if (/\blabel\s*=\s*$/.test(source.slice(match.index, i)) && source.slice(i, end).includes("<Term")) {
+          out.push(match[1]);
+        }
+        i = end;
+      } else {
+        i++;
+      }
+    }
+  }
+  return out;
+}

@@ -3,6 +3,7 @@ import {
   countRawDataTourUsages,
   extractTermIds,
   extractTourAnchorCalls,
+  findTermInsideChipLabel,
   isTestFile,
 } from "./coverage-scan";
 
@@ -30,5 +31,28 @@ describe("coverage-scan", () => {
     expect(isTestFile("resolve.test.ts")).toBe(true);
     expect(isTestFile("-coverage.test.ts")).toBe(true);
     expect(isTestFile("resolve.ts")).toBe(false);
+  });
+  it("findTermInsideChipLabel acha <Term> dentro do label={…} de um *Chip", () => {
+    const src = `
+      <RuleChip
+        label={
+          <>
+            Gerou <Term id="pix-gerado-pago">PIX</Term> e não pagou
+          </>
+        }
+        onClick={() => setActivity("pixUnpaid", true)}
+      />
+      <FilterChip label={<Term id="ftd">FTD</Term>} active />`;
+    expect(findTermInsideChipLabel(src)).toEqual(["RuleChip", "FilterChip"]);
+  });
+
+  it("findTermInsideChipLabel ignora label de texto, Term fora do chip e outros componentes", () => {
+    const src = `
+      <RuleGroup title="Pendências" help={<><Term id="pix-gerado-pago">PIX</Term> em aberto</>}>
+        <RuleChip label="Gerou PIX e não pagou" onClick={() => go({ a: 1 })} />
+        <RuleChip label={count > 1 ? "Vários" : "Um"} count={count} />
+      </RuleGroup>
+      <Field label={<Term id="ggr">GGR</Term>} />`;
+    expect(findTermInsideChipLabel(src)).toEqual([]);
   });
 });

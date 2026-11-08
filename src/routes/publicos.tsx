@@ -287,13 +287,18 @@ function PublicosPage() {
                       tourProps={tourAnchor("publicos.editor.deposito-nunca")}
                     />
                   </RuleGroup>
-                  <RuleGroup title="Pendências" dot={FILTER_GROUP_DOT.pending}>
+                  <RuleGroup
+                    title="Pendências"
+                    dot={FILTER_GROUP_DOT.pending}
+                    help={
+                      <>
+                        <Term id="pix-gerado-pago">PIX</Term> gerado e não pago, ou saque ainda em
+                        aberto.
+                      </>
+                    }
+                  >
                     <RuleChip
-                      label={
-                        <>
-                          Gerou <Term id="pix-gerado-pago">PIX</Term> e não pagou
-                        </>
-                      }
+                      label="Gerou PIX e não pagou"
                       dot={FILTER_GROUP_DOT.pending}
                       count={facets?.activity.pixUnpaid}
                       loading={calculating}
