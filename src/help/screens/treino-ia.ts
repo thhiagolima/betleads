@@ -58,7 +58,7 @@ const screen: HelpScreen = {
         {
           anchor: "exemplos.salvar",
           label: "Salvar exemplo",
-          what: "Cadastra o exemplo com a pergunta, o assunto (se preenchido) e a resposta ideal, já ligado, com a origem \"manual\".",
+          what: "Cadastra o exemplo com a pergunta, o assunto (se preenchido) e a resposta ideal, já ligado, com a origem \"manual\". Ao salvar com sucesso, aparece o aviso \"Exemplo cadastrado\" e os três campos são limpos.",
           notes:
             'Erro possível: "Preencha a pergunta e a resposta ideal." quando um dos dois campos obrigatórios está vazio. Se a gravação falhar por outro motivo, o erro mostrado é o texto que vier do banco de dados (varia caso a caso).',
         },

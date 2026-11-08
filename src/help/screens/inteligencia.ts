@@ -87,7 +87,7 @@ const screen: HelpScreen = {
         {
           anchor: "ia.feedback.bom",
           label: 'Essa resposta ajudou? — polegar para cima',
-          what: 'Registra a resposta como boa. Depois de clicar, os dois botões somem e aparece "feedback registrado" no lugar.',
+          what: 'Registra a resposta como boa. Depois de clicar, aparece o aviso "Obrigado pelo feedback!" e, no lugar dos dois botões, "feedback registrado".',
           notes:
             'Se a resposta não tiver um identificador válido (caso raro, de uma resposta antiga da sessão), aparece o erro "Resposta sem id (recarregue a página)." e nada é registrado.',
         },
@@ -151,6 +151,12 @@ const screen: HelpScreen = {
       title: "Resposta sem id (recarregue a página).",
       what: 'Erro ao clicar no polegar para cima de uma resposta sem identificador válido para o feedback (situação rara).',
       action: "Atualize a página e tente avaliar a resposta de novo.",
+    },
+    {
+      id: "resposta-sem-dados",
+      title: "Sem dados para mostrar.",
+      what: 'Texto mostrado no lugar da resposta quando a IA responde sem resumo, sem jogadores, sem observações e sem métricas — a pergunta foi entendida e respondida, mas não há nada para exibir.',
+      action: "Tente reformular a pergunta ou pedir um período diferente.",
     },
   ],
 
