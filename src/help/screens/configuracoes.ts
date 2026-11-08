@@ -69,7 +69,7 @@ const screen: HelpScreen = {
         {
           anchor: "configuracoes.janela.status",
           label: "Resumo (fora da edição)",
-          what: 'Um grupo de números e textos só de leitura, que aparece quando você não está editando: o selo "Dentro da janela" ou "Fora da janela" (com "(janela desativada — enviando 24h)" ao lado quando a janela está desligada), o horário permitido e o fuso, quando a janela volta a abrir ("Próxima retomada"), "Pendentes fora da janela" e "Para próxima janela" (quantos envios/ligações estão esperando o horário certo), a "Última execução" (o envio mais recente de e-mail ou SMS) e, por baixo, quantos e-mails e ligações estão agendados especificamente para a próxima janela.',
+          what: 'Um grupo de números e textos só de leitura, que aparece quando você não está editando: o selo "Dentro da janela" ou "Fora da janela" (com "(janela desativada — enviando 24h)" ao lado quando a janela está desligada), o horário permitido e o fuso, quando a janela volta a abrir ("Próxima retomada"), "Pendentes fora da janela" e "Para próxima janela" (quantos envios/ligações estão esperando o horário certo), a "Última execução" (o envio mais recente de e-mail ou SMS) e, por baixo, a linha "Email:" com dois números separados por "·" — quantos e-mails de jornada (automação) estão agendados para a próxima janela e, depois, quantas campanhas de e-mail agendadas caem na próxima janela — e a linha "Ligações:" com quantas ligações estão agendadas para a próxima janela.',
         },
       ],
     },
