@@ -84,6 +84,8 @@ export function Overview({
     previous && previous.sent > 0 && totals.sent < previous.sent * 0.5
       ? 1 - totals.sent / previous.sent
       : null;
+  // "hoje" / "ontem" / "no período": every number says when it happened.
+  const when = data.days === 1 ? (data.endOffset === 0 ? "hoje" : "ontem") : "no período";
   const afterClickPlayers = totals.directPlayers + totals.directActivePlayers;
   const afterClickRevenue = totals.directRevenue + totals.directActiveRevenue;
   const recoveredShare = afterClickRevenue > 0 ? totals.directRevenue / afterClickRevenue : 0;
@@ -133,7 +135,10 @@ export function Overview({
                 <p className="text-kpi tabular-nums text-success">{money(totals.directRevenue)}</p>
                 <p className="text-sm">
                   {num(totals.directPlayers)}{" "}
-                  {totals.directPlayers === 1 ? "jogador voltou" : "jogadores voltaram"} pelo link
+                  {totals.directPlayers === 1
+                    ? "jogador parado voltou"
+                    : "jogadores parados voltaram"}{" "}
+                  a depositar {when} pelo link do SMS
                 </p>
                 {previous && (
                   <Delta
@@ -156,12 +161,13 @@ export function Overview({
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {brl(efficiency.cost)} em SMS · {cost(efficiency.costPerConversion)} por jogador
+                  recuperado
                 </p>
                 {crossCurrency ? (
                   <p className="text-xs text-muted-foreground">{crossCurrencyNote(currency)}</p>
                 ) : data.rolling ? (
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground sm:justify-end">
-                    últimos 7 dias ({periodLabel(data.rolling.from, data.rolling.to)})
+                    conta dos últimos 7 dias ({periodLabel(data.rolling.from, data.rolling.to)})
                     <InfoTip text={ROLLING_INFO} />
                   </p>
                 ) : (
@@ -179,10 +185,10 @@ export function Overview({
             </div>
 
             <div className="border-t border-success/20 pt-3">
-              <p className="text-label text-muted-foreground">De onde veio</p>
+              <p className="text-label text-muted-foreground">SMS e cliques {when}</p>
               <ol
                 className="mt-1 flex flex-col gap-1 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2"
-                aria-label="De onde veio"
+                aria-label={`SMS e cliques ${when}`}
               >
                 <li>
                   <span className="font-medium tabular-nums">{num(totals.sent)}</span> SMS enviados{" "}
@@ -197,7 +203,9 @@ export function Overview({
                     <span className="font-medium tabular-nums">{num(totals.humanClicks)}</span>{" "}
                     cliques no link{" "}
                     {totals.clickRate != null && (
-                      <span className="text-muted-foreground">({pct(totals.clickRate)})</span>
+                      <span className="text-muted-foreground">
+                        ({pct(totals.clickRate)} dos SMS)
+                      </span>
                     )}
                   </span>
                 </li>
@@ -208,11 +216,13 @@ export function Overview({
                   />
                   <span>
                     <span className="font-medium tabular-nums">{num(totals.convertedClicks)}</span>{" "}
-                    {totals.convertedClicks === 1 ? "clique virou" : "cliques viraram"} depósito{" "}
+                    {totals.convertedClicks === 1
+                      ? "desses cliques já virou depósito"
+                      : "desses cliques já viraram depósito"}{" "}
                     {totals.conversionRate != null && (
                       <span className="text-muted-foreground">
                         ({pct(totals.conversionRate)}
-                        {partial && ", ainda pode subir"})
+                        {partial && " · pode aumentar: quem clicou tem 7 dias para depositar"})
                       </span>
                     )}
                   </span>
@@ -223,7 +233,7 @@ export function Overview({
             {totals.directActivePlayers > 0 && (
               <div className="space-y-2 border-t border-success/20 pt-3">
                 <p className="text-sm">
-                  Depositaram depois de clicar:{" "}
+                  Depositaram {when} depois de clicar em um SMS dos últimos 7 dias:{" "}
                   <span className="font-medium tabular-nums">{num(afterClickPlayers)}</span>{" "}
                   jogadores ·{" "}
                   <span className="font-medium tabular-nums">{money(afterClickRevenue)}</span>
@@ -238,12 +248,13 @@ export function Overview({
                 <div className="flex flex-col gap-1 text-xs sm:flex-row sm:flex-wrap sm:gap-x-4">
                   <span className="flex items-center gap-1.5">
                     <span className="size-2 rounded-sm bg-success" aria-hidden="true" />
-                    Recuperado pelo CRM {money(totals.directRevenue)} ({num(totals.directPlayers)})
+                    Estavam parados (Recuperado pelo CRM): {money(totals.directRevenue)} ·{" "}
+                    {num(totals.directPlayers)} jogadores
                   </span>
                   <span className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="size-2 rounded-sm bg-muted-foreground/30" aria-hidden="true" />
-                    Já estavam jogando {money(totals.directActiveRevenue)} (
-                    {num(totals.directActivePlayers)})
+                    Já estavam jogando (não contam): {money(totals.directActiveRevenue)} ·{" "}
+                    {num(totals.directActivePlayers)} jogadores
                     <InfoTip text={ACTIVE_INFO} />
                   </span>
                 </div>
