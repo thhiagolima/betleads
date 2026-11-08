@@ -176,10 +176,14 @@ notify pgrst, 'reload schema';
 
 `billing_invoices` ganha `channel_fees_cents` (bigint, >= 0, default 0) e
 `channel_fees` (jsonb, default `'{}'`). `billing_channel_fees(_tenant)` soma
-`monthly_fee_cents` das concessões ativas cuja conta ligada em
-`tenant_channel_providers` é da própria casa e está `active` — sem concessão,
-sem conta ligada, conta de outro dono, conta desativada ou taxa zero: não
-entra. `billing_issue_invoice`, `billing_reprice_open_invoice` e
+`monthly_fee_cents` das concessões ativas (`allowed` na emissão) em que (a)
+a conta ligada em `tenant_channel_providers` é da própria casa e está
+`active`, **ou** (b) a casa usou conta própria naquele canal desde a emissão
+da fatura anterior (`wallet_ledger` `usage_reservation` com
+`metadata->>'own_account' = 'true'`; sem fatura anterior, desde `granted_at`)
+— desligar a conta própria pouco antes da emissão não tira a taxa de quem
+usou. Sem concessão, taxa zero, ou sem uso próprio no período e sem conta
+própria ativa ligada: não entra. `billing_issue_invoice`, `billing_reprice_open_invoice` e
 `billing_admin_one_off_discount` são recriadas para gravar/preservar
 `channel_fees_cents` dentro de `amount_cents` (taxa congelada na emissão,
 desconto continua incidindo só sobre a base do plano).

@@ -8,11 +8,20 @@
 --     congelada no valor da emissão.
 --   * public.billing_channel_fees(_tenant uuid) returns jsonb -> soma
 --     monthly_fee_cents das concessões (tenant_own_provider_grants) com
---     allowed = true e monthly_fee_cents > 0 cuja conta ligada em
---     tenant_channel_providers (mesma casa, mesmo canal) pertence à própria
---     casa (provider_accounts.owner_tenant_id = _tenant) e está ativa
---     (status = 'active'). Sem concessão, sem conta ligada, conta de outro
---     dono, conta desativada ou taxa zero: não entra. Devolve
+--     allowed = true e monthly_fee_cents > 0 na emissão, quando o canal se
+--     qualifica de UM destes dois jeitos:
+--       (a) a conta ligada em tenant_channel_providers (mesma casa, mesmo
+--           canal) pertence à própria casa (provider_accounts.owner_tenant_id
+--           = _tenant) e está ativa (status = 'active'); ou
+--       (b) a casa usou conta própria nesse canal desde a emissão da fatura
+--           anterior (sem fatura anterior: desde granted_at da concessão):
+--           wallet_ledger com entry_type = 'usage_reservation',
+--           metadata->>'own_account' = 'true' e item do canal (sms -> 'sms',
+--           email -> 'email', voice -> 'voice_30s'). Fecha o desvio de
+--           desligar a conta própria pouco antes da emissão depois de ter
+--           usado o mês inteiro ("quem usa conta própria paga a taxa").
+--     Sem concessão, taxa zero, ou (sem uso próprio no período e sem conta
+--     própria ativa ligada): não entra. Devolve
 --     {"total_cents": n, "channels": {"sms": n, ...}} (canal com taxa > 0
 --     cobrada só).
 --   * billing_issue_invoice recriada (corpo de 20261023100000:394) para
@@ -91,15 +100,41 @@ begin
          coalesce(sum(g.monthly_fee_cents), 0)
     into v_channels, v_total
   from public.tenant_own_provider_grants g
-  join public.tenant_channel_providers tcp
-    on tcp.tenant_id = g.tenant_id and tcp.channel = g.channel
-  join public.provider_accounts pa
-    on pa.id = tcp.provider_account_id
   where g.tenant_id = _tenant
     and g.allowed
     and g.monthly_fee_cents > 0
-    and pa.owner_tenant_id = _tenant
-    and pa.status = 'active';
+    and (
+      -- (a) conta própria ativa ligada no canal na emissão
+      exists (
+        select 1
+        from public.tenant_channel_providers tcp
+        join public.provider_accounts pa on pa.id = tcp.provider_account_id
+        where tcp.tenant_id = g.tenant_id
+          and tcp.channel = g.channel
+          and pa.owner_tenant_id = _tenant
+          and pa.status = 'active'
+      )
+      -- (b) uso por conta própria no canal desde a fatura anterior
+      or exists (
+        select 1
+        from public.wallet_ledger wl
+        where wl.tenant_id = _tenant
+          and wl.entry_type = 'usage_reservation'
+          and wl.metadata ->> 'own_account' = 'true'
+          and wl.item = case g.channel
+                          when 'sms' then 'sms'
+                          when 'email' then 'email'
+                          when 'voice' then 'voice_30s'
+                        end
+          and wl.created_at > coalesce(
+                (select max(bi.created_at)
+                   from public.billing_invoices bi
+                  where bi.tenant_id = _tenant),
+                g.granted_at,
+                '-infinity'::timestamptz
+              )
+      )
+    );
 
   return jsonb_build_object('total_cents', v_total, 'channels', v_channels);
 end;

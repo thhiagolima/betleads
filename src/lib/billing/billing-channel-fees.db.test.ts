@@ -202,7 +202,97 @@ async function ownAccount(tenant: string, channel: string, status = "active"): P
   return id;
 }
 
+/** Reserva gratuita de conta própria no razão (o que wallet_reserve grava). */
+async function ownUsage(
+  tenant: string,
+  item: string,
+  offset: string,
+  ownAccountFlag: unknown = true,
+) {
+  await db.query(
+    `insert into public.wallet_ledger
+       (tenant_id, entry_type, item, units, unit_price, provider_unit_cost, amount, balance_after,
+        metadata, created_at)
+     values ($1, 'usage_reservation', $2, 1, 0, 0, 0, 0,
+             jsonb_build_object('own_account', $3::jsonb), now() + $4::interval)`,
+    [tenant, item, JSON.stringify(ownAccountFlag), offset],
+  );
+}
+
+async function feesOf(tenant: string) {
+  return scalar<Record<string, unknown>>("select public.billing_channel_fees($1) v", [tenant]);
+}
+
 describe("billing_channel_fees", () => {
+  describe("uso de conta própria desde a fatura anterior (I1)", () => {
+    it("desligar a conta própria antes da emissão depois de usar ainda cobra a taxa", async () => {
+      const tenant = await createHouse();
+      await grant(tenant, "sms", true, 50000);
+      const account = await ownAccount(tenant, "sms", "active");
+      // Fatura anterior: a upfront emitida na criação da casa.
+      await ownUsage(tenant, "sms", "1 second");
+      await db.query(`update public.provider_accounts set status = 'disabled' where id = $1`, [
+        account,
+      ]);
+      await db.query(`delete from public.tenant_channel_providers where tenant_id = $1`, [tenant]);
+
+      expect(await feesOf(tenant)).toEqual({ total_cents: 50000, channels: { sms: 50000 } });
+      await reissueUpfront(tenant);
+      expect(await openInvoiceOf(tenant)).toMatchObject({
+        channel_fees_cents: "50000",
+        channel_fees: { sms: 50000 },
+      });
+    });
+
+    it("sem uso no período e sem conta ativa: sem taxa", async () => {
+      const tenant = await createHouse();
+      await grant(tenant, "sms", true, 50000);
+      await ownAccount(tenant, "sms", "disabled");
+      // Uso de antes da fatura anterior não conta.
+      await ownUsage(tenant, "sms", "-1 day");
+      expect(await feesOf(tenant)).toEqual({ total_cents: 0, channels: {} });
+    });
+
+    it("uso pela rota BetLeads, de outro canal ou sem concessão não cobra", async () => {
+      const tenant = await createHouse();
+      await grant(tenant, "sms", true, 50000);
+      await grant(tenant, "email", false, 30000);
+      await ownUsage(tenant, "sms", "1 second", false); // rota BetLeads
+      await ownUsage(tenant, "voice_30s", "1 second"); // canal sem concessão
+      await ownUsage(tenant, "email", "1 second"); // concessão revogada
+      expect(await feesOf(tenant)).toEqual({ total_cents: 0, channels: {} });
+    });
+
+    it("voz: uso em voice_30s qualifica a concessão 'voice'; e-mail em 'email'", async () => {
+      const tenant = await createHouse();
+      await grant(tenant, "voice", true, 20000);
+      await grant(tenant, "email", true, 10000);
+      await ownUsage(tenant, "voice_30s", "1 second");
+      await ownUsage(tenant, "email", "1 second");
+      expect(await feesOf(tenant)).toEqual({
+        total_cents: 30000,
+        channels: { voice: 20000, email: 10000 },
+      });
+    });
+
+    it("sem fatura anterior: conta o uso desde granted_at", async () => {
+      const tenant = await createHouse();
+      await db.query(`delete from public.billing_invoices where tenant_id = $1`, [tenant]);
+      await grant(tenant, "sms", true, 50000);
+      await asServiceRole(() =>
+        db.query(
+          `update public.tenant_own_provider_grants set granted_at = now() where tenant_id = $1`,
+          [tenant],
+        ),
+      );
+      await ownUsage(tenant, "sms", "-1 hour");
+      expect(await feesOf(tenant)).toEqual({ total_cents: 0, channels: {} });
+      await ownUsage(tenant, "sms", "1 second");
+      expect(await feesOf(tenant)).toEqual({ total_cents: 50000, channels: { sms: 50000 } });
+    });
+  });
+
+
   it("taxa entra só com concessão e conta própria ativas", async () => {
     const tenant = await createHouse();
     await grant(tenant, "sms", true, 50000);
