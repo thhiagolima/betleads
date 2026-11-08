@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronRight, Clock, TrendingUp } from "lucide-react";
+import { AlertTriangle, ChevronRight, Clock, ShieldCheck, TrendingUp } from "lucide-react";
 import { useState } from "react";
 import {
   Bar,
@@ -13,9 +13,10 @@ import {
 } from "recharts";
 
 import { buildRecommendations } from "@/lib/crm-recommendations";
-import type { CrmSource } from "@/lib/crm-results";
+import { isComparable } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import {
   CHART_COLORS,
   chartAxisProps,
@@ -28,24 +29,36 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { RecommendationList } from "./recommendations";
 import {
   type Data,
+  compareLabel,
   cost,
   crossCurrencyNote,
   dayLabel,
   isCrossCurrency,
   isWaste,
   pct,
-  ratio,
+  perReal,
+  periodLabel,
+  proofSeal,
 } from "./format";
-import { Delta, EmptyCard, InfoTip, Kpi } from "./shared";
+import { Delta, EmptyCard, InfoTip, RoiValue } from "./shared";
 
-/** Conversions arrive up to 7 days after the click: the last week is still filling in. */
+const TITLE_INFO =
+  "Conta quem estava há 2 dias ou mais sem depositar (ou nunca depositou), clicou no link do SMS e depositou em até 7 dias depois do clique. Soma todos os depósitos desses 7 dias. Cada jogador conta uma vez, no dia do primeiro depósito. Quem já estava jogando não entra. O custo considera só SMS.";
+const PARTIAL_INFO =
+  "Quem clicou tem até 7 dias para depositar. Os números deste período ainda podem subir.";
+const ACTIVE_INFO =
+  "Clicaram, mas tinham depositado nos 2 dias anteriores e iam depositar de qualquer forma. Por isso não entram no Recuperado pelo CRM nem no retorno. O efeito do SMS sobre eles aparece em Prova e método.";
+const ROLLING_INFO =
+  "Em períodos curtos, o custo do dia e os depósitos vêm de envios diferentes (quem deposita hoje pode ter clicado em um SMS de dias atrás). Por isso o retorno usa os últimos 7 dias.";
 
 export function Overview({
   data,
   onOpenOrigin,
+  onOpenProof,
 }: {
   data: Data;
   onOpenOrigin: (name: string) => void;
+  onOpenProof: () => void;
 }) {
   const [showAllRecommendations, setShowAllRecommendations] = useState(false);
   const { currency, money } = useMoney();
@@ -61,151 +74,208 @@ export function Overview({
       </EmptyCard>
     );
 
-  const funnel = [
-    { label: "SMS cobrados", value: num(totals.sent), rate: null },
-    {
-      label: "SMS clicados",
-      value: num(totals.humanClicks),
-      rate: totals.clickRate == null ? null : `${pct(totals.clickRate)} dos SMS`,
-    },
-    {
-      label: "Jogadores convertidos",
-      value: num(totals.directPlayers),
-      rate:
-        totals.conversionRate == null
-          ? null
-          : `${pct(totals.conversionRate)} dos cliques converteram`,
-    },
-  ];
+  const versus = compareLabel(data.previous.from, data.previous.to);
+  const comparable = previous ? isComparable(totals, previous) : false;
+  // Deposits arrive up to 7 days after the click: a period ending in the last week still grows.
+  const partial = data.endOffset < 7;
+  // Short periods read the return over the 7 days ending on the same day.
+  const efficiency = data.rolling?.totals ?? totals;
+  const sendDrop =
+    previous && previous.sent > 0 && totals.sent < previous.sent * 0.5
+      ? 1 - totals.sent / previous.sent
+      : null;
+  const afterClickPlayers = totals.directPlayers + totals.directActivePlayers;
+  const afterClickRevenue = totals.directRevenue + totals.directActiveRevenue;
+  const recoveredShare = afterClickRevenue > 0 ? totals.directRevenue / afterClickRevenue : 0;
+  const seal = proofSeal(data.holdout, data.holdoutSetup.length);
   const recommendations = buildRecommendations(data, data.holdout);
 
   return (
     <div className="space-y-4">
       <section aria-labelledby="click-title" className="space-y-3">
-        <div className="flex flex-wrap items-end justify-between gap-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 id="click-title" className="flex items-center gap-1.5 text-section">
               Recuperado pelo CRM
-              <InfoTip text="Jogadores que não depositavam havia 2+ dias (ou nunca depositaram), clicaram no link do SMS e depositaram em até 7 dias. Quem já estava ativo ia depositar de qualquer jeito e fica fora da conta. Conta jogadores, não depósitos: quem deposita 3 vezes conta 1, no dia do primeiro depósito. A taxa compara os cliques do período com quantos deles converteram." />
+              <InfoTip text={TITLE_INFO} />
             </h2>
             <p className="text-sm text-muted-foreground">
-              Parados há 2+ dias ou sem depósito que clicaram no link do SMS e depositaram em até 7
-              dias.
+              Jogadores parados que clicaram no SMS e voltaram a depositar.
             </p>
           </div>
-          {previous && (
-            <p className="text-xs text-muted-foreground">
-              ▲▼ comparado a {dayLabel(data.previous.from)}
-              {data.previous.from !== data.previous.to && ` a ${dayLabel(data.previous.to)}`}
-            </p>
+          {partial && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-meta text-muted-foreground">
+              <Clock className="h-3 w-3" aria-hidden="true" />
+              Parcial
+              <InfoTip text={PARTIAL_INFO} />
+            </span>
           )}
         </div>
 
-        <Card className="border-success/40 bg-success/[0.06]">
-          <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
-            <ol
-              className="flex flex-wrap items-center gap-x-3 gap-y-2"
-              aria-label="Funil do clique"
-            >
-              {funnel.map((step, index) => (
-                <li key={step.label} className="flex items-center gap-3">
-                  {index > 0 && (
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  )}
-                  <div>
-                    <p className="text-xs text-muted-foreground">{step.label}</p>
-                    <p className="text-kpi-sm tabular-nums">{step.value}</p>
-                    {step.rate && <p className="text-xs text-muted-foreground">{step.rate}</p>}
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <div className="lg:text-right">
-              <p className="text-label text-muted-foreground">Valor recuperado pelo CRM</p>
-              <div className="flex items-baseline gap-2 lg:justify-end">
-                <p className="text-kpi tabular-nums text-success">{money(totals.directRevenue)}</p>
-                <Delta current={totals.directRevenue} previous={previous?.directRevenue} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Kpi
-            label="Custo em SMS"
-            value={brl(totals.cost)}
-            detail={`${num(totals.sent)} mensagens cobradas`}
-            info="Só SMS. WhatsApp, e-mail e voz ainda não têm preço cadastrado e não entram no custo."
-            delta={<Delta current={totals.cost} previous={previous?.cost} better="low" />}
-          />
-          <Kpi
-            label="Custo por jogador convertido"
-            value={cost(totals.costPerConversion)}
-            detail="custo ÷ jogadores convertidos"
-            delta={
-              <Delta
-                current={totals.costPerConversion}
-                previous={previous?.costPerConversion}
-                better="low"
-              />
-            }
-          />
-          <Kpi
-            label="Retorno"
-            value={crossCurrency ? "—" : ratio(totals.clickRoi)}
-            detail={crossCurrency ? crossCurrencyNote(currency) : "recuperado pelo CRM ÷ custo"}
-            delta={
-              crossCurrency ? undefined : (
-                <Delta current={totals.clickRoi} previous={previous?.clickRoi} />
-              )
-            }
-          />
-        </div>
-
-        {totals.directActivePlayers > 0 && (
-          <p className="text-xs text-muted-foreground">
-            Fora da conta: {num(totals.directActivePlayers)}{" "}
-            {totals.directActivePlayers === 1 ? "jogador já ativo" : "jogadores já ativos"}{" "}
-            (depositaram nas 48 h antes do clique) somaram {money(totals.directActiveRevenue)}{" "}
-            depois de clicar. Esse valor não entra no retorno.
+        {sendDrop != null && (
+          <p
+            role="status"
+            className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs"
+          >
+            <AlertTriangle
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
+              aria-hidden="true"
+            />
+            Foram enviados {Math.round(sendDrop * 100)}% menos SMS que em {versus}. Custo e retorno
+            mudam por isso.
           </p>
         )}
 
-        <p className="flex items-start gap-2 text-xs text-muted-foreground">
-          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          Jogadores e valor contam no dia do depósito. A taxa de conversão dos cliques dos últimos 7
-          dias ainda pode subir: quem clicou tem até 7 dias para depositar.
+        <Card className="border-success/40 bg-success/[0.06]">
+          <CardContent className="space-y-4 p-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-0.5">
+                <p className="text-kpi tabular-nums text-success">{money(totals.directRevenue)}</p>
+                <p className="text-sm">
+                  {num(totals.directPlayers)}{" "}
+                  {totals.directPlayers === 1 ? "jogador voltou" : "jogadores voltaram"} pelo link
+                </p>
+                {previous && (
+                  <Delta
+                    current={totals.directRevenue}
+                    previous={previous.directRevenue}
+                    comparable={comparable}
+                    formatDiff={(value) => money(value)}
+                    versus={versus}
+                  />
+                )}
+              </div>
+              <div className="space-y-0.5 sm:text-right">
+                <p className="text-label text-muted-foreground">Cada R$ 1 em SMS trouxe</p>
+                <p className="text-kpi-sm tabular-nums">
+                  <RoiValue
+                    roi={efficiency.clickRoi}
+                    smallSample={efficiency.smallSample}
+                    currency={currency}
+                  />
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {brl(efficiency.cost)} em SMS · {cost(efficiency.costPerConversion)} por jogador
+                </p>
+                {crossCurrency ? (
+                  <p className="text-xs text-muted-foreground">{crossCurrencyNote(currency)}</p>
+                ) : data.rolling ? (
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground sm:justify-end">
+                    últimos 7 dias ({periodLabel(data.rolling.from, data.rolling.to)})
+                    <InfoTip text={ROLLING_INFO} />
+                  </p>
+                ) : (
+                  previous && (
+                    <Delta
+                      current={totals.clickRoi}
+                      previous={previous.clickRoi}
+                      comparable={comparable}
+                      formatDiff={perReal}
+                      versus={versus}
+                    />
+                  )
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-success/20 pt-3">
+              <p className="text-label text-muted-foreground">De onde veio</p>
+              <ol
+                className="mt-1 flex flex-col gap-1 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2"
+                aria-label="De onde veio"
+              >
+                <li>
+                  <span className="font-medium tabular-nums">{num(totals.sent)}</span> SMS enviados{" "}
+                  <span className="text-muted-foreground">({brl(totals.cost)})</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <ChevronRight
+                    className="hidden h-4 w-4 text-muted-foreground sm:block"
+                    aria-hidden="true"
+                  />
+                  <span>
+                    <span className="font-medium tabular-nums">{num(totals.humanClicks)}</span>{" "}
+                    cliques no link{" "}
+                    {totals.clickRate != null && (
+                      <span className="text-muted-foreground">({pct(totals.clickRate)})</span>
+                    )}
+                  </span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <ChevronRight
+                    className="hidden h-4 w-4 text-muted-foreground sm:block"
+                    aria-hidden="true"
+                  />
+                  <span>
+                    <span className="font-medium tabular-nums">{num(totals.convertedClicks)}</span>{" "}
+                    {totals.convertedClicks === 1 ? "clique virou" : "cliques viraram"} depósito{" "}
+                    {totals.conversionRate != null && (
+                      <span className="text-muted-foreground">
+                        ({pct(totals.conversionRate)}
+                        {partial && ", ainda pode subir"})
+                      </span>
+                    )}
+                  </span>
+                </li>
+              </ol>
+            </div>
+
+            {totals.directActivePlayers > 0 && (
+              <div className="space-y-2 border-t border-success/20 pt-3">
+                <p className="text-sm">
+                  Depositaram depois de clicar:{" "}
+                  <span className="font-medium tabular-nums">{num(afterClickPlayers)}</span>{" "}
+                  jogadores ·{" "}
+                  <span className="font-medium tabular-nums">{money(afterClickRevenue)}</span>
+                </p>
+                <div
+                  className="flex h-2 overflow-hidden rounded-full bg-muted-foreground/30"
+                  role="img"
+                  aria-label={`${pct(recoveredShare)} do valor depositado depois do clique é Recuperado pelo CRM`}
+                >
+                  <div className="bg-success" style={{ width: `${recoveredShare * 100}%` }} />
+                </div>
+                <div className="flex flex-col gap-1 text-xs sm:flex-row sm:flex-wrap sm:gap-x-4">
+                  <span className="flex items-center gap-1.5">
+                    <span className="size-2 rounded-sm bg-success" aria-hidden="true" />
+                    Recuperado pelo CRM {money(totals.directRevenue)} ({num(totals.directPlayers)})
+                  </span>
+                  <span className="flex items-center gap-1.5 text-muted-foreground">
+                    <span className="size-2 rounded-sm bg-muted-foreground/30" aria-hidden="true" />
+                    Já estavam jogando {money(totals.directActiveRevenue)} (
+                    {num(totals.directActivePlayers)})
+                    <InfoTip text={ACTIVE_INFO} />
+                  </span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+          <ShieldCheck
+            className={cn(
+              "h-3.5 w-3.5 shrink-0",
+              seal.tone === "success"
+                ? "text-success"
+                : seal.tone === "danger"
+                  ? "text-danger"
+                  : "text-muted-foreground",
+            )}
+            aria-hidden="true"
+          />
+          <span className={seal.tone === "muted" ? "text-muted-foreground" : undefined}>
+            {seal.text}
+          </span>
+          <button
+            type="button"
+            className="font-medium text-primary underline-offset-2 hover:underline"
+            onClick={onOpenProof}
+          >
+            Ver prova e método
+          </button>
         </p>
       </section>
-
-      <Card className="bg-muted/20">
-        <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-0.5">
-            <p className="flex items-center gap-1.5 text-sm font-medium">
-              Recuperados (visão ampla)
-              <InfoTip text="Retornos, não pessoas: quem parou e voltou duas vezes no período conta duas. O valor é só o depósito de retorno. Voltar depois do SMS não prova que foi por causa dele; o efeito real está no Teste de controle." />
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Parados há 2+ dias (ou cadastrados há 2+ dias sem depositar) que depositaram até 3
-              dias depois de um SMS, com ou sem clique. Inclui boa parte do Recuperado pelo CRM: não
-              some os dois.
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-wrap gap-6 tabular-nums">
-            {[
-              [num(totals.influencedPlayers), "recuperados"],
-              [money(totals.influencedRevenue), "valor"],
-              [cost(totals.costPerRecovered), "por recuperado"],
-              [crossCurrency ? "—" : ratio(totals.roi), "retorno"],
-            ].map(([value, label]) => (
-              <div key={label}>
-                <p className="text-kpi-sm">{value}</p>
-                <p className="text-xs text-muted-foreground">{label}</p>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
       <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
         <DailyChart data={data} />
@@ -254,12 +324,10 @@ function DailyChart({ data }: { data: Data }) {
     label: dayLabel(day.date),
     cost: day.cost,
     converted: day.directRevenue,
-    recovered: day.influencedRevenue,
   }));
   const names: Record<string, string> = {
     cost: "Custo em SMS",
     converted: "Recuperado pelo CRM",
-    recovered: "Recuperados (visão ampla)",
   };
   return (
     <Card>
@@ -304,14 +372,6 @@ function DailyChart({ data }: { data: Data }) {
             />
             <Line
               yAxisId={crossCurrency ? "revenue" : "cost"}
-              dataKey="recovered"
-              stroke={CHART_COLORS.muted}
-              strokeWidth={1.5}
-              strokeDasharray="2 3"
-              dot={false}
-            />
-            <Line
-              yAxisId={crossCurrency ? "revenue" : "cost"}
               dataKey="converted"
               stroke={CHART_COLORS.success}
               strokeWidth={3}
@@ -347,13 +407,14 @@ function Highlights({ data, onOpenOrigin }: { data: Data; onOpenOrigin: (name: s
               <button type="button" className={linkClass} onClick={() => onOpenOrigin(best.name)}>
                 {best.name}
               </button>{" "}
-              converte mais barato: {cost(best.costPerConversion)} por jogador (
+              traz jogadores de volta mais barato: {cost(best.costPerConversion)} por jogador (
               {num(best.directPlayers)} jogadores, {money(best.directRevenue)}).
             </span>
           </p>
         ) : (
           <p className="text-muted-foreground">
-            Ainda não há origem com 5 ou mais jogadores convertidos para comparar eficiência.
+            Ainda não há origem com 5 ou mais jogadores que voltaram pelo link para comparar
+            eficiência.
           </p>
         )}
         {waste.length > 0 && (
@@ -369,11 +430,12 @@ function Highlights({ data, onOpenOrigin }: { data: Data; onOpenOrigin: (name: s
                   >
                     {waste[0].name}
                   </button>{" "}
-                  gastou {brl(wasteCost)} sem nenhuma conversão.
+                  gastou {brl(wasteCost)} sem trazer nenhum jogador de volta.
                 </>
               ) : (
                 <>
-                  {num(waste.length)} origens gastaram {brl(wasteCost)} sem nenhuma conversão.
+                  {num(waste.length)} origens gastaram {brl(wasteCost)} sem trazer nenhum jogador de
+                  volta.
                 </>
               )}
             </span>
@@ -384,7 +446,7 @@ function Highlights({ data, onOpenOrigin }: { data: Data; onOpenOrigin: (name: s
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
             <span>
               {pct(activeShare)} do custo ({brl(totals.costOnActive)}) foi para jogadores que já
-              estavam ativos (depositaram há menos de 2 dias).
+              estavam jogando (depositaram nos 2 dias anteriores).
             </span>
           </p>
         )}

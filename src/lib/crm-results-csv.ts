@@ -1,7 +1,7 @@
 // Central de Resultados F5: CSV export of the period, one line per origin and
 // one per journey step, with the same numbers shown on screen.
 // Colunas de valor levam a moeda no nome: custo sempre em BRL, receita na moeda
-// da casa. Fora de BRL o retorno (receita ÷ custo) fica vazio: sem câmbio.
+// da casa. Fora de BRL os R$ por R$ 1 em SMS (receita ÷ custo) ficam vazios: sem câmbio.
 import type { CrmMetricsWithRatios, CrmResults } from "./crm-results";
 import { DEFAULT_CURRENCY, toTenantCurrency, type TenantCurrency } from "./currency";
 
@@ -16,27 +16,27 @@ const header = (currency: TenantCurrency) => {
     "tipo",
     "origem",
     "etapa",
-    "enviados",
+    "sms_enviados",
     "falhas",
     "destinatarios",
     "custo_brl",
-    "custo_em_ativos_brl",
-    "sms_clicados",
+    "custo_em_quem_ja_estava_jogando_brl",
+    "cliques_no_link",
     "taxa_de_clique",
-    "jogadores_convertidos_clique",
-    "conversao_do_clique",
-    `receita_clique_${house}`,
-    "custo_por_convertido_brl",
-    "retorno_clique",
-    "recuperados",
-    "depositos_influenciados",
-    `receita_influenciada_${house}`,
-    "custo_por_recuperado_brl",
-    "retorno_recuperados",
+    "jogadores_que_voltaram_pelo_link",
+    "taxa_cliques_que_viraram_deposito",
+    `recuperado_pelo_crm_${house}`,
+    "custo_por_jogador_que_voltou_brl",
+    "reais_por_real_em_sms",
+    "reativacoes_apos_sms",
+    "depositos_reativacoes",
+    `primeiro_deposito_na_volta_${house}`,
+    "custo_por_reativacao_brl",
+    "retorno_reativacoes",
     "depositos_apos_clique",
-    "cliques_convertidos",
-    "jogadores_ja_ativos_clique",
-    `receita_ja_ativos_clique_${house}`,
+    "cliques_que_viraram_deposito",
+    "jogadores_ja_estavam_jogando_clique",
+    `receita_ja_estavam_jogando_clique_${house}`,
   ];
 };
 

@@ -24,10 +24,8 @@ const pct = (value: number | null) =>
   value == null
     ? "—"
     : `${(value * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
-const ratio = (value: number | null) =>
-  value == null
-    ? "—"
-    : `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}x`;
+/** Quanto cada R$ 1 em SMS trouxe, em reais ("R$ 7,90"). */
+const perReal = (value: number | null) => (value == null ? "—" : brl(value));
 type Row = Awaited<ReturnType<typeof getTenantComparison>>["rows"][number];
 
 const pctFine = (value: number | null) =>
@@ -53,10 +51,10 @@ const cost = (value: number | null) => (value == null ? "—" : brl(value));
 const houseMoney = (value: number | null, row: Row) =>
   value == null ? "—" : formatMoney(value, row.moeda);
 const CROSS_CURRENCY_NOTE = "receita e custo em moedas diferentes";
-/** Retorno só existe quando a receita também está em BRL (sem câmbio entre moedas). */
+/** "Cada R$ 1 em SMS trouxe" só existe quando a receita também está em BRL (sem câmbio entre moedas). */
 const sameCurrencyRoi = (value: (row: Row) => number | null) => (row: Row) =>
   row.moeda === "BRL" ? value(row) : null;
-const roiFormat = (value: number | null, row: Row) => (row.moeda === "BRL" ? ratio(value) : "—");
+const roiFormat = (value: number | null, row: Row) => (row.moeda === "BRL" ? perReal(value) : "—");
 
 const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
   {
@@ -66,21 +64,21 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
       { label: "Custo em SMS", raw: (row) => row.cost, format: cost },
       {
         label: "Taxa de clique",
-        hint: "SMS clicados ÷ SMS enviados.",
+        hint: "Cliques no link ÷ SMS enviados.",
         raw: (row) => row.clickRate,
         format: pctFine,
         better: "high",
       },
       {
-        label: "Jogadores convertidos",
+        label: "Jogadores que voltaram pelo link",
         hint: "Depositaram até 7 dias depois de clicar.",
         raw: (row) => row.directPlayers,
         format: count,
         better: "high",
       },
       {
-        label: "Conversão do clique",
-        hint: "Jogadores convertidos ÷ SMS clicados.",
+        label: "Cliques que viraram depósito",
+        hint: "Cliques do período que levaram a um depósito em até 7 dias ÷ cliques no link.",
         raw: (row) => row.conversionRate,
         format: pct,
         better: "high",
@@ -93,13 +91,13 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
         houseMoney: true,
       },
       {
-        label: "Custo por jogador convertido",
+        label: "Custo por jogador que voltou",
         raw: (row) => row.costPerConversion,
         format: cost,
         better: "low",
       },
       {
-        label: "Retorno",
+        label: "Cada R$ 1 em SMS trouxe",
         hint: `Recuperado pelo CRM ÷ custo. Só em casas em BRL (${CROSS_CURRENCY_NOTE} nas demais).`,
         raw: sameCurrencyRoi((row) => row.clickRoi),
         format: roiFormat,
@@ -108,30 +106,30 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
     ],
   },
   {
-    title: "Recuperados (visão ampla)",
+    title: "Reativações após SMS",
     metrics: [
       {
-        label: "Jogadores recuperados",
-        hint: "Parados há 2+ dias (ou cadastrados há 2+ dias sem depositar) que depositaram até 3 dias após um SMS, com ou sem clique.",
+        label: "Reativações após SMS",
+        hint: "Parados há 2 dias ou mais (ou cadastrados há 2 dias ou mais sem depositar) que voltaram a depositar. Outra régua: conta voltas até 3 dias depois de um SMS, com ou sem clique, e só o 1º depósito da volta.",
         raw: (row) => row.influencedPlayers,
         format: count,
         better: "high",
       },
       {
-        label: "Valor recuperado",
+        label: "1º depósito na volta",
         raw: (row) => row.influencedRevenue,
         format: houseMoney,
         houseMoney: true,
       },
       {
-        label: "Custo por recuperado",
+        label: "Custo por reativação",
         raw: (row) => row.costPerRecovered,
         format: cost,
         better: "low",
       },
       {
-        label: "Custo gasto com ativos",
-        hint: "Parte do custo enviada a quem depositou nas últimas 48 h.",
+        label: "Custo em quem já estava jogando",
+        hint: "Parte do custo enviada a quem depositou nos últimos 2 dias.",
         raw: (row) => row.costOnActiveShare,
         format: pct,
         better: "low",
@@ -141,7 +139,7 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
   {
     title: "Base de jogadores (agora)",
     metrics: [
-      { label: "Ativos (48 h)", raw: (row) => row.base.ativo, format: count },
+      { label: "Ativos (até 2 dias)", raw: (row) => row.base.ativo, format: count },
       { label: "Esfriando (2–7 dias)", raw: (row) => row.base.esfriando, format: count },
       { label: "Dormindo (7–30 dias)", raw: (row) => row.base.dormindo, format: count },
       { label: "Perdidos (30+ dias)", raw: (row) => row.base.perdido, format: count },

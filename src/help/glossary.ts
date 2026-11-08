@@ -12,7 +12,11 @@ import type { GlossaryTerm } from "./types";
  */
 export const GLOSSARY: GlossaryTerm[] = [
   // --- Financeiro (src/components/finance/definitions.ts) ---
-  { id: "lucro-liquido", term: FINANCE_TERMS.cashResult.label, short: FINANCE_TERMS.cashResult.how },
+  {
+    id: "lucro-liquido",
+    term: FINANCE_TERMS.cashResult.label,
+    short: FINANCE_TERMS.cashResult.how,
+  },
   { id: "net", term: FINANCE_TERMS.net.label, short: FINANCE_TERMS.net.how },
   { id: "ggr", term: FINANCE_TERMS.ggr.label, short: FINANCE_TERMS.ggr.how },
   { id: "taxa-de-ggr", term: FINANCE_TERMS.ggrFee.label, short: FINANCE_TERMS.ggrFee.how },
@@ -23,7 +27,11 @@ export const GLOSSARY: GlossaryTerm[] = [
   },
   { id: "envios", term: FINANCE_TERMS.sends.label, short: FINANCE_TERMS.sends.how },
   { id: "mensalidade", term: FINANCE_TERMS.fee.label, short: FINANCE_TERMS.fee.how },
-  { id: "outros-custos", term: FINANCE_TERMS.otherCosts.label, short: FINANCE_TERMS.otherCosts.how },
+  {
+    id: "outros-custos",
+    term: FINANCE_TERMS.otherCosts.label,
+    short: FINANCE_TERMS.otherCosts.how,
+  },
   { id: "roi", term: FINANCE_TERMS.roi.label, short: FINANCE_TERMS.roi.how },
   { id: "margem", term: FINANCE_TERMS.margin.label, short: FINANCE_TERMS.margin.how },
 
@@ -34,23 +42,23 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "Jogador que clicou no link do SMS e depositou em até 7 dias, e o valor depositado. É a medida principal, a mesma do Início (conversão por clique). Conta jogadores, não depósitos: quem deposita 3 vezes conta 1.",
   },
-  { id: "taxa-de-clique", term: "Taxa de clique", short: "SMS clicados ÷ SMS enviados." },
+  { id: "taxa-de-clique", term: "Taxa de clique", short: "Cliques no link ÷ SMS enviados." },
   {
     id: "custo-por-jogador-convertido",
-    term: "Custo por jogador convertido",
-    short: "Custo em SMS ÷ jogadores convertidos pelo clique.",
+    term: "Custo por jogador que voltou",
+    short: "Custo em SMS ÷ jogadores que voltaram pelo link.",
   },
   {
     id: "retorno-do-envio",
-    term: "Retorno",
+    term: "Cada R$ 1 em SMS trouxe",
     short:
-      "Recuperado pelo CRM ÷ custo em SMS. Verde quando paga o envio (1x ou mais), vermelho quando não paga. Com menos de 5 jogadores convertidos aparece como “amostra pequena” e não entra em comparações.",
+      "Recuperado pelo CRM ÷ custo em SMS, em reais (ex.: R$ 7,90 para cada R$ 1). Verde quando paga o envio (R$ 1 ou mais), vermelho quando não paga. Com menos de 5 jogadores que voltaram pelo link aparece como “amostra pequena” e não entra em comparações.",
   },
   {
     id: "recuperados-visao-ampla",
-    term: "Recuperados (visão ampla)",
+    term: "Reativações após SMS",
     short:
-      "Jogador parado há 2+ dias (ou sem 1º depósito) que depositou até 3 dias depois de um SMS, com ou sem clique. Conta retornos, não pessoas, e o valor é só o depósito de retorno. Inclui boa parte do Recuperado pelo CRM: não some os dois.",
+      "Jogador parado há 2 dias ou mais (ou sem 1º depósito) que voltou a depositar. Conta voltas, não pessoas, e o valor é o 1º depósito na volta. Outra régua: conta voltas até 3 dias depois de um SMS, com ou sem clique, e só o 1º depósito da volta.",
   },
   {
     id: "ultimos-7-dias",
@@ -104,7 +112,7 @@ export const GLOSSARY: GlossaryTerm[] = [
   {
     id: "ftd",
     term: "FTD",
-    short: "Sigla de \"first time deposit\": o primeiro depósito que um jogador faz na casa.",
+    short: 'Sigla de "first time deposit": o primeiro depósito que um jogador faz na casa.',
   },
   {
     id: "grupo-de-controle",
@@ -121,7 +129,8 @@ export const GLOSSARY: GlossaryTerm[] = [
   {
     id: "gatilho",
     term: "Gatilho",
-    short: "O evento que faz um jogador entrar numa jornada, por exemplo \"ficou 3 dias sem depositar\".",
+    short:
+      'O evento que faz um jogador entrar numa jornada, por exemplo "ficou 3 dias sem depositar".',
   },
   {
     id: "segmento-sms",
@@ -169,7 +178,7 @@ export const GLOSSARY: GlossaryTerm[] = [
     id: "cta",
     term: "CTA",
     short:
-      "Sigla de \"call to action\" (chamada para ação): o botão principal do e-mail, como \"Acessar agora\", que leva o jogador para o link combinado.",
+      'Sigla de "call to action" (chamada para ação): o botão principal do e-mail, como "Acessar agora", que leva o jogador para o link combinado.',
   },
   {
     id: "preheader",
@@ -181,7 +190,7 @@ export const GLOSSARY: GlossaryTerm[] = [
     id: "hero",
     term: "Hero",
     short:
-      "A imagem grande de destaque logo abaixo da logo, no topo do corpo do e-mail — também chamada de \"banner principal\".",
+      'A imagem grande de destaque logo abaixo da logo, no topo do corpo do e-mail — também chamada de "banner principal".',
   },
   {
     id: "alt-text",

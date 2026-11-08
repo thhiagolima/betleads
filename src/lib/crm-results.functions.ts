@@ -102,13 +102,26 @@ export const getCrmResults = createServerFn({ method: "GET" })
     const { from, to, fromInstant, toInstant } = periodBounds(data.days, data.endOffset);
 
     // Same-length period right before this one, for the variation on each KPI.
-    const previous = periodBounds(data.days, data.endOffset + data.days);
-    const [rows, previousRows, players, previousPlayers] = await Promise.all([
-      loadResultRows(db, tenantId, from, to),
-      loadResultRows(db, tenantId, previous.from, previous.to),
-      loadPeriodPlayers(db, tenantId, from, to),
-      loadPeriodPlayers(db, tenantId, previous.from, previous.to),
-    ]);
+    // A single day compares with the same weekday of the week before: betting
+    // volume swings a lot between weekdays.
+    const previous = periodBounds(data.days, data.endOffset + (data.days === 1 ? 7 : data.days));
+    // Deposits land up to 7 days after the click: below 7 days the period's
+    // cost and its deposits come from different sends, so the return uses the
+    // 7 days ending on the same day.
+    const rollingBounds = data.days < 7 ? periodBounds(7, data.endOffset) : null;
+    const [rows, previousRows, players, previousPlayers, rollingRows, rollingPlayers] =
+      await Promise.all([
+        loadResultRows(db, tenantId, from, to),
+        loadResultRows(db, tenantId, previous.from, previous.to),
+        loadPeriodPlayers(db, tenantId, from, to),
+        loadPeriodPlayers(db, tenantId, previous.from, previous.to),
+        rollingBounds
+          ? loadResultRows(db, tenantId, rollingBounds.from, rollingBounds.to)
+          : Promise.resolve(null),
+        rollingBounds
+          ? loadPeriodPlayers(db, tenantId, rollingBounds.from, rollingBounds.to)
+          : Promise.resolve(null),
+      ]);
 
     const journeyIds = [
       ...new Set(
@@ -271,6 +284,14 @@ export const getCrmResults = createServerFn({ method: "GET" })
           ? withPeriodPlayers(aggregateCrmResults(previousRows).totals, previousPlayers)
           : null,
       },
+      rolling:
+        rollingBounds && rollingRows
+          ? {
+              from: rollingBounds.from,
+              to: rollingBounds.to,
+              totals: withPeriodPlayers(aggregateCrmResults(rollingRows).totals, rollingPlayers),
+            }
+          : null,
       stepNames: steps,
       ...result,
       totals: withPeriodPlayers(result.totals, players),

@@ -355,8 +355,8 @@ function ExpertHomePage() {
           <p className="text-xs leading-relaxed text-muted-foreground">
             Só entram os seus leads
             {tipo === "total" ? " (com acesso total, todos os jogadores da casa)" : ""}. Recuperado
-            pelo CRM considera depósitos feitos em até 7 dias depois de um clique humano em link de
-            campanha ou jornada, sem quem já estava ativo. Datas no fuso de Brasília.
+            pelo CRM considera depósitos feitos em até 7 dias depois de um clique no link de
+            campanha ou jornada, sem quem já estava jogando. Datas no fuso de Brasília.
           </p>
         </>
       )}

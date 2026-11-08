@@ -65,15 +65,15 @@ describe("buildRecommendations", () => {
   it("flags a source that spends without any conversion, first", () => {
     expect(items[0].severity).toBe("acao");
     expect(items[0].title).toContain("Promo");
-    expect(items[0].title).toContain("sem nenhuma conversão");
+    expect(items[0].title).toContain("sem ninguém voltar");
   });
 
   it("flags a source that brings players back but converts nobody through the link", () => {
-    expect(titles).toContain("Sem link não converteu ninguém pelo link");
+    expect(titles).toContain("Sem link não trouxe ninguém de volta pelo link");
   });
 
   it("flags a dead journey step", () => {
-    expect(titles).toContain("Etapa 5 de Esfriando não converteu ninguém");
+    expect(titles).toContain("Etapa 5 de Esfriando não trouxe ninguém de volta");
   });
 
   it("flags spend on already active players", () => {
@@ -81,8 +81,8 @@ describe("buildRecommendations", () => {
   });
 
   it("compares cost per converted player against the median", () => {
-    expect(titles).toContain("Esfriando é a forma mais barata de converter");
-    expect(titles).toContain("Caro converte, mas caro");
+    expect(titles).toContain("Esfriando traz jogadores de volta pelo menor custo");
+    expect(titles).toContain("Caro traz jogadores de volta, mas caro");
     expect(titles.some((title) => title.startsWith("Dormindo"))).toBe(false);
   });
 
@@ -96,7 +96,9 @@ describe("buildRecommendations", () => {
       journey("b", { cost: 100, direct_players: 4 }),
       journey("c", { cost: 1000, direct_players: 4 }),
     ]);
-    expect(buildRecommendations(small).some((item) => item.title.includes("converte"))).toBe(false);
+    expect(
+      buildRecommendations(small).some((item) => item.title.includes("traz jogadores de volta")),
+    ).toBe(false);
   });
 
   it("reads holdout results", () => {

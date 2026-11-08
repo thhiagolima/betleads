@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateCrmResults,
   compareHoldout,
+  isComparable,
   stepLabels,
   type CrmResultRow,
   withPeriodPlayers,
@@ -211,5 +212,14 @@ describe("compareHoldout (F3)", () => {
       lift: null,
       sufficient: false,
     });
+  });
+});
+
+describe("isComparable", () => {
+  it("needs 20 players and 1,000 SMS in both periods for a percent variation", () => {
+    const big = { directPlayers: 20, sent: 1000 };
+    expect(isComparable(big, big)).toBe(true);
+    expect(isComparable({ directPlayers: 8, sent: 4722 }, big)).toBe(false);
+    expect(isComparable(big, { directPlayers: 40, sent: 999 })).toBe(false);
   });
 });

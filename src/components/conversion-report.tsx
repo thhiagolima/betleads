@@ -49,7 +49,7 @@ import {
   TechnicalDetails,
   WindowCaption,
 } from "@/components/reports/report-parts";
-import { cost, dateTime, day, number, percent, ratio } from "@/components/reports/format";
+import { cost, dateTime, day, number, percent } from "@/components/reports/format";
 import { crossCurrencyNote, isCrossCurrency } from "@/components/crm-results/format";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { cn } from "@/lib/utils";
@@ -333,7 +333,7 @@ function CampaignReport({
   const [filter, setFilter] = useState<RecipientFilter>("all");
   const [page, setPage] = useState(1);
   const { currency, money } = useMoney();
-  // Recuperado na moeda da casa, custo em BRL: fora de BRL não há retorno.
+  // Recuperado na moeda da casa, custo em BRL: fora de BRL não há "R$ por R$ 1 em SMS".
   const crossCurrency = isCrossCurrency(currency);
   const pageSize = 50;
   const campaign = details?.campaign;
@@ -466,7 +466,7 @@ function CampaignReport({
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         <HomeCard className="p-4 sm:p-5">
           <ReportSectionHeader
-            title="Custo e retorno"
+            title="Custo e resultado"
             description="Total da campanha desde o disparo, pelo último clique em até 7 dias"
             className="mb-2"
           />
@@ -479,12 +479,12 @@ function CampaignReport({
             value={smsCost === null ? `${number(data.sent)} envios` : cost(smsCost)}
           />
           <MetricRow
-            label="Retorno"
+            label={isEmail ? "Cada R$ 1 em e-mail trouxe" : "Cada R$ 1 em SMS trouxe"}
             value={
               crossCurrency ? (
                 <span title={crossCurrencyNote(currency)}>—</span>
               ) : smsCost ? (
-                `${ratio(directRevenue / smsCost)}x`
+                cost(directRevenue / smsCost)
               ) : (
                 "—"
               )
@@ -502,8 +502,8 @@ function CampaignReport({
                 ? "Custo financeiro indisponível para este canal."
                 : `Custo: ${number(data.sent)} envios × ${cost(data.smsPrice ?? 0)}. ${
                     crossCurrency
-                      ? `Retorno não calculado: ${crossCurrencyNote(currency).toLowerCase()}.`
-                      : "Retorno = recuperado ÷ custo."
+                      ? `R$ por R$ 1 não calculado: ${crossCurrencyNote(currency).toLowerCase()}.`
+                      : "Cada R$ 1 trouxe = recuperado ÷ custo."
                   }`}{" "}
               Recuperado de {attributedPlayers}.
             </p>
@@ -771,7 +771,10 @@ function UnresolvedRecipientsCard({
           ))}
         </ul>
         {unresolved.sample.length > 0 ? (
-          <details className="mt-3 text-meta" {...tourAnchor("campanha-relatorio.nao-enviados.exemplos")}>
+          <details
+            className="mt-3 text-meta"
+            {...tourAnchor("campanha-relatorio.nao-enviados.exemplos")}
+          >
             <summary className="cursor-pointer text-label text-muted-foreground hover:text-foreground">
               Ver os primeiros {number(unresolved.sample.length)}
             </summary>
@@ -806,8 +809,9 @@ function ActiveNote({ players, revenue }: { players?: number; revenue?: number }
   if (!players) return null;
   return (
     <p className="text-meta text-muted-foreground">
-      Fora da conta: {number(players)} {players === 1 ? "jogador já ativo" : "jogadores já ativos"}{" "}
-      (depositaram nas 48 h antes do clique) somaram {money(revenue ?? 0)} depois de clicar.
+      Fora do total: {number(players)}{" "}
+      {players === 1 ? "jogador já estava jogando" : "jogadores já estavam jogando"} (depositaram
+      nos 2 dias antes do clique) e somaram {money(revenue ?? 0)} depois de clicar.
     </p>
   );
 }
