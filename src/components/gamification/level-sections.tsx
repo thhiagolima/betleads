@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronRight, Megaphone } from "lucide-react";
 
 import { HomeCard } from "@/components/home/home-cards";
+import { tourAnchor } from "@/help/anchor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,7 +59,7 @@ export function LevelStrip({ data }: { data: GamificationData }) {
       className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"
     >
       <div className="grid grid-cols-[repeat(6,minmax(140px,1fr))] gap-3">
-        {data.levels.map((level) => (
+        {data.levels.map((level, i) => (
           <HomeCard key={level.slug} className="flex flex-col p-3.5 sm:p-4">
             <h3
               className={cn(
@@ -78,6 +79,7 @@ export function LevelStrip({ data }: { data: GamificationData }) {
               to="/players"
               search={PLAYERS_SEARCH}
               className="mt-auto inline-flex min-h-9 items-center gap-0.5 pt-2 text-meta font-medium text-primary hover:underline"
+              {...(i === 0 ? tourAnchor("gamificacao.niveis.ver-jogadores") : {})}
             >
               Ver jogadores
               <ChevronRight className="size-3.5" aria-hidden="true" />
@@ -97,10 +99,13 @@ export function PlayerLine({
   player,
   position,
   showStatus = true,
+  anchorProps,
 }: {
   player: GamificationPlayer;
   position?: number;
   showStatus?: boolean;
+  /** Spread of `tourAnchor(...)`, applied only on the first row of a list. */
+  anchorProps?: Record<string, string>;
 }) {
   const { money } = useMoney();
   return (
@@ -109,6 +114,7 @@ export function PlayerLine({
       params={{ playerId: player.id }}
       search={PLAYERS_SEARCH}
       className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-foreground/[0.04] sm:px-5"
+      {...anchorProps}
     >
       {position != null && (
         <span className="w-8 shrink-0 text-meta tabular-nums text-muted-foreground">
@@ -163,7 +169,12 @@ export function VipStoppedCard({
           </p>
         </div>
         {data.totals.stoppedVipCount > 0 && (
-          <Button asChild variant="outline" className="h-10 shrink-0 sm:h-9">
+          <Button
+            asChild
+            variant="outline"
+            className="h-10 shrink-0 sm:h-9"
+            {...tourAnchor("gamificacao.vip.criar-campanha")}
+          >
             <Link to="/campanhas" search={NEW_CAMPAIGN_SEARCH}>
               <Megaphone className="size-4" aria-hidden="true" />
               Criar campanha
@@ -177,8 +188,13 @@ export function VipStoppedCard({
         </p>
       ) : (
         <div className="divide-y divide-border/70 border-t border-border/70">
-          {data.vipStopped.map((player) => (
-            <PlayerLine key={player.id} player={player} showStatus={false} />
+          {data.vipStopped.map((player, i) => (
+            <PlayerLine
+              key={player.id}
+              player={player}
+              showStatus={false}
+              anchorProps={i === 0 ? tourAnchor("gamificacao.vip.linha") : undefined}
+            />
           ))}
         </div>
       )}
@@ -188,6 +204,7 @@ export function VipStoppedCard({
             variant="ghost"
             className="-mx-2 h-10 px-2 text-body text-primary sm:h-9"
             onClick={onShowAll}
+            {...tourAnchor("gamificacao.vip.ver-todos")}
           >
             Ver todos que pararam no ranking
           </Button>
@@ -224,7 +241,12 @@ export function LevelRulesCard({
             O nível vem do total depositado; a situação, do tempo sem depositar.
           </p>
         </div>
-        <Button className="h-9 shrink-0" disabled={!dirty || saving} onClick={onSave}>
+        <Button
+          className="h-9 shrink-0"
+          disabled={!dirty || saving}
+          onClick={onSave}
+          {...tourAnchor("gamificacao.regras.salvar")}
+        >
           {saving ? "Salvando…" : dirty ? "Salvar" : "Tudo salvo"}
         </Button>
       </div>
@@ -233,7 +255,7 @@ export function LevelRulesCard({
         <legend className="mb-2 text-label font-medium text-muted-foreground">
           Total depositado para entrar no nível
         </legend>
-        {PAID_LEVELS.map((level) => (
+        {PAID_LEVELS.map((level, i) => (
           <div key={level} className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
             <Label htmlFor={`threshold-${level}`} className={LEVEL_TONE[level].text}>
               {LEVEL_LABEL[level]}
@@ -252,6 +274,7 @@ export function LevelRulesCard({
                   setDraft((current) => ({ ...current, [level]: event.target.value }))
                 }
                 className="h-10 pl-9 tabular-nums"
+                {...(i === 0 ? tourAnchor("gamificacao.regras.limite") : {})}
               />
             </div>
           </div>
@@ -267,12 +290,14 @@ export function LevelRulesCard({
           label="Esfriando após"
           value={draft.coolingAfterDays}
           onChange={(value) => setDraft((current) => ({ ...current, coolingAfterDays: value }))}
+          anchorProps={tourAnchor("gamificacao.regras.esfriando")}
         />
         <DaysField
           id="sleeping-days"
           label="Dormindo após"
           value={draft.sleepingAfterDays}
           onChange={(value) => setDraft((current) => ({ ...current, sleepingAfterDays: value }))}
+          anchorProps={tourAnchor("gamificacao.regras.dormindo")}
         />
         <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
           <Label htmlFor="vip-min-level">VIP a partir de</Label>
@@ -282,7 +307,11 @@ export function LevelRulesCard({
               setDraft((current) => ({ ...current, vipMinLevel: value as PaidLevelSlug }))
             }
           >
-            <SelectTrigger id="vip-min-level" className="h-10">
+            <SelectTrigger
+              id="vip-min-level"
+              className="h-10"
+              {...tourAnchor("gamificacao.regras.vip-min")}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -322,11 +351,13 @@ function DaysField({
   label,
   value,
   onChange,
+  anchorProps,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
+  anchorProps?: Record<string, string>;
 }) {
   return (
     <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
@@ -340,6 +371,7 @@ function DaysField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           className="h-10 pr-32 tabular-nums"
+          {...anchorProps}
         />
         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-meta text-muted-foreground">
           dias sem depositar

@@ -38,6 +38,7 @@ export const EXCLUDED_ROUTES: string[] = [
   "/links", // -> /webhooks#links
   "/links/configuracoes", // -> /webhooks#links
   "/experts/$expertId", // -> /rendimento/equipe/$expertId
+  "/regras", // -> /gamificacao (useEffect navigate, replace: true; nada mais é renderizado)
   // Non-UI: MCP OAuth metadata endpoints, not screens.
   "/.well-known/oauth-authorization-server",
   "/.well-known/oauth-protected-resource",
@@ -59,10 +60,6 @@ export const PENDING_ROUTES: string[] = [
   "/webhooks#plataforma",
   "/webhooks#meta",
   "/webhooks#webpush",
-
-  // --- Fase 2 ---
-  "/gamificacao",
-  "/regras",
 
   // --- Fase 3 ---
   "/resultados",
