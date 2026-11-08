@@ -220,13 +220,16 @@ const screen: HelpScreen = {
       tab: "retencao",
       items: [
         {
+          anchor: "midia.retencao.base-agora",
           label: '"Onde a base está agora"',
           what: 'Barras com a base inteira da casa (não muda com o período) pelo tempo desde o último depósito de cada jogador: "Sem 1º depósito", "Ativo (< 2 dias)", "Esfriando (2–7 dias)", "Dormindo (7–30 dias)", "Perdido (30+ dias)" e "Sem histórico" — cada uma com a contagem e o % da base.',
         },
         {
+          anchor: "midia.retencao.evolucao-base",
           label: '"Evolução da base"',
           what: "Gráfico de linhas com quantos jogadores estavam em cada situação (Ativo, Esfriando, Dormindo, Perdido) ao fim de cada dia do período escolhido.",
-          notes: "Esfriando e Dormindo são os jogadores que o CRM precisa trazer de volta.",
+          notes:
+            'Esfriando e Dormindo são os jogadores que o CRM precisa trazer de volta. Com o período escolhido tendo só 1 dia de dados, o cartão não aparece e mostra em vez disso "A evolução da base aparece em períodos de 7 dias ou mais."',
         },
       ],
     },
@@ -236,10 +239,13 @@ const screen: HelpScreen = {
       tab: "retencao",
       items: [
         {
+          anchor: "midia.retencao.funil",
           label: '"Funil dos cadastros"',
           what: "Barras com os cadastros do período e até onde chegaram: Cadastros, 1º depósito, 2º depósito e 3 ou mais depósitos. Mostra também a mediana de tempo do cadastro ao 1º depósito.",
+          notes: 'Sem nenhum cadastro no período, mostra "Nenhum cadastro hoje/ontem/nos últimos N dias." em vez das barras.',
         },
         {
+          anchor: "midia.retencao.origem",
           label: '"Por origem do cadastro"',
           what: "Tabela com a origem informada no cadastro (a marcação utm_source): cadastros, quantos viraram depositantes (% e contagem), quantos fizeram o 2º depósito (% e contagem) e o tempo mediano até o 1º depósito.",
           notes:
@@ -253,10 +259,11 @@ const screen: HelpScreen = {
       tab: "retencao",
       items: [
         {
+          anchor: "midia.retencao.cohort",
           label: '"Retenção dos novos depositantes"',
           what: "Uma linha por semana do 1º depósito, nas últimas 12 semanas: quantos jogadores fizeram o 1º depósito naquela semana, a % que fez o 2º depósito em 7, 14 e 30 dias (cor mais forte = % maior), o tempo mediano até o 2º depósito e quanto esse grupo já depositou em 30 dias.",
           notes:
-            "A % de 2º depósito só aparece depois que a janela se fecha para todo o grupo — a taxa em 30 dias de uma semana muito recente, por exemplo, ainda não é mostrada.",
+            'A % de 2º depósito só aparece depois que a janela se fecha para todo o grupo — a taxa em 30 dias de uma semana muito recente, por exemplo, ainda não é mostrada. Sem nenhum 1º depósito nas últimas 12 semanas, mostra "Sem primeiros depósitos no período." Rodapé fixo da tabela: "O histórico de depósitos começa em 02/09/2026; jogadores que já depositavam antes disso não entram como novos."',
         },
       ],
     },
@@ -281,7 +288,7 @@ const screen: HelpScreen = {
       title: "A conta conectada ainda não está entregando gasto",
       what: "Mostrado na aba Mídia quando alguma conta marcada nunca teve uma sincronização concluída com sucesso.",
       action:
-        'Enquanto isso o gasto dessa conta não entra e o ROAS aparece melhor do que é; aguarde a próxima sincronização automática ou clique em "Atualizar agora".',
+        '"O token pode estar válido, mas sem leitura recente para uma conta de anúncio. Enquanto isso o gasto dessa conta não entra, e o ROI aparece melhor do que é." Aguarde a próxima sincronização automática ou clique em "Atualizar agora".',
     },
     {
       id: "cadastros-sem-anuncio",
@@ -379,6 +386,36 @@ const screen: HelpScreen = {
         title: "Período da Retenção",
         body: "Escolha o intervalo usado pelo funil de cadastros e pela evolução da base. A base agora e os cohorts (retenção dos novos depositantes) não mudam com este período.",
         articleSection: "retencao-periodo",
+      },
+      {
+        anchor: "midia.retencao.base-agora",
+        title: "Onde a base está agora",
+        body: "A base inteira da casa, pelo tempo desde o último depósito de cada jogador — não muda com o período escolhido acima.",
+        articleSection: "retencao-base",
+      },
+      {
+        anchor: "midia.retencao.evolucao-base",
+        title: "Evolução da base",
+        body: "Quantos jogadores estavam em cada situação (ativo, esfriando, dormindo, perdido) ao fim de cada dia do período.",
+        articleSection: "retencao-base",
+      },
+      {
+        anchor: "midia.retencao.funil",
+        title: "Funil dos cadastros",
+        body: "Quem se cadastrou no período e até onde chegou: 1º depósito, 2º depósito, 3 ou mais depósitos.",
+        articleSection: "retencao-funil",
+      },
+      {
+        anchor: "midia.retencao.origem",
+        title: "Por origem do cadastro",
+        body: "A origem informada no cadastro (utm_source) e quantos desses cadastros viraram depositantes.",
+        articleSection: "retencao-funil",
+      },
+      {
+        anchor: "midia.retencao.cohort",
+        title: "Retenção dos novos depositantes",
+        body: "Por semana do 1º depósito, quantos jogadores fizeram o 2º depósito em 7, 14 e 30 dias — a cor mais forte marca a maior retenção.",
+        articleSection: "retencao-cohort",
       },
     ],
   },

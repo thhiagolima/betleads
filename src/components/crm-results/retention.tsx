@@ -207,7 +207,7 @@ function Lifecycle({ retention }: { retention: Retention }) {
   );
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-      <Card>
+      <Card {...tourAnchor("midia.retencao.base-agora")}>
         <CardHeader>
           <CardTitle>
             Onde a base está agora
@@ -226,7 +226,7 @@ function Lifecycle({ retention }: { retention: Retention }) {
         </CardContent>
       </Card>
       {retention.lifecycleDaily.length > 1 ? (
-        <Card>
+        <Card {...tourAnchor("midia.retencao.evolucao-base")}>
           <CardHeader>
             <CardTitle>Evolução da base</CardTitle>
             <CardDescription>
@@ -292,7 +292,7 @@ function Cohorts({ retention }: { retention: Retention }) {
     ...cohorts.flatMap((row) => [row.second7d ?? 0, row.second14d ?? 0, row.second30d ?? 0]),
   );
   return (
-    <Card>
+    <Card {...tourAnchor("midia.retencao.cohort")}>
       <CardHeader>
         <CardTitle>
           Retenção dos novos depositantes
@@ -378,7 +378,7 @@ function Acquisition({
     : null;
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-      <Card>
+      <Card {...tourAnchor("midia.retencao.funil")}>
         <CardHeader>
           <CardTitle>Funil dos cadastros</CardTitle>
           <CardDescription>
@@ -398,7 +398,7 @@ function Acquisition({
           />
         </CardContent>
       </Card>
-      <Card>
+      <Card {...tourAnchor("midia.retencao.origem")}>
         <CardHeader>
           <CardTitle>Por origem do cadastro</CardTitle>
           <CardDescription>
