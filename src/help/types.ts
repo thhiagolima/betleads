@@ -76,6 +76,13 @@ export type HelpScreen = {
    * its id — doesn't auto-start the same tour again). Omitted: `route`.
    * Resolved by `screenTourKey` (tour-logic.ts). */
   tourRoute?: string;
+  /** The query param that holds the tab, for a screen whose tabs live in
+   * the query string (`/resultados?aba=origens`, `/financeiro?tab=…`)
+   * instead of the hash. Omitted: the tab is the hash. Must equal the
+   * route's entry in `HELP_TAB_SEARCH_PARAMS` (registry.ts), which is what
+   * `resolveHelpScreen`/`helpTabLocation` read; tour keys and progress keys
+   * keep the same format (`tour:<rota>#<aba>`) either way. */
+  tabSearchParam?: string;
   /** Glossary term ids (glossary.ts) used by this screen, beyond any
    * `<Term id>` already found in its own component source. */
   terms?: string[];

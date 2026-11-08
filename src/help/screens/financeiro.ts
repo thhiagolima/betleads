@@ -15,6 +15,9 @@ import type { HelpScreen } from "../types";
 const screen: HelpScreen = {
   id: "financeiro",
   route: "/financeiro",
+  // As abas ficam em `?tab=` (FINANCE_TABS em src/lib/finance/search.ts),
+  // não no hash.
+  tabSearchParam: "tab",
   defaultTab: "painel",
   title: "Financeiro",
   purpose:

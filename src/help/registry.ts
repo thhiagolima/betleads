@@ -50,6 +50,19 @@ export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpSc
   shell: () => import("./screens/shell"),
 };
 
+/**
+ * The screens that keep their tabs in a query param instead of the hash,
+ * route → param name: the same value as each article's
+ * `HelpScreen.tabSearchParam` (-coverage.test.ts checks both agree). Kept
+ * here, outside the lazily loaded articles, because `resolveHelpScreen`
+ * needs it synchronously, before the article has loaded.
+ */
+export const HELP_TAB_SEARCH_PARAMS: Record<string, string> = {
+  "/resultados": "aba",
+  "/financeiro": "tab",
+  "/rendimento/equipe/$expertId": "aba",
+};
+
 let allScreens: Promise<HelpScreen[]> | null = null;
 
 /** Loads every registered article once (cached), for the panel's search

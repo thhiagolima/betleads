@@ -1,9 +1,12 @@
 // Help article for the "Relatório de rendimento" de uma pessoa, visto pelo
 // admin (/rendimento/equipe/$expertId), aberto pelo nome na tela "Rendimento
-// da equipe". Duas abas por um parâmetro de busca, não por hash (?aba=
-// campanhas) — por isso este artigo não usa `HelpSection.tab`/`defaultTab`:
-// as duas vistas (Rendimento e Campanhas) nunca aparecem juntas, então o tour
-// (único, "default") cobre a vista Rendimento, que é a que abre por padrão.
+// da equipe". Duas abas por um parâmetro de busca, não por hash
+// (`tabSearchParam: "aba"`): sem parâmetro, a vista Rendimento (tour
+// "default", seções sem `tab`); com `?aba=campanhas`, a vista Campanhas (tour
+// e seções `tab: "campanhas"`). Valores de `aba` que a rota aceita
+// (validateSearch em src/routes/rendimento.equipe.$expertId.tsx): só
+// "campanhas" — qualquer outro valor cai na vista Rendimento. Por isso não há
+// `defaultTab`: a vista padrão é o tour "default".
 // O `ReportView` é o mesmo de /rendimento e de /expert/rendimento (fase 4):
 // os blocos dele usam aqui o mesmo prefixo neutro "rendimento." do artigo
 // "rendimento" — ver aquele artigo para o detalhe de cada bloco (cartões,
@@ -21,6 +24,7 @@ import type { HelpScreen } from "../types";
 const screen: HelpScreen = {
   id: "rendimento-pessoa",
   route: "/rendimento/equipe/$expertId",
+  tabSearchParam: "aba",
   title: "Relatório de rendimento",
   purpose:
     "O relatório de rendimento de uma pessoa específica da equipe, visto pelo admin: os mesmos blocos de \"Meu rendimento\", mais editar os dados da pessoa, ativar/desativar e, na aba Campanhas, revisar e aprovar os envios dela.",
@@ -121,6 +125,7 @@ const screen: HelpScreen = {
     {
       id: "campanhas",
       title: "Aba Campanhas",
+      tab: "campanhas",
       intro:
         'Acessada pela aba "Campanhas" (a aba "Rendimento" é a vista padrão, descrita acima). Mostra o modo de envio, o uso do teto mensal e a fila de campanhas desta pessoa, com aprovação, pausa e retomada. Não tem seletor de período: olha sempre os últimos 90 dias.',
       items: [
@@ -171,6 +176,7 @@ const screen: HelpScreen = {
     {
       id: "revisao",
       title: "Diálogo de revisão da campanha",
+      tab: "campanhas",
       intro: 'Aberto por "Revisar" (ou "Ver") na fila de campanhas.',
       items: [
         {
@@ -273,6 +279,38 @@ const screen: HelpScreen = {
         anchor: "rendimento.extrato",
         title: "Extrato de créditos",
         body: "A base da comissão desta pessoa, linha a linha.",
+        articleSection: "cabecalho",
+      },
+    ],
+    campanhas: [
+      {
+        anchor: "pessoa.tabs.campanhas",
+        title: "Aba Campanhas",
+        body: "A fila de campanhas desta pessoa. O número ao lado mostra quantas estão aguardando aprovação.",
+        articleSection: "campanhas",
+      },
+      {
+        anchor: "pessoa.campanhas.envio",
+        title: "Envio de campanhas",
+        body: "\"Com aprovação\": cada campanha espera você aprovar ou recusar. \"Livre\": dispara direto. Mude em Editar, na aba Rendimento ou na tela Experts.",
+        articleSection: "campanhas",
+      },
+      {
+        anchor: "pessoa.campanhas.teto",
+        title: "Uso do teto",
+        body: "Quanto a pessoa já gastou no mês em SMS, e-mail e voz, comparado ao teto mensal dela.",
+        articleSection: "campanhas",
+      },
+      {
+        anchor: "pessoa.campanhas.fila",
+        title: "Campanhas do expert",
+        body: "As campanhas dos últimos 90 dias, com as aguardando aprovação primeiro. Use Revisar, Pausar ou Retomar em cada linha.",
+        articleSection: "campanhas",
+      },
+      {
+        anchor: "pessoa.tabs.rendimento",
+        title: "Voltar ao relatório",
+        body: "A aba Rendimento mostra o relatório desta pessoa: cartões, funil, gráfico e extrato.",
         articleSection: "cabecalho",
       },
     ],

@@ -24,7 +24,9 @@ import {
 } from "./coverage-config";
 import { GLOSSARY } from "./glossary";
 import { GUIDES } from "./guides";
-import { HELP_SCREEN_LOADERS } from "./registry";
+import { HELP_SCREEN_LOADERS, HELP_TAB_SEARCH_PARAMS } from "./registry";
+import { TABS as CENTRAL_TABS } from "@/components/crm-results/search";
+import { FINANCE_TABS } from "@/lib/finance/search";
 import type { HelpScreen } from "./types";
 
 const SRC_ROOT = path.resolve(__dirname, "..");
@@ -238,6 +240,54 @@ describe("help coverage", () => {
         `defaultTab "${screen.defaultTab}" de "${screen.id}" não é aba de nenhuma seção (nem pendente em PENDING_ROUTES)`,
       ).toBe(true);
     }
+  }, LOAD_ALL_TIMEOUT_MS);
+
+  it("tabSearchParam bate com HELP_TAB_SEARCH_PARAMS e cada tour/aba é um valor que a rota aceita", async () => {
+    // The tab values each query-param route accepts, from the route's own
+    // list where one exists. /rendimento/equipe/$expertId has no exported
+    // list: its validateSearch only accepts "campanhas" (documented in the
+    // article's header) — anything else shows the Rendimento view, which is
+    // the "default" tour.
+    const acceptedTabs: Record<string, readonly string[]> = {
+      "/resultados": CENTRAL_TABS.map((tab) => tab.key),
+      "/financeiro": FINANCE_TABS,
+      "/rendimento/equipe/$expertId": ["campanhas"],
+    };
+    const declared = new Set<string>();
+    for (const screen of await loadAllScreens()) {
+      expect(
+        screen.tabSearchParam,
+        `"${screen.id}": tabSearchParam diferente de HELP_TAB_SEARCH_PARAMS["${screen.route}"]`,
+      ).toBe(HELP_TAB_SEARCH_PARAMS[screen.route]);
+      if (!screen.tabSearchParam) continue;
+      declared.add(screen.route);
+      const accepted = acceptedTabs[screen.route];
+      expect(
+        accepted,
+        `"${screen.id}" declara tabSearchParam sem lista de abas aceitas neste teste`,
+      ).toBeTruthy();
+      for (const tab of Object.keys(screen.tours)) {
+        if (tab === "default") continue;
+        expect(
+          accepted.includes(tab),
+          `tour "${screen.id}#${tab}": "${tab}" não é um valor de ?${screen.tabSearchParam}= que ${screen.route} aceita`,
+        ).toBe(true);
+      }
+      for (const section of screen.sections) {
+        if (!section.tab) continue;
+        expect(
+          accepted.includes(section.tab),
+          `seção "${screen.id}" › "${section.id}": tab "${section.tab}" não é aceita pela rota`,
+        ).toBe(true);
+      }
+      if (screen.defaultTab) {
+        expect(
+          accepted.includes(screen.defaultTab) && !!screen.tours[screen.defaultTab],
+          `defaultTab "${screen.defaultTab}" de "${screen.id}" precisa ser um valor aceito e ter tour`,
+        ).toBe(true);
+      }
+    }
+    expect([...declared].sort()).toEqual(Object.keys(HELP_TAB_SEARCH_PARAMS).sort());
   }, LOAD_ALL_TIMEOUT_MS);
 
   it("<Term> nunca vai dentro do label={…} de um *Chip (botão dentro de botão)", () => {

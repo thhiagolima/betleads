@@ -10,6 +10,9 @@ import type { HelpScreen } from "../types";
 const screen: HelpScreen = {
   id: "resultados",
   route: "/resultados",
+  // As abas ficam em `?aba=` (validateCentralSearch, TABS em
+  // src/components/crm-results/search.ts), não no hash.
+  tabSearchParam: "aba",
   defaultTab: "visao",
   title: "Resultados do CRM",
   purpose:
