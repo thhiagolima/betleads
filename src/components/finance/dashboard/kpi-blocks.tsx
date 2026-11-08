@@ -13,6 +13,7 @@
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
 import { formatCount, formatInt, formatMoneyIn, formatPct } from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
+import { tourAnchor } from "@/help/anchor";
 import type { TenantCurrency } from "@/lib/currency";
 import type { FinanceKpis, PeriodSummary, SendLine } from "@/lib/finance/types";
 
@@ -321,6 +322,7 @@ export function KpiBlocks({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <KpiBlock
         id="movement"
+        anchorAttrs={tourAnchor("financeiro.painel.kpi-movimentacao")}
         title="Movimentação"
         description="Dinheiro que entrou e saiu da casa."
       >
@@ -328,12 +330,22 @@ export function KpiBlocks({
         <KpiSubheading>Comportamento</KpiSubheading>
         {rows(behavior)}
       </KpiBlock>
-      <KpiBlock id="acquisition" title="Aquisição" description="Quanto custou trazer jogadores.">
+      <KpiBlock
+        id="acquisition"
+        anchorAttrs={tourAnchor("financeiro.painel.kpi-aquisicao")}
+        title="Aquisição"
+        description="Quanto custou trazer jogadores."
+      >
         {rows(acquisition)}
         <KpiSubheading>Custo por jogador</KpiSubheading>
         {rows(costPerPlayer)}
       </KpiBlock>
-      <KpiBlock id="ggr" title="GGR" description="Perdas na casa e a taxa cobrada sobre elas.">
+      <KpiBlock
+        id="ggr"
+        anchorAttrs={tourAnchor("financeiro.painel.kpi-ggr")}
+        title="GGR"
+        description="Perdas na casa e a taxa cobrada sobre elas."
+      >
         {rows(ggr)}
         {s.ggrEstimated && (
           <KpiFooter>
@@ -343,6 +355,7 @@ export function KpiBlocks({
       </KpiBlock>
       <KpiBlock
         id="sends"
+        anchorAttrs={tourAnchor("financeiro.painel.kpi-envios")}
         title="Envios e CRM"
         description="Custo dos envios e o que eles trouxeram de volta."
       >

@@ -4,6 +4,7 @@
 // (allocateMonthlyGgr); while it exists the daily GGR column is read-only.
 // Clearing the value removes the total and the month goes back to daily GGR.
 import { formatMoneyIn } from "@/components/finance/format";
+import { tourAnchor } from "@/help/anchor";
 import type { TenantCurrency } from "@/lib/currency";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,7 +122,10 @@ export function MonthlyGgrFields({
       : parseGgrInput(value.ggr) === current.ggr && value.validThrough === current.validThrough;
 
   return (
-    <div className="space-y-2 rounded-lg border border-border/40 bg-primary/5 p-3 text-sm">
+    <div
+      className="space-y-2 rounded-lg border border-border/40 bg-primary/5 p-3 text-sm"
+      {...tourAnchor("financeiro.lancamentos.ggr-mes")}
+    >
       {canEdit ? (
         <div className="flex flex-wrap items-end gap-3">
           <label className="space-y-1">

@@ -14,6 +14,8 @@ import { getTenantFinanceMonth, setFinanceRates, setFinanceViewer } from "@/lib/
 import { presetRange } from "@/lib/finance/calc";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -90,21 +92,26 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
     <div className="space-y-8">
       <section className="space-y-3">
         <h3 className="text-sm font-semibold">Taxas</h3>
-        <div className="grid gap-2 text-sm sm:grid-cols-2">
+        <div
+          className="grid gap-2 text-sm sm:grid-cols-2"
+          {...tourAnchor("financeiro.configuracoes.taxas-atuais")}
+        >
           <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Taxa de GGR</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              <Term id="taxa-de-ggr">Taxa de GGR</Term>
+            </p>
             <p className="font-medium">{formatPct(rates.current.ggrFeePct / 100)}</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              Taxa de movimentação
+              <Term id="taxa-de-movimentacao">Taxa de movimentação</Term>
             </p>
             <p className="font-medium">{formatPct(rates.current.movementFeePct / 100)}</p>
           </div>
         </div>
 
         {rates.history.length > 0 && (
-          <Table>
+          <Table {...tourAnchor("financeiro.configuracoes.historico")}>
             <TableHeader>
               <TableRow>
                 <TableHead>Vale a partir de</TableHead>
@@ -137,6 +144,7 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
                 onChange={(e) => setGgrFeePct(e.target.value)}
                 disabled={isDemo}
                 className="w-28"
+                {...tourAnchor("financeiro.configuracoes.taxa-ggr")}
               />
             </div>
             <div>
@@ -150,6 +158,7 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
                 onChange={(e) => setMovementFeePct(e.target.value)}
                 disabled={isDemo}
                 className="w-28"
+                {...tourAnchor("financeiro.configuracoes.taxa-movimentacao")}
               />
             </div>
             <div>
@@ -161,6 +170,7 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
                 onChange={(e) => setValidFrom(e.target.value)}
                 disabled={isDemo}
                 className="w-40"
+                {...tourAnchor("financeiro.configuracoes.vale-a-partir-de")}
               />
             </div>
             <DemoDisabledTooltip active={isDemo}>
@@ -168,6 +178,7 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
                 type="button"
                 disabled={isDemo || !ggrFeePct || !movementFeePct || saveRates.isPending}
                 onClick={() => saveRates.mutate()}
+                {...tourAnchor("financeiro.configuracoes.salvar-taxas")}
               >
                 Salvar taxas
               </Button>
@@ -177,13 +188,13 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
       </section>
 
       {permissions.canManageViewers && (
-        <section className="space-y-3">
+        <section className="space-y-3" {...tourAnchor("financeiro.configuracoes.gestores")}>
           <h3 className="text-sm font-semibold">Liberação para gestores</h3>
           <p className="text-sm text-muted-foreground">
             Cada gestor liberado passa a ver este financeiro (somente leitura).
           </p>
           <div className="space-y-2">
-            {viewers.map((viewer) => (
+            {viewers.map((viewer, index) => (
               <div
                 key={viewer.user_id}
                 className="flex items-center justify-between gap-3 rounded-lg border border-border/40 bg-background/30 p-3"
@@ -196,6 +207,9 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
                     onCheckedChange={(checked) =>
                       setViewer.mutate({ userId: viewer.user_id, canView: checked })
                     }
+                    {...(index === 0
+                      ? tourAnchor("financeiro.configuracoes.liberar-gestor")
+                      : {})}
                   />
                 </DemoDisabledTooltip>
               </div>

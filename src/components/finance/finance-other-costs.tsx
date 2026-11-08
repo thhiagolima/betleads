@@ -25,6 +25,7 @@ import {
 } from "@/lib/finance/categories";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { tourAnchor } from "@/help/anchor";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -193,6 +194,7 @@ export function CostDateRepeatFields({
           value={costDate}
           onChange={(e) => onCostDateChange(e.target.value)}
           disabled={disabled || !bounds}
+          {...tourAnchor("financeiro.outros-custos.data")}
         />
       </div>
       <label className="flex h-9 items-center gap-2 text-sm">
@@ -290,6 +292,7 @@ export function CategoryCombobox({
           aria-label="Categoria"
           disabled={disabled}
           className="w-full justify-between font-normal"
+          {...tourAnchor("financeiro.outros-custos.categoria")}
         >
           <span className="truncate">{value}</span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
@@ -460,8 +463,12 @@ export function FinanceOtherCosts({
         value={month}
         onChange={(e) => setMonth(e.target.value)}
         className="w-44"
+        {...tourAnchor("financeiro.outros-custos.mes")}
       />
-      <div className="overflow-x-auto rounded-lg border border-border/40">
+      <div
+        className="overflow-x-auto rounded-lg border border-border/40"
+        {...tourAnchor("financeiro.outros-custos.tabela")}
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -473,7 +480,7 @@ export function FinanceOtherCosts({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {otherCosts.map((cost) => (
+            {otherCosts.map((cost, index) => (
               <TableRow key={cost.id}>
                 <TableCell className="whitespace-nowrap">
                   <CostDateLabel costDate={cost.costDate} repeatMonthly={cost.repeatMonthly} />
@@ -508,6 +515,7 @@ export function FinanceOtherCosts({
                           className="h-7 w-7"
                           disabled={isDemo}
                           onClick={() => startEdit(cost)}
+                          {...(index === 0 ? tourAnchor("financeiro.outros-custos.editar") : {})}
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
@@ -520,6 +528,7 @@ export function FinanceOtherCosts({
                           className="h-7 w-7 text-destructive hover:text-destructive"
                           disabled={isDemo || remove.isPending}
                           onClick={() => requestDelete(cost)}
+                          {...(index === 0 ? tourAnchor("financeiro.outros-custos.excluir") : {})}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -596,6 +605,7 @@ export function FinanceOtherCosts({
                 value={descricao}
                 onChange={(e) => setDescricao(e.target.value)}
                 disabled={isDemo}
+                {...tourAnchor("financeiro.outros-custos.descricao")}
               />
             </div>
             <div className="w-full sm:w-52">
@@ -615,6 +625,7 @@ export function FinanceOtherCosts({
                 value={valor}
                 onChange={(e) => setValor(e.target.value)}
                 disabled={isDemo}
+                {...tourAnchor("financeiro.outros-custos.valor")}
               />
             </div>
             <DemoDisabledTooltip active={isDemo}>
@@ -623,6 +634,7 @@ export function FinanceOtherCosts({
                 disabled={isDemo || !descricao.trim() || !valor || !dateAllowed || save.isPending}
                 onClick={() => save.mutate()}
                 className="gap-2"
+                {...tourAnchor("financeiro.outros-custos.adicionar")}
               >
                 <Plus className="h-4 w-4" />
                 {editingId ? "Salvar custo" : "Adicionar"}

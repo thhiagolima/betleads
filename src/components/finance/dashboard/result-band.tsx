@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
 import { formatMoneyIn, formatPct, formatRatio } from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
+import { tourAnchor } from "@/help/anchor";
 import type { TenantCurrency } from "@/lib/currency";
 import { mixedCurrencyNote } from "@/lib/finance/money";
 import type { DateRange, FinanceKpis, PeriodSummary } from "@/lib/finance/types";
@@ -29,6 +30,7 @@ const signClass = (value: number | null) =>
 
 function ResultCard({
   id,
+  anchorAttrs,
   label,
   term,
   value,
@@ -38,6 +40,9 @@ function ResultCard({
   tint,
 }: {
   id: string;
+  /** tourAnchor built at the call site (financeiro.painel.resultado-*) so the
+   * literal string stays visible to the coverage scanner (anchor.ts). */
+  anchorAttrs: { "data-tour": string };
   label: string;
   term?: TermKey;
   value: string;
@@ -49,6 +54,7 @@ function ResultCard({
   return (
     <div
       data-result={id}
+      {...anchorAttrs}
       className={cn(
         "min-w-0 rounded-[14px] border border-border bg-card/80 px-5 py-[18px]",
         main && "sm:col-span-2 xl:col-span-1",
@@ -132,6 +138,7 @@ export function ResultBand({
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-[1.6fr_1fr_1fr_1fr]">
       <ResultCard
         id="cashResult"
+        anchorAttrs={tourAnchor("financeiro.painel.resultado-lucro")}
         main
         label={profitLabel}
         term="cashResult"
@@ -148,6 +155,7 @@ export function ResultBand({
       />
       <ResultCard
         id="margin"
+        anchorAttrs={tourAnchor("financeiro.painel.resultado-margem")}
         label={FINANCE_TERMS.margin.label}
         term="margin"
         value={kpis.current.margin === null ? "—" : formatPct(kpis.current.margin)}
@@ -158,6 +166,7 @@ export function ResultBand({
       />
       <ResultCard
         id="roi"
+        anchorAttrs={tourAnchor("financeiro.painel.resultado-roi")}
         label={FINANCE_TERMS.roi.label}
         term="roi"
         value={current.roi === null ? "—" : formatRatio(current.roi)}
@@ -172,6 +181,7 @@ export function ResultBand({
       />
       <ResultCard
         id="adSpend"
+        anchorAttrs={tourAnchor("financeiro.painel.resultado-anuncios")}
         label="Anúncios"
         value={formatMoneyIn(current.adSpend, currency)}
         meta={adsMeta}

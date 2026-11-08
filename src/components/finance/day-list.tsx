@@ -10,6 +10,8 @@ import { FINANCE_TERMS } from "@/components/finance/definitions";
 import { dayLabel, dayResult, dayStatus, type DayStatus } from "@/components/finance/day-entry";
 import { SendCostAmount } from "@/components/finance/dashboard/sends-block";
 import { formatMoneyIn } from "@/components/finance/format";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 import type { TenantCurrency } from "@/lib/currency";
 import type { FinanceDay, SendUsage } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
@@ -72,7 +74,10 @@ export function DayList({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border/40">
+    <div
+      className="overflow-hidden rounded-lg border border-border/40"
+      {...tourAnchor("financeiro.lancamentos.dias")}
+    >
       <div
         className={cn(
           "hidden gap-3 border-b border-border/40 px-3 py-2 text-xs text-muted-foreground sm:grid",
@@ -80,12 +85,18 @@ export function DayList({
         )}
       >
         <span>Dia</span>
-        <span className="truncate text-right">{FINANCE_TERMS.net.label}</span>
-        <span className="truncate text-right">{FINANCE_TERMS.sends.label}</span>
-        <span className="truncate text-right">{FINANCE_TERMS.cashResult.label}</span>
+        <span className="truncate text-right">
+          <Term id="net">{FINANCE_TERMS.net.label}</Term>
+        </span>
+        <span className="truncate text-right">
+          <Term id="envios">{FINANCE_TERMS.sends.label}</Term>
+        </span>
+        <span className="truncate text-right">
+          <Term id="lucro-liquido">{FINANCE_TERMS.cashResult.label}</Term>
+        </span>
       </div>
       <ul className="divide-y divide-border/40">
-        {days.map((day) => {
+        {days.map((day, index) => {
           const costs = otherCosts.filter((cost) => cost.costDate === day.date);
           const { summary, sendCost, sendCostIncomplete } = dayResult(
             day,
@@ -104,6 +115,7 @@ export function DayList({
                   ROW_GRID,
                   day.date === focusDate && "bg-primary/10 ring-2 ring-inset ring-primary",
                 )}
+                {...(index === 0 ? tourAnchor("financeiro.lancamentos.dia-linha") : {})}
               >
                 <span className="col-span-3 flex min-w-0 items-center gap-2 sm:col-span-1">
                   <span className="font-medium tabular-nums">{dayLabel(day.date)}</span>

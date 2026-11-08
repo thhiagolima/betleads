@@ -9,11 +9,15 @@ import { cn } from "@/lib/utils";
 
 export function KpiBlock({
   id,
+  anchorAttrs,
   title,
   description,
   children,
 }: {
   id: string;
+  /** tourAnchor built at the call site (financeiro.painel.kpi-*) so the
+   * literal string stays visible to the coverage scanner (anchor.ts). */
+  anchorAttrs?: { "data-tour": string };
   title: string;
   description: string;
   children: ReactNode;
@@ -21,6 +25,7 @@ export function KpiBlock({
   return (
     <section
       data-block={id}
+      {...anchorAttrs}
       className="min-w-0 rounded-[14px] border border-border bg-card/80 px-5 pb-2 pt-5 sm:px-[22px]"
     >
       <h3 className="text-[15px] font-semibold leading-tight">{title}</h3>

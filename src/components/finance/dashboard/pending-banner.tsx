@@ -7,6 +7,7 @@
 import { AlertTriangle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { tourAnchor } from "@/help/anchor";
 
 import { pendingTitle } from "./display";
 
@@ -61,7 +62,10 @@ export function PendingBanner({
   const ggrUpdatedThrough = pendingTenants[0]?.ggrUpdatedThrough;
 
   return (
-    <div className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+    <div
+      className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+      {...tourAnchor("financeiro.painel.pendencias")}
+    >
       {showPending && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" aria-hidden />
@@ -91,6 +95,7 @@ export function PendingBanner({
               variant="secondary"
               className="shrink-0 bg-white font-semibold text-slate-950 hover:bg-white/90"
               onClick={() => onLaunchPending(first)}
+              {...tourAnchor("financeiro.painel.lancar-agora")}
             >
               Lançar agora
             </Button>

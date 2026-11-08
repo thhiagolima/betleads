@@ -36,6 +36,8 @@ import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 
 export { currentMonth };
 
@@ -168,6 +170,7 @@ export function FinanceMonthView({
               if (openDate) openDay(null);
             }}
             className="w-44"
+            {...tourAnchor("financeiro.lancamentos.mes")}
           />
           {summary.pendingDays > 0 && (
             <span className="text-xs text-muted-foreground">
@@ -182,6 +185,7 @@ export function FinanceMonthView({
               className="gap-2"
               disabled={isDemo || fillFromMeta.isPending}
               onClick={() => fillFromMeta.mutate()}
+              {...tourAnchor("financeiro.lancamentos.usar-meta")}
             >
               <Sparkles className="h-4 w-4" />
               Usar gasto da Meta nos dias vazios
@@ -238,7 +242,15 @@ export function FinanceMonthView({
   );
 }
 
-function SummaryTile({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+function SummaryTile({
+  id,
+  label,
+  children,
+}: {
+  id: string;
+  label: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div data-tile={id}>
       <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
@@ -267,26 +279,29 @@ export function MonthSummary({
   currency?: TenantCurrency;
 }) {
   return (
-    <div className="grid gap-2 rounded-lg border border-border/40 bg-background/30 p-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
-      <SummaryTile id="movementFee" label={FINANCE_TERMS.movementFee.label}>
+    <div
+      className="grid gap-2 rounded-lg border border-border/40 bg-background/30 p-4 text-sm sm:grid-cols-3 lg:grid-cols-6"
+      {...tourAnchor("financeiro.lancamentos.resumo")}
+    >
+      <SummaryTile id="movementFee" label={<Term id="taxa-de-movimentacao">{FINANCE_TERMS.movementFee.label}</Term>}>
         <p className="font-medium">{formatMoneyIn(summary.movementFee, currency)}</p>
       </SummaryTile>
-      <SummaryTile id="ggrFee" label={FINANCE_TERMS.ggrFee.label}>
+      <SummaryTile id="ggrFee" label={<Term id="taxa-de-ggr">{FINANCE_TERMS.ggrFee.label}</Term>}>
         <p className="font-medium">{formatMoneyIn(summary.ggrFee, currency)}</p>
       </SummaryTile>
-      <SummaryTile id="otherCosts" label={FINANCE_TERMS.otherCosts.label}>
+      <SummaryTile id="otherCosts" label={<Term id="outros-custos">{FINANCE_TERMS.otherCosts.label}</Term>}>
         <p className="font-medium">{formatMoneyIn(summary.otherCosts, currency)}</p>
       </SummaryTile>
-      <SummaryTile id="sends" label={FINANCE_TERMS.sends.label}>
+      <SummaryTile id="sends" label={<Term id="envios">{FINANCE_TERMS.sends.label}</Term>}>
         <p className="font-medium">
           <SendCostAmount amount={round2(summary.betleadsUsage)} incomplete={sendCostIncomplete} />
         </p>
         {betleadsNote && <p className="text-xs text-muted-foreground">{betleadsNote}</p>}
       </SummaryTile>
-      <SummaryTile id="fee" label={FINANCE_TERMS.fee.label}>
+      <SummaryTile id="fee" label={<Term id="mensalidade">{FINANCE_TERMS.fee.label}</Term>}>
         <p className="font-medium">{formatBRL(round2(summary.betleadsFee ?? 0))}</p>
       </SummaryTile>
-      <SummaryTile id="cashResult" label={FINANCE_TERMS.cashResult.label}>
+      <SummaryTile id="cashResult" label={<Term id="lucro-liquido">{FINANCE_TERMS.cashResult.label}</Term>}>
         {summary.cashResult === null ? (
           <>
             <p className="text-lg font-semibold text-muted-foreground">—</p>
