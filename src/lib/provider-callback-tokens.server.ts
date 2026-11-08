@@ -20,8 +20,16 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { decryptProviderCredentials, encryptProviderCredentials } from "./secret-box.server";
 
+/**
+ * "unauthenticated": callback Short Brasil sem token nenhum (a URL cadastrada
+ * sem ?token=, origin/main 40e5ba5). Só mexe no que a plataforma mexeria,
+ * nunca em envio de conta com dono, nunca cria órfão e nunca usa a chave do
+ * payload em link_dispatches.
+ */
 export type CallbackScope =
-  { kind: "platform" } | { kind: "account"; accountId: string; tenantId: string };
+  | { kind: "platform" }
+  | { kind: "unauthenticated" }
+  | { kind: "account"; accountId: string; tenantId: string };
 
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -173,7 +181,8 @@ export async function resolveCallbackScope(
 /**
  * Se o escopo pode aplicar um evento à linha de log com esse
  * provider_account_id: a conta só aceita as linhas dela; a plataforma recusa
- * as de conta com dono (NULL = envio legado da plataforma).
+ * as de conta com dono (NULL = envio legado da plataforma); sem token vale o
+ * mesmo que a plataforma.
  */
 export function scopeAllowsRow(
   scope: CallbackScope,
@@ -199,9 +208,9 @@ export async function loadOwnedAccountIds(): Promise<ReadonlySet<string>> {
   return ids;
 }
 
-/** ownedAccountIds só é necessário no escopo da plataforma. */
+/** ownedAccountIds só é necessário nos escopos plataforma e sem token. */
 export async function ownedAccountIdsFor(scope: CallbackScope): Promise<ReadonlySet<string>> {
-  return scope.kind === "platform" ? loadOwnedAccountIds() : new Set();
+  return scope.kind === "account" ? new Set() : loadOwnedAccountIds();
 }
 
 /** last_callback_at = agora, no máximo uma escrita por minuto por conta. Nunca lança. */

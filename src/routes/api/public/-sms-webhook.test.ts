@@ -79,7 +79,6 @@ afterEach(() => {
 
 describe("Short Brasil sms-webhook: callback scope", () => {
   it("unknown or forged tokens stay 401", async () => {
-    expect((await callback(null, { id: "msg-key-p" })).status).toBe(401);
     expect((await callback("wrong", { id: "msg-key-p" })).status).toBe(401);
     expect((await callback(`${tokens.tokenA.slice(0, -2)}xx`, { id: "msg-key-a" })).status).toBe(
       401,
@@ -146,6 +145,57 @@ describe("Short Brasil sms-webhook: callback scope", () => {
     expect(link("ld-p").delivery_status).toBe("delivered");
     await callback("global-hook-secret", { id: "msg-unknown" });
     expect(orphans()).toHaveLength(1);
+  });
+
+  describe("no token at all (origin/main 40e5ba5: URL registered without ?token=)", () => {
+    it("applies to platform / legacy rows only", async () => {
+      for (const ref of [{ id: "msg-key-p" }, { parceiroId: "key-l" }]) {
+        const response = await callback(null, ref);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ matched: 1 });
+      }
+      expect(log("log-p").delivery_status).toBe("delivered");
+      expect(log("log-l").delivery_status).toBe("delivered");
+      expect(link("ld-p").delivery_status).toBe("delivered");
+    });
+
+    it("never touches an owned account's row (by id or by delivery key)", async () => {
+      for (const ref of [{ id: "msg-key-a" }, { parceiroId: "key-a" }, { id: "msg-key-b" }]) {
+        const response = await callback(null, ref);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ matched: 0, ignored: 1 });
+      }
+      expect(log("log-a").delivery_status).toBe("sent");
+      expect(log("log-b").delivery_status).toBe("sent");
+      expect(link("ld-a").delivery_status).toBe("sent");
+      expect(link("ld-b").delivery_status).toBe("sent");
+      expect(lastCallbackAt(fake.db, OWN_A)).toBeNull();
+    });
+
+    it("no orphan row and no payload key reaches link_dispatches", async () => {
+      fake.db
+        .rows("link_dispatches")
+        .push({ id: "ld-x", idempotency_key: "zz:0", delivery_status: "sent" });
+      const response = await callback(null, { id: "msg-forged", parceiroId: "zz" });
+      expect(await response.json()).toMatchObject({ matched: 0, ignored: 0 });
+      expect(orphans()).toHaveLength(0);
+      expect(link("ld-x").delivery_status).toBe("sent");
+    });
+
+    it("Short Brasil's token-only lote is acknowledged and changes nothing", async () => {
+      const post = (Route as unknown as { options: { server: { handlers: { POST: Handler } } } })
+        .options.server.handlers.POST;
+      const response = await post({
+        request: new Request("https://betleads.io/api/public/sms-webhook", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ lote: [{ token: "abc" }] }),
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ matched: 0 });
+      expect(orphans()).toHaveLength(0);
+    });
   });
 
   describe("link_dispatches only follow the matched row's own key", () => {

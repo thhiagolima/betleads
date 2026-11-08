@@ -19,8 +19,16 @@ import {
 } from "@/lib/sms-callback-parse";
 
 // Callback Short Brasil SMS.
-// URL sugerida:
-//   https://seu-dominio.com/api/public/sms-webhook?token=<SHORT_BRASIL_WEBHOOK_SECRET>
+// URL cadastrada na Short Brasil (contas da plataforma, sem token):
+//   https://seu-dominio.com/api/public/sms-webhook
+//
+// Com ?token= na URL a Short Brasil devolvia só {"lote":[{"token":...}]}, sem
+// id nem status (2026-11-07), então o token deixou de ser obrigatório. Um token
+// enviado ainda precisa estar certo; sem token (escopo "unauthenticated"), a
+// chamada só atualiza envios existentes que a plataforma poderia atualizar,
+// nunca envio de conta com dono, nunca cria linha "callback-orphan" e nunca
+// usa a chave do payload em link_dispatches.
+//
 // Conta própria da casa (provider_accounts.owner_tenant_id): o token é o da
 // conta (provider-callback-tokens.server.ts), configurado no painel da Short
 // Brasil daquela conta. O token da conta só mexe nos envios dela; o global
@@ -60,7 +68,9 @@ async function authorizeCallback(
   request: Request,
 ): Promise<{ scope: CallbackScope } | { response: Response }> {
   const expected = process.env.SHORT_BRASIL_WEBHOOK_SECRET;
-  const scope = await resolveCallbackScope(extractToken(request), expected);
+  const token = extractToken(request);
+  if (!token) return { scope: { kind: "unauthenticated" } };
+  const scope = await resolveCallbackScope(token, expected);
   if (scope) return { scope };
   if (!expected) {
     return {
@@ -266,9 +276,13 @@ async function updateFromPayload(
   // A dispatch uses `${sms_log.idempotency_key}:position`; this carries the
   // provider's confirmed delivery back to the conversion report without ever
   // treating accepted/sent as delivered. A matched row's own key only; with
-  // no row (platform scope only, as before) the payload's key, wildcards
-  // escaped so it can never match other deliveries.
-  const linkKeys = matched ? [...matchedKeys] : idempotencyKey ? [idempotencyKey] : [];
+  // no row (authenticated platform scope only, as before) the payload's key,
+  // wildcards escaped so it can never match other deliveries.
+  const linkKeys = matched
+    ? [...matchedKeys]
+    : idempotencyKey && filter.scope.kind === "platform"
+      ? [idempotencyKey]
+      : [];
   if (["delivered", "failed"].includes(patch.delivery_status)) {
     for (const key of linkKeys) {
       const pattern = likeKeyPrefixPattern(key);
@@ -280,8 +294,9 @@ async function updateFromPayload(
     }
   }
 
-  if (!matched) {
-    // Platform scope only (an account scope returned above).
+  // A caller without a token can only touch sends that already exist.
+  if (!matched && filter.scope.kind === "platform") {
+    // Authenticated platform scope only (an account scope returned above).
     await supabaseAdmin.from("sms_send_logs").insert({
       to_phone: pickStr(payload, "celular", "to", "phone", "destination") ?? "unknown",
       content: pickStr(payload, "mensagem") ?? "(callback sem envio correspondente)",

@@ -26,11 +26,11 @@ export const adminGetSmsProviderConfig = createServerFn({ method: "GET" })
     // Contas padrão da plataforma. Contas por casa: tenant_channel_providers.
     const sms = envShortBrasilAccount();
     const infobip = envInfobipAccount();
-    const webhookSecret = process.env.SHORT_BRASIL_WEBHOOK_SECRET ?? "SEU_WEBHOOK_SECRET";
     const appUrl = (process.env.PUBLIC_APP_URL ?? "https://betleads.io").replace(/\/$/, "");
     const smsProvider = sms.shortcodeToken ? "Short Code" : "Short Brasil (legado)";
     const smsEndpoint = sms.shortcodeToken ? sms.shortcodeUrl : sms.singleUrl;
-    const smsCallbackUrl = `${appUrl}/api/public/sms-webhook?token=${encodeURIComponent(webhookSecret)}`;
+    // Sem ?token=: com ele a Short Brasil devolvia só o token no callback.
+    const smsCallbackUrl = `${appUrl}/api/public/sms-webhook`;
     const channels = [
       {
         channel: "SMS",
