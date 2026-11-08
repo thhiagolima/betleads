@@ -44,14 +44,14 @@ const screen: HelpScreen = {
           what: 'O título é o nome da campanha. O subtítulo diz "Relatório da campanha", o canal e o dia do envio — numa campanha de Web Push, o canal aparece escrito como "webpush".',
         },
         {
-          label: 'Aviso de status (quando a campanha parou ou foi bloqueada)',
+          label: "Aviso de status (quando a campanha parou ou foi bloqueada)",
           what: 'Aparece acima dos indicadores com o nome do estado (ex.: "Falhou", "Cancelada", "Bloqueada") e o motivo, quando a campanha não terminou normalmente.',
         },
       ],
     },
     {
       id: "custo-retorno",
-      title: "Custo e retorno",
+      title: "Custo e resultado",
       intro: "Total da campanha desde o disparo, pelo último clique em até 7 dias.",
       items: [
         {
@@ -62,20 +62,20 @@ const screen: HelpScreen = {
           label: "Custo em SMS / Consumo de e-mail",
           what: 'No SMS, o custo em R$ dos envios. No e-mail, "— envios" (sem custo financeiro calculado para e-mail ainda).',
           notes:
-            'No Web Push, a linha aparece com o rótulo "Custo em SMS", mas mostra só a quantidade ("N envios") e a frase "Custo financeiro indisponível para este canal." — o custo do Web Push não é calculado neste relatório (ele aparece no extrato de Plano e créditos). Por isso o Retorno fica "—".',
+            'No Web Push, a linha aparece com o rótulo "Custo em SMS", mas mostra só a quantidade ("N envios") e a frase "Custo financeiro indisponível para este canal." — o custo do Web Push não é calculado neste relatório (ele aparece no extrato de Plano e créditos). Por isso o "Cada R$ 1 em SMS trouxe" fica "—".',
         },
         {
-          label: "Retorno",
-          what: 'Recuperado pelo CRM ÷ custo em SMS, escrito como "Nx" (por exemplo "3,2x"). Sem custo em R$ calculado (e-mail, ou moeda da casa diferente do real), mostra "—".',
+          label: "Cada R$ 1 em SMS trouxe",
+          what: 'Recuperado pelo CRM ÷ custo em SMS, escrito em reais (por exemplo "R$ 3,20" para cada R$ 1). Sem custo em R$ calculado (e-mail, ou moeda da casa diferente do real), mostra "—".',
         },
         {
           label: "Receita assistida (fora do total)",
-          what: "Depósitos em que esta campanha participou mas não foi o último clique antes do depósito. Fica fora do \"Recuperado pelo CRM\" de propósito, para não contar a mesma receita em duas campanhas.",
+          what: 'Depósitos em que esta campanha participou mas não foi o último clique antes do depósito. Fica fora do "Recuperado pelo CRM" de propósito, para não contar a mesma receita em duas campanhas.',
           notes: "Só aparece quando esse valor é maior que zero.",
         },
         {
-          label: "Jogadores já ativos (fora da conta)",
-          what: "Jogadores que já tinham depositado nas 48 horas antes do clique: o depósito deles depois do clique entra aqui, separado, nunca no total recuperado — ele não prova que foi a campanha que trouxe o depósito.",
+          label: "Jogadores que já estavam jogando (fora do total)",
+          what: "Jogadores que já tinham depositado nos 2 dias antes do clique: o depósito deles depois do clique entra aqui, separado, nunca no total recuperado — ele não prova que foi a campanha que trouxe o depósito.",
         },
       ],
     },
@@ -112,10 +112,11 @@ const screen: HelpScreen = {
       id: "nao-enviados",
       title: "Não enviados",
       intro:
-        'ENV-06: quem a campanha nem tentou enviar — os demais receberam normalmente. Só aparece quando existe pelo menos um. A lista completa (incluindo o telefone sem máscara) fica no CSV.',
+        "ENV-06: quem a campanha nem tentou enviar — os demais receberam normalmente. Só aparece quando existe pelo menos um. A lista completa (incluindo o telefone sem máscara) fica no CSV.",
       items: [
         {
-          label: "Motivos (Sem cadastro, Telefone inválido, Sem consentimento, Grupo de controle, Já é jogador)",
+          label:
+            "Motivos (Sem cadastro, Telefone inválido, Sem consentimento, Grupo de controle, Já é jogador)",
           what: '"Sem cadastro": o telefone não corresponde a nenhum jogador cadastrado. "Telefone inválido": não é um celular ou fixo brasileiro válido. "Sem consentimento": o destinatário revogou o consentimento para SMS. "Grupo de controle": o jogador está no grupo de controle de uma jornada e não recebe campanhas em massa enquanto o teste estiver aberto. "Já é jogador": só em campanhas para lista de números — o telefone já pertence a um jogador da casa, e essas campanhas só valem para quem ainda não se cadastrou.',
         },
         {
@@ -164,7 +165,7 @@ const screen: HelpScreen = {
         {
           anchor: "campanha-relatorio.funil.filtro",
           label: "Etapas do funil",
-          what: 'Público, Enviados, Entregues (só quando o canal confirma entrega — nunca em SMS/e-mail), Clicaram, Não clicaram, Cadastros, Login ou jogo, Primeiro depósito, Depositaram e Clicaram e não depositaram. Cada etapa mostra o total da campanha inteira, não só da lista carregada.',
+          what: "Público, Enviados, Entregues (só quando o canal confirma entrega — nunca em SMS/e-mail), Clicaram, Não clicaram, Cadastros, Login ou jogo, Primeiro depósito, Depositaram e Clicaram e não depositaram. Cada etapa mostra o total da campanha inteira, não só da lista carregada.",
         },
         {
           anchor: "campanha-relatorio.funil.csv",
@@ -190,8 +191,7 @@ const screen: HelpScreen = {
     {
       id: "quem-depositou",
       title: "Quem clicou e depositou",
-      intro:
-        "Só aparece quando existe pelo menos um depósito atribuído à campanha.",
+      intro: "Só aparece quando existe pelo menos um depósito atribuído à campanha.",
       items: [
         {
           label: "Lista de quem depositou",
@@ -207,7 +207,7 @@ const screen: HelpScreen = {
       id: "voz",
       title: "Variante de voz",
       intro:
-        "Campanhas de voz com uma única ligação mostram este relatório mais simples, em vez do funil. Campanhas de voz com mais de uma ligação não têm o botão \"Relatório\" no hub.",
+        'Campanhas de voz com uma única ligação mostram este relatório mais simples, em vez do funil. Campanhas de voz com mais de uma ligação não têm o botão "Relatório" no hub.',
       items: [
         {
           label: "Status / Atendida / Tempo de chamada / Tentativas",
@@ -260,7 +260,7 @@ const screen: HelpScreen = {
     {
       id: "funil-sem-ninguem",
       title: "Ninguém nesta etapa na lista",
-      what: 'Nenhum destinatário, entre os carregados na tela, chegou à etapa escolhida do funil.',
+      what: "Nenhum destinatário, entre os carregados na tela, chegou à etapa escolhida do funil.",
       action: "Baixe o CSV para ver se alguém chegou lá na campanha inteira.",
     },
   ],

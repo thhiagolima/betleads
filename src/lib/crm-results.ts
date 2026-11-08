@@ -70,6 +70,23 @@ export type CrmMetricsWithRatios = CrmMetrics & {
 /** Below this many converted players a return is shown as "amostra pequena". */
 export const MIN_CONVERSIONS = 5;
 
+/**
+ * Below these volumes a percent variation is noise (8 players has a 95%
+ * interval of ~3 to 16), so the overview shows the absolute difference.
+ */
+export const MIN_DELTA_PLAYERS = 20;
+export const MIN_DELTA_SENT = 1000;
+
+/** Both periods big enough for a percent variation. */
+export function isComparable(
+  current: Pick<CrmMetrics, "directPlayers" | "sent">,
+  previous: Pick<CrmMetrics, "directPlayers" | "sent">,
+) {
+  return [current, previous].every(
+    (metrics) => metrics.directPlayers >= MIN_DELTA_PLAYERS && metrics.sent >= MIN_DELTA_SENT,
+  );
+}
+
 export const PLAYER_STATE_LABELS: Record<string, string> = {
   sem_ftd: "Sem 1º depósito",
   ativo: "Ativo (< 2 dias)",

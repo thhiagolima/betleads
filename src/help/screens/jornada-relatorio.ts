@@ -89,8 +89,8 @@ const screen: HelpScreen = {
           what: '"Enviados com link medido" conta só os envios que tinham um link rastreável (os outros não entram em clique/depósito/recuperado). "Clicaram" conta quem abriu o link (— quando o clique não é medido para o canal). "Depósitos atribuídos" conta jogadores com depósito atribuído a esta jornada. "Recuperado pelo CRM" soma o valor desses depósitos.',
         },
         {
-          label: "Jogadores já ativos (fora da conta)",
-          what: "Jogadores que já tinham depositado nas 48 horas antes do clique: o depósito deles depois do clique entra aqui, separado, nunca no total recuperado.",
+          label: "Jogadores que já estavam jogando (fora do total)",
+          what: "Jogadores que já tinham depositado nos 2 dias antes do clique: o depósito deles depois do clique entra aqui, separado, nunca no total recuperado.",
         },
       ],
     },
@@ -136,15 +136,15 @@ const screen: HelpScreen = {
         },
         {
           label: "Tabela de mensagens (rotação)",
-          what: "Só aparece em etapas com mais de uma mensagem possível (template com variações). Uma linha por mensagem (ou \"Sem mensagem registrada\", para envios anteriores à rotação), com enviados, cliques, taxa de clique, depósitos e recuperado de cada uma.",
+          what: 'Só aparece em etapas com mais de uma mensagem possível (template com variações). Uma linha por mensagem (ou "Sem mensagem registrada", para envios anteriores à rotação), com enviados, cliques, taxa de clique, depósitos e recuperado de cada uma.',
         },
         {
           label: "Etapas desativadas",
-          what: "Tabela à parte, só quando existe pelo menos uma: etapas que já enviaram mensagens e depois foram removidas do editor. O resultado delas continua somado no total \"Desde a criação\" da jornada.",
+          what: 'Tabela à parte, só quando existe pelo menos uma: etapas que já enviaram mensagens e depois foram removidas do editor. O resultado delas continua somado no total "Desde a criação" da jornada.',
         },
         {
           label: "Sem etapa identificada",
-          what: 'Linha de texto, só quando existir: depósitos e valor recuperado cujo envio de origem não corresponde a nenhuma etapa atual da jornada.',
+          what: "Linha de texto, só quando existir: depósitos e valor recuperado cujo envio de origem não corresponde a nenhuma etapa atual da jornada.",
         },
         {
           label: "Envios que falharam ou foram cancelados",
@@ -164,12 +164,13 @@ const screen: HelpScreen = {
         {
           anchor: "jornada-relatorio.carregar-jogadores",
           label: "Carregar jogadores",
-          what: "A lista individual carrega só quando você pede, para não atrasar o resto do relatório. Mostra \"Carregando…\" enquanto busca.",
+          what: 'A lista individual carrega só quando você pede, para não atrasar o resto do relatório. Mostra "Carregando…" enquanto busca.',
         },
         {
           label: "Lista de jogadores",
           what: "Uma linha por jogador que recebeu, com quando foi enviado, se e quando clicou, se e quando fez login ou jogou, e se e quando depositou (com o valor).",
-          notes: "Um depósito de um jogador já ativo antes do clique aparece marcado \"já ativo, não conta\" e não entra nos totais.",
+          notes:
+            'Um depósito de um jogador que já estava jogando antes do clique aparece marcado "já estava jogando, não conta" e não entra nos totais.',
         },
       ],
     },

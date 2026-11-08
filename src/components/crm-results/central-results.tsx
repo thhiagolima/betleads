@@ -24,6 +24,7 @@ import { Holdout } from "./holdout";
 import { Origins } from "./origins";
 import { type Data, periodLabel } from "./format";
 import { Overview } from "./overview";
+import { Reactivations } from "./reactivations";
 import { SpendByState } from "./retention";
 import { CentralPeriodPicker, EmptyCard } from "./shared";
 import { PERIODS, TABS, type CentralSearch, type PeriodKey, type TabKey } from "./search";
@@ -121,7 +122,12 @@ export function CentralResults() {
                 <SpendByState data={query.data} />
               </div>
             )}
-            {tab === "controle" && <Holdout data={query.data} />}
+            {tab === "controle" && (
+              <div className="space-y-4">
+                <Reactivations data={query.data} />
+                <Holdout data={query.data} />
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -146,13 +152,8 @@ function LoadingSkeleton() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Carregando resultados">
       <Skeleton className="h-10 w-full max-w-xl rounded-lg" />
-      <Skeleton className="h-28 rounded-xl" />
-      <div className="grid gap-3 sm:grid-cols-3">
-        {Array.from({ length: 3 }, (_, index) => (
-          <Skeleton key={index} className="h-28 rounded-xl" />
-        ))}
-      </div>
-      <Skeleton className="h-20 rounded-xl" />
+      <Skeleton className="h-12 w-full max-w-md rounded-lg" />
+      <Skeleton className="h-56 rounded-xl" />
       <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
         <Skeleton className="h-80 rounded-xl" />
         <Skeleton className="h-80 rounded-xl" />
@@ -166,25 +167,40 @@ function Glossary() {
   const terms: Array<[string, string]> = [
     [
       "Recuperado pelo CRM",
-      "Jogador que clicou no link do SMS e depositou em até 7 dias, e o valor depositado. É a medida principal, a mesma do Início (conversão por clique). Conta jogadores, não depósitos: quem deposita 3 vezes conta 1.",
-    ],
-    ["Taxa de clique", "SMS clicados ÷ SMS enviados."],
-    ["Custo por jogador convertido", "Custo em SMS ÷ jogadores convertidos pelo clique."],
-    [
-      "Retorno",
-      "Recuperado pelo CRM ÷ custo em SMS. Verde quando paga o envio (1x ou mais), vermelho quando não paga. Com menos de 5 jogadores convertidos aparece como “amostra pequena” e não entra em comparações.",
+      "Jogador parado há 2 dias ou mais (ou sem 1º depósito) que clicou no link do SMS e depositou em até 7 dias, e tudo o que ele depositou nesses 7 dias. É a medida principal, a mesma do Início. Conta jogadores, não depósitos: quem deposita 3 vezes conta 1.",
     ],
     [
-      "Recuperados (visão ampla)",
-      "Jogador parado há 2+ dias (ou sem 1º depósito) que depositou até 3 dias depois de um SMS, com ou sem clique. Conta retornos, não pessoas, e o valor é só o depósito de retorno. Inclui boa parte do Recuperado pelo CRM: não some os dois.",
+      "Já estavam jogando",
+      "Clicaram, mas tinham depositado nos 2 dias anteriores. Iam depositar de qualquer forma, então não entram no Recuperado pelo CRM nem no retorno.",
     ],
     [
-      "Últimos 7 dias",
-      "Conversões chegam até 7 dias depois do clique. O custo entra no dia do envio, o clique no dia do clique e a conversão no dia do depósito; por isso os últimos 7 dias ainda crescem.",
+      "Cliques no link",
+      "Cliques de pessoas no link do SMS (robôs ficam fora). Taxa: cliques ÷ SMS enviados.",
+    ],
+    [
+      "Cliques que viraram depósito",
+      "Dos cliques do período, quantos levaram a um depósito em até 7 dias. Por isso pode ser diferente do número de jogadores que voltaram no período, que conta pelo dia do depósito.",
+    ],
+    ["Custo por jogador que voltou", "Custo em SMS ÷ jogadores que voltaram pelo link."],
+    [
+      "Cada R$ 1 em SMS trouxe",
+      "Recuperado pelo CRM ÷ custo em SMS. Verde quando paga o envio (R$ 1 ou mais), vermelho quando não paga. Com menos de 5 jogadores aparece como “amostra pequena”. Em Hoje e Ontem usa os últimos 7 dias, porque o depósito de hoje pode vir de um SMS de dias atrás.",
+    ],
+    [
+      "Comparação",
+      "Hoje e Ontem comparam com o mesmo dia da semana anterior; os outros períodos, com o período anterior de mesmo tamanho. Com menos de 20 jogadores ou 1.000 SMS mostra a diferença em valor, não em %, porque a porcentagem seria ruído.",
+    ],
+    [
+      "Parcial",
+      "Quem clicou tem até 7 dias para depositar. O custo entra no dia do envio, o clique no dia do clique e o jogador no dia do depósito; por isso os últimos 7 dias ainda crescem.",
+    ],
+    [
+      "Reativações após SMS",
+      "Em Prova e método. Jogador parado há 2 dias ou mais que depositou até 3 dias depois de um SMS, com ou sem clique. Conta voltas, não pessoas, e só o 1º depósito da volta. É outra régua: muitos jogadores estão nos dois números, então não some com o Recuperado pelo CRM.",
     ],
     [
       "Teste de controle",
-      "Voltar depois do SMS não prova que foi por causa dele. O teste compara com um grupo sorteado que não recebe mensagens e mostra o efeito real.",
+      "Em Prova e método. Voltar depois do SMS não prova que foi por causa dele. O teste compara com um grupo sorteado que não recebe mensagens e mostra o efeito real.",
     ],
     ["Custo", "Só SMS. WhatsApp, e-mail e voz ainda não têm preço cadastrado."],
   ];

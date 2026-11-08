@@ -37,8 +37,9 @@ export type HouseCrmFields = Pick<
   "messageCost" | "messageRoi" | "activeFlows" | "totalFlows" | "walletBalance" | "exempt"
 >;
 
+/** Quanto cada R$ 1 em SMS trouxe, em reais ("R$ 7,90"). */
 function fmtRoi(value: number) {
-  return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}x`;
+  return brl(value);
 }
 
 function comparisonText(periodDays: number) {
@@ -204,9 +205,9 @@ function HouseCrmDetails({ data, house }: { data: HomeDashboardData; house: Hous
   return (
     <>
       <div className="mt-3">
-        {isEnabled("sms") && <MetricRow label="Gasto em SMS" value={brl(house.messageCost)} />}
+        {isEnabled("sms") && <MetricRow label="Custo em SMS" value={brl(house.messageCost)} />}
         <MetricRow
-          label="Retorno sobre o envio"
+          label="Cada R$ 1 em SMS trouxe"
           value={roi > 0 ? fmtRoi(roi) : "—"}
           valueClassName={roi > 0 ? "text-success" : undefined}
         />
@@ -233,7 +234,7 @@ function HouseCrmDetails({ data, house }: { data: HomeDashboardData; house: Hous
 
 /**
  * "Recuperado pelo CRM". Com `house`, mostra também o que é só da casa:
- * gasto em SMS, retorno sobre o envio, jornadas ativas/total, saldo e o
+ * custo em SMS, quanto cada R$ 1 em SMS trouxe, jornadas ativas/total, saldo e o
  * botão para a Central de Resultados. Sem `house` (expert), fica só o
  * recuperado e "Em jornada agora" dos leads.
  */

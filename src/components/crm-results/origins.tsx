@@ -31,25 +31,25 @@ type SortKey =
   | "influencedPlayers";
 
 const COLUMNS: Array<{ key: SortKey; label: string; info?: string; align?: "left" }> = [
-  { key: "sent", label: "Envios" },
+  { key: "sent", label: "SMS enviados" },
   { key: "cost", label: "Custo em SMS" },
-  { key: "clickRate", label: "Cliques", info: "SMS clicados e a taxa sobre os enviados." },
+  { key: "clickRate", label: "Cliques", info: "Cliques no link e a taxa sobre os SMS enviados." },
   {
     key: "directRevenue",
     label: "Recuperado pelo CRM",
-    info: "Jogadores que clicaram e depositaram em até 7 dias, e o valor. A barra compara com a origem que mais converteu.",
+    info: "Jogadores que voltaram pelo link (clicaram e depositaram em até 7 dias), e o valor. A barra compara com a origem que mais recuperou.",
     align: "left",
   },
-  { key: "costPerConversion", label: "Custo / convertido" },
+  { key: "costPerConversion", label: "Custo por jogador que voltou" },
   {
     key: "clickRoi",
-    label: "Retorno",
-    info: "Recuperado pelo CRM ÷ custo. Verde paga o envio (1x ou mais), vermelho não paga. Menos de 5 convertidos: amostra pequena.",
+    label: "R$ por R$ 1 em SMS",
+    info: "Quanto cada R$ 1 em SMS trouxe (Recuperado pelo CRM ÷ custo). Verde paga o envio (R$ 1 ou mais), vermelho não paga. Menos de 5 jogadores que voltaram pelo link: amostra pequena.",
   },
   {
     key: "influencedPlayers",
-    label: "Recuperados (visão ampla)",
-    info: "Parados há 2+ dias (ou cadastrados há 2+ dias sem depositar) que depositaram até 3 dias após um SMS, com ou sem clique. Não some com o Recuperado pelo CRM.",
+    label: "Reativações após SMS",
+    info: "Parados há 2 dias ou mais (ou cadastrados há 2 dias ou mais sem depositar) que voltaram a depositar, e o 1º depósito na volta. Outra régua: conta voltas até 3 dias depois de um SMS, com ou sem clique, e só o 1º depósito da volta.",
   },
 ];
 
@@ -317,7 +317,7 @@ function SourceName({ source }: { source: CrmSource }) {
             variant="outline"
             className="border-warning/40 bg-warning/10 text-meta text-warning"
           >
-            gasta sem converter
+            gasta sem trazer ninguém
           </Badge>
         )}
       </div>

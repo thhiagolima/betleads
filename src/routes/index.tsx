@@ -119,9 +119,9 @@ function Dashboard() {
       <LiveFeed events={data.liveEvents} showAllEventsLink />
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Recuperado pelo CRM considera depósitos feitos em até 7 dias depois de um clique humano em
-        link de campanha ou jornada, sem quem já estava ativo; gasto em SMS é o preço por segmento
-        vezes os segmentos enviados. Datas no fuso de Brasília.
+        Recuperado pelo CRM considera depósitos feitos em até 7 dias depois de um clique no link de
+        campanha ou jornada, sem quem já estava jogando; custo em SMS é o preço por segmento vezes
+        os segmentos enviados. Datas no fuso de Brasília.
       </p>
     </div>
   );

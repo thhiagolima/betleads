@@ -120,7 +120,7 @@ export function SpendByState({ data }: { data: Data }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-1.5">
           Para quem vai o dinheiro
-          <InfoTip text="Situação do jogador no momento em que recebeu a mensagem. Envios a jogadores ativos são relacionamento, não reativação." />
+          <InfoTip text="Situação do jogador no momento em que recebeu a mensagem. SMS enviados a quem já estava jogando são relacionamento, não reativação." />
         </CardTitle>
         <CardDescription>
           Custo em SMS e recuperado pelo CRM pela situação do jogador no envio.
@@ -133,10 +133,10 @@ export function SpendByState({ data }: { data: Data }) {
               <TableHead>Situação no envio</TableHead>
               <TableHead className="min-w-40">Parte do custo</TableHead>
               <TableHead className="text-right">Jogadores</TableHead>
-              <TableHead className="text-right">Convertidos</TableHead>
-              <TableHead className="text-right">Custo / convertido</TableHead>
-              <TableHead className="text-right">Retorno</TableHead>
-              <TableHead className="text-right">Recuperados (visão ampla)</TableHead>
+              <TableHead className="text-right">Voltaram pelo link</TableHead>
+              <TableHead className="text-right">Custo por jogador que voltou</TableHead>
+              <TableHead className="text-right">R$ por R$ 1 em SMS</TableHead>
+              <TableHead className="text-right">Reativações após SMS</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
