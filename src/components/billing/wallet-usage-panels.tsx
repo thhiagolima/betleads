@@ -10,6 +10,7 @@ import {
   num,
 } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { tourAnchor } from "@/help/anchor";
 import {
   Table,
   TableBody,
@@ -49,7 +50,7 @@ export function MonthUsageCard({
   visibleItems?: readonly BillingItem[];
 }) {
   return (
-    <Card>
+    <Card {...tourAnchor("carteira.consumo-mes")}>
       <CardHeader>
         <CardTitle>Consumo do mês</CardTitle>
       </CardHeader>
@@ -90,7 +91,7 @@ export function CurrentPricesCard({
   visibleItems?: readonly BillingItem[];
 }) {
   return (
-    <Card>
+    <Card {...tourAnchor("carteira.precos-vigentes")}>
       <CardHeader>
         <CardTitle>Preços vigentes</CardTitle>
       </CardHeader>

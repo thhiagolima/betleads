@@ -293,4 +293,22 @@ export const GLOSSARY: GlossaryTerm[] = [
     long:
       "Exemplos comuns no Brasil: America/Sao_Paulo (horário de Brasília, usado por quase todas as casas), America/Manaus (Amazonas e Rondônia), America/Rio_Branco (Acre e parte do Amazonas) e America/Noronha (Fernando de Noronha). O campo aceita qualquer texto — um nome errado não mostra erro na hora de salvar, mas os horários calculados ficam errados até corrigir. Digite exatamente como nos exemplos, sem espaços.",
   },
+
+  // --- Conta e equipe / Plano e créditos (fase 2, Task 7) ---
+  {
+    id: "pix-copia-cola",
+    term: "Pix Copia e Cola",
+    short:
+      "Um código de texto que representa o mesmo pagamento Pix do QR Code. Copie e cole no aplicativo do seu banco (em vez de escanear a câmera) para pagar.",
+    long:
+      "É útil quando você está pagando do mesmo aparelho onde o CRM está aberto (sem outro celular à mão para escanear o QR Code): copie o código com o botão ao lado do campo e cole no app do banco, na opção de pagar com Pix via código/\"Copia e Cola\".",
+  },
+  {
+    id: "franquia-mensal",
+    term: "Franquia mensal",
+    short:
+      "Uma quantidade de unidades de um canal (hoje, e-mail) que a casa pode usar todo mês sem ser cobrada, antes de o preço por unidade passar a valer.",
+    long:
+      "Cada canal tem sua própria franquia (ou nenhuma — SMS e Voz não têm). Ela reinicia a cada mês: o que não foi usado não acumula para o mês seguinte. Em \"Consumo do mês\", o texto \"X de Y grátis\" mostra quanto da franquia já foi usado; em \"Preços vigentes\", a coluna \"Franquia mensal\" mostra o tamanho dela (\"-\" quando o canal não tem).",
+  },
 ];

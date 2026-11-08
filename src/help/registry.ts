@@ -32,6 +32,8 @@ export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpSc
   "/players": () => import("./screens/jogadores"),
   "/players/$playerId": () => import("./screens/jogador"),
   "/webpush": () => import("./screens/webpush"),
+  "/tenants": () => import("./screens/conta-equipe"),
+  "/plano-e-creditos": () => import("./screens/plano-creditos"),
   onboarding: () => import("./screens/onboarding"),
   shell: () => import("./screens/shell"),
 };
