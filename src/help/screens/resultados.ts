@@ -47,7 +47,7 @@ const screen: HelpScreen = {
           label: 'Pílula "Atualizado há..." / "Divergência nos dados" / "Sem atualização"',
           what: "Abre a gaveta \"Saúde dos dados\", com quatro informações: a hora da última atualização da tabela de resultados (recalculada a cada 10 minutos); os SMS enviados na tela comparados com o registro bruto de SMS, com a diferença em %; a checagem diária de consistência mais recente (SMS enviados, custo e voltas pelo link comparados com a origem, do dia anterior, roda todo dia às 03h40) e, se houver, quantas das últimas 14 checagens deram divergência; e, se o período pedido for muito longo para carregar tudo, um aviso de que parte dos dados não entrou na conta.",
           notes:
-            'O ponto é verde quando a última atualização tem até 30 minutos, a checagem mais recente não divergiu e os dados não foram truncados; senão fica amarelo ("Divergência nos dados") ou, sem nenhuma atualização registrada ainda, mostra "Sem atualização". A gaveta explica no rodapé: "O registro inclui mensagens de hoje que entram na próxima atualização; diferenças pequenas nas últimas horas são esperadas. Custo considera o preço do SMS da sua conta. WhatsApp, e-mail e voz ainda não entram no custo."',
+            'O ponto é verde quando a última atualização tem até 30 minutos, a checagem mais recente não divergiu e os dados não foram truncados; senão fica amarelo ("Divergência nos dados") ou, sem nenhuma atualização registrada ainda, mostra "Sem atualização". Se o registro bruto de SMS não puder ser lido para comparar, a linha "SMS enviados conferidos com o registro de SMS" mostra "não disponível" em vez do número e da diferença. A gaveta explica no rodapé: "O registro inclui mensagens de hoje que entram na próxima atualização; diferenças pequenas nas últimas horas são esperadas. Custo considera o preço do SMS da sua conta. WhatsApp, e-mail e voz ainda não entram no custo."',
         },
         {
           anchor: "resultados.como-ler.abrir",
@@ -128,6 +128,8 @@ const screen: HelpScreen = {
         {
           label: "Destaques do período",
           what: 'Até três avisos automáticos: a origem que trouxe jogadores de volta mais barato (com 5 ou mais jogadores que voltaram, para não comparar amostra pequena); quantas origens gastaram R$ 50 ou mais sem trazer ninguém de volta (nem pelo link, nem pela Reativação após SMS), e quanto gastaram; e, quando 20% ou mais do custo foi para jogadores que já estavam jogando, quanto isso representa. Clicar no nome de uma origem abre a aba Origens já filtrada por ela.',
+          notes:
+            'Sem nenhuma origem com 5 ou mais jogadores que voltaram pelo link, o primeiro destaque mostra "Ainda não há origem com 5 ou mais jogadores que voltaram pelo link para comparar eficiência." em vez do melhor desempenho. O aviso de origens que gastaram sem retorno muda de texto conforme a quantidade: com uma só, "<nome da origem> gastou <valor> sem trazer nenhum jogador de volta."; com duas ou mais, "<N> origens gastaram <valor> sem trazer nenhum jogador de volta."',
         },
         {
           anchor: "resultados.visao.recomendacoes.ver-todas",
@@ -168,6 +170,8 @@ const screen: HelpScreen = {
           anchor: "resultados.origens.expandir",
           label: "Expandir (seta ›) uma jornada",
           what: "Abre, embaixo da linha da jornada, uma linha por etapa de envio (\"1ª mensagem · na entrada\", \"2ª mensagem · +2 dias\"...), com as mesmas colunas. Só aparece em jornadas com mais de uma etapa de envio; campanhas e jornadas de etapa única não expandem.",
+          notes:
+            'Uma etapa que o CRM não conseguiu ligar a nenhuma mensagem configurada na jornada (por exemplo, uma etapa removida do fluxo depois do envio) aparece como "Sem etapa identificada" em vez do nome da mensagem.',
         },
         {
           label: "Colunas da tabela",
