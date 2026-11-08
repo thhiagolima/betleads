@@ -429,6 +429,11 @@ desativar.
 2. Provedor: Short Brasil. Credenciais (shortcode + token, ou usuário/chave —
    o que a Short Brasil emitiu para a conta separada da 99Bet). Campo só de
    escrita; nada volta do servidor, nem mascarado.
+   **Recomende o token do Short Code.** A API legada da Short Brasil
+   (usuário/chave) é **http** sem TLS (`http://lp01-short.painelsms.com/bot/...`),
+   então o usuário e a chave da 99Bet trafegam em claro a cada envio; o Short
+   Code usa **https** com token. Se a 99Bet só tiver usuário/chave, avise o
+   usuário (e a casa) desse risco antes de ativar.
 3. Custo por SMS (R$ por segmento) — usado depois na Central de resultados.
 4. **Copiar a URL do webhook** (com o token **próprio dessa conta**, gerado
    pelo servidor) e colar no painel Short Brasil da 99Bet — "sem isso você
