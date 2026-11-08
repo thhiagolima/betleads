@@ -30,7 +30,7 @@ const header = (currency: TenantCurrency) => {
     "reais_por_real_em_sms",
     "reativacoes_apos_sms",
     "depositos_reativacoes",
-    `primeiro_deposito_na_volta_${house}`,
+    `depositado_3d_reativacoes_${house}`,
     "custo_por_reativacao_brl",
     "retorno_reativacoes",
     "depositos_apos_clique",

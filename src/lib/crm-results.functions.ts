@@ -72,7 +72,7 @@ async function loadResultRows(db: any, tenantId: string, from: string, to: strin
   return rows;
 }
 
-/** Distinct click-converted and already-active players of the period. */
+/** Distinct click-converted, already-active and influenced players of the period. */
 export async function loadPeriodPlayers(
   db: any,
   tenantId: string,
@@ -86,7 +86,11 @@ export async function loadPeriodPlayers(
   });
   const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
   if (error || !row) return null;
-  return { converted: Number(row.converted_players ?? 0), active: Number(row.active_players ?? 0) };
+  return {
+    converted: Number(row.converted_players ?? 0),
+    active: Number(row.active_players ?? 0),
+    influenced: row.influenced_players == null ? null : Number(row.influenced_players),
+  };
 }
 
 /**

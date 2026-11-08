@@ -110,13 +110,13 @@ const GROUPS: Array<{ title: string; metrics: Metric[] }> = [
     metrics: [
       {
         label: "Reativações após SMS",
-        hint: "Parados há 2 dias ou mais (ou cadastrados há 2 dias ou mais sem depositar) que voltaram a depositar. Outra régua: conta voltas até 3 dias depois de um SMS, com ou sem clique, e só o 1º depósito da volta.",
+        hint: "Jogadores que estavam há 2 dias ou mais sem depositar (ou que nunca depositaram), receberam um SMS e voltaram a depositar em até 3 dias, mesmo sem clicar no link. O valor é tudo o que depositaram nesses 3 dias. Já inclui o Recuperado pelo CRM (quem clicou), por isso é sempre igual ou maior: não some os dois.",
         raw: (row) => row.influencedPlayers,
         format: count,
         better: "high",
       },
       {
-        label: "1º depósito na volta",
+        label: "Depositaram em até 3 dias",
         raw: (row) => row.influencedRevenue,
         format: houseMoney,
         houseMoney: true,

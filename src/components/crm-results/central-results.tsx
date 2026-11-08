@@ -197,7 +197,7 @@ function Glossary() {
     ],
     [
       "Reativações após SMS",
-      "Em Prova e método. Jogador parado há 2 dias ou mais que depositou até 3 dias depois de um SMS, com ou sem clique. Conta voltas, não pessoas, e só o 1º depósito da volta. É outra régua: muitos jogadores estão nos dois números, então não some com o Recuperado pelo CRM.",
+      "Fica em Prova e método. Jogadores que estavam há 2 dias ou mais sem depositar (ou que nunca depositaram), receberam um SMS e voltaram a depositar em até 3 dias, mesmo sem clicar no link. O valor é tudo o que depositaram nesses 3 dias. Já inclui o Recuperado pelo CRM (quem clicou), por isso é sempre igual ou maior: não some os dois.",
     ],
     [
       "Teste de controle",

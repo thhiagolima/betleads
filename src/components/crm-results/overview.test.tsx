@@ -91,13 +91,17 @@ describe("Overview", () => {
   );
 
   it("keeps the funnel on one cohort: converted clicks, not the day's players", () => {
-    expect(text).toContain("4 cliques viraram depósito (5,7%, ainda pode subir)");
-    expect(text).toContain("8 jogadores voltaram pelo link");
+    expect(text).toContain(
+      "4 desses cliques já viraram depósito (5,7% · pode aumentar: quem clicou tem 7 dias para depositar)",
+    );
+    expect(text).toContain("8 jogadores parados voltaram a depositar hoje pelo link do SMS");
   });
 
   it("splits the deposits after the click into recovered and already playing", () => {
-    expect(text).toContain("Depositaram depois de clicar: 40 jogadores · R$ 7.429,00");
-    expect(text).toContain("Já estavam jogando R$ 5.231,68 (32)");
+    expect(text).toContain(
+      "Depositaram hoje depois de clicar em um SMS dos últimos 7 dias: 40 jogadores · R$ 7.429,00",
+    );
+    expect(text).toContain("Já estavam jogando (não contam): R$ 5.231,68 · 32 jogadores");
     expect(text).not.toContain("Fora da conta");
     expect(text).not.toContain("visão ampla");
   });
@@ -111,7 +115,7 @@ describe("Overview", () => {
   it("reads the return of a single day over the last 7 days", () => {
     expect(text).toContain("Cada R$ 1 em SMS trouxe");
     expect(text).toContain("R$ 0,63");
-    expect(text).toContain("últimos 7 dias (02/11 a 08/11)");
+    expect(text).toContain("conta dos últimos 7 dias (02/11 a 08/11)");
   });
 
   it("says when there is no control group to prove the effect", () => {

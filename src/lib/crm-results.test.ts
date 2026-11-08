@@ -144,6 +144,22 @@ describe("aggregateCrmResults", () => {
     expect(withPeriodPlayers(daily, null)).toBe(daily);
   });
 
+  it("uses distinct influenced people of the period when the database stores them", () => {
+    const daily = aggregateCrmResults([
+      row({ cost: 30, influenced_players: 3, influenced_revenue: 200 }),
+      row({ metric_date: "2026-10-11", cost: 30, influenced_players: 2, influenced_revenue: 100 }),
+    ]).totals;
+    expect(daily.influencedPlayers).toBe(5);
+    const totals = withPeriodPlayers(daily, { converted: 0, active: 0, influenced: 4 });
+    expect(totals).toMatchObject({ influencedPlayers: 4, influencedRevenue: 300 });
+    expect(totals.costPerRecovered).toBeCloseTo(15);
+    // Before rule_version 5 (no column) or before the backfill (nothing stored).
+    expect(withPeriodPlayers(daily, { converted: 0, active: 0 }).influencedPlayers).toBe(5);
+    expect(
+      withPeriodPlayers(daily, { converted: 0, active: 0, influenced: 0 }).influencedPlayers,
+    ).toBe(5);
+  });
+
   it("builds a daily series in date order", () => {
     expect(result.daily).toEqual([
       { date: "2026-10-10", cost: 18, influencedRevenue: 450, directRevenue: 0 },

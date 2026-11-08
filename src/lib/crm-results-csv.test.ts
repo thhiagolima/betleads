@@ -78,7 +78,7 @@ describe("crmResultsCsv", () => {
       .split("\n");
     const cells = (line: string): string[] => line.match(/"(?:[^"]|"")*"/g) ?? [];
     const cols = cells(ars[0]);
-    expect(cols).toContain('"primeiro_deposito_na_volta_ars"');
+    expect(cols).toContain('"depositado_3d_reativacoes_ars"');
     expect(cols).toContain('"custo_brl"');
     const roi = cols.indexOf('"retorno_reativacoes"');
     const total = cells(ars[1]);

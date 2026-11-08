@@ -58,7 +58,7 @@ export const GLOSSARY: GlossaryTerm[] = [
     id: "recuperados-visao-ampla",
     term: "Reativações após SMS",
     short:
-      "Jogador parado há 2 dias ou mais (ou sem 1º depósito) que voltou a depositar. Conta voltas, não pessoas, e o valor é o 1º depósito na volta. Outra régua: conta voltas até 3 dias depois de um SMS, com ou sem clique, e só o 1º depósito da volta.",
+      "Jogadores que estavam há 2 dias ou mais sem depositar (ou que nunca depositaram), receberam um SMS e voltaram a depositar em até 3 dias, mesmo sem clicar no link. O valor é tudo o que depositaram nesses 3 dias. Já inclui o Recuperado pelo CRM (quem clicou), por isso é sempre igual ou maior: não some os dois.",
   },
   {
     id: "ultimos-7-dias",
