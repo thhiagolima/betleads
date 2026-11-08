@@ -49,7 +49,7 @@ const COLUMNS: Array<{ key: SortKey; label: string; info?: string; align?: "left
   {
     key: "influencedPlayers",
     label: "Reativações após SMS",
-    info: "Parados há 2 dias ou mais no envio (ou cadastrados há 2 dias ou mais sem depositar) que voltaram a depositar até 7 dias depois de um SMS, com ou sem clique, e o depositado em 7 dias a partir da volta. Inclui o Recuperado pelo CRM e mais quem voltou sem clicar: não some os dois.",
+    info: "Jogadores que estavam há 2 dias ou mais sem depositar (ou que nunca depositaram), receberam um SMS e voltaram a depositar em até 3 dias, mesmo sem clicar no link. O valor é tudo o que depositaram nesses 3 dias. Já inclui o Recuperado pelo CRM (quem clicou), por isso é sempre igual ou maior: não some os dois.",
   },
 ];
 

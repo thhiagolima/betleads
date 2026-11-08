@@ -13,13 +13,13 @@
 --     dispatch, step and player state as direct_*. So influenced >= direct on
 --     every row, for players and value, by construction;
 --   * part 2, exposure, for players with no such deposit that day:
---       - return: an approved deposit with an accepted SMS in the 7 days
+--       - return: an approved deposit with an accepted SMS in the 3 days
 --         before it and no approved deposit from 48 h before that SMS until
 --         the deposit (the player was stopped AT THE SEND, the same 2 days as
 --         the click view; checked on the last SMS, last touch). A first
 --         deposit counts when it is a true FTD and the SMS went out 48 h+
 --         after sign-up (rule_version 4, unchanged);
---       - value: every approved deposit of that player in the 7 days from the
+--       - value: every approved deposit of that player in the 3 days from the
 --         return (the return included), booked on the day of each deposit,
 --         like direct_revenue;
 --   * influenced_players: one per player on the day of the return (part 1:
@@ -30,11 +30,16 @@
 --     crm_click_players_period can count distinct people over the period
 --     (new column influenced_players).
 --
+-- 3 days, not 7: with daily mass sends almost every depositor got an SMS in
+-- the week, so a 7-day exposure window credited nearly all the house's
+-- deposits to the CRM (trial 11-08: 459 players / R$ 248k in 2 days at one
+-- house against 13 / R$ 4k by click).
+--
 -- Cost (refresh_crm_results_day, per house and day): part 2 starts from the
 -- day's approved depositors (the deposits CTE that already existed), keeps
--- only those with an accepted SMS in the 14 days before (one probe each on
+-- only those with an accepted SMS in the 6 days before (one probe each on
 -- sms_send_logs_tenant_player_created_idx) and no click deposit that day,
--- and reads their approved deposits of the 9 previous days with one range
+-- and reads their approved deposits of the 5 previous days with one range
 -- scan each on deposits_tenant_player_created_idx. The previous-deposit
 -- probe and the last-SMS lookup, which used to run for every eligible
 -- deposit of the day, now run only for deposits with 48 h of silence before
@@ -185,8 +190,8 @@ begin
       and d.created_at >= v_from and d.created_at < v_to
   ),
   -- Part 2 candidates: depositors of the day not in part 1 who received an
-  -- accepted SMS in the 14 days before (a return of the last 7 days needs an
-  -- SMS in the 7 days before it).
+  -- accepted SMS in the 6 days before (a return of the last 3 days needs an
+  -- SMS in the 3 days before it).
   exposed_players as (
     select p.player_id
     from (select distinct d.player_id from deps d) p
@@ -195,11 +200,11 @@ begin
         select 1 from public.sms_send_logs s
         where s.tenant_id = _tenant and s.player_id = p.player_id
           and s.status in ('sent', 'delivered', 'enviado', 'entregue')
-          and s.created_at >= v_from - interval '14 days' and s.created_at < v_to
+          and s.created_at >= v_from - interval '6 days' and s.created_at < v_to
       )
   ),
-  -- Their approved deposits from 9 days before the day: a return of the last
-  -- 7 days needs 48 h without deposits before it, and those 2 extra days show
+  -- Their approved deposits from 5 days before the day: a return of the last
+  -- 3 days needs 48 h without deposits before it, and those 2 extra days show
   -- the deposit right before it.
   recent_deps as (
     select r.id, r.player_id, r.created_at,
@@ -207,7 +212,7 @@ begin
     from exposed_players p
     join public.deposits r
       on r.tenant_id = _tenant and r.player_id = p.player_id and r.status = 'aprovado'
-     and r.created_at >= v_from - interval '9 days' and r.created_at < v_to
+     and r.created_at >= v_from - interval '5 days' and r.created_at < v_to
   ),
   -- Deposits with 48 h of silence before them: the only ones that can be a
   -- return (stopped at an SMS sent before them).
@@ -221,12 +226,12 @@ begin
       where p.tenant_id = _tenant and p.player_id = r.player_id
         and p.status = 'aprovado' and p.created_at < r.created_at
     ) pv
-    where r.created_at > v_from - interval '7 days'
+    where r.created_at > v_from - interval '3 days'
       and (r.prev_in_window is null or r.prev_in_window < r.created_at - interval '48 hours')
       -- A first deposit in our history of an older depositor is not a return.
       and (pv.prev_at is not null or pl.ftd_em is null or pl.ftd_em >= r.created_at - interval '10 minutes')
   ),
-  -- Last accepted SMS in the 7 days before the return, sent while the player
+  -- Last accepted SMS in the 3 days before the return, sent while the player
   -- was stopped: no deposit in the 48 h before it (nor after it, as the
   -- return is the next deposit). A first deposit needs the SMS 48 h+ after
   -- sign-up. The origin and state belong to that SMS.
@@ -241,21 +246,21 @@ begin
       where s.tenant_id = _tenant and s.player_id = r.player_id
         and s.status in ('sent', 'delivered', 'enviado', 'entregue')
         and s.created_at < r.created_at
-        and s.created_at >= r.created_at - interval '7 days'
+        and s.created_at >= r.created_at - interval '3 days'
         and (case when r.prev_at is null then s.created_at >= r.registered_at + interval '48 hours'
                   else s.created_at > r.prev_at + interval '48 hours' end)
       order by s.created_at desc
       limit 1
     ) ls
   ),
-  -- Deposits of the day within 7 days of a credited return (the latest one).
+  -- Deposits of the day within 3 days of a credited return (the latest one).
   exposed_deps as (
     select distinct on (d.id) d.id, d.player_id, d.valor, d.id = c.return_id is_return,
            c.trigger_name, c.idempotency_key, c.campaign_id, c.player_state
     from deps d
     join credited c
       on c.player_id = d.player_id
-     and d.created_at >= c.returned_at and d.created_at < c.returned_at + interval '7 days'
+     and d.created_at >= c.returned_at and d.created_at < c.returned_at + interval '3 days'
     order by d.id, c.returned_at desc
   ),
   exposure_agg as (
