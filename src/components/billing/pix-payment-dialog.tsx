@@ -20,6 +20,7 @@ import {
   type TopupStatusSnapshot,
 } from "@/lib/billing/topup";
 import { safeHttpsUrl, safePixImageSrc } from "@/lib/billing/pix-display";
+import { Term } from "@/components/help/term";
 
 /** The shape every Pix charge payload shares (credit top-up, invoice...). */
 export type PixChargePayload = {
@@ -236,7 +237,9 @@ export function PixPaymentDialog({
                 )}
                 {charge.emv && (
                   <div className="space-y-2">
-                    <Label htmlFor="pix-payment-emv">Pix Copia e Cola</Label>
+                    <Label htmlFor="pix-payment-emv">
+                      <Term id="pix-copia-cola">Pix Copia e Cola</Term>
+                    </Label>
                     <div className="flex gap-2">
                       <Input
                         id="pix-payment-emv"

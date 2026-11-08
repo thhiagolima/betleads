@@ -11,6 +11,7 @@ import {
 } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import {
   Table,
   TableBody,
@@ -101,7 +102,9 @@ export function CurrentPricesCard({
             <TableRow>
               <TableHead>Canal</TableHead>
               <TableHead className="text-right">Preço unitário</TableHead>
-              <TableHead className="text-right">Franquia mensal</TableHead>
+              <TableHead className="text-right">
+                <Term id="franquia-mensal">Franquia mensal</Term>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
