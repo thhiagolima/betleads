@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { tourAnchor } from "@/help/anchor";
 import { getMyMcpStatus, revokeMyConnection } from "@/lib/mcp/mcp.functions";
 
 export const Route = createFileRoute("/mcp")({
@@ -83,7 +84,7 @@ function McpPage() {
         subtitle={`Nível de acesso: ${LEVEL_LABEL[data.level]}.`}
       />
 
-      <Card>
+      <Card {...tourAnchor("mcp.url.card")}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Bot className="h-5 w-5" /> URL de conexão
@@ -99,6 +100,7 @@ function McpPage() {
             <Button
               variant="outline"
               className="gap-2"
+              {...tourAnchor("mcp.url.copiar")}
               onClick={() => {
                 navigator.clipboard.writeText(data.mcpUrl);
                 toast.success("URL copiada");
@@ -110,7 +112,7 @@ function McpPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card {...tourAnchor("mcp.claudeai.card")}>
         <CardHeader>
           <CardTitle>claude.ai</CardTitle>
         </CardHeader>
@@ -119,7 +121,7 @@ function McpPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card {...tourAnchor("mcp.desktop.card")}>
         <CardHeader>
           <CardTitle>Claude Desktop</CardTitle>
         </CardHeader>
@@ -129,7 +131,7 @@ function McpPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card {...tourAnchor("mcp.code.card")}>
         <CardHeader>
           <CardTitle>Claude Code</CardTitle>
         </CardHeader>
@@ -143,6 +145,7 @@ function McpPage() {
             <Button
               variant="outline"
               className="gap-2"
+              {...tourAnchor("mcp.code.copiar")}
               onClick={() => {
                 navigator.clipboard.writeText(claudeCodeCommand);
                 toast.success("Comando copiado");
@@ -154,7 +157,7 @@ function McpPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card {...tourAnchor("mcp.conexoes.card")}>
         <CardHeader>
           <CardTitle>Conexões ativas</CardTitle>
         </CardHeader>
@@ -162,7 +165,7 @@ function McpPage() {
           {data.connections.length === 0 && (
             <p className="text-sm text-muted-foreground">Nenhuma conexão ativa.</p>
           )}
-          {data.connections.map((conn) => (
+          {data.connections.map((conn, index) => (
             <div key={conn.id} className="flex items-center justify-between gap-2 border-b border-border/40 pb-2 last:border-0 last:pb-0">
               <div>
                 <div className="text-sm font-medium">{conn.clientName}</div>
@@ -174,6 +177,7 @@ function McpPage() {
                 type="button"
                 size="sm"
                 variant="outline"
+                {...(index === 0 ? tourAnchor("mcp.conexoes.desconectar") : {})}
                 onClick={() => {
                   void revokeFn({ data: { connectionId: conn.id } }).then(() => {
                     toast.success("Conexão desconectada");

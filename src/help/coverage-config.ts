@@ -55,10 +55,6 @@ export const EXCLUDED_ROUTES: string[] = [
  * every phase-1 route — Tasks 9-15 remove each one as its article ships.
  */
 export const PENDING_ROUTES: string[] = [
-  // --- Fase 3 ---
-  "/experts",
-  "/mcp",
-
   // --- Fase 4 ---
   "/expert",
   "/expert/",

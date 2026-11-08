@@ -428,4 +428,22 @@ export const GLOSSARY: GlossaryTerm[] = [
     long:
       "Ao chegar perto do teto, a barra de uso avisa (\"X% do teto\"); ao atingir, os novos envios do expert ficam bloqueados (\"Envios bloqueados\") até o mês virar ou o admin aumentar o teto em Editar. Uma campanha já em andamento pode ser pausada automaticamente pelo teto (\"Pausada pelo teto\") se o saldo acabar no meio do envio.",
   },
+
+  // --- Experts e Conectar ao Claude (fase 3, Task 6) ---
+  {
+    id: "id-de-afiliado",
+    term: "ID de afiliado",
+    short:
+      "O código que a plataforma de afiliação coloca no link de quem trouxe o lead. Um expert \"Restrito\" só vê os leads com os IDs de afiliado vinculados a ele.",
+    long:
+      "Um lead chega com um ID de afiliado quando se cadastra por um link que leva esse código (ex.: ?aff=queiroz). O admin vincula um ou mais IDs a cada expert em \"Novo expert\"/\"Editar expert\"; o card \"IDs de afiliado sem expert\", na tela Experts, lista os que já têm leads mas ainda não foram vinculados a ninguém.",
+  },
+  {
+    id: "mcp",
+    term: "MCP",
+    short:
+      "Sigla de \"Model Context Protocol\": o protocolo que deixa o Claude (claude.ai, Claude Desktop ou Claude Code) ler e, com acesso de escrita, agir sobre os dados financeiros desta casa, através da URL mostrada em \"Conectar ao Claude\".",
+    long:
+      "O nível de acesso (leitura, ou leitura e escrita) é concedido pelo super admin por pessoa, fora desta tela. Sem nenhum nível concedido, \"Conectar ao Claude\" nem aparece no menu.",
+  },
 ];
