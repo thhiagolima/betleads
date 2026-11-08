@@ -80,6 +80,43 @@ export function deltaView({
   return { text, tone };
 }
 
+export type ProofSeal = { text: string; tone: "success" | "danger" | "muted" };
+
+/**
+ * One line on the overview saying whether the control group proves the CRM
+ * effect: attribution shows who came back after the SMS, only the holdout
+ * shows who came back because of it.
+ */
+export function proofSeal(holdout: Data["holdout"], pendingTests: number): ProofSeal {
+  const decided = holdout.filter((row) => row.sufficient && row.significant && row.lift != null);
+  const proven = decided.filter((row) => (row.lift ?? 0) > 0);
+  const worse = decided.filter((row) => (row.lift ?? 0) < 0);
+  const journeys = (count: number) => (count === 1 ? "1 jornada" : `${count} jornadas`);
+  if (proven.length) {
+    const extra = Math.round(proven.reduce((sum, row) => sum + (row.incrementalPlayers ?? 0), 0));
+    return {
+      text: `Efeito comprovado pelo grupo de controle em ${journeys(proven.length)}${
+        extra > 0 ? `: ${extra.toLocaleString("pt-BR")} jogadores a mais do que sem SMS` : ""
+      }.`,
+      tone: "success",
+    };
+  }
+  if (worse.length)
+    return {
+      text: `Grupo de controle: ${journeys(worse.length)} com resultado pior que não enviar.`,
+      tone: "danger",
+    };
+  if (holdout.length || pendingTests)
+    return {
+      text: "Grupo de controle em andamento: ainda sem diferença comprovada.",
+      tone: "muted",
+    };
+  return {
+    text: "Sem prova de efeito ainda: ative o grupo de controle nas jornadas.",
+    tone: "muted",
+  };
+}
+
 /** Origin with real spend and no conversion at all. */
 export const isWaste = (source: CrmSource) =>
   source.cost >= 50 && source.directPlayers === 0 && source.influencedPlayers === 0;

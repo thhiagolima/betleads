@@ -110,6 +110,7 @@ export function CentralResults() {
               <Overview
                 data={query.data}
                 onOpenOrigin={(name) => setSearch({ aba: "origens", busca: name })}
+                onOpenProof={() => setSearch({ aba: "controle" })}
               />
             )}
             {tab === "origens" && (

@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronRight, Clock, TrendingUp } from "lucide-react";
+import { AlertTriangle, ChevronRight, Clock, ShieldCheck, TrendingUp } from "lucide-react";
 import { useState } from "react";
 import {
   Bar,
@@ -16,6 +16,7 @@ import { buildRecommendations } from "@/lib/crm-recommendations";
 import { isComparable } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import {
   CHART_COLORS,
   chartAxisProps,
@@ -37,6 +38,7 @@ import {
   pct,
   perReal,
   periodLabel,
+  proofSeal,
 } from "./format";
 import { Delta, EmptyCard, InfoTip, RoiValue } from "./shared";
 
@@ -52,9 +54,11 @@ const ROLLING_INFO =
 export function Overview({
   data,
   onOpenOrigin,
+  onOpenProof,
 }: {
   data: Data;
   onOpenOrigin: (name: string) => void;
+  onOpenProof: () => void;
 }) {
   const [showAllRecommendations, setShowAllRecommendations] = useState(false);
   const { currency, money } = useMoney();
@@ -83,6 +87,7 @@ export function Overview({
   const afterClickPlayers = totals.directPlayers + totals.directActivePlayers;
   const afterClickRevenue = totals.directRevenue + totals.directActiveRevenue;
   const recoveredShare = afterClickRevenue > 0 ? totals.directRevenue / afterClickRevenue : 0;
+  const seal = proofSeal(data.holdout, data.holdoutSetup.length);
   const recommendations = buildRecommendations(data, data.holdout);
 
   return (
@@ -246,6 +251,30 @@ export function Overview({
             )}
           </CardContent>
         </Card>
+
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+          <ShieldCheck
+            className={cn(
+              "h-3.5 w-3.5 shrink-0",
+              seal.tone === "success"
+                ? "text-success"
+                : seal.tone === "danger"
+                  ? "text-danger"
+                  : "text-muted-foreground",
+            )}
+            aria-hidden="true"
+          />
+          <span className={seal.tone === "muted" ? "text-muted-foreground" : undefined}>
+            {seal.text}
+          </span>
+          <button
+            type="button"
+            className="font-medium text-primary underline-offset-2 hover:underline"
+            onClick={onOpenProof}
+          >
+            Ver prova e método
+          </button>
+        </p>
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">

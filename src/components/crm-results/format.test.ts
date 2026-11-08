@@ -8,6 +8,8 @@ import {
   isCrossCurrency,
   money,
   perReal,
+  proofSeal,
+  type Data,
 } from "./format";
 
 // Intl usa espaço não separável entre símbolo e valor; normaliza para comparar.
@@ -75,5 +77,41 @@ describe("deltaView", () => {
 
   it("returns nothing without a previous value", () => {
     expect(deltaView({ current: 1, previous: null, comparable: true, formatDiff })).toBeNull();
+  });
+});
+
+describe("proofSeal", () => {
+  const row = (overrides: Record<string, unknown>) =>
+    ({
+      sufficient: true,
+      significant: true,
+      lift: 0.05,
+      incrementalPlayers: 12.4,
+      ...overrides,
+    }) as unknown as Data["holdout"][number];
+
+  it("claims an effect only for sufficient, significant positive tests", () => {
+    expect(proofSeal([row({}), row({ incrementalPlayers: 3 })], 0)).toEqual({
+      text: "Efeito comprovado pelo grupo de controle em 2 jornadas: 15 jogadores a mais do que sem SMS.",
+      tone: "success",
+    });
+    expect(proofSeal([row({ sufficient: false })], 0).tone).toBe("muted");
+    expect(proofSeal([row({ significant: false })], 0).tone).toBe("muted");
+  });
+
+  it("flags journeys that do worse than not sending", () => {
+    expect(proofSeal([row({ lift: -0.02 })], 0)).toEqual({
+      text: "Grupo de controle: 1 jornada com resultado pior que não enviar.",
+      tone: "danger",
+    });
+  });
+
+  it("tells running tests apart from no control group at all", () => {
+    expect(proofSeal([], 2).text).toBe(
+      "Grupo de controle em andamento: ainda sem diferença comprovada.",
+    );
+    expect(proofSeal([], 0).text).toBe(
+      "Sem prova de efeito ainda: ative o grupo de controle nas jornadas.",
+    );
   });
 });
