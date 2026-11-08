@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Clock, MoonStar, SunMedium } from "lucide-react";
 import { toast } from "sonner";
 import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 
 const WEEKDAYS = [
   { v: 1, l: "Seg" },
@@ -133,15 +134,31 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
       actions={
         editing ? (
           <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setEditing(false)}
+              {...tourAnchor("configuracoes.janela.cancelar")}
+            >
               Cancelar
             </Button>
-            <Button size="sm" onClick={() => mut.mutate()} disabled={mut.isPending}>
+            <Button
+              size="sm"
+              onClick={() => mut.mutate()}
+              disabled={mut.isPending}
+              {...tourAnchor("configuracoes.janela.salvar")}
+            >
               {mut.isPending ? "Salvando…" : "Salvar"}
             </Button>
           </div>
         ) : (
-          <Button variant="outline" size="sm" onClick={openEdit} disabled={isLoading}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openEdit}
+            disabled={isLoading}
+            {...tourAnchor("configuracoes.janela.configurar")}
+          >
             Configurar
           </Button>
         )
@@ -159,6 +176,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
                 value={start}
                 onChange={(e) => setStart(e.target.value)}
                 className="mt-2 bg-background/60"
+                {...tourAnchor("configuracoes.janela.inicio")}
               />
             </div>
             <div>
@@ -168,22 +186,26 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
                 value={end}
                 onChange={(e) => setEnd(e.target.value)}
                 className="mt-2 bg-background/60"
+                {...tourAnchor("configuracoes.janela.fim")}
               />
             </div>
           </div>
           <div>
-            <Label className="text-label text-muted-foreground">Fuso horário</Label>
+            <Label className="text-label text-muted-foreground">
+              <Term id="fuso-horario">Fuso horário</Term>
+            </Label>
             <Input
               value={tz}
               onChange={(e) => setTz(e.target.value)}
               className="mt-2 bg-background/60"
               placeholder="America/Sao_Paulo"
+              {...tourAnchor("configuracoes.janela.fuso")}
             />
           </div>
           <div>
             <Label className="text-label text-muted-foreground mb-2 block">Dias permitidos</Label>
             <div className="flex flex-wrap gap-1.5">
-              {WEEKDAYS.map((d) => {
+              {WEEKDAYS.map((d, i) => {
                 const active = days.includes(d.v);
                 return (
                   <button
@@ -198,6 +220,7 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
                         ? "border-primary/50 bg-primary/15 text-primary"
                         : "border-border/40 bg-background/40 text-muted-foreground hover:border-primary/30")
                     }
+                    {...(i === 0 ? tourAnchor("configuracoes.janela.dias") : {})}
                   >
                     {d.l}
                   </button>
@@ -210,11 +233,15 @@ export function SendWindowCard({ compact = false }: { compact?: boolean }) {
               <p className="text-sm font-medium">Janela ativa</p>
               <p className="text-xs text-muted-foreground">Desligado = envia 24h, todos os dias.</p>
             </div>
-            <Switch checked={enabled} onCheckedChange={setEnabled} />
+            <Switch
+              checked={enabled}
+              onCheckedChange={setEnabled}
+              {...tourAnchor("configuracoes.janela.ativa")}
+            />
           </div>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4" {...tourAnchor("configuracoes.janela.status")}>
           <div className="flex items-center gap-2">
             <span
               className={

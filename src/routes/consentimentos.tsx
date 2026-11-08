@@ -31,6 +31,8 @@ import {
   saveVoiceContactPolicy,
 } from "@/lib/consent.functions";
 import { useEnabledChannels } from "@/hooks/use-enabled-channels";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 
 export const Route = createFileRoute("/consentimentos")({ component: ConsentPage });
 
@@ -240,6 +242,7 @@ function ConsentPage() {
             size="sm"
             onClick={() => exportCsv.mutate()}
             disabled={exportCsv.isPending || (!debouncedSearch && total === 0)}
+            {...tourAnchor("consentimentos.cabecalho.exportar")}
           >
             <Download className="mr-2 size-4" aria-hidden="true" />
             {exportCsv.isPending ? "Exportando…" : "Exportar CSV"}
@@ -247,12 +250,14 @@ function ConsentPage() {
         }
       />
 
-      <PageTabs
-        value={view}
-        onValueChange={setView}
-        label="Seções de consentimentos"
-        items={visibleViews}
-      />
+      <div {...tourAnchor("consentimentos.abas")}>
+        <PageTabs
+          value={view}
+          onValueChange={setView}
+          label="Seções de consentimentos"
+          items={visibleViews}
+        />
+      </div>
 
       <div role="tabpanel" aria-labelledby={`tab-${view}`} className="space-y-4">
         {view === "base" && (
@@ -270,6 +275,7 @@ function ConsentPage() {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por telefone ou e-mail"
               aria-label="Buscar por telefone ou e-mail"
+              {...tourAnchor("consentimentos.base.buscar")}
             />
             {total > items.length && (
               <p className="mb-3 text-meta text-muted-foreground">
@@ -332,7 +338,10 @@ function ConsentPage() {
                     </li>
                   ))}
                 </ul>
-                <div className="hidden overflow-x-auto md:block">
+                <div
+                  className="hidden overflow-x-auto md:block"
+                  {...tourAnchor("consentimentos.base.lista")}
+                >
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -381,6 +390,7 @@ function ConsentPage() {
                     className={select}
                     value={channel}
                     onChange={(e) => setChannel(e.target.value as Channel)}
+                    {...tourAnchor("consentimentos.registrar.canal")}
                   >
                     {isEnabled("sms") && <option value="sms">SMS</option>}
                     {isEnabled("email") && <option value="email">E-mail</option>}
@@ -395,6 +405,7 @@ function ConsentPage() {
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
                     placeholder={channel === "email" ? "cliente@exemplo.com" : "11999999999"}
+                    {...tourAnchor("consentimentos.registrar.destinatario")}
                   />
                 </div>
                 <div>
@@ -404,19 +415,23 @@ function ConsentPage() {
                     className={select}
                     value={status}
                     onChange={(e) => setStatus(e.target.value as Status)}
+                    {...tourAnchor("consentimentos.registrar.decisao")}
                   >
                     <option value="revoked">Bloquear</option>
                     <option value="granted">Autorizar</option>
                   </select>
                 </div>
                 <div>
-                  <Label htmlFor="consent-basis">Base legal (opcional)</Label>
+                  <Label htmlFor="consent-basis">
+                    <Term id="lgpd">Base legal</Term> (opcional)
+                  </Label>
                   <Input
                     id="consent-basis"
                     className="mt-2"
                     value={legalBasis}
                     onChange={(e) => setLegalBasis(e.target.value)}
                     placeholder="Consentimento"
+                    {...tourAnchor("consentimentos.registrar.base-legal")}
                   />
                 </div>
                 <div>
@@ -426,6 +441,7 @@ function ConsentPage() {
                     className="mt-2"
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
+                    {...tourAnchor("consentimentos.registrar.motivo")}
                   />
                 </div>
               </div>
@@ -433,6 +449,7 @@ function ConsentPage() {
                 className="mt-4"
                 onClick={() => save.mutate()}
                 disabled={save.isPending || subject.trim().length < 3 || !reason.trim()}
+                {...tourAnchor("consentimentos.registrar.salvar")}
               >
                 {save.isPending ? "Salvando…" : "Salvar decisão"}
               </Button>
@@ -447,12 +464,14 @@ function ConsentPage() {
                 value={csv}
                 onChange={(e) => setCsv(e.target.value)}
                 aria-label="Conteúdo do CSV"
+                {...tourAnchor("consentimentos.importar.csv")}
               />
               <Button
                 className="mt-3"
                 variant="secondary"
                 onClick={() => importCsv.mutate()}
                 disabled={importCsv.isPending}
+                {...tourAnchor("consentimentos.importar.enviar")}
               >
                 <Upload className="mr-2 size-4" aria-hidden="true" />
                 {importCsv.isPending ? "Importando…" : "Importar"}
@@ -468,7 +487,7 @@ function ConsentPage() {
             ) : audit.length === 0 ? (
               <EmptyState title="Nenhuma alteração ainda" />
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto" {...tourAnchor("consentimentos.historico.lista")}>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -511,7 +530,10 @@ function ConsentPage() {
             description="Quantas vezes o mesmo número pode receber ligação. A janela de envio da casa vale sempre, mesmo com os limites desligados."
           >
             <div className="grid gap-4 md:grid-cols-3">
-              <label className="flex items-center gap-3 rounded-lg border border-border p-3 text-body">
+              <label
+                className="flex items-center gap-3 rounded-lg border border-border p-3 text-body"
+                {...tourAnchor("consentimentos.voz.aplicar")}
+              >
                 <input
                   type="checkbox"
                   checked={voicePolicyEnabled}
@@ -529,6 +551,7 @@ function ConsentPage() {
                   max={720}
                   value={cooldownHours}
                   onChange={(e) => setCooldownHours(Number(e.target.value))}
+                  {...tourAnchor("consentimentos.voz.intervalo")}
                 />
               </div>
               <div>
@@ -541,6 +564,7 @@ function ConsentPage() {
                   max={100}
                   value={rolling24hLimit}
                   onChange={(e) => setRolling24hLimit(Number(e.target.value))}
+                  {...tourAnchor("consentimentos.voz.limite")}
                 />
               </div>
             </div>
@@ -549,6 +573,7 @@ function ConsentPage() {
               variant="secondary"
               onClick={() => savePolicy.mutate()}
               disabled={savePolicy.isPending}
+              {...tourAnchor("consentimentos.voz.salvar")}
             >
               {savePolicy.isPending ? "Salvando…" : "Salvar limites"}
             </Button>

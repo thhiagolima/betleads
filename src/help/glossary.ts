@@ -275,4 +275,22 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "Um reforço que deixa a voz gerada mais parecida com a voz original e mais clara ao telefone, ao custo de um processamento um pouco mais lento para gerar o áudio.",
   },
+
+  // --- New terms (fase 2, Task 6) ---
+  {
+    id: "lgpd",
+    term: "LGPD",
+    short:
+      "Sigla de \"Lei Geral de Proteção de Dados\", a lei brasileira sobre uso de dados pessoais. A \"Base legal\" de uma decisão de consentimento é o motivo, previsto na lei, que autoriza a casa a usar aquele contato — por exemplo \"Consentimento\" (o titular autorizou) ou \"Execução de contrato\" (é preciso para prestar o serviço).",
+    long:
+      "O campo é só um texto livre, para registro — o CRM não valida nem restringe o que você escrever. Se não souber o que colocar, deixe em branco ou escreva \"Consentimento\", que é a base mais comum para contato de marketing.",
+  },
+  {
+    id: "fuso-horario",
+    term: "Fuso horário",
+    short:
+      "O fuso em que os horários de início e fim da janela de envio são interpretados, no formato Continente/Cidade (ex.: America/Sao_Paulo). Mude só se a casa opera fora do horário de Brasília.",
+    long:
+      "Exemplos comuns no Brasil: America/Sao_Paulo (horário de Brasília, usado por quase todas as casas), America/Manaus (Amazonas e Rondônia), America/Rio_Branco (Acre e parte do Amazonas) e America/Noronha (Fernando de Noronha). O campo aceita qualquer texto — um nome errado não mostra erro na hora de salvar, mas os horários calculados ficam errados até corrigir. Digite exatamente como nos exemplos, sem espaços.",
+  },
 ];
