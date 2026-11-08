@@ -64,7 +64,6 @@ export const PENDING_ROUTES: string[] = [
   "/gamificacao",
   "/regras",
   "/plano-e-creditos",
-  "/ligacoes",
   "/consentimentos",
   "/configuracoes",
   "/tenants",

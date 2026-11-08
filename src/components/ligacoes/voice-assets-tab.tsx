@@ -17,6 +17,7 @@ import {
   listJourneyVoiceAssets,
   updateJourneyVoiceAsset,
 } from "@/lib/journey-voice-assets.functions";
+import { tourAnchor } from "@/help/anchor";
 
 type VoiceAsset = {
   id: string;
@@ -143,13 +144,13 @@ export function VoiceAssetsTab() {
               Ativos fixos reutilizáveis em jornadas e campanhas de voz.
             </p>
           </div>
-          <Button onClick={() => setUploadOpen(true)}>
+          <Button onClick={() => setUploadOpen(true)} {...tourAnchor("ligacoes.audios.novo")}>
             <Plus className="mr-2 size-4" /> Novo áudio
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-64 flex-1">
+            <div className="relative min-w-64 flex-1" {...tourAnchor("ligacoes.audios.busca")}>
               <Search className="absolute left-3 top-3 size-4 text-muted-foreground" />
               <Input
                 className="pl-9"
@@ -158,6 +159,7 @@ export function VoiceAssetsTab() {
                 placeholder="Buscar por nome, tag, idioma ou origem"
               />
             </div>
+            <div className="flex flex-wrap items-center gap-2" {...tourAnchor("ligacoes.audios.filtro")}>
             {(["active", "archived", "all"] as const).map((value) => (
               <Button
                 key={value}
@@ -168,6 +170,7 @@ export function VoiceAssetsTab() {
                 {value === "active" ? "Ativos" : value === "archived" ? "Arquivados" : "Todos"}
               </Button>
             ))}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -187,8 +190,12 @@ export function VoiceAssetsTab() {
         </Card>
       )}
 
-      {rows.map((asset) => (
-        <Card key={asset.id} className={asset.is_archived ? "opacity-60" : ""}>
+      {rows.map((asset, i) => (
+        <Card
+          key={asset.id}
+          className={asset.is_archived ? "opacity-60" : ""}
+          {...(i === 0 ? tourAnchor("ligacoes.audios.cartao") : {})}
+        >
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
             <div>
               <div className="flex flex-wrap items-center gap-2">

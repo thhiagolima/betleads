@@ -17,6 +17,7 @@ import {
 import { listCallScripts, deleteCallScript } from "@/lib/calls.functions";
 import { ScriptFormDialog } from "./script-form-dialog";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { tourAnchor } from "@/help/anchor";
 
 const SCRIPT_STATUS_LABEL: Record<string, string> = {
   active: "Ativo",
@@ -67,6 +68,7 @@ export function ScriptsTab() {
             setEditing(null);
             setDialogOpen(true);
           }}
+          {...tourAnchor("ligacoes.roteiros.novo")}
         >
           <Plus className="mr-2 h-4 w-4" /> Novo roteiro
         </Button>
@@ -91,8 +93,8 @@ export function ScriptsTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {scripts.map((s: any) => (
-                <TableRow key={s.id}>
+              {scripts.map((s: any, i: number) => (
+                <TableRow key={s.id} {...(i === 0 ? tourAnchor("ligacoes.roteiros.tabela") : {})}>
                   <TableCell className="font-medium">{s.name}</TableCell>
                   <TableCell>v{s.version ?? 1}</TableCell>
                   <TableCell>

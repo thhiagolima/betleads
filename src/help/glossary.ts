@@ -244,4 +244,35 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "Sigla de \"pontos percentuais\": a diferença entre duas taxas (ex.: de 20% para 21% é +1,0 p.p.), não a variação relativa entre elas. Usado na variação da Conversão cadastro → FTD, que já é uma taxa.",
   },
+
+  // --- Ligações / Voz (fase 2, Task 5) ---
+  {
+    id: "estabilidade-voz",
+    term: "Estabilidade",
+    short:
+      "Controla o quanto a voz gerada varia a entonação. Baixa deixa a fala mais expressiva (e mais imprevisível); alta deixa a fala mais uniforme e monótona, mas mais consistente entre uma ligação e outra.",
+  },
+  {
+    id: "similaridade-voz",
+    term: "Similaridade",
+    short:
+      "O quanto a voz gerada tenta se manter fiel ao timbre original da voz escolhida. Alta deixa o som mais parecido com a voz original; valores muito altos podem deixar a fala com pequenos ruídos ou artefatos.",
+  },
+  {
+    id: "estilo-voz",
+    term: "Estilo",
+    short:
+      "O quanto a voz exagera a expressão/emoção ao falar. Baixo deixa a fala mais neutra e previsível; alto deixa a fala mais dramática ou exagerada, mas pode ficar menos estável.",
+  },
+  {
+    id: "velocidade-voz",
+    term: "Velocidade",
+    short: "A velocidade da fala: menor que 1 fala mais devagar, maior que 1 fala mais rápido.",
+  },
+  {
+    id: "speaker-boost",
+    term: "Speaker boost",
+    short:
+      "Um reforço que deixa a voz gerada mais parecida com a voz original e mais clara ao telefone, ao custo de um processamento um pouco mais lento para gerar o áudio.",
+  },
 ];

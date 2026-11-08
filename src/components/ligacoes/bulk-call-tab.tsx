@@ -31,6 +31,7 @@ import { listCallScripts, listPlayersForCalls, bulkDispatchCalls } from "@/lib/c
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { num } from "@/lib/format";
+import { tourAnchor } from "@/help/anchor";
 
 interface Target {
   key: string;
@@ -233,7 +234,7 @@ export function BulkCallTab() {
                   value={audioMode}
                   onValueChange={(value: "tts" | "fixed") => setAudioMode(value)}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger {...tourAnchor("ligacoes.massa.fonte")}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -246,7 +247,7 @@ export function BulkCallTab() {
                 <Label>{audioMode === "tts" ? "Roteiro" : "Áudio reutilizável"}</Label>
                 {audioMode === "tts" ? (
                   <Select value={scriptId} onValueChange={setScriptId}>
-                    <SelectTrigger>
+                    <SelectTrigger {...tourAnchor("ligacoes.massa.selecao")}>
                       <SelectValue placeholder="Selecione um roteiro..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -264,7 +265,7 @@ export function BulkCallTab() {
                   </Select>
                 ) : (
                   <Select value={assetId} onValueChange={setAssetId}>
-                    <SelectTrigger>
+                    <SelectTrigger {...tourAnchor("ligacoes.massa.selecao")}>
                       <SelectValue placeholder="Selecione um áudio..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -295,7 +296,7 @@ export function BulkCallTab() {
 
             <Separator />
 
-            <div className="space-y-2">
+            <div className="space-y-2" {...tourAnchor("ligacoes.massa.busca")}>
               <Label className="flex items-center gap-2">
                 <Search className="h-4 w-4" /> Buscar jogadores
               </Label>
@@ -342,7 +343,7 @@ export function BulkCallTab() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1.5" {...tourAnchor("ligacoes.massa.avulsos")}>
               <Label>Ou cole números avulsos</Label>
               <Textarea
                 rows={3}
@@ -358,7 +359,7 @@ export function BulkCallTab() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card {...tourAnchor("ligacoes.massa.destinatarios")}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
               <Users className="h-4 w-4" /> Destinatários ({allTargets.length})
@@ -399,7 +400,7 @@ export function BulkCallTab() {
       </div>
 
       <div className="space-y-4">
-        <Card>
+        <Card {...tourAnchor("ligacoes.massa.resumo")}>
           <CardHeader className="pb-3">
             <CardTitle>Resumo do disparo</CardTitle>
           </CardHeader>
@@ -412,6 +413,7 @@ export function BulkCallTab() {
               className="w-full gap-2"
               onClick={() => void confirmDispatch()}
               disabled={!canSend}
+              {...tourAnchor("ligacoes.massa.disparar")}
             >
               {bulkMut.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

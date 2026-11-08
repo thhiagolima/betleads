@@ -14,6 +14,7 @@ import { getCallsDashboard } from "@/lib/calls.functions";
 import { CHART_COLORS } from "@/lib/chart-theme";
 import { num, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { tourAnchor } from "@/help/anchor";
 
 import { HISTORY_STATUS_LABEL } from "./shared";
 
@@ -99,6 +100,7 @@ export function DashboardTab() {
       }
     >
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <div {...tourAnchor("ligacoes.visao.top-roteiros")}>
         <ChannelBlock
           title="Top roteiros"
           description="Os mais usados no período e quantos atenderam."
@@ -128,7 +130,9 @@ export function DashboardTab() {
             </ul>
           )}
         </ChannelBlock>
+        </div>
 
+        <div {...tourAnchor("ligacoes.visao.recentes")}>
         <ChannelBlock title="Últimas ligações" description="As 10 mais recentes do período.">
           {recent.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
@@ -164,6 +168,7 @@ export function DashboardTab() {
             </ul>
           )}
         </ChannelBlock>
+        </div>
       </div>
     </ChannelOverview>
   );

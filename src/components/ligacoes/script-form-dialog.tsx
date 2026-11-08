@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -27,6 +27,8 @@ import { useTenantCurrency } from "@/hooks/use-tenant-currency";
 import { saveCallScript } from "@/lib/calls.functions";
 import { VariablePicker } from "./variable-picker";
 import { FAKE_LEAD_CLIENT, renderScriptClient, VOICE_OPTIONS } from "./shared";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 
 interface Props {
   open: boolean;
@@ -217,27 +219,30 @@ export function ScriptFormDialog({
             <p className="text-sm leading-relaxed text-foreground">{preview}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 rounded-lg border border-border p-4">
+          <div
+            className="grid grid-cols-2 gap-4 rounded-lg border border-border p-4"
+            {...tourAnchor("ligacoes.roteiros.voz")}
+          >
             <div className="col-span-2">
               <p className="text-sm font-medium">Ajustes de voz</p>
             </div>
             <SliderRow
-              label="Estabilidade"
+              label={<Term id="estabilidade-voz">Estabilidade</Term>}
               value={form.stability}
               onChange={(v) => setForm({ ...form, stability: v })}
             />
             <SliderRow
-              label="Similaridade"
+              label={<Term id="similaridade-voz">Similaridade</Term>}
               value={form.similarity_boost}
               onChange={(v) => setForm({ ...form, similarity_boost: v })}
             />
             <SliderRow
-              label="Estilo"
+              label={<Term id="estilo-voz">Estilo</Term>}
               value={form.style}
               onChange={(v) => setForm({ ...form, style: v })}
             />
             <SliderRow
-              label="Velocidade"
+              label={<Term id="velocidade-voz">Velocidade</Term>}
               value={form.speed}
               min={0.7}
               max={1.2}
@@ -246,7 +251,7 @@ export function ScriptFormDialog({
             />
             <div className="col-span-2 flex items-center justify-between">
               <Label htmlFor="speaker-boost" className="cursor-pointer text-sm">
-                Speaker boost
+                <Term id="speaker-boost">Speaker boost</Term>
               </Label>
               <Switch
                 id="speaker-boost"
@@ -278,7 +283,7 @@ function SliderRow({
   max = 1,
   step = 0.05,
 }: {
-  label: string;
+  label: ReactNode;
   value: number;
   onChange: (v: number) => void;
   min?: number;
