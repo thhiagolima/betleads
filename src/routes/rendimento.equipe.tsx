@@ -22,6 +22,7 @@ import { TeamRanking, TEAM_REPORT_QUERY_KEY } from "@/components/rendimento/team
 import { updatedLabel } from "@/components/rendimento/updated-label";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useMoney } from "@/hooks/use-tenant-currency";
+import { tourAnchor } from "@/help/anchor";
 import { exportTeamReportCsv, getTeamReport } from "@/lib/expert-report.functions";
 import { DEFAULT_REPORT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
 import { num } from "@/lib/format";
@@ -62,6 +63,7 @@ function ExportTeamCsvButton({ period }: { period: PeriodKey }) {
       className="gap-2"
       onClick={() => exportMutation.mutate()}
       disabled={exportMutation.isPending}
+      {...tourAnchor("equipe.csv")}
     >
       <Download className="h-4 w-4" />
       {exportMutation.isPending ? "Exportando…" : "Exportar CSV"}
@@ -96,8 +98,15 @@ function RendimentoEquipePage() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
-            <Button variant="outline" className="gap-2" onClick={() => setSettingsOpen(true)}>
+            <div {...tourAnchor("equipe.periodo")}>
+              <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
+            </div>
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => setSettingsOpen(true)}
+              {...tourAnchor("equipe.regras-credito")}
+            >
               <Settings className="h-4 w-4" />
               Regras de crédito
             </Button>
@@ -120,7 +129,10 @@ function RendimentoEquipePage() {
         </Card>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+            {...tourAnchor("equipe.cards")}
+          >
             <Kpi
               label="Total creditado à equipe"
               value={money(report.totais.creditado)}

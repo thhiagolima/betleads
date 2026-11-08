@@ -24,6 +24,7 @@ import {
 import { formatBrtDateTime } from "@/components/expert/sheet-format";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useMoney } from "@/hooks/use-tenant-currency";
+import { tourAnchor } from "@/help/anchor";
 import {
   exportExpertCreditsCsv,
   listExpertCredits,
@@ -95,7 +96,7 @@ export function CreditStatement({
   const totalPages = Math.max(1, Math.ceil(total / CREDITS_PAGE_SIZE));
 
   return (
-    <Card>
+    <Card {...tourAnchor("rendimento.extrato")}>
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
         <div>
           <CardTitle>Extrato de créditos</CardTitle>

@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useMoney } from "@/hooks/use-tenant-currency";
+import { tourAnchor } from "@/help/anchor";
 import { VariationTag } from "@/components/rendimento/report-cards";
 import { CLIQUE_DEPOSITO_DEFINICAO } from "@/components/rendimento/report-funnel";
 import type { TeamReportRow } from "@/lib/expert-report.functions";
@@ -107,11 +108,14 @@ function SortHeader({
   active,
   direction,
   onSort,
+  first = false,
 }: {
   column: { key: SortKey; label: string; align?: "right" };
   active: boolean;
   direction: SortDirection;
   onSort: (key: SortKey) => void;
+  /** Marca a âncora do tour só na primeira coluna (o cabeçalho ordenável se repete). */
+  first?: boolean;
 }) {
   const Icon = active ? (direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
   return (
@@ -123,6 +127,7 @@ function SortHeader({
           column.align === "right" ? "flex-row-reverse" : ""
         } hover:text-foreground ${active ? "text-foreground" : "text-muted-foreground"}`}
         aria-label={`Ordenar por ${column.label}`}
+        {...(first ? tourAnchor("equipe.ranking.ordenar") : {})}
       >
         {column.label}
         <Icon className="h-3.5 w-3.5" aria-hidden="true" />
@@ -152,7 +157,7 @@ export function TeamRanking({ rows }: { rows: TeamReportRow[] }) {
   }, [rows, sort]);
 
   return (
-    <Card>
+    <Card {...tourAnchor("equipe.ranking")}>
       <CardHeader>
         <CardTitle>Ranking</CardTitle>
       </CardHeader>
@@ -163,13 +168,14 @@ export function TeamRanking({ rows }: { rows: TeamReportRow[] }) {
           <Table>
             <TableHeader>
               <TableRow>
-                {COLUMNS.map((column) => (
+                {COLUMNS.map((column, index) => (
                   <SortHeader
                     key={column.key}
                     column={column}
                     active={sort.key === column.key}
                     direction={sort.direction}
                     onSort={handleSort}
+                    first={index === 0}
                   />
                 ))}
               </TableRow>

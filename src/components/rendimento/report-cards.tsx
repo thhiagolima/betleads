@@ -2,7 +2,9 @@
 // quatro cartões com a variação contra o período anterior de mesma duração.
 // Puramente apresentacional — os números vêm de `getExpertReport`.
 import { Kpi } from "@/components/crm-results/shared";
+import { Term } from "@/components/help/term";
 import { useMoney } from "@/hooks/use-tenant-currency";
+import { tourAnchor } from "@/help/anchor";
 import type { ReportBlock } from "@/lib/expert-report.functions";
 import { num } from "@/lib/format";
 
@@ -51,9 +53,13 @@ export function ReportCards({
   const { money } = useMoney();
   const ticket = current.ticketRedeposito === null ? "—" : money(current.ticketRedeposito);
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" {...tourAnchor("rendimento.cards")}>
       <Kpi
-        label="Depositado creditado"
+        label={
+          <>
+            Depositado <Term id="creditado">creditado</Term>
+          </>
+        }
         value={money(current.depositado)}
         delta={<VariationTag value={variacao.depositado} />}
         detail={`clique ${money(current.depositadoClique)} · afiliado ${money(current.depositadoAfiliado)}`}
@@ -65,13 +71,13 @@ export function ReportCards({
         detail={`${money(current.valorFtd)} em 1º depósito`}
       />
       <Kpi
-        label="Redepósitos"
+        label={<Term id="redeposito">Redepósitos</Term>}
         value={num(current.redepositos)}
         delta={<VariationTag value={variacao.redepositos} />}
         detail={`${money(current.valorRedeposito)} · ticket ${ticket}`}
       />
       <Kpi
-        label="Reativados"
+        label={<Term id="reativado">Reativados</Term>}
         value={num(current.reativados)}
         delta={<VariationTag value={variacao.reativados} />}
         detail="leads que estavam dormindo"

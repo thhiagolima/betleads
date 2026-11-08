@@ -13,6 +13,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { useMoney } from "@/hooks/use-tenant-currency";
+import { tourAnchor } from "@/help/anchor";
 import { CHART_COLORS, chartAxisProps, chartGridProps } from "@/lib/chart-theme";
 import { num } from "@/lib/format";
 
@@ -40,7 +41,7 @@ export function ReportChart({ serie }: { serie: ReportSeriePoint[] }) {
   const points = serie.map((d) => ({ ...d, label: dayLabel(d.dia) }));
 
   return (
-    <Card>
+    <Card {...tourAnchor("rendimento.chart")}>
       <CardHeader>
         <CardTitle>Evolução por dia</CardTitle>
       </CardHeader>

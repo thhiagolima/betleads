@@ -384,4 +384,48 @@ export const GLOSSARY: GlossaryTerm[] = [
     long:
       "O CRM ainda não mostra um número único de LTV. A aba Retenção (base agora, evolução, funil e cohorts) é a visão que aproxima essa resposta: quanto do grupo volta a depositar, e por quanto tempo, depois do 1º depósito.",
   },
+
+  // --- Relatório de rendimento (fase 3, Task 4) ---
+  {
+    id: "creditado",
+    term: "Creditado",
+    short:
+      "O valor de um depósito atribuído a um expert ou perfil de equipe: a base da comissão que a casa paga a ele por fora do sistema.",
+    long:
+      "Cada depósito é creditado a no máximo uma pessoa — por clique num link dela (dentro da janela de clique) ou por vínculo de afiliado (ver \"Clique × afiliado\"). O cálculo roda a cada 10 minutos; um depósito muito recente pode aparecer como \"Aguardando cálculo\" no histórico do lead até a próxima passada.",
+  },
+  {
+    id: "janela-de-clique",
+    term: "Janela de clique",
+    short:
+      "Quantas horas depois do clique num link um depósito ainda conta como creditado por clique. Padrão: 72 horas. Configurada em Rendimento da equipe → Regras de crédito.",
+    long:
+      "Um depósito feito depois da janela não é descartado: ele pode ainda ser creditado por vínculo de afiliado, se existir um. Mudar a janela recalcula só os créditos dos últimos 8 dias — depósitos mais antigos não são refeitos.",
+  },
+  {
+    id: "clique-x-afiliado",
+    term: "Clique × afiliado",
+    short:
+      'As duas origens de um crédito: "Clique" (o lead clicou num link seu e depositou dentro da janela de clique) e "Afiliado" (o lead está vinculado a um dos seus IDs de afiliado, sem precisar de clique). "Ambos" aparece quando um mesmo lead teve depósitos creditados pelas duas origens.',
+  },
+  {
+    id: "reativado",
+    term: "Reativado",
+    short:
+      "Um lead que estava dormindo (tempo sem depositar) e voltou a depositar — o depósito que o trouxe de volta conta como reativação.",
+  },
+  {
+    id: "redeposito",
+    term: "Redepósito",
+    short:
+      "Qualquer depósito de um lead que não é o primeiro (o primeiro é o FTD). O \"ticket\" de redepósito é o valor total dividido pela quantidade de redepósitos.",
+  },
+  {
+    id: "teto",
+    term: "Teto mensal",
+    short:
+      "O limite de gasto mensal de um expert em campanhas (SMS, e-mail e voz somados, pelo preço cobrado da casa). Vazio é sem limite; R$ 0,00 bloqueia todos os envios dele.",
+    long:
+      "Ao chegar perto do teto, a barra de uso avisa (\"X% do teto\"); ao atingir, os novos envios do expert ficam bloqueados (\"Envios bloqueados\") até o mês virar ou o admin aumentar o teto em Editar. Uma campanha já em andamento pode ser pausada automaticamente pelo teto (\"Pausada pelo teto\") se o saldo acabar no meio do envio.",
+  },
 ];

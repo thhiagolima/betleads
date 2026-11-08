@@ -65,7 +65,7 @@ export function Kpi({
   info,
   delta,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   detail?: string;
   info?: string;

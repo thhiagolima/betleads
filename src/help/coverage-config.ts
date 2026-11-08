@@ -56,9 +56,6 @@ export const EXCLUDED_ROUTES: string[] = [
  */
 export const PENDING_ROUTES: string[] = [
   // --- Fase 3 ---
-  "/rendimento",
-  "/rendimento/equipe",
-  "/rendimento/equipe/$expertId",
   "/inteligencia",
   "/treino-ia",
   "/experts",

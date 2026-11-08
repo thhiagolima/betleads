@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Term } from "@/components/help/term";
 import { saveExpertSettings } from "@/lib/expert-metrics.functions";
 import { EXPERT_CLICK_WINDOW_QUERY_KEY } from "@/components/experts/experts-query";
 import { REPORT_QUERY_KEY } from "@/components/rendimento/report-view";
@@ -84,7 +85,9 @@ export function ExpertSettingsDialog({
         </DialogHeader>
 
         <div className="space-y-2">
-          <Label htmlFor="janela-clique">Janela de clique (horas)</Label>
+          <Label htmlFor="janela-clique">
+            <Term id="janela-de-clique">Janela de clique</Term> (horas)
+          </Label>
           <Input
             id="janela-clique"
             inputMode="numeric"

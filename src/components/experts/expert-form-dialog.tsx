@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Term } from "@/components/help/term";
 import {
   Select,
   SelectContent,
@@ -388,7 +389,9 @@ export function ExpertFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor={ids.teto}>Teto mensal</Label>
+            <Label htmlFor={ids.teto}>
+              <Term id="teto">Teto mensal</Term>
+            </Label>
             <div className="relative">
               <span
                 aria-hidden="true"
