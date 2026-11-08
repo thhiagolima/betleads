@@ -129,3 +129,13 @@ export function findTermInsideLabelWithoutFor(source: string): string[] {
   }
   return out;
 }
+
+const TERM_NEXT_TO_INFOTIP_RE = /<\/Term>\s*<InfoTip\b|<InfoTip\b[^>]*\/>\s*<Term\b/g;
+
+/** How many `<Term>`s sit right next to an `<InfoTip>` (the "i" tooltip
+ * that already explains the label): two "i" side by side. A label that
+ * already has an explanation tooltip doesn't get a `<Term>` — keep the
+ * term id in the article's `terms` instead (ruling R17, generalized). */
+export function countTermNextToInfoTip(source: string): number {
+  return (source.match(TERM_NEXT_TO_INFOTIP_RE) ?? []).length;
+}

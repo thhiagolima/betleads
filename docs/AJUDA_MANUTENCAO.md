@@ -72,6 +72,12 @@ npx vitest run src/help src/components/help
 
 `<Term id="...">texto</Term>` é um componente React, usado dentro de JSX de telas reais (`.tsx`). As strings dos artigos (`label`, `what`, `when`, `notes` em `HelpItem`) são texto puro, renderizado como texto — colocar `<Term id="...">` ali não vira um componente, aparece literalmente como `<Term...>` na tela. Para explicar uma sigla/termo num artigo, escreva o texto direto (a convenção do projeto já é explicar toda sigla na primeira aparição) ou cite o termo em `screen.terms` para ele aparecer no glossário do painel.
 
+## Um "i" por rótulo
+
+Um rótulo que já tem um tooltip de explicação ("i") — o `InfoTip` dos Resultados, o "Como calculamos" do Financeiro — não ganha `<Term>`: seriam dois "i" lado a lado explicando a mesma coisa. Nesse caso o id do termo fica só em `screen.terms` (aparece no glossário do painel). O teste de cobertura falha quando um `<Term>` aparece colado a um `<InfoTip>`.
+
+Também não ponha `<Term>` dentro de um `<label>`/`<Label>` sem `htmlFor`: o `<Term>` é um botão e tomaria o rótulo do campo. Dê um `id` ao campo e `htmlFor` ao rótulo (o teste de cobertura também confere isso), e não ponha a âncora do seletor de período numa `div` em volta — passe `{...tourAnchor(...)}` ao próprio `CentralPeriodPicker`.
+
 ## Como testar um tour manualmente
 
 1. Acesse a tela/aba que você alterou, logado como um usuário que nunca visitou essa tela/aba antes (ou limpe o progresso dele — ver `help_progress` no banco).

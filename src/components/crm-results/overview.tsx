@@ -100,7 +100,7 @@ export function Overview({
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 id="click-title" className="flex items-center gap-1.5 text-section">
-              <Term id="recuperado-pelo-crm">Recuperado pelo CRM</Term>
+              Recuperado pelo CRM
               <InfoTip text={TITLE_INFO} />
             </h2>
             <p className="text-sm text-muted-foreground">

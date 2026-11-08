@@ -1,7 +1,6 @@
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { num } from "@/lib/format";
 import { tourAnchor } from "@/help/anchor";
-import { Term } from "@/components/help/term";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { type Data, cost } from "./format";
 import { InfoTip } from "./shared";
@@ -19,7 +18,7 @@ export function Reactivations({ data }: { data: Data }) {
     <Card {...tourAnchor("resultados.controle.reativacoes")}>
       <CardHeader>
         <CardTitle className="flex items-center gap-1.5">
-          <Term id="recuperados-visao-ampla">Reativações após SMS</Term>
+          Reativações após SMS
           <InfoTip text="Jogadores que estavam há 2 dias ou mais sem depositar (ou que nunca depositaram), receberam um SMS e voltaram a depositar em até 3 dias, mesmo sem clicar no link. O valor é tudo o que depositaram nesses 3 dias. Já inclui o Recuperado pelo CRM (quem clicou), por isso é sempre igual ou maior: não some os dois. Voltar depois do SMS não prova que foi por causa dele: o efeito real aparece no Teste de controle, logo abaixo." />
         </CardTitle>
         <CardDescription>

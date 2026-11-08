@@ -3,6 +3,7 @@ import {
   countRawDataTourUsages,
   extractTermIds,
   extractTourAnchorCalls,
+  countTermNextToInfoTip,
   findAnchorWrappedPeriodPicker,
   findTermInsideChipLabel,
   findTermInsideLabelWithoutFor,
@@ -62,6 +63,18 @@ describe("coverage-scan", () => {
       <Label />
       <Term id="ftd">FTD</Term>`;
     expect(findTermInsideLabelWithoutFor(ok)).toEqual([]);
+  });
+
+  it("countTermNextToInfoTip acha <Term> colado a um <InfoTip>", () => {
+    const bad = `<CardTitle>
+          <Term id="recuperado-pelo-crm">Recuperado pelo CRM</Term>
+          <InfoTip text={TITLE_INFO} />
+        </CardTitle>
+        <p><InfoTip text="x" /> <Term id="ftd">FTD</Term></p>`;
+    expect(countTermNextToInfoTip(bad)).toBe(2);
+    const ok = `<CardTitle>Recuperado pelo CRM<InfoTip text={TITLE_INFO} /></CardTitle>
+        <p><Term id="ftd">FTD</Term></p>`;
+    expect(countTermNextToInfoTip(ok)).toBe(0);
   });
 
   it("findTermInsideChipLabel acha <Term> dentro do label={…} de um *Chip", () => {

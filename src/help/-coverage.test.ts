@@ -13,6 +13,7 @@ import {
   countRawDataTourUsages,
   extractTermIds,
   extractTourAnchorCalls,
+  countTermNextToInfoTip,
   findAnchorWrappedPeriodPicker,
   findTermInsideChipLabel,
   findTermInsideLabelWithoutFor,
@@ -309,6 +310,15 @@ describe("help coverage", () => {
         labels,
         `<Term> dentro de ${labels.join(", ")} sem htmlFor em ${path.relative(SRC_ROOT, file)} — dê um id ao campo e htmlFor ao rótulo, ou tire o Term do rótulo`,
       ).toEqual([]);
+    }
+  });
+
+  it("rótulo que já tem InfoTip (\"i\") não ganha <Term> ao lado", () => {
+    for (const file of sourceFiles) {
+      expect(
+        countTermNextToInfoTip(fs.readFileSync(file, "utf8")),
+        `<Term> colado a um <InfoTip> em ${path.relative(SRC_ROOT, file)} — o rótulo já tem um "i": tire o Term e deixe o id em screen.terms`,
+      ).toBe(0);
     }
   });
 
