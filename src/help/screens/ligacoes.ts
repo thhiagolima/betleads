@@ -162,7 +162,7 @@ const screen: HelpScreen = {
           label: '"Disparar N ligações"',
           what: 'Abre a confirmação "Disparar N ligações?", com a descrição de que elas começam a ser disparadas agora e não podem ser canceladas, que o custo depende da duração de cada chamada e do contrato do provedor, e que fora da janela de envio as ligações ficam pendentes até o próximo horário permitido. Os botões são "Cancelar" / "Disparar N ligações".',
           notes:
-            'Fica desabilitado sem roteiro/áudio escolhido ou sem destinatário. Depois do disparo aparece a caixa "Último disparo" com Total, Disparadas, Pendentes e Falhas; havendo falha, aparecem os detalhes de cada uma (veja os estados da tela).',
+            'Fica desabilitado sem roteiro/áudio escolhido ou sem destinatário. Depois do disparo aparece a caixa "Último disparo" com Total, Disparadas, Pendentes e Falhas; havendo falha, aparecem os detalhes de cada uma (veja os estados da tela). O aviso que aparece no canto da tela depende do resultado: "N ligações disparadas" quando tudo foi disparado sem falha nem pendência; "N ligação(ões) ficaram pendentes para retentativa" quando não houve falha mas alguma ficou pendente; "Falha em todas (N)" (com a descrição "Não foi possível concluir esta chamada. Tente novamente ou contate o suporte.") quando nenhuma foi disparada; e "N disparadas, M falharam" quando o resultado foi misto. Em qualquer um desses quatro, se parte dos destinatários não chegou a ser tentada por falta de saldo, o aviso ganha o complemento ", X não tentadas por saldo insuficiente". Se o disparo nem chegar a rodar (erro de rede ou de validação), aparece "Falha no disparo em massa" (ou a mensagem específica do servidor, quando houver uma).',
         },
       ],
     },
@@ -197,7 +197,13 @@ const screen: HelpScreen = {
           label: "Cartão de áudio",
           what: 'Cada cartão mostra o nome, a origem ("Voz gerada", "Importado" ou "Upload"), se está "Arquivado", o idioma, a duração (quando conhecida), o tamanho em KB, as tags e a data da última atualização. Um áudio arquivado aparece com menos destaque (opacidade reduzida).',
           notes:
-            'Os botões do cartão são "Ouvir" (reproduz o áudio no navegador), "Editar" (abre o formulário "Editar metadados" abaixo, com Nome, Tags e Idioma, e os botões "Salvar" — desabilitado sem nome — e "Cancelar"), "Arquivar"/"Reativar" (o rótulo muda conforme o áudio estar ativo ou não) e o ícone de lixeira, que pede a confirmação "Excluir áudio permanentemente?" (veja os estados da tela).',
+            'Os botões do cartão são "Ouvir" (reproduz o áudio no navegador), "Editar" (abre o formulário "Editar metadados" abaixo, com Nome, Tags e Idioma, e os botões "Salvar" — desabilitado sem nome — e "Cancelar", que ao gravar mostra "Metadados atualizados"), "Arquivar"/"Reativar" (o rótulo muda conforme o áudio estar ativo ou não; ao confirmar, mostra "Estado do áudio atualizado") e o ícone de lixeira, que pede a confirmação "Excluir áudio permanentemente?" e, ao excluir, mostra "Áudio e objeto de armazenamento excluídos" (veja os estados da tela).',
+        },
+        {
+          label: 'Diálogo "Enviar áudio fixo"',
+          what: 'Abre com a descrição "Adicione um áudio reutilizável à biblioteca. Formatos: MP3, WAV, M4A/MP4 ou OGG, até 50 MB." Os campos são: "Selecionar arquivo de áudio" (a área de clicar para escolher o arquivo; depois de escolhido, mostra o nome do arquivo e o tamanho em MB no lugar do texto), "Nome na biblioteca" (preenchido sozinho com o nome do arquivo, mas pode ser trocado), "Idioma" (texto livre, começa em "pt-BR") e "Tags" (palavras separadas por vírgula).',
+          notes:
+            'Os botões são "Cancelar" (fecha sem enviar) e "Enviar e selecionar" (desabilitado sem arquivo ou sem nome; mostra "Enviando…" enquanto sobe o arquivo e, ao terminar, "Áudio enviado e selecionado").',
         },
       ],
     },
@@ -222,7 +228,7 @@ const screen: HelpScreen = {
           label: "Tabela de roteiros",
           what: 'Cada linha mostra o nome, a versão (ex.: "v2"), o status (Ativo, Rascunho, Arquivado ou Inativo), quando foi atualizado e as ações Editar (abre o diálogo com o conteúdo desse roteiro) e Excluir.',
           notes:
-            'Excluir pede a confirmação "Excluir \\"<nome>\\"?", com a descrição "O roteiro será removido e não poderá ser usado em novas ligações." e os botões "Cancelar" / "Excluir roteiro".',
+            'Excluir pede a confirmação "Excluir \\"<nome>\\"?", com a descrição "O roteiro será removido e não poderá ser usado em novas ligações." e os botões "Cancelar" / "Excluir roteiro". Ao confirmar, mostra "Roteiro excluído"; se der erro, mostra a mensagem do servidor ou, na falta de uma, "Erro ao excluir".',
         },
         {
           label: 'Diálogo "Novo roteiro" / "Editar roteiro" — Nome, Status e Voz',
@@ -269,6 +275,7 @@ const screen: HelpScreen = {
           anchor: "ligacoes.fila.retentar",
           label: "Retentar pendentes",
           what: 'Tenta disparar de novo todos os itens com retentativa disponível. Ao terminar, mostra "Nenhuma ligação pendente para retentar", "N ligação(ões) disparada(s)" ou "N disparadas, M ainda falhando".',
+          notes: 'Se o pedido em si falhar (erro de rede ou do servidor), mostra a mensagem do servidor ou, na falta de uma, "Erro ao retentar".',
         },
         {
           anchor: "ligacoes.fila.tabela",
@@ -385,6 +392,40 @@ const screen: HelpScreen = {
       id: "massa-sem-destinatario",
       title: "Nenhum destinatário adicionado ainda.",
       what: "Texto mostrado no cartão de Destinatários do Envio em massa antes de buscar um jogador ou colar algum número avulso.",
+    },
+    {
+      id: "massa-disparo-sucesso",
+      title: "N ligações disparadas",
+      what: 'Aviso de sucesso depois de um disparo em massa em que nada falhou e nada ficou pendente: todas as ligações preparadas foram enviadas ao provedor.',
+    },
+    {
+      id: "massa-disparo-pendente",
+      title: "N ligação(ões) ficaram pendentes para retentativa",
+      what: 'Aviso mostrado quando nenhuma ligação falhou de verdade, mas parte delas não pôde ser disparada na hora (ex.: fora da janela de envio) e ficou aguardando uma nova tentativa.',
+      action: 'Acompanhe pela Fila de ligações ou pelo Histórico; o sistema tenta de novo sozinho.',
+    },
+    {
+      id: "massa-disparo-falha-todas",
+      title: "Falha em todas (N)",
+      what: 'Erro mostrado quando nenhuma ligação do disparo em massa foi enviada. A descrição do aviso é "Não foi possível concluir esta chamada. Tente novamente ou contate o suporte."',
+      action: "Corrija o que for apontado nos detalhes (ver estado seguinte) e dispare de novo.",
+    },
+    {
+      id: "massa-disparo-parcial",
+      title: "N disparadas, M falharam",
+      what: "Aviso misto mostrado quando parte das ligações foi disparada e parte falhou.",
+    },
+    {
+      id: "massa-disparo-nao-tentadas",
+      title: ", N não tentadas por saldo insuficiente",
+      what: 'Complemento que se junta a qualquer um dos quatro avisos acima quando parte dos destinatários nem chegou a ser tentada por falta de saldo na carteira da casa.',
+      action: 'Compre créditos em "Saldo e consumo" e dispare de novo só para quem faltou.',
+    },
+    {
+      id: "massa-disparo-erro-geral",
+      title: "Falha no disparo em massa",
+      what: 'Erro mostrado quando o próprio pedido de disparo em massa não chega a rodar (falha de rede ou de validação) — nenhuma ligação chega a ser preparada. Quando o servidor devolve uma mensagem mais específica, ela aparece no lugar deste texto padrão.',
+      action: "Tente disparar de novo; se persistir, contate o suporte.",
     },
     {
       id: "massa-falha-audio",
