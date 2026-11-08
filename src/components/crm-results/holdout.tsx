@@ -3,6 +3,8 @@ import { Link } from "@tanstack/react-router";
 import { HOLDOUT_MIN_PLAYERS, HOLDOUT_MIN_RETURNS } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { num } from "@/lib/format";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,9 +24,11 @@ export function Holdout({ data }: { data: Data }) {
   const pending = data.holdoutSetup.filter((journey) => !withResults.has(journey.journeyId));
   return (
     <div className="space-y-4">
-      <Card>
+      <Card {...tourAnchor("resultados.controle.explicacao")}>
         <CardHeader>
-          <CardTitle>Teste de controle</CardTitle>
+          <CardTitle>
+            <Term id="teste-de-controle">Teste de controle</Term>
+          </CardTitle>
           <CardDescription>
             Uma parte sorteada dos jogadores que entram na jornada não recebe mensagens. Comparar a
             volta dos dois grupos em até 7 dias mostra o efeito real da jornada, sem contar quem
@@ -205,7 +209,9 @@ export function Holdout({ data }: { data: Data }) {
               dias depois das primeiras entradas.
             </p>
             <Button size="sm" variant="outline" asChild>
-              <Link to="/jornadas">Ir para Jornadas</Link>
+              <Link to="/jornadas" {...tourAnchor("resultados.controle.ir-jornadas")}>
+                Ir para Jornadas
+              </Link>
             </Button>
           </CardContent>
         </Card>

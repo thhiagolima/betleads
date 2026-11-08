@@ -1,4 +1,5 @@
 import { brl, num } from "@/lib/format";
+import { tourAnchor } from "@/help/anchor";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -35,7 +36,12 @@ export function HealthIndicator({ data }: { data: Data }) {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button size="sm" variant="ghost" className="gap-2 text-muted-foreground">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="gap-2 text-muted-foreground"
+          {...tourAnchor("resultados.saude.indicador")}
+        >
           <span
             className={`h-2 w-2 rounded-full ${ok ? "bg-success" : "bg-warning"}`}
             aria-hidden="true"

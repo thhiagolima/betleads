@@ -24,6 +24,8 @@ import {
   chartLegendProps,
   chartTooltipProps,
 } from "@/lib/chart-theme";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecommendationList } from "./recommendations";
@@ -98,7 +100,7 @@ export function Overview({
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 id="click-title" className="flex items-center gap-1.5 text-section">
-              Recuperado pelo CRM
+              <Term id="recuperado-pelo-crm">Recuperado pelo CRM</Term>
               <InfoTip text={TITLE_INFO} />
             </h2>
             <p className="text-sm text-muted-foreground">
@@ -151,7 +153,9 @@ export function Overview({
                 )}
               </div>
               <div className="space-y-0.5 sm:text-right">
-                <p className="text-label text-muted-foreground">Cada R$ 1 em SMS trouxe</p>
+                <p className="text-label text-muted-foreground">
+                  <Term id="retorno-do-envio">Cada R$ 1 em SMS trouxe</Term>
+                </p>
                 <p className="text-kpi-sm tabular-nums">
                   <RoiValue
                     roi={efficiency.clickRoi}
@@ -282,6 +286,7 @@ export function Overview({
             type="button"
             className="font-medium text-primary underline-offset-2 hover:underline"
             onClick={onOpenProof}
+            {...tourAnchor("resultados.visao.ver-prova")}
           >
             Ver prova e método
           </button>
@@ -303,6 +308,7 @@ export function Overview({
                 variant="ghost"
                 aria-expanded={showAllRecommendations}
                 onClick={() => setShowAllRecommendations((value) => !value)}
+                {...tourAnchor("resultados.visao.recomendacoes.ver-todas")}
               >
                 {showAllRecommendations ? "Ver menos" : `Ver todas (${recommendations.length})`}
               </Button>

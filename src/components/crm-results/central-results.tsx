@@ -7,6 +7,7 @@ import { useTenantCurrency } from "@/hooks/use-tenant-currency";
 import { getCrmResults } from "@/lib/crm-results.functions";
 import { getComparisonAccess } from "@/lib/tenant-comparison.functions";
 import { crmResultsCsv } from "@/lib/crm-results-csv";
+import { tourAnchor } from "@/help/anchor";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -71,7 +72,9 @@ export function CentralResults() {
               <Glossary />
               {access.data?.allowed && (
                 <Button size="sm" variant="ghost" asChild>
-                  <Link to="/resultados/comparar">Comparar casas</Link>
+                  <Link to="/resultados/comparar" {...tourAnchor("resultados.comparar.abrir")}>
+                    Comparar casas
+                  </Link>
                 </Button>
               )}
               {query.data && (
@@ -80,6 +83,7 @@ export function CentralResults() {
                   variant="outline"
                   className="gap-2"
                   onClick={() => downloadCsv(query.data, period.key, currency)}
+                  {...tourAnchor("resultados.csv.baixar")}
                 >
                   <Download className="h-4 w-4" aria-hidden="true" />
                   CSV
@@ -88,7 +92,12 @@ export function CentralResults() {
             </>
           }
         />
-        <CentralPeriodPicker value={period.key} onChange={(key) => setSearch({ periodo: key })} />
+        <div {...tourAnchor("resultados.periodo.picker")}>
+          <CentralPeriodPicker
+            value={period.key}
+            onChange={(key) => setSearch({ periodo: key })}
+          />
+        </div>
       </div>
 
       {query.isLoading ? (
@@ -99,12 +108,14 @@ export function CentralResults() {
         </EmptyCard>
       ) : (
         <div className="space-y-4">
-          <PageTabs
-            value={tab}
-            onValueChange={(value) => setSearch({ aba: value })}
-            label="Seções dos resultados"
-            items={TABS.map((item) => ({ value: item.key, label: item.label }))}
-          />
+          <div {...tourAnchor("resultados.abas")}>
+            <PageTabs
+              value={tab}
+              onValueChange={(value) => setSearch({ aba: value })}
+              label="Seções dos resultados"
+              items={TABS.map((item) => ({ value: item.key, label: item.label }))}
+            />
+          </div>
           <div role="tabpanel" aria-labelledby={`tab-${tab}`}>
             {tab === "visao" && (
               <Overview
@@ -208,7 +219,12 @@ function Glossary() {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button size="sm" variant="ghost" className="gap-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="gap-2"
+          {...tourAnchor("resultados.como-ler.abrir")}
+        >
           <BookOpen className="h-4 w-4" aria-hidden="true" />
           Como ler
         </Button>

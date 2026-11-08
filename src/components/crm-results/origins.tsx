@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Search } from "lucide-re
 import type { CrmMetricsWithRatios, CrmSource } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
+import { tourAnchor } from "@/help/anchor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -121,6 +122,7 @@ export function Origins({
             className="inline-flex rounded-lg bg-muted p-1 text-sm"
             role="group"
             aria-label="Tipo"
+            {...tourAnchor("resultados.origens.tipo")}
           >
             {TYPE_FILTERS.map((filter) => (
               <button
@@ -149,6 +151,7 @@ export function Origins({
               onChange={(event) => onSearch(event.target.value)}
               placeholder="Buscar origem..."
               aria-label="Buscar origem"
+              {...tourAnchor("resultados.origens.busca")}
             />
           </label>
         </div>
@@ -160,6 +163,7 @@ export function Origins({
               <TableHead
                 className="sticky left-0 z-10 min-w-56 bg-card"
                 aria-sort={sort.key === "name" ? (sort.desc ? "descending" : "ascending") : "none"}
+                {...tourAnchor("resultados.origens.ordenar")}
               >
                 <SortButton
                   label="Origem"
@@ -200,7 +204,7 @@ export function Origins({
                 </TableCell>
               </TableRow>
             )}
-            {rows.map((source) => {
+            {rows.map((source, index) => {
               const id = `${source.type}:${source.key}`;
               const steps = source.steps.filter((step) => step.position >= 0 || step.sent > 0);
               const expandable = source.type === "journey" && steps.length > 1;
@@ -219,6 +223,7 @@ export function Origins({
                             aria-expanded={expanded}
                             aria-label={`${expanded ? "Fechar" : "Ver"} mensagens de ${source.name}`}
                             onClick={() => setOpen(expanded ? null : id)}
+                            {...(index === 0 ? tourAnchor("resultados.origens.expandir") : {})}
                           >
                             {expanded ? (
                               <ChevronDown className="h-4 w-4" />

@@ -16,6 +16,7 @@ import { getCrmRetention } from "@/lib/crm-results.functions";
 import { PLAYER_STATE_LABELS, RECOVERABLE_STATES } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
+import { Term } from "@/components/help/term";
 import {
   CHART_COLORS,
   chartAxisProps,
@@ -134,9 +135,13 @@ export function SpendByState({ data }: { data: Data }) {
               <TableHead className="min-w-40">Parte do custo</TableHead>
               <TableHead className="text-right">Jogadores</TableHead>
               <TableHead className="text-right">Voltaram pelo link</TableHead>
-              <TableHead className="text-right">Custo por jogador que voltou</TableHead>
+              <TableHead className="text-right">
+                <Term id="custo-por-jogador-convertido">Custo por jogador que voltou</Term>
+              </TableHead>
               <TableHead className="text-right">R$ por R$ 1 em SMS</TableHead>
-              <TableHead className="text-right">Reativações após SMS</TableHead>
+              <TableHead className="text-right">
+                <Term id="recuperados-visao-ampla">Reativações após SMS</Term>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

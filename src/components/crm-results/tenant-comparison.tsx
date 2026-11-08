@@ -5,6 +5,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { getTenantComparison } from "@/lib/tenant-comparison.functions";
 import { formatMoney } from "@/lib/currency";
 import { brl, num } from "@/lib/format";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -43,6 +45,20 @@ type Metric = {
   /** Valor na moeda da casa: só compara (destaca a melhor) entre casas da mesma moeda. */
   houseMoney?: boolean;
 };
+
+/** Glossary id for a group title or metric label that also appears, word for
+ * word, on the Central (resultados.ts / resultados-comparar.ts "Como ler"). */
+const TERM_BY_LABEL: Record<string, string> = {
+  "Recuperado pelo CRM": "recuperado-pelo-crm",
+  "Reativações após SMS": "recuperados-visao-ampla",
+  "Taxa de clique": "taxa-de-clique",
+  "Custo por jogador que voltou": "custo-por-jogador-convertido",
+};
+
+function Labeled({ text }: { text: string }) {
+  const termId = TERM_BY_LABEL[text];
+  return termId ? <Term id={termId}>{text}</Term> : text;
+}
 
 const count = (value: number | null) => (value == null ? "—" : num(value));
 /** Custo da plataforma, sempre BRL. */
@@ -187,7 +203,12 @@ export function TenantComparison() {
       <PageHeader
         subtitle="Mesmas métricas lado a lado, apenas nas casas em que você é administrador."
         actions={
-          <div className="flex gap-2" role="group" aria-label="Período">
+          <div
+            className="flex gap-2"
+            role="group"
+            aria-label="Período"
+            {...tourAnchor("resultados-comparar.periodo")}
+          >
             {PERIODS.map((value) => (
               <Button
                 key={value}
@@ -213,7 +234,7 @@ export function TenantComparison() {
           </CardContent>
         </Card>
       ) : (
-        <Card>
+        <Card {...tourAnchor("resultados-comparar.tabela")}>
           <CardHeader>
             <CardTitle>Últimos {query.data.days} dias</CardTitle>
             <CardDescription>
@@ -241,7 +262,7 @@ export function TenantComparison() {
                         colSpan={query.data.rows.length + 1}
                         className="text-label font-semibold text-muted-foreground"
                       >
-                        {group.title}
+                        <Labeled text={group.title} />
                       </TableCell>
                     </TableRow>
                     {group.metrics.map((metric) => {
@@ -249,7 +270,9 @@ export function TenantComparison() {
                       return (
                         <TableRow key={metric.label}>
                           <TableCell>
-                            <div className="font-medium">{metric.label}</div>
+                            <div className="font-medium">
+                              <Labeled text={metric.label} />
+                            </div>
                             {metric.hint && (
                               <div className="text-xs text-muted-foreground">{metric.hint}</div>
                             )}
