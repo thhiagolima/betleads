@@ -1,8 +1,10 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-interface DataCardProps {
+/** Extra HTML attributes (e.g. `tourAnchor(...)`) go to the outer `<section>`;
+ * `title` is the card heading, not the HTML attribute. */
+interface DataCardProps extends Omit<HTMLAttributes<HTMLElement>, "title" | "children"> {
   title?: ReactNode;
   description?: ReactNode;
   /** @deprecated Decorative icons are gone in the redesign; ignored. */
@@ -21,9 +23,10 @@ export function DataCard({
   children,
   className,
   bodyClassName,
+  ...rest
 }: DataCardProps) {
   return (
-    <section className={cn("rounded-2xl border border-border bg-card/80", className)}>
+    <section className={cn("rounded-2xl border border-border bg-card/80", className)} {...rest}>
       {(title || actions) && (
         <div
           className={cn(

@@ -100,75 +100,76 @@ export function DashboardTab() {
       }
     >
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <div {...tourAnchor("ligacoes.visao.top-roteiros")}>
-          <ChannelBlock
-            title="Top roteiros"
-            description="Os mais usados no período e quantos atenderam."
-          >
-            {topScripts.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                Nenhuma ligação com roteiro no período.
-              </p>
-            ) : (
-              <ul className="space-y-4">
-                {topScripts.map((script) => {
-                  const rate = pct(script.answered, script.total);
-                  return (
-                    <li key={script.script_id} className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-3 text-[13.5px]">
-                        <span className="truncate font-medium">
-                          {script.name === "Script removido" ? "Roteiro excluído" : script.name}
-                        </span>
-                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                          {num(script.answered)} de {num(script.total)} · {rate}%
-                        </span>
-                      </div>
-                      <Progress value={rate} className="h-1.5" />
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </ChannelBlock>
-        </div>
-
-        <div {...tourAnchor("ligacoes.visao.recentes")}>
-          <ChannelBlock title="Últimas ligações" description="As 10 mais recentes do período.">
-            {recent.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                Nenhuma ligação no período.
-              </p>
-            ) : (
-              <ul>
-                {recent.map((call) => (
-                  <li
-                    key={call.id}
-                    className="flex items-center gap-3 border-b border-border/70 py-2.5 text-[13.5px] last:border-b-0"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">
-                        {call.lead_nome === "Avulso" ? "Número avulso" : call.lead_nome}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {call.script_name === "—" ? "Sem roteiro" : call.script_name}
-                        {call.duration_seconds ? ` · ${call.duration_seconds}s` : ""}
-                      </p>
+        <ChannelBlock
+          {...tourAnchor("ligacoes.visao.top-roteiros")}
+          title="Top roteiros"
+          description="Os mais usados no período e quantos atenderam."
+        >
+          {topScripts.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Nenhuma ligação com roteiro no período.
+            </p>
+          ) : (
+            <ul className="space-y-4">
+              {topScripts.map((script) => {
+                const rate = pct(script.answered, script.total);
+                return (
+                  <li key={script.script_id} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-3 text-[13.5px]">
+                      <span className="truncate font-medium">
+                        {script.name === "Script removido" ? "Roteiro excluído" : script.name}
+                      </span>
+                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                        {num(script.answered)} de {num(script.total)} · {rate}%
+                      </span>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={cn("shrink-0 text-xs", statusBadgeTone(call.status))}
-                    >
-                      {HISTORY_STATUS_LABEL[call.status] ?? call.status}
-                    </Badge>
-                    <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                      {timeAgo(call.created_at)}
-                    </span>
+                    <Progress value={rate} className="h-1.5" />
                   </li>
-                ))}
-              </ul>
-            )}
-          </ChannelBlock>
-        </div>
+                );
+              })}
+            </ul>
+          )}
+        </ChannelBlock>
+
+        <ChannelBlock
+          {...tourAnchor("ligacoes.visao.recentes")}
+          title="Últimas ligações"
+          description="As 10 mais recentes do período."
+        >
+          {recent.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Nenhuma ligação no período.
+            </p>
+          ) : (
+            <ul>
+              {recent.map((call) => (
+                <li
+                  key={call.id}
+                  className="flex items-center gap-3 border-b border-border/70 py-2.5 text-[13.5px] last:border-b-0"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">
+                      {call.lead_nome === "Avulso" ? "Número avulso" : call.lead_nome}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {call.script_name === "—" ? "Sem roteiro" : call.script_name}
+                      {call.duration_seconds ? ` · ${call.duration_seconds}s` : ""}
+                    </p>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={cn("shrink-0 text-xs", statusBadgeTone(call.status))}
+                  >
+                    {HISTORY_STATUS_LABEL[call.status] ?? call.status}
+                  </Badge>
+                  <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                    {timeAgo(call.created_at)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ChannelBlock>
       </div>
     </ChannelOverview>
   );

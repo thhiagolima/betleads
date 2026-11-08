@@ -473,7 +473,10 @@ function TenantWorkspace({
   // Summary numbers live only in this row; the tabs below don't repeat them.
   return (
     <div className="min-w-0 space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" {...tourAnchor("conta.resumo.cartoes")}>
+      <div
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        {...tourAnchor("conta.resumo.cartoes")}
+      >
         <MetricCard
           label="Equipe"
           value={num(detail.users.length)}
@@ -493,7 +496,12 @@ function TenantWorkspace({
       </div>
 
       <div {...tourAnchor("conta.abas")}>
-        <PageTabs value={tab} onValueChange={setTab} items={WORKSPACE_TABS} label="Seções da conta" />
+        <PageTabs
+          value={tab}
+          onValueChange={setTab}
+          items={WORKSPACE_TABS}
+          label="Seções da conta"
+        />
       </div>
 
       <div role="tabpanel" aria-labelledby={`tab-${tab}`}>
@@ -518,8 +526,11 @@ function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)]">
-      <div {...tourAnchor("conta.visao.dados")}>
-      <DataCard title="Dados da casa" bodyClassName="grid gap-4 sm:grid-cols-2">
+      <DataCard
+        {...tourAnchor("conta.visao.dados")}
+        title="Dados da casa"
+        bodyClassName="grid gap-4 sm:grid-cols-2"
+      >
         <Info label="Nome" value={tenant.nome} />
         <Info label="Status" value={statusBadge(tenant.status)} />
         <Info label="Plano" value={labelFrom(PLANO_LABEL, tenant.plano)} />
@@ -529,10 +540,12 @@ function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
         />
         <Info label="Criada em" value={fmtDate(tenant.created_at)} />
       </DataCard>
-      </div>
 
-      <div {...tourAnchor("conta.visao.saude")}>
-      <DataCard title="Saúde operacional" bodyClassName="space-y-3">
+      <DataCard
+        {...tourAnchor("conta.visao.saude")}
+        title="Saúde operacional"
+        bodyClassName="space-y-3"
+      >
         <HealthLine label="Saldo disponível" ok={Number(detail.sms.summary.balance ?? 0) > 0} />
         <HealthLine
           label="Administrador na equipe"
@@ -556,7 +569,6 @@ function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
           </p>
         )}
       </DataCard>
-      </div>
     </div>
   );
 }
@@ -921,8 +933,11 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
       <CurrentPricesCard prices={detail.sms.summary.prices ?? {}} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div {...tourAnchor("conta.saldo.extrato")}>
-        <DataCard title="Extrato" bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3">
+        <DataCard
+          {...tourAnchor("conta.saldo.extrato")}
+          title="Extrato"
+          bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3"
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -963,10 +978,12 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
             </TableBody>
           </Table>
         </DataCard>
-        </div>
 
-        <div {...tourAnchor("conta.saldo.pedidos")}>
-        <DataCard title="Pedidos de compra" bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3">
+        <DataCard
+          {...tourAnchor("conta.saldo.pedidos")}
+          title="Pedidos de compra"
+          bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3"
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -1004,7 +1021,6 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
             </TableBody>
           </Table>
         </DataCard>
-        </div>
       </div>
     </div>
   );
@@ -1182,8 +1198,8 @@ function AuditTab({ detail }: { detail: TenantDetail }) {
     detail.users.filter((user) => user.email).map((user) => [user.user_id, user.email]),
   );
   return (
-    <div {...tourAnchor("conta.historico.tabela")}>
     <DataCard
+      {...tourAnchor("conta.historico.tabela")}
       title="Histórico de alterações"
       bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3"
     >
@@ -1243,7 +1259,6 @@ function AuditTab({ detail }: { detail: TenantDetail }) {
         </TableBody>
       </Table>
     </DataCard>
-    </div>
   );
 }
 
