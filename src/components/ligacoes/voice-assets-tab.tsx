@@ -159,17 +159,20 @@ export function VoiceAssetsTab() {
                 placeholder="Buscar por nome, tag, idioma ou origem"
               />
             </div>
-            <div className="flex flex-wrap items-center gap-2" {...tourAnchor("ligacoes.audios.filtro")}>
-            {(["active", "archived", "all"] as const).map((value) => (
-              <Button
-                key={value}
-                size="sm"
-                variant={filter === value ? "default" : "outline"}
-                onClick={() => setFilter(value)}
-              >
-                {value === "active" ? "Ativos" : value === "archived" ? "Arquivados" : "Todos"}
-              </Button>
-            ))}
+            <div
+              className="flex flex-wrap items-center gap-2"
+              {...tourAnchor("ligacoes.audios.filtro")}
+            >
+              {(["active", "archived", "all"] as const).map((value) => (
+                <Button
+                  key={value}
+                  size="sm"
+                  variant={filter === value ? "default" : "outline"}
+                  onClick={() => setFilter(value)}
+                >
+                  {value === "active" ? "Ativos" : value === "archived" ? "Arquivados" : "Todos"}
+                </Button>
+              ))}
             </div>
           </div>
         </CardContent>

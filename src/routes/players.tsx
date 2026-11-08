@@ -7,14 +7,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type HTMLAttributes,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { POLL_INTERVALS } from "@/hooks/use-updated-ago";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -2135,20 +2128,20 @@ function PlayersPage() {
             da fila.
           </p>
           <div {...tourAnchor("jogadores.acompanhamento.fila")}>
-          <SegmentedFilter
-            label="Fila de acompanhamento"
-            value={followupQueue}
-            onValueChange={setFollowupQueue}
-            items={FOLLOWUP_QUEUES.map((queue) => ({
-              ...queue,
-              count:
-                queue.value === "aguardando_conversao"
-                  ? (pendingData?.rows.length ?? null)
-                  : queue.value === "convertido"
-                    ? (convertedData?.rows.length ?? null)
-                    : (notConvertedData?.rows.length ?? null),
-            }))}
-          />
+            <SegmentedFilter
+              label="Fila de acompanhamento"
+              value={followupQueue}
+              onValueChange={setFollowupQueue}
+              items={FOLLOWUP_QUEUES.map((queue) => ({
+                ...queue,
+                count:
+                  queue.value === "aguardando_conversao"
+                    ? (pendingData?.rows.length ?? null)
+                    : queue.value === "convertido"
+                      ? (convertedData?.rows.length ?? null)
+                      : (notConvertedData?.rows.length ?? null),
+              }))}
+            />
           </div>
           <HomeCard className="overflow-hidden">
             <div className="border-b border-border/70 px-4 py-3 sm:px-5">
@@ -2235,9 +2228,7 @@ function PlayersPage() {
                         Histórico
                       </Button>
                       <Button
-                        {...(rowIndex === 0
-                          ? tourAnchor("jogadores.acompanhamento.mensagem")
-                          : {})}
+                        {...(rowIndex === 0 ? tourAnchor("jogadores.acompanhamento.mensagem") : {})}
                         size="sm"
                         variant="outline"
                         className="h-10 sm:h-9"
