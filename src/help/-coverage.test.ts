@@ -8,11 +8,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { ROUTE_META } from "@/lib/navigation";
+import { isExpertAllowedPath, ROUTE_META } from "@/lib/navigation";
 import {
   countRawDataTourUsages,
   extractTermIds,
   extractTourAnchorCalls,
+  findTermInsideChipLabel,
   isTestFile,
 } from "./coverage-scan";
 import {
@@ -42,6 +43,10 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 const sourceFiles = walk(SRC_ROOT);
+
+/** Tests that dynamically import every article can exceed vitest's 5 s
+ * default on a cold cache; same value as the `npm test` script. */
+const LOAD_ALL_TIMEOUT_MS = 20_000;
 
 async function loadAllScreens(): Promise<HelpScreen[]> {
   const screens: HelpScreen[] = [];
@@ -145,7 +150,7 @@ describe("help coverage", () => {
         ).toBe(true);
       }
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it('todo tourAnchor("…") em src/ é citado por algum artigo', async () => {
     const declared = declaredAnchors();
@@ -154,7 +159,7 @@ describe("help coverage", () => {
     for (const id of declared) {
       expect(cited.has(id), `tourAnchor("${id}") não citado por nenhum artigo`).toBe(true);
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("proíbe data-tour cru fora de src/help/anchor.ts", () => {
     for (const file of sourceFiles) {
@@ -179,7 +184,7 @@ describe("help coverage", () => {
         );
       }
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("todo passo de tour tem anchor e body não vazios; cada tour tem de 1 a 8 passos", async () => {
     const screens = await loadAllScreens();
@@ -196,7 +201,7 @@ describe("help coverage", () => {
         }
       }
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("todo artigo do registro tem route igual à chave em HELP_SCREEN_LOADERS", async () => {
     // HelpProvider only shows an article whose `route` equals the resolved
@@ -207,7 +212,7 @@ describe("help coverage", () => {
         key,
       );
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("tela com tours só por aba (sem \"default\") declara defaultTab, e ele é uma aba dela", async () => {
     // Without a hash the route shows its own fallback tab, but resolveHelpScreen
@@ -233,7 +238,39 @@ describe("help coverage", () => {
         `defaultTab "${screen.defaultTab}" de "${screen.id}" não é aba de nenhuma seção (nem pendente em PENDING_ROUTES)`,
       ).toBe(true);
     }
+  }, LOAD_ALL_TIMEOUT_MS);
+
+  it("<Term> nunca vai dentro do label={…} de um *Chip (botão dentro de botão)", () => {
+    for (const file of sourceFiles) {
+      const chips = findTermInsideChipLabel(fs.readFileSync(file, "utf8"));
+      expect(
+        chips,
+        `<Term> dentro do label de ${chips.join(", ")} em ${path.relative(SRC_ROOT, file)} — ponha o Term fora do botão`,
+      ).toEqual([]);
+    }
   });
+
+  it('artigo de rota que o expert não abre (isExpertAllowedPath) não lista "expert" nos roles', async () => {
+    // A pure expert is redirected to /expert from any other house route
+    // (navigation.ts), so "expert" there would be a promise the screen can't
+    // keep. Virtual screens (onboarding, shell) have no route of their own.
+    const virtual = new Set<string>(VIRTUAL_SCREENS);
+    for (const screen of await loadAllScreens()) {
+      if (virtual.has(screen.route) || isExpertAllowedPath(screen.route)) continue;
+      expect(
+        screen.roles.includes("expert"),
+        `"${screen.id}" (${screen.route}) lista "expert" nos roles, mas o expert não abre essa rota`,
+      ).toBe(false);
+      for (const section of screen.sections) {
+        for (const item of section.items) {
+          expect(
+            item.roles?.includes("expert") ?? false,
+            `"${screen.id}" › "${item.label}" lista "expert" nos roles, mas o expert não abre ${screen.route}`,
+          ).toBe(false);
+        }
+      }
+    }
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("GLOSSARY não tem ids duplicados", () => {
     const ids = GLOSSARY.map((term) => term.id);

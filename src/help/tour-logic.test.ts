@@ -275,7 +275,7 @@ describe("screenTourKey", () => {
     const novaKey = screenTourKey(nova, tourFor(nova, null).tourTab);
     expect(novaKey).toBe("tour:/jornadas/nova");
     expect(screenTourKey(edit, tourFor(edit, null).tourTab)).toBe(novaKey);
-  });
+  }, 20_000);
 
   it("keeps every other screen's key byte-identical to tourKey(route, tab)", async () => {
     const casa = (await HELP_SCREEN_LOADERS["/configuracoes/casa"]()).default;
@@ -291,7 +291,7 @@ describe("screenTourKey", () => {
         expect(screenTourKey(screen, tourTab)).toBe(tourKey(screen.route, tourTab));
       }
     }
-  });
+  }, 20_000);
 });
 
 describe("tourReadiness", () => {
