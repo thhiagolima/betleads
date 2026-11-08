@@ -298,8 +298,8 @@ describe("credentialHint", () => {
 
 describe("webhookStepContent", () => {
   it("Short Brasil: URL própria, sem nota", () => {
-    expect(webhookStepContent("short_brasil", "https://betleads.io/api/public/sms-webhook?token=x")).toEqual({
-      url: "https://betleads.io/api/public/sms-webhook?token=x",
+    expect(webhookStepContent("short_brasil", "https://betleads.io/api/public/sms-webhook/pa_x")).toEqual({
+      url: "https://betleads.io/api/public/sms-webhook/pa_x",
       note: null,
     });
   });
@@ -451,11 +451,11 @@ describe("WebhookStepView (etapa 3 — webhook)", () => {
     const html = renderToStaticMarkup(
       <WebhookStepView
         provider="short_brasil"
-        callbackUrl="https://betleads.io/api/public/sms-webhook?token=x"
+        callbackUrl="https://betleads.io/api/public/sms-webhook/pa_x"
         onNext={() => {}}
       />,
     );
-    expect(html).toContain("https://betleads.io/api/public/sms-webhook?token=x");
+    expect(html).toContain("https://betleads.io/api/public/sms-webhook/pa_x");
     expect(html).toContain("Copiar");
   });
 

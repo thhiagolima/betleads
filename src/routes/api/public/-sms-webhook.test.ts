@@ -20,6 +20,7 @@ import {
   seedCallbackAccounts,
 } from "@/lib/provider-callback-tokens.test-support";
 import { Route } from "./sms-webhook";
+import { Route as PathRoute } from "./sms-webhook_.$token";
 
 type Handler = (input: { request: Request }) => Promise<Response>;
 const get = (Route as unknown as { options: { server: { handlers: { GET: Handler } } } }).options
@@ -33,6 +34,25 @@ function callback(token: string | null, ref: { id?: string; parceiroId?: string 
   if (ref.parceiroId) url.searchParams.set("parceiroId", ref.parceiroId);
   url.searchParams.set("statusConfirmacao", "CONFIRMADO");
   return get({ request: new Request(url) });
+}
+
+type PathHandler = (input: {
+  request: Request;
+  params: { token: string };
+}) => Promise<Response>;
+const pathHandlers = (
+  PathRoute as unknown as {
+    options: { server: { handlers: { GET: PathHandler; POST: PathHandler } } };
+  }
+).options.server.handlers;
+
+/** House-owned account callback: token in the path (/sms-webhook/$token). */
+function pathCallback(token: string, ref: { id?: string; parceiroId?: string }) {
+  const url = new URL(`https://betleads.io/api/public/sms-webhook/${token}`);
+  if (ref.id) url.searchParams.set("id", ref.id);
+  if (ref.parceiroId) url.searchParams.set("parceiroId", ref.parceiroId);
+  url.searchParams.set("statusConfirmacao", "CONFIRMADO");
+  return pathHandlers.GET({ request: new Request(url), params: { token } });
 }
 
 const log = (id: string) => fake.db.rows("sms_send_logs").find((row) => row.id === id)!;
@@ -195,6 +215,63 @@ describe("Short Brasil sms-webhook: callback scope", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ matched: 0 });
       expect(orphans()).toHaveLength(0);
+    });
+  });
+
+  describe("token in the path (/api/public/sms-webhook/$token)", () => {
+    it("account A's path token + A's message -> applied, last_callback_at touched", async () => {
+      const response = await pathCallback(tokens.tokenA, { parceiroId: "key-a" });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ matched: 1, ignored: 0 });
+      expect(log("log-a").delivery_status).toBe("delivered");
+      expect(link("ld-a").delivery_status).toBe("delivered");
+      expect(lastCallbackAt(fake.db, OWN_A)).toEqual(expect.any(String));
+    });
+
+    it("account A's path token + B's / platform message -> ignored, no touch, no orphan", async () => {
+      for (const ref of [{ id: "msg-key-b" }, { parceiroId: "key-p" }, { id: "msg-unknown" }]) {
+        const response = await pathCallback(tokens.tokenA, ref);
+        expect(await response.json()).toMatchObject({ matched: 0, ignored: 1 });
+      }
+      expect(log("log-b").delivery_status).toBe("sent");
+      expect(log("log-p").delivery_status).toBe("sent");
+      expect(orphans()).toHaveLength(0);
+      expect(lastCallbackAt(fake.db, OWN_A)).toBeNull();
+    });
+
+    it("invalid / forged path token -> 401", async () => {
+      for (const token of ["wrong", `${tokens.tokenA.slice(0, -2)}xx`, ""]) {
+        expect((await pathCallback(token, { id: "msg-key-a" })).status).toBe(401);
+      }
+      expect(log("log-a").delivery_status).toBe("sent");
+    });
+
+    it("the path token decides even when a query token is present", async () => {
+      const url = new URL(`https://betleads.io/api/public/sms-webhook/wrong`);
+      url.searchParams.set("token", tokens.tokenA);
+      url.searchParams.set("parceiroId", "key-a");
+      url.searchParams.set("statusConfirmacao", "CONFIRMADO");
+      const response = await pathHandlers.GET({
+        request: new Request(url),
+        params: { token: "wrong" },
+      });
+      expect(response.status).toBe(401);
+      expect(log("log-a").delivery_status).toBe("sent");
+    });
+
+    it("an empty / token-only lote is acknowledged but does not touch last_callback_at", async () => {
+      for (const body of [{ lote: [] }, { lote: [{ token: "abc" }] }]) {
+        const response = await pathHandlers.POST({
+          request: new Request(`https://betleads.io/api/public/sms-webhook/${tokens.tokenA}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+          params: { token: tokens.tokenA },
+        });
+        expect(response.status).toBe(200);
+      }
+      expect(lastCallbackAt(fake.db, OWN_A)).toBeNull();
     });
   });
 

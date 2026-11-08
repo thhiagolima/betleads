@@ -300,7 +300,7 @@ describe("saveOwnProviderAccountFor", () => {
     const { token } = await decryptProviderCredentials(String(owned()[0].callback_token_encrypted));
     expect(token).toMatch(/^pa_/);
     expect(state.callbackUrl).toBe(
-      `https://app.betleads.io/api/public/sms-webhook?token=${encodeURIComponent(token)}`,
+      `https://app.betleads.io/api/public/sms-webhook/${encodeURIComponent(token)}`,
     );
     expect(state.account!.credentialsSet).toEqual(["shortcode_token"]);
     expect(JSON.stringify(state)).not.toContain(SECRET);

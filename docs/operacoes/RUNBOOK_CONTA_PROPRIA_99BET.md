@@ -43,6 +43,8 @@ fallback para a rota BetLeads, por constraint).
 7. Super admin libera SMS para a 99Bet com a taxa mensal (Passo 7).
 8. Admin da 99Bet cadastra a conta Short Brasil, configura o webhook, testa e
    ativa (Passo 8).
+8b. **Teste obrigatório no painel real da Short Brasil** antes do piloto
+   (Passo 8b) — callback com o token no caminho atualizando `delivery_status`.
 9. Verificação do primeiro envio e do primeiro callback (Passo 9).
 10. O que a 99Bet precisa saber (Passo 10, comunicar antes do Passo 8).
 11. Rollback (Passo 11).
@@ -423,7 +425,11 @@ desativar.
 3. Custo por SMS (R$ por segmento) — usado depois na Central de resultados.
 4. **Copiar a URL do webhook** (com o token **próprio dessa conta**, gerado
    pelo servidor) e colar no painel Short Brasil da 99Bet — "sem isso você
-   não verá entregas".
+   não verá entregas". O formato é
+   `https://betleads.io/api/public/sms-webhook/pa_<...>` — o token vai **no
+   caminho**, não em `?token=`: com `?token=` a Short Brasil manda só
+   `{"lote":[{"token":...}]}`, sem id nem status (origin/main `40e5ba5`), e
+   nenhuma entrega seria marcada. Não acrescente `?token=` à URL.
 5. **Testar** — envia 1 SMS de teste para um celular informado (não cobrado
    da carteira da 99Bet).
 6. **Ativar** — exige senha (reautenticação). Os outros admins da 99Bet
@@ -431,6 +437,47 @@ desativar.
    SMS da 99Bet a essa conta; a cobrança por envio deixa de existir nesse
    canal (passa a valer só a taxa mensal do Passo 7, a partir da próxima
    fatura).
+
+**Resultado:** _______________________________________________
+
+---
+
+## Passo 8b — Teste obrigatório no painel real da Short Brasil (antes do piloto)
+
+O formato que a Short Brasil manda com o token **no caminho** ainda não foi
+visto em produção (só o com `?token=`, que vinha sem id/status). Antes de
+liberar envios reais da 99Bet:
+
+1. Confirmar que a URL configurada no painel Short Brasil da 99Bet é
+   exatamente a do Passo 8.4 (`/api/public/sms-webhook/pa_...`, sem query).
+2. Enviar **1 SMS** pela conta própria (o "Testar" do Passo 8.5 ou um
+   avulso para um celular da equipe) e esperar a entrega no aparelho.
+3. Conferir, em leitura:
+```sql
+select id, provider_account_id, status, delivery_status, delivered_at,
+       last_callback, created_at
+from public.sms_send_logs
+where tenant_id = 'b5c4fec6-3adf-412d-868e-0bc18ad1b7c6'
+order by created_at desc
+limit 3;
+
+select id, created_at, method, query_string, left(body, 300) as body,
+       processed, matched, unidentified
+from public.sms_callback_raw
+order by created_at desc
+limit 10;
+```
+**Esperado:** o envio de teste com `delivery_status = 'delivered'` (ou
+`'failed'` com motivo), `delivered_at` e `last_callback` preenchidos, e uma
+linha de `sms_callback_raw` com `matched = 1` no mesmo minuto.
+
+**Se o callback chegar sem id/status (`unidentified > 0`, `matched = 0`) ou
+não chegar:** a Short Brasil também está descartando o token do caminho.
+**Pare e pergunte ao usuário** — não libere o piloto. Plano B (decisão do
+usuário, não implementado): aceitar callbacks sem token também para envios
+de conta própria (hoje o escopo sem token nunca toca envio de conta com
+dono), o que deixa qualquer um que conheça um id de mensagem da 99Bet marcar
+o status dela.
 
 **Resultado:** _______________________________________________
 
@@ -465,6 +512,19 @@ limit 5;
 `metadata->>'own_account' = 'true'`, `metadata->>'provider_account_id'` =
 mesmo id da conta própria.
 
+**Entregas sendo marcadas (o que importa):**
+```sql
+select delivery_status, count(*), max(delivered_at) as ultima_entrega
+from public.sms_send_logs
+where tenant_id = 'b5c4fec6-3adf-412d-868e-0bc18ad1b7c6'
+  and provider_account_id = '<id da conta própria da 99Bet>'
+  and created_at > now() - interval '1 day'
+group by 1 order by 2 desc;
+```
+**Esperado:** a maior parte em `delivered` (e algum `failed`), não tudo
+parado em `sent` — `sent` sem mudar depois de alguns minutos é callback não
+aplicado.
+
 **Primeiro callback aceito:**
 ```sql
 select id, label, owner_tenant_id, last_callback_at
@@ -472,8 +532,9 @@ from public.provider_accounts
 where owner_tenant_id = 'b5c4fec6-3adf-412d-868e-0bc18ad1b7c6';
 ```
 **Esperado:** `last_callback_at` preenchido, posterior ao envio de teste ou
-ao primeiro envio real — confirma que o token por conta casou e a Short
-Brasil está de fato postando no webhook certo.
+ao primeiro envio real. Ele só é gravado quando um callback com o token da
+conta **atualizou** um envio dela (um `lote` vazio ou sem id não conta), mas
+sozinho não basta — a verificação de `delivery_status` acima é a que vale.
 
 **Taxa na próxima fatura:**
 ```sql
@@ -490,8 +551,10 @@ limit 3;
 
 **Se vier diferente:** `provider_account_id` nulo no log indica que o
 resolver caiu para a conta padrão — confira `tenant_channel_providers` da
-99Bet/sms; `last_callback_at` nunca preenchido indica token errado no painel
-Short Brasil da 99Bet ou URL copiada errada no Passo 8.
+99Bet/sms; `last_callback_at` nunca preenchido / tudo em `sent` indica token
+errado no painel Short Brasil da 99Bet, URL copiada errada no Passo 8 ou a
+Short Brasil descartando o token do caminho (Plano B do Passo 8b — pare e
+pergunte ao usuário).
 
 **Resultado:** _______________________________________________
 

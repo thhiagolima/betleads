@@ -191,7 +191,9 @@ function configText(config: Record<string, unknown> | null, key: string): string
 
 function smsCallbackUrl(token: string): string {
   const appUrl = (process.env.PUBLIC_APP_URL ?? "https://betleads.io").replace(/\/$/, "");
-  return `${appUrl}/api/public/sms-webhook?token=${encodeURIComponent(token)}`;
+  // Token no caminho: com ?token= a Short Brasil devolve só o token no
+  // callback, sem id nem status (origin/main 40e5ba5).
+  return `${appUrl}/api/public/sms-webhook/${encodeURIComponent(token)}`;
 }
 
 export type OwnAccountView = {

@@ -104,6 +104,7 @@ import { Route as ApiPublicPushLoaderDotjsRouteImport } from './routes/api/publi
 import { Route as ApiPublicPushSubscribeRouteImport } from './routes/api/public/push/subscribe'
 import { Route as ApiPublicPushWorkerDotjsRouteImport } from './routes/api/public/push/worker[.]js'
 import { Route as ApiPublicShortioSyncRouteImport } from './routes/api/public/shortio/sync'
+import { Route as ApiPublicSmsWebhookTokenRouteImport } from './routes/api/public/sms-webhook_.$token'
 import { Route as ApiPublicTenantDomainsVerifyRouteImport } from './routes/api/public/tenant-domains/verify'
 import { Route as ApiPublicUpperWebhookRouteImport } from './routes/api/public/upper/webhook'
 import { Route as ApiPublicWebhookEventoRouteImport } from './routes/api/public/webhook.$evento'
@@ -616,6 +617,12 @@ const ApiPublicShortioSyncRoute = ApiPublicShortioSyncRouteImport.update({
   path: '/api/public/shortio/sync',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicSmsWebhookTokenRoute =
+  ApiPublicSmsWebhookTokenRouteImport.update({
+    id: '/api/public/sms-webhook_/$token',
+    path: '/api/public/sms-webhook/$token',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicTenantDomainsVerifyRoute =
   ApiPublicTenantDomainsVerifyRouteImport.update({
     id: '/api/public/tenant-domains/verify',
@@ -777,6 +784,7 @@ export interface FileRoutesByFullPath {
   '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
   '/api/public/push/worker.js': typeof ApiPublicPushWorkerDotjsRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
+  '/api/public/sms-webhook/$token': typeof ApiPublicSmsWebhookTokenRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
@@ -885,6 +893,7 @@ export interface FileRoutesByTo {
   '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
   '/api/public/push/worker.js': typeof ApiPublicPushWorkerDotjsRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
+  '/api/public/sms-webhook/$token': typeof ApiPublicSmsWebhookTokenRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
@@ -994,6 +1003,7 @@ export interface FileRoutesById {
   '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
   '/api/public/push/worker.js': typeof ApiPublicPushWorkerDotjsRoute
   '/api/public/shortio/sync': typeof ApiPublicShortioSyncRoute
+  '/api/public/sms-webhook_/$token': typeof ApiPublicSmsWebhookTokenRoute
   '/api/public/tenant-domains/verify': typeof ApiPublicTenantDomainsVerifyRoute
   '/api/public/upper/webhook': typeof ApiPublicUpperWebhookRoute
   '/api/public/webhook/$evento': typeof ApiPublicWebhookEventoRoute
@@ -1104,6 +1114,7 @@ export interface FileRouteTypes {
     | '/api/public/push/subscribe'
     | '/api/public/push/worker.js'
     | '/api/public/shortio/sync'
+    | '/api/public/sms-webhook/$token'
     | '/api/public/tenant-domains/verify'
     | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
@@ -1212,6 +1223,7 @@ export interface FileRouteTypes {
     | '/api/public/push/subscribe'
     | '/api/public/push/worker.js'
     | '/api/public/shortio/sync'
+    | '/api/public/sms-webhook/$token'
     | '/api/public/tenant-domains/verify'
     | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
@@ -1320,6 +1332,7 @@ export interface FileRouteTypes {
     | '/api/public/push/subscribe'
     | '/api/public/push/worker.js'
     | '/api/public/shortio/sync'
+    | '/api/public/sms-webhook_/$token'
     | '/api/public/tenant-domains/verify'
     | '/api/public/upper/webhook'
     | '/api/public/webhook/$evento'
@@ -1411,6 +1424,7 @@ export interface RootRouteChildren {
   ApiPublicPushSubscribeRoute: typeof ApiPublicPushSubscribeRoute
   ApiPublicPushWorkerDotjsRoute: typeof ApiPublicPushWorkerDotjsRoute
   ApiPublicShortioSyncRoute: typeof ApiPublicShortioSyncRoute
+  ApiPublicSmsWebhookTokenRoute: typeof ApiPublicSmsWebhookTokenRoute
   ApiPublicTenantDomainsVerifyRoute: typeof ApiPublicTenantDomainsVerifyRoute
   ApiPublicUpperWebhookRoute: typeof ApiPublicUpperWebhookRoute
   ApiPublicWebhookEventoRoute: typeof ApiPublicWebhookEventoRoute
@@ -2091,6 +2105,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicShortioSyncRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/sms-webhook_/$token': {
+      id: '/api/public/sms-webhook_/$token'
+      path: '/api/public/sms-webhook/$token'
+      fullPath: '/api/public/sms-webhook/$token'
+      preLoaderRoute: typeof ApiPublicSmsWebhookTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/tenant-domains/verify': {
       id: '/api/public/tenant-domains/verify'
       path: '/api/public/tenant-domains/verify'
@@ -2402,6 +2423,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicPushSubscribeRoute: ApiPublicPushSubscribeRoute,
   ApiPublicPushWorkerDotjsRoute: ApiPublicPushWorkerDotjsRoute,
   ApiPublicShortioSyncRoute: ApiPublicShortioSyncRoute,
+  ApiPublicSmsWebhookTokenRoute: ApiPublicSmsWebhookTokenRoute,
   ApiPublicTenantDomainsVerifyRoute: ApiPublicTenantDomainsVerifyRoute,
   ApiPublicUpperWebhookRoute: ApiPublicUpperWebhookRoute,
   ApiPublicWebhookEventoRoute: ApiPublicWebhookEventoRoute,
