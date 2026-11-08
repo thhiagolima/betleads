@@ -210,7 +210,7 @@ const screen: HelpScreen = {
           label: "Salvar / Tudo salvo",
           what: 'Grava as faixas e as regras. O botão mostra "Salvar" enquanto há alguma alteração não salva, "Salvando…" durante a gravação, e "Tudo salvo" (desabilitado) quando o que está na tela já é igual ao que foi salvo.',
           notes:
-            'Erros possíveis ao salvar: "As faixas precisam ser crescentes: Bronze < Prata < Ouro < Diamante < Black VIP." (algum limite ficou igual ou menor que o anterior), "Esfriando precisa ser pelo menos 1 dia." e "Dormindo precisa ser maior ou igual a Esfriando." Ao salvar com sucesso aparece "Faixas e regras salvas."; se a gravação falhar por outro motivo, aparece "Não foi possível salvar as faixas." (ou a mensagem específica do erro, quando houver uma).',
+            'Erros possíveis ao salvar: "As faixas precisam ser crescentes: Bronze < Prata < Ouro < Diamante < Black VIP." (algum limite ficou igual ou menor que o anterior), "Esfriando precisa ser pelo menos 1 dia." e "Dormindo precisa ser maior ou igual a Esfriando." Ao salvar com sucesso aparece "Faixas e regras salvas."; se a gravação falhar por outro motivo, aparece "Não foi possível salvar as faixas." (ou a mensagem específica do erro, quando houver uma) — inclusive "A tabela de gamificacao ainda nao foi criada. Aplique as migrations antes de salvar." quando a casa ainda não tem essa configuração criada no banco (veja o estado correspondente, mais abaixo).',
         },
         {
           label: '"O que fazer com isso" (dica)',
@@ -277,6 +277,12 @@ const screen: HelpScreen = {
       title: "Não foi possível salvar as faixas.",
       what: 'Mensagem genérica mostrada quando "Salvar" falha por um motivo sem mensagem própria (por exemplo, erro de rede).',
       action: "Tente salvar de novo; se persistir, verifique sua conexão.",
+    },
+    {
+      id: "faixas-tabela-nao-criada",
+      title: "A tabela de gamificacao ainda nao foi criada. Aplique as migrations antes de salvar.",
+      what: 'Mostrado em vez de "Faixas e regras salvas." quando a casa ainda não tem a configuração de gamificação criada no banco (uma pendência de implantação, não algo que o uso normal da tela provoca).',
+      action: "Fale com o suporte — é preciso aplicar uma atualização pendente no banco da casa antes de conseguir salvar.",
     },
   ],
 
