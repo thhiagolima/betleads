@@ -37,6 +37,7 @@ import {
   pickHelpTarget,
   releaseAutoStart,
   screenTourKey,
+  shellOverrideResetKey,
   startAutoStartSuppression,
   nextFirstVisibleClock,
   nextReadinessClock,
@@ -184,9 +185,15 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  // Memoized on the resolved route/tab, not the raw query: a screen
+  // rewriting its own filters/period in the query keeps the same target
+  // object, so nothing keyed on it (auto-start, suppression) re-runs.
+  const resolved = resolveHelpScreen(pathname, hash, search);
+  const resolvedRoute = resolved?.route ?? null;
+  const resolvedTab = resolved?.tab ?? null;
   const urlTarget: Target | null = useMemo(
-    () => resolveHelpScreen(pathname, hash, search),
-    [pathname, hash, search],
+    () => (resolvedRoute === null ? null : { route: resolvedRoute, tab: resolvedTab }),
+    [resolvedRoute, resolvedTab],
   );
   // The onboarding wizard's override (`setScreenOverride`), which it clears
   // itself based on wizard state...
@@ -202,10 +209,12 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   // "Sobre o CRM" overrides the screen without navigating anywhere, so
   // nothing else would drop it: it goes away when the panel closes or the
   // location (path or tab) changes, and the help is back on the page's own
-  // article (or the wizard's).
+  // article (or the wizard's). Other query changes (filters, period, paging)
+  // keep it — see `shellOverrideResetKey`.
+  const shellResetKey = shellOverrideResetKey(pathname, urlTarget);
   useEffect(() => {
     setShellOverride(null);
-  }, [pathname, hash, search]);
+  }, [shellResetKey]);
   useEffect(() => {
     if (!panelOpen) setShellOverride(null);
   }, [panelOpen]);

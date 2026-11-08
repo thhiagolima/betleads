@@ -1,9 +1,16 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { effectiveTab, helpTabLocation, resolveHelpScreen, tabSectionId } from "./resolve";
+import {
+  effectiveTab,
+  helpTabLocation,
+  knownTab,
+  resolveHelpScreen,
+  tabSectionId,
+} from "./resolve";
 import {
   isAutoStartSuppressed,
   nextAutoStartSuppression,
   screenTourKey,
+  shellOverrideResetKey,
   startAutoStartSuppression,
   tourFor,
 } from "./tour-logic";
@@ -207,5 +214,70 @@ describe("abas na query string (tabSearchParam)", () => {
     for (const route of Object.keys(HELP_TAB_SEARCH_PARAMS)) {
       expect(HELP_SCREEN_LOADERS[route], route).toBeTruthy();
     }
+  });
+});
+
+describe("aba desconhecida em tela de query (knownTab)", () => {
+  const step = { anchor: "x.a.b", title: "t", body: "b" };
+  const queryScreen: HelpScreen = {
+    ...fakeScreen,
+    route: "/q",
+    tabSearchParam: "aba",
+    defaultTab: "visao",
+    sections: [
+      { id: "s1", title: "S1", tab: "visao", items: [] },
+      { id: "s2", title: "S2", tab: "so-secao", items: [] },
+    ],
+    tours: { visao: [step], origens: [step] },
+  };
+
+  it("valor que não é aba da tela vira null e cai no defaultTab", () => {
+    expect(knownTab(queryScreen, "recomendacoes")).toBeNull();
+    expect(effectiveTab(queryScreen, "recomendacoes")).toBe("visao");
+  });
+
+  it("aba com tour ou com seção própria é mantida", () => {
+    expect(knownTab(queryScreen, "origens")).toBe("origens");
+    expect(knownTab(queryScreen, "so-secao")).toBe("so-secao");
+    expect(knownTab(queryScreen, null)).toBeNull();
+  });
+
+  it("tela de hash mantém a aba crua", () => {
+    const hashScreen: HelpScreen = { ...queryScreen, tabSearchParam: undefined };
+    expect(knownTab(hashScreen, "recomendacoes")).toBe("recomendacoes");
+  });
+
+  it("/resultados?aba=recomendacoes usa o tour e a chave da Visão geral", async () => {
+    const resultados = (await HELP_SCREEN_LOADERS["/resultados"]()).default;
+    const target = resolveHelpScreen("/resultados", "", "?aba=recomendacoes")!;
+    const tab = effectiveTab(resultados, target.tab);
+    expect(tab).toBe("visao");
+    expect(screenTourKey(resultados, tourFor(resultados, tab).tourTab)).toBe(
+      "tour:/resultados#visao",
+    );
+  }, 20_000);
+});
+
+describe("shellOverrideResetKey", () => {
+  it("mudar filtro/período/página na query não muda a chave", () => {
+    const a = resolveHelpScreen("/resultados", "", "?aba=origens&periodo=7");
+    const b = resolveHelpScreen("/resultados", "", "?aba=origens&periodo=30&busca=x");
+    expect(shellOverrideResetKey("/resultados", a)).toBe(shellOverrideResetKey("/resultados", b));
+  });
+
+  it("trocar a aba (query ou hash) ou o caminho muda a chave", () => {
+    const origens = resolveHelpScreen("/resultados", "", "?aba=origens");
+    const controle = resolveHelpScreen("/resultados", "", "?aba=controle");
+    expect(shellOverrideResetKey("/resultados", origens)).not.toBe(
+      shellOverrideResetKey("/resultados", controle),
+    );
+    const email = resolveHelpScreen("/configuracoes/casa", "#email");
+    const casa = resolveHelpScreen("/configuracoes/casa", "#casa");
+    expect(shellOverrideResetKey("/configuracoes/casa", email)).not.toBe(
+      shellOverrideResetKey("/configuracoes/casa", casa),
+    );
+    const j1 = resolveHelpScreen("/jornadas/a", "");
+    const j2 = resolveHelpScreen("/jornadas/b", "");
+    expect(shellOverrideResetKey("/jornadas/a", j1)).not.toBe(shellOverrideResetKey("/jornadas/b", j2));
   });
 });

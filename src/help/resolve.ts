@@ -48,13 +48,25 @@ export function helpTabLocation(
   return { href: `${route}#${tab}`, search: "", hash: `#${tab}` };
 }
 
-/** The tab actually showing: the URL's (`tab`), else the screen's
- * `defaultTab` (what the route itself shows without a hash), else null. Use
- * it wherever the current tab picks something — the tour (`tourFor`), its
- * progress key, the panel's scroll-to-tab section — so the landing URL
- * (/configuracoes/casa) and its explicit hash (#casa) behave the same. */
+/** The URL's tab as the screen understands it. On a `tabSearchParam`
+ * screen, a value that isn't one of its tabs (no tour and no section with
+ * that `tab` — e.g. a retired `/resultados?aba=recomendacoes`, which the
+ * route still accepts and shows as Visão geral) counts as no tab (null), so
+ * it falls back to `defaultTab`. Hash screens keep the raw tab. */
+export function knownTab(screen: HelpScreen, tab: string | null): string | null {
+  if (!tab || !screen.tabSearchParam) return tab;
+  const known = tab in screen.tours || screen.sections.some((section) => section.tab === tab);
+  return known ? tab : null;
+}
+
+/** The tab actually showing: the URL's (`tab`, via `knownTab`), else the
+ * screen's `defaultTab` (what the route itself shows without a hash), else
+ * null. Use it wherever the current tab picks something — the tour
+ * (`tourFor`), its progress key, the panel's scroll-to-tab section — so the
+ * landing URL (/configuracoes/casa) and its explicit hash (#casa) behave the
+ * same. */
 export function effectiveTab(screen: HelpScreen, tab: string | null): string | null {
-  return tab ?? screen.defaultTab ?? null;
+  return knownTab(screen, tab) ?? screen.defaultTab ?? null;
 }
 
 /** The first article section of the tab actually showing, for the panel to
