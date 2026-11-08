@@ -193,7 +193,8 @@ const screen: HelpScreen = {
           label: "Chave de acesso do Usuário do Sistema",
           what: "Campo onde cola a chave copiada da Meta (aceita um texto longo, tipo senha). É pedido sem nenhuma chave conectada ainda e também ao adicionar outra chave ou trocar a de uma conexão existente.",
           roles: ["admin"],
-          notes: "Fica guardada de forma criptografada e não volta a aparecer depois.",
+          notes:
+            'Fica guardada de forma criptografada e não volta a aparecer depois. O painel lateral que o pede tem o título "Adicionar Usuário do Sistema" (para somar uma chave) ou "Trocar chave · <nome da chave>" (para substituir a de uma conexão existente).',
         },
         {
           anchor: "webhooks.meta.validar",
@@ -201,7 +202,7 @@ const screen: HelpScreen = {
           what: "Confirma a chave colada: a Meta valida o acesso e o CRM lista as contas de anúncio que essa chave alcança.",
           roles: ["admin"],
           notes:
-            'Fica desativado com menos de 40 caracteres na chave. Ao validar, mostra "Chave "<nome>" conectada: N BMs, N contas (N novas). Marque as que deseja acompanhar e salve." (ou "atualizada" em vez de "conectada", ao trocar a chave de uma conexão existente). Se a chave for de outro Usuário do Sistema ou de outro app, ela entra como uma nova conexão e aparece o aviso "Esta chave é de outro Usuário do Sistema ou de outro app: ela foi adicionada como uma nova conexão e a chave antiga continua conectada." Falhando, mostra "Não foi possível validar a chave de acesso da Meta" (ou o motivo específico do erro, quando a Meta informa um).',
+            'Fica desativado com menos de 40 caracteres na chave. Ao validar, mostra "Chave "<nome>" conectada: N BMs, N contas (N novas). Marque as que deseja acompanhar e salve." (ou "atualizada" em vez de "conectada", ao trocar a chave de uma conexão existente). Se a chave for de outro Usuário do Sistema ou de outro app, ela entra como uma nova conexão e aparece o aviso "Esta chave é de outro Usuário do Sistema ou de outro app: ela foi adicionada como uma nova conexão e a chave antiga continua conectada." Falhando, mostra "Não foi possível validar a chave de acesso da Meta" ou, quando a Meta informa o motivo, a mensagem específica — as mais comuns são "Use a chave de um Usuário do Sistema: chaves de usuário comum expiram em até 60 dias.", "A chave foi gerada por outro app da Meta." e "A chave de acesso é inválida ou expirou."',
         },
         {
           anchor: "webhooks.meta.progresso",
@@ -230,13 +231,13 @@ const screen: HelpScreen = {
           label: "Chaves conectadas",
           what: 'Um cartão por chave: nome ("Chave "<nome>""), app e trecho da chave, Usuário do Sistema, quantas BMs e contas alcança (e quantas marcadas), validade ("Não expira", "Expira em <data>" ou "Validade desconhecida") e um selo de saúde ("ok", "atenção" ou "erro").',
           notes:
-            'Uma chave com problema mostra o motivo ("A chave está com erro. Teste o acesso ou troque a chave.", "A chave expirou. Troque a chave.", "A chave expira em menos de 1 dia. Troque a chave." ou "A chave expira em N dias. Troque a chave.", e/ou "N conta(s) com erro de sincronização.") com o botão "Trocar chave" ao lado. Uma chave da integração antiga (app compartilhado) ganha o selo "Conexão antiga", e a tela mostra o aviso "Conexão antiga precisa ser substituída: A integração anterior usava o app compartilhado da plataforma. Gere uma chave no app da sua operação e conecte; os dados já importados ficam." Cada cartão tem o botão "Testar acesso" e o menu "..." com "Renomear" (até 60 caracteres), "Trocar chave" e "Desconectar". Sem nenhuma chave conectada: para o admin, mostra o guia e o campo de conectar a primeira chave; para os outros perfis, "A Meta ainda não está conectada nesta casa."',
+            'Uma chave com problema mostra o motivo ("A chave está com erro. Teste o acesso ou troque a chave.", "A chave expirou. Troque a chave.", "A chave expira em menos de 1 dia. Troque a chave." ou "A chave expira em N dias. Troque a chave.", e/ou "N conta(s) com erro de sincronização.") com o botão "Trocar chave" ao lado. Uma chave da integração antiga (app compartilhado) ganha o selo "Conexão antiga", e a tela mostra o aviso "Conexão antiga precisa ser substituída: A integração anterior usava o app compartilhado da plataforma. Gere uma chave no app da sua operação e conecte; os dados já importados ficam." Cada cartão tem o botão "Testar acesso" e o menu "..." com "Renomear" (até 60 caracteres), "Trocar chave" e "Desconectar". Sem nenhuma chave conectada: para o admin, mostra o guia e o campo de conectar a primeira chave; para os outros perfis, "A Meta ainda não está conectada nesta casa."\n\n"Testar acesso" mostra "Acesso testado · N conta(s) acessível(is) (N nova(s))" (a parte entre parênteses só aparece com conta nova) ou, falhando, "Não foi possível testar o acesso". "Renomear" mostra "Chave renomeada para "<nome>"" ou, falhando, "Não foi possível renomear a chave". O texto embaixo do nome da chave (quando ela está com erro, gravado pela última verificação automática) é um destes: "Conexão antiga: reconecte usando a chave de acesso do Usuário do Sistema.", "Nenhuma chave conectada alcança esta conta.", "A conta foi removida ou deixou de estar selecionada.", "A chave perdeu a permissão ads_read.", "A Meta não devolveu nenhuma conta para esta chave. Teste o acesso.", "A chave de acesso é inválida ou expirou." ou "A chave foi revogada ou expirou. Gere uma nova no Business Manager."',
         },
         {
           label: 'Diálogo "Desconectar a chave "<nome>"?"',
           what: 'Remove a chave de acesso guardada desta casa. Lista o impacto: quantas contas e BMs ela alcança, quantas contas vão parar de sincronizar e quantas continuam por outra chave conectada, e avisa que os dados já importados ficam. Botões "Cancelar" e "Desconectar" (vermelho).',
           notes:
-            'Quando pelo menos uma conta vai parar de sincronizar, o botão "Desconectar" só libera depois de digitar o nome da chave no campo "Para confirmar, digite o nome da chave: <nome>" (sem diferença de acento, caixa ou espaços). Ao confirmar, mostra "Chave desconectada" com o resumo do que mudou (contas que seguem por outra chave; contas que pararam).',
+            'Quando pelo menos uma conta vai parar de sincronizar, o botão "Desconectar" só libera depois de digitar o nome da chave no campo "Para confirmar, digite o nome da chave: <nome>" (sem diferença de acento, caixa ou espaços). Ao confirmar, mostra "Chave desconectada" com o resumo do que mudou (contas que seguem por outra chave; contas que pararam), ou, falhando, "Não foi possível desconectar".',
         },
         {
           anchor: "webhooks.meta.contas",
@@ -250,7 +251,7 @@ const screen: HelpScreen = {
           label: 'Barra "N alteração(ões) não salva(s)"',
           what: 'Aparece ao marcar ou desmarcar contas sem salvar ainda, com os botões "Descartar" (volta ao que estava salvo) e "Salvar contas".',
           notes:
-            'Ao salvar, mostra "N conta(s) marcada(s)" (e, se alguma conta nova entrou, ", a importação dos últimos 90 dias começou"). Se a lista de contas mudou desde que a tela abriu (outra pessoa alterou, ou uma conexão caiu), aparece "A lista de contas mudou desde que você abriu a tela. Revise e salve de novo." e a página relê a lista.',
+            'Ao salvar, mostra "N conta(s) marcada(s)" (e, se alguma conta nova entrou, ", a importação dos últimos 90 dias começou"). Se a lista de contas mudou desde que a tela abriu (outra pessoa alterou, ou uma conexão caiu), aparece "A lista de contas mudou desde que você abriu a tela. Revise e salve de novo." e a página relê a lista. Qualquer outra falha ao salvar mostra "Não foi possível salvar as contas".',
         },
         {
           label: 'Diálogo "Sair sem salvar?"',
@@ -270,7 +271,7 @@ const screen: HelpScreen = {
           label: 'Montar marcação — campo "Link da casa" e parâmetros de UTM',
           what: 'Cole o link de destino do anúncio (por exemplo a página de cadastro) e o CRM monta o link completo já com os parâmetros de UTM, prontos para colar nos anúncios do Facebook e do Instagram.',
           notes:
-            'O utm_id leva o ID do anúncio: é ele que liga cada cadastro ao anúncio certo, mesmo quando dois anúncios têm o mesmo nome. Os botões "Copiar" dos blocos "Parâmetros de URL" e "Link completo" copiam o respectivo texto.',
+            'O utm_id leva o ID do anúncio: é ele que liga cada cadastro ao anúncio certo, mesmo quando dois anúncios têm o mesmo nome. Os botões "Copiar" dos blocos "Parâmetros de URL" e "Link completo" copiam o respectivo texto (toast "Copiado"); se o navegador recusar a cópia, mostra "Não foi possível copiar. Selecione o texto e copie manualmente."',
         },
       ],
     },
@@ -298,22 +299,29 @@ const screen: HelpScreen = {
           anchor: "webhooks.webpush.copiar-instrucoes",
           label: "Copiar instruções para o suporte",
           what: "Copia, num só texto, tudo que o suporte do site da casa precisa para instalar o Web Push: o arquivo do service worker, o script e a identificação do jogador — para abrir um único chamado em vez de três.",
-          notes: 'Mostra "Instruções copiadas" ao copiar com sucesso.',
+          notes:
+            'Mostra "Instruções copiadas" ao copiar com sucesso, ou "Não foi possível copiar. Selecione o texto e copie manualmente." se o navegador recusar (sem acesso à área de transferência, ou fora de um contexto seguro).',
         },
         {
           anchor: "webhooks.webpush.bloco-arquivo",
           label: "1. Arquivo",
           what: 'O arquivo OneSignalSDKWorker.js para baixar e colocar, sem renomear, na pasta push/onesignal na raiz do site. Mostra o endereço completo onde ele deve abrir, com botão "Copiar".',
+          notes:
+            'O botão mostra "Endereço copiado" ao copiar com sucesso, ou "Não foi possível copiar. Selecione o texto e copie manualmente." se falhar.',
         },
         {
           anchor: "webhooks.webpush.bloco-script",
           label: "2. Script",
           what: "O código para colar no <head> de todas as páginas do site, com botão de copiar.",
+          notes:
+            'O botão mostra "Script copiado" ao copiar com sucesso, ou "Não foi possível copiar. Selecione o texto e copie manualmente." se falhar.',
         },
         {
           anchor: "webhooks.webpush.bloco-jogador",
           label: "3. Jogador logado (opcional)",
           what: "O código que identifica o jogador logado (o mesmo ID enviado nos webhooks da casa), para colar antes do script do passo 2 — opcional, mas recomendado para saber quem recebeu cada push.",
+          notes:
+            'O botão mostra "Script copiado" ao copiar com sucesso (a mesma mensagem do bloco do Script), ou "Não foi possível copiar. Selecione o texto e copie manualmente." se falhar.',
         },
         {
           anchor: "webhooks.webpush.status",
@@ -363,7 +371,8 @@ const screen: HelpScreen = {
           label: "Salvar",
           what: "Grava o texto, os rótulos e o ícone do convite.",
           roles: ["admin"],
-          notes: 'Mostra "Salvando…" e, ao terminar, o aviso "Convite de notificações salvo".',
+          notes:
+            'Mostra "Salvando…" e, ao terminar, o aviso "Convite de notificações salvo". Falhando, mostra o próprio motivo do erro devolvido pelo servidor (não há uma mensagem padrão fixa aqui).',
         },
         {
           anchor: "webhooks.webpush.convite-preview",
