@@ -17,7 +17,7 @@ const screen: HelpScreen = {
   title: "SMS",
   purpose:
     "Visão geral dos envios de SMS, o saldo e a saúde do canal, os templates usados em campanhas e jornadas (com contador de caracteres/segmentos e chips de link) e o histórico completo de envios.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["segmento-sms", "gsm-7", "ucs-2"],
   sections: [
     // ---------------------------------------------------------------

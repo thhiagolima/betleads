@@ -13,7 +13,7 @@ const screen: HelpScreen = {
   title: "Ficha do jogador",
   purpose:
     "Tudo sobre um jogador: contato, movimento financeiro, pontuação de risco/retenção, como ele chegou, o que o CRM já fez com ele e a linha do tempo completa.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["grupo-de-controle", "utm"],
   sections: [
     {
@@ -107,38 +107,32 @@ const screen: HelpScreen = {
           anchor: "jogador.link-equipe.card",
           label: "Cartão Link rastreado",
           what: "Gera um link curto rastreado para este jogador, a partir de uma URL de oferta sua.",
-          roles: ["member", "expert"],
         },
         {
           anchor: "jogador.link-equipe.url",
           label: "URL da oferta",
           what: "O endereço (https://...) para onde o link gerado deve levar o jogador.",
-          roles: ["member", "expert"],
         },
         {
           label: "Nome da oferta",
           what: 'Um nome para identificar a oferta, por exemplo "Cashback de sexta" (até 60 caracteres).',
-          roles: ["member", "expert"],
         },
         {
           anchor: "jogador.link-equipe.gerar",
           label: "Gerar link",
           what: "Cria o link rastreado. Fica desabilitado até os dois campos acima estarem preenchidos.",
-          roles: ["member", "expert"],
           notes: 'Depois de gerado, aparece o aviso "Encurtador não configurado; o link é rastreado mesmo assim." quando a casa não tem domínio de encurtador próprio. Erro "Não foi possível gerar o link." se a geração falhar.',
         },
         {
           anchor: "jogador.link-equipe.copiar",
           label: "Copiar (link gerado)",
           what: "Copia o link gerado para a área de transferência.",
-          roles: ["member", "expert"],
           notes: 'Erro "Não foi possível copiar." se a área de transferência não puder ser usada.',
         },
         {
           anchor: "jogador.link-equipe.whatsapp",
           label: "Abrir no WhatsApp",
           what: "Abre o WhatsApp Web/app com o link gerado já no texto da conversa com este jogador.",
-          roles: ["member", "expert"],
           notes: 'Fica desabilitado com o aviso "Jogador sem telefone válido." quando o telefone do jogador não é um número de WhatsApp reconhecível.',
         },
       ],

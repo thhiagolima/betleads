@@ -36,7 +36,7 @@ const screen: HelpScreen = {
   title: "Integrações",
   purpose:
     "Conectar a plataforma de apostas (endereços de recebimento e assinatura), configurar os links curtos (encurtador), a conta de anúncios da Meta e o Web Push (notificações no navegador).",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["encurtador", "bm", "usuario-do-sistema", "ads-read", "utm"],
   sections: [
     // ---------------------------------------------------------------

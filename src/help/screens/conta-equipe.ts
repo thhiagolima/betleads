@@ -239,7 +239,6 @@ const screen: HelpScreen = {
           anchor: "conta.config.salvar",
           label: "Salvar configuração",
           what: "Grava o novo nome da casa.",
-          roles: ["admin"],
           notes:
             'Fica desabilitado com o Nome em branco. Um gestor ou membro consegue digitar no campo Nome (ele não trava por papel), mas o servidor recusa a gravação com "Sem permissão para gerenciar esta casa" — só administrador da casa (ou super admin) pode de fato salvar. Sucesso mostra "Casa atualizada".',
         },
@@ -324,7 +323,7 @@ const screen: HelpScreen = {
       {
         anchor: "conta.equipe.adicionar",
         title: "Adicionar pessoa",
-        body: "Convida alguém por e-mail (ou cria um login com senha, se você for super admin) e escolhe o papel.",
+        body: "Convida alguém por e-mail e escolhe o papel.",
         articleSection: "equipe",
       },
       {

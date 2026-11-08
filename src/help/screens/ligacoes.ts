@@ -19,7 +19,7 @@ const screen: HelpScreen = {
   title: "Voz (Ligações)",
   purpose:
     "Visão geral das ligações, o disparo em massa com roteiro ou áudio fixo, a biblioteca de áudios e roteiros (com as configurações de voz gerada) e o histórico completo, incluindo a fila de ligações preparadas.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: [
     "estabilidade-voz",
     "similaridade-voz",

@@ -13,7 +13,7 @@ const screen: HelpScreen = {
   title: "Consentimentos",
   purpose:
     "Quem pediu para não receber SMS, e-mail ou ligação (ou foi autorizado de volta), o histórico de cada decisão, a importação em lote por CSV e os limites de frequência das ligações. Um bloqueio aqui vale para todas as campanhas e automações da casa, em qualquer canal.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["lgpd"],
   sections: [
     // ---------------------------------------------------------------

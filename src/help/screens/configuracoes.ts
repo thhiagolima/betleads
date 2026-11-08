@@ -12,7 +12,7 @@ const screen: HelpScreen = {
   title: "Configurações",
   purpose:
     "O horário em que a casa pode enviar SMS, e-mail e ligações (a janela de envio) e um atalho para a tela de equipe e permissões.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["fuso-horario"],
   sections: [
     {
@@ -42,9 +42,9 @@ const screen: HelpScreen = {
         {
           anchor: "configuracoes.janela.fuso",
           label: "Fuso horário",
-          what: 'Em qual fuso o Início e o Fim são interpretados, no formato "Continente/Cidade" (ex.: America/Sao_Paulo, que é o horário de Brasília). Mude só se a casa opera em outro fuso brasileiro.',
+          what: 'Em qual fuso o Início e o Fim são interpretados, no formato "Continente/Cidade" (ex.: America/Sao_Paulo, que é o horário de Brasília). Mude só se a casa opera em outro fuso (ex.: America/Argentina/Buenos_Aires, para uma casa que opera na Argentina).',
           notes:
-            'Outros fusos comuns no Brasil: America/Manaus (Amazonas e Rondônia), America/Rio_Branco (Acre) e America/Noronha (Fernando de Noronha). O campo aceita qualquer texto digitado — um nome errado ou inventado não dá erro ao salvar, mas os cálculos de horário ficam errados a partir daí; digite exatamente como nos exemplos, sem espaços e sem acento.',
+            'Outros fusos comuns no Brasil: America/Manaus (Amazonas e Rondônia), America/Rio_Branco (Acre e parte do Amazonas) e America/Noronha (Fernando de Noronha). O campo aceita qualquer texto digitado — um nome errado ou inventado não dá erro ao salvar, mas os cálculos de horário ficam errados a partir daí; digite exatamente como nos exemplos, sem espaços e sem acento.',
         },
         {
           anchor: "configuracoes.janela.dias",

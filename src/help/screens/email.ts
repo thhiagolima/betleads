@@ -16,7 +16,7 @@ const screen: HelpScreen = {
   title: "Email",
   purpose:
     "Visão geral dos envios de e-mail, os templates usados em campanhas e jornadas (com dois jeitos de criar: Editor Rápido e Editor Avançado) e o histórico completo de envios.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["cta", "preheader", "hero", "alt-text", "remetente"],
   sections: [
     // ---------------------------------------------------------------

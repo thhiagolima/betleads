@@ -38,7 +38,6 @@ const screen: HelpScreen = {
           anchor: "creditos.mensalidade.pagar",
           label: "Pagar mensalidade (Pix)",
           what: "Gera o Pix da fatura em aberto e abre o diálogo de pagamento (veja \"Diálogo de pagamento Pix\" abaixo).",
-          roles: ["admin", "gestor"],
           notes:
             'Só aparece com uma fatura em aberto e para quem pode pagar (administrador, gestor ou super admin). Quem não pode pagar (membro) vê, no lugar do botão, "Peça ao administrador da casa para pagar a mensalidade."',
         },

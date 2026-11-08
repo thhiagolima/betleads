@@ -16,7 +16,7 @@ const screen: HelpScreen = {
   title: "Jogadores",
   purpose:
     "A base de jogadores da casa: busca, filtros por situação/nível/comportamento/período, seleção para campanha e a fila de acompanhamento de quem já recebeu contato.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   sections: [
     // ---------------------------------------------------------------
     // Cabeçalho e KPIs — aparecem nas duas abas

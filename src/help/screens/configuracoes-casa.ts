@@ -15,7 +15,7 @@ const screen: HelpScreen = {
   title: "Configuração da casa",
   purpose:
     "Endereço do site da casa, atalhos usados em campanhas e jornadas, os domínios próprios do encurtador de links e de e-mail (com o DNS de cada um) e os remetentes que enviam os e-mails.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["dns", "subdominio", "registro-dns", "remetente", "encurtador"],
   sections: [
     // ---------------------------------------------------------------

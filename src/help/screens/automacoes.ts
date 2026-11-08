@@ -27,7 +27,7 @@ const screen: HelpScreen = {
   title: "Automações",
   purpose:
     "O painel de jornadas: criar, ativar/pausar, acompanhar quem está em cada etapa, ver falhas e conflitos de prioridade, a lista de leads mortos e os fluxos de ligação (voz). A aba Fluxos de voz só aparece com o canal de voz ligado para a casa.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: [
     "grupo-de-controle",
     "reentrada",
