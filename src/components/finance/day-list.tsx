@@ -85,14 +85,20 @@ export function DayList({
         )}
       >
         <span>Dia</span>
-        <span className="truncate text-right">
-          <Term id="net">{FINANCE_TERMS.net.label}</Term>
+        <span className="flex min-w-0 items-center justify-end gap-1">
+          <Term id="net">
+            <span className="truncate">{FINANCE_TERMS.net.label}</span>
+          </Term>
         </span>
-        <span className="truncate text-right">
-          <Term id="envios">{FINANCE_TERMS.sends.label}</Term>
+        <span className="flex min-w-0 items-center justify-end gap-1">
+          <Term id="envios">
+            <span className="truncate">{FINANCE_TERMS.sends.label}</span>
+          </Term>
         </span>
-        <span className="truncate text-right">
-          <Term id="lucro-liquido">{FINANCE_TERMS.cashResult.label}</Term>
+        <span className="flex min-w-0 items-center justify-end gap-1">
+          <Term id="lucro-liquido">
+            <span className="truncate">{FINANCE_TERMS.cashResult.label}</span>
+          </Term>
         </span>
       </div>
       <ul className="divide-y divide-border/40">

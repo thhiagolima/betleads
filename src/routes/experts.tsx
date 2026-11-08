@@ -44,7 +44,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
-import { tourAnchor } from "@/help/anchor";
+import { firstIndexWhere, tourAnchor } from "@/help/anchor";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
@@ -116,6 +116,13 @@ function ExpertsPage() {
   const pendingTotal = (usageQuery.data?.items ?? []).reduce((sum, u) => sum + u.pendentes, 0);
 
   const experts = expertsQuery.data ?? [];
+  // Per-row action anchors go on the first row that shows that action.
+  const firstSemAcesso = firstIndexWhere(experts, (e) => e.acesso === "sem_acesso");
+  const firstEquipe = firstIndexWhere(experts, (e) => e.acesso === "equipe");
+  const firstComAcesso = firstIndexWhere(
+    experts,
+    (e) => e.acesso !== "sem_acesso" && e.acesso !== "equipe",
+  );
   const unassigned = unassignedQuery.data ?? [];
   // null até carregar: o diálogo não salva um padrão por cima da janela real.
   const janelaHoras = clickWindowQuery.data?.janelaHoras ?? null;
@@ -312,7 +319,7 @@ function ExpertsPage() {
                             size="sm"
                             variant="outline"
                             disabled={isDemo}
-                            {...(index === 0 ? tourAnchor("experts.linha.convidar") : {})}
+                            {...(index === firstSemAcesso ? tourAnchor("experts.linha.convidar") : {})}
                             onClick={() => setInviteExpertRow(expert)}
                           >
                             Convidar
@@ -326,7 +333,7 @@ function ExpertsPage() {
                             size="sm"
                             variant="outline"
                             disabled={isDemo}
-                            {...(index === 0 ? tourAnchor("experts.linha.vincular") : {})}
+                            {...(index === firstSemAcesso ? tourAnchor("experts.linha.vincular") : {})}
                             onClick={() => setTeamLinkExpertRow(expert)}
                           >
                             Vincular a alguém da equipe
@@ -340,7 +347,7 @@ function ExpertsPage() {
                             size="sm"
                             variant="outline"
                             disabled={isDemo || removeAccess.isPending}
-                            {...(index === 0 ? tourAnchor("experts.linha.desvincular") : {})}
+                            {...(index === firstEquipe ? tourAnchor("experts.linha.desvincular") : {})}
                             onClick={async () => {
                               const confirmed = await requestConfirmation({
                                 title: `Desvincular o perfil ${expert.nome}?`,
@@ -364,7 +371,7 @@ function ExpertsPage() {
                             size="sm"
                             variant="outline"
                             disabled={isDemo || removeAccess.isPending}
-                            {...(index === 0 ? tourAnchor("experts.linha.remover-acesso") : {})}
+                            {...(index === firstComAcesso ? tourAnchor("experts.linha.remover-acesso") : {})}
                             onClick={async () => {
                               const confirmed = await requestConfirmation({
                                 title: `Remover o acesso de ${expert.nome}?`,
@@ -403,7 +410,7 @@ function ExpertsPage() {
                             variant="ghost"
                             className="text-destructive hover:text-destructive"
                             disabled={isDemo || remove.isPending}
-                            {...(index === 0 ? tourAnchor("experts.linha.excluir") : {})}
+                            {...(index === firstSemAcesso ? tourAnchor("experts.linha.excluir") : {})}
                             onClick={async () => {
                               const confirmed = await requestConfirmation({
                                 title: `Excluir o expert ${expert.nome}?`,

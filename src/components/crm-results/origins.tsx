@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Search } from "lucide-re
 import type { CrmMetricsWithRatios, CrmSource } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
-import { tourAnchor } from "@/help/anchor";
+import { firstIndexWhere, tourAnchor } from "@/help/anchor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,6 +66,14 @@ const value = (source: CrmSource, key: SortKey): number | string => {
   return raw == null ? -Infinity : raw;
 };
 
+/** The journey steps a row lists when expanded. */
+const visibleSteps = (source: CrmSource) =>
+  source.steps.filter((step) => step.position >= 0 || step.sent > 0);
+
+/** Only a journey with more than one listed step has the expand button. */
+const isExpandableSource = (source: CrmSource): boolean =>
+  source.type === "journey" && visibleSteps(source).length > 1;
+
 export function Origins({
   data,
   search,
@@ -97,6 +105,8 @@ export function Origins({
         );
       });
   }, [data.sources, search, sort, type]);
+  // The "Ver mensagens" anchor goes on the first row that can expand.
+  const firstExpandable = firstIndexWhere(rows, isExpandableSource);
 
   if (data.sources.length === 0)
     return <EmptyCard>Nenhuma jornada ou campanha com envio neste período.</EmptyCard>;
@@ -206,8 +216,8 @@ export function Origins({
             )}
             {rows.map((source, index) => {
               const id = `${source.type}:${source.key}`;
-              const steps = source.steps.filter((step) => step.position >= 0 || step.sent > 0);
-              const expandable = source.type === "journey" && steps.length > 1;
+              const steps = visibleSteps(source);
+              const expandable = isExpandableSource(source);
               const expanded = open === id;
               const names = (source.sourceId && data.stepNames[source.sourceId]) || {};
               return (
@@ -223,7 +233,7 @@ export function Origins({
                             aria-expanded={expanded}
                             aria-label={`${expanded ? "Fechar" : "Ver"} mensagens de ${source.name}`}
                             onClick={() => setOpen(expanded ? null : id)}
-                            {...(index === 0 ? tourAnchor("resultados.origens.expandir") : {})}
+                            {...(index === firstExpandable ? tourAnchor("resultados.origens.expandir") : {})}
                           >
                             {expanded ? (
                               <ChevronDown className="h-4 w-4" />

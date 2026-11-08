@@ -69,7 +69,22 @@ import {
 import { AdAccountFilter, AdAccountFilterNote } from "@/components/midia-ltv/ad-account-filter";
 import { tourAnchor } from "@/help/anchor";
 import { Term } from "@/components/help/term";
+import { splitTermText } from "@/components/help/term-text";
+import { ROUTE_META } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
+
+/** The page title from ROUTE_META, with the glossary "i" only on "LTV". */
+function titleWithLtvTerm(title: string) {
+  const ltv = splitTermText(title, "LTV");
+  if (!ltv) return title;
+  return (
+    <>
+      {ltv.before}
+      <Term id="ltv">{ltv.match}</Term>
+      {ltv.after}
+    </>
+  );
+}
 
 export const Route = createFileRoute("/midia-ltv")({
   component: MediaLtvPage,
@@ -257,11 +272,7 @@ function MediaLtvPage() {
   return (
     <Page>
       <PageHeader
-        title={
-          <>
-            Aquisição e <Term id="ltv">LTV</Term>
-          </>
-        }
+        title={titleWithLtvTerm(ROUTE_META["/midia-ltv"].title)}
         subtitle="Cada jogador carrega o anúncio que o trouxe. Veja quem trouxe cadastro barato, quem trouxe dinheiro e quem continua depositando."
         actions={
           view === "midia" && noMetaConnection ? (

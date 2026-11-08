@@ -29,7 +29,7 @@ Isso vale para qualquer controle interativo novo, inclusive dentro de diálogos 
 
 - Formato: `"<tela>.<secao>.<elemento>"`, tudo minúsculo, hífen dentro de cada parte (ex.: `"casa.email.dns-table"`).
 - Sempre pelo helper `tourAnchor("...")`, nunca `data-tour` escrito na mão.
-- Em controle que se repete por linha (lista, tabela), a âncora vai só no primeiro item/linha — não em cada repetição.
+- Em controle que se repete por linha (lista, tabela), a âncora vai só no primeiro item/linha **que tem o controle** — não em cada repetição, e não cegamente na linha 0 quando o controle depende da linha (uma jornada que não expande, um expert sem acesso para remover). Calcule o índice uma vez, fora do `map`, com `firstIndexWhere(linhas, temOControle)` (`anchor.ts`).
 - O id precisa ser um **literal de string** na chamada (`tourAnchor("tela.secao.item")`), porque o scanner (`coverage-scan.ts`, regex `tourAnchor\("([^"]+)"\)`) lê o código-fonte como texto, não executa nada. Uma âncora montada com variável/template string não é detectada e o teste de cobertura vai achar uma âncora "fantasma" citada no artigo sem `tourAnchor()` correspondente.
 
 ## Como adicionar uma tela nova
