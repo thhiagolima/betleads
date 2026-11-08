@@ -193,11 +193,6 @@ export async function adminSetOwnProviderGrantFor(
       updated_at: now,
     };
   }
-  const { error: upsertError } = await db()
-    .from("tenant_own_provider_grants")
-    .upsert(row, { onConflict: "tenant_id,channel" });
-  if (upsertError) throw new Error(upsertError.message);
-
   let disabledAccountIds: string[] = [];
   if (revoking) {
     // A conta própria do canal fica suspensa: o canal da casa pausa (a
@@ -218,6 +213,16 @@ export async function adminSetOwnProviderGrantFor(
     }
     invalidateProviderAccountsCache();
   }
+
+  // Only after the account is suspended: a failed account update above leaves
+  // the grant still allowed (the house keeps paying the fee for its own
+  // account) instead of a revoked grant with the account still sending at R$0
+  // and no fee. A failed upsert here leaves the account paused ('revoked'),
+  // never sending.
+  const { error: upsertError } = await db()
+    .from("tenant_own_provider_grants")
+    .upsert(row, { onConflict: "tenant_id,channel" });
+  if (upsertError) throw new Error(upsertError.message);
 
   await auditBoth({
     actorUserId: context.userId,

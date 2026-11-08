@@ -168,6 +168,48 @@ describe("adminSetOwnProviderGrantFor", () => {
     expect(JSON.stringify(tenantAudits())).not.toContain(SECRET);
   });
 
+  it("revoking: a failed account update leaves the grant allowed (never R$0 with no fee)", async () => {
+    await ownedAccount();
+    grant();
+    link();
+    fake.db.failNext("provider_accounts", "update");
+    await expect(
+      adminSetOwnProviderGrantFor(ADMIN, {
+        tenantId: TENANT,
+        channel: "sms",
+        allowed: false,
+        monthlyFeeCents: 5000,
+      }),
+    ).rejects.toThrow();
+    expect(fake.db.rows("tenant_own_provider_grants")[0]).toMatchObject({
+      allowed: true,
+      pending_decision: false,
+    });
+    expect(fake.db.rows("provider_accounts")[0]).toMatchObject({ status: "active" });
+    expect(tenantAudits()).toHaveLength(0);
+  });
+
+  it("revoking: the account is disabled before the grant flips", async () => {
+    await ownedAccount();
+    grant();
+    link();
+    fake.db.failNext("tenant_own_provider_grants", "upsert");
+    await expect(
+      adminSetOwnProviderGrantFor(ADMIN, {
+        tenantId: TENANT,
+        channel: "sms",
+        allowed: false,
+        monthlyFeeCents: 5000,
+      }),
+    ).rejects.toThrow();
+    // The house's account is paused (not sending); the grant still shows allowed.
+    expect(fake.db.rows("provider_accounts")[0]).toMatchObject({
+      status: "disabled",
+      disabled_reason: "revoked",
+    });
+    expect(fake.db.rows("tenant_own_provider_grants")[0].allowed).toBe(true);
+  });
+
   it("revoking keeps an account the BetLeads already disabled as 'platform'", async () => {
     await ownedAccount({ status: "disabled", disabled_reason: "platform" });
     grant();
