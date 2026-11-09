@@ -71,6 +71,10 @@ function authorizeCallback(
   return { authenticated: true };
 }
 
+const FINAL_DELIVERY_STATUSES = ["delivered", "failed"];
+// `not.in` alone skips rows whose delivery_status is still null.
+const NOT_FINAL_FILTER = "delivery_status.is.null,delivery_status.not.in.(delivered,failed)";
+
 function pickStr(obj: CallbackPayload, ...keys: string[]): string | null {
   for (const k of keys) {
     const v = obj[k];
@@ -192,14 +196,28 @@ async function updateFromPayload(
   if (deliveredAt) patch.delivered_at = deliveredAt;
   if (errorMsg) patch.error = errorMsg;
 
+  // Short Brasil sends the carrier's ENVIADA alongside CONFIRMADO/NAO_ENTREGUE,
+  // often after it in the same batch (2026-11-08). A non-final status must
+  // never overwrite a final one, or delivered/failed sends fall back to "sent".
+  const isFinal = FINAL_DELIVERY_STATUSES.includes(patch.delivery_status);
+  const updateLog = () => {
+    const query = supabaseAdmin.from("sms_send_logs").update(patch);
+    return isFinal ? query : query.or(NOT_FINAL_FILTER);
+  };
+
   let matched = false;
   if (providerMessageId) {
-    const { data } = await supabaseAdmin
-      .from("sms_send_logs")
-      .update(patch)
-      .eq("provider_message_id", providerMessageId)
-      .select("id");
+    const { data } = await updateLog().eq("provider_message_id", providerMessageId).select("id");
     matched = !!data && data.length > 0;
+    if (!matched && !isFinal) {
+      // Already final: the send exists, so it is matched (and never an orphan).
+      const { data: existing } = await supabaseAdmin
+        .from("sms_send_logs")
+        .select("id")
+        .eq("provider_message_id", providerMessageId)
+        .limit(1);
+      matched = !!existing && existing.length > 0;
+    }
   }
   if (!matched && idempotencyKey) {
     // A delivery key can have older 'error' rows (refunded attempts) besides
@@ -213,12 +231,8 @@ async function updateFromPayload(
       .limit(1);
     const targetId = candidates?.[0]?.id;
     if (targetId) {
-      const { data } = await supabaseAdmin
-        .from("sms_send_logs")
-        .update(patch)
-        .eq("id", targetId)
-        .select("id");
-      matched = !!data && data.length > 0;
+      await updateLog().eq("id", targetId);
+      matched = true;
     }
   }
 
