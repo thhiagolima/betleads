@@ -156,7 +156,7 @@ const screen: HelpScreen = {
       title: "Limites de voz",
       tab: "voz",
       intro:
-        "Quantas vezes o mesmo número pode receber ligação, para não incomodar quem já foi chamado recentemente. Vale além da janela de envio da casa (Configurações), que já impede ligações fora do horário permitido mesmo com esses limites desligados.",
+        "Quantas vezes o mesmo número pode receber ligação, para não incomodar quem já foi chamado recentemente.",
       items: [
         {
           anchor: "consentimentos.voz.aplicar",

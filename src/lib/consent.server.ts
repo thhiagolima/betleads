@@ -1,5 +1,4 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { deferIfOutsideWindow } from "./send-window.server";
 
 export type ConsentChannel = "sms" | "email" | "voice";
 export type ConsentStatus = "granted" | "revoked";
@@ -83,14 +82,6 @@ export async function evaluateVoiceContactPolicy(tenantId: string, subject: stri
   const phone = normalizeConsentSubject("voice", subject);
   if (await isChannelRevoked(tenantId, "voice", phone))
     return { allowed: false as const, reason: "consent_revoked" as const, retryAt: null };
-  const deferUntil = await deferIfOutsideWindow(new Date(), tenantId);
-  if (deferUntil)
-    return {
-      allowed: false as const,
-      reason: "outside_contact_window" as const,
-      retryAt: deferUntil,
-    };
-
   const { data: policy, error: policyError } = await (supabaseAdmin as any)
     .from("voice_contact_policies")
     .select("enabled,cooldown_hours,rolling_24h_limit")

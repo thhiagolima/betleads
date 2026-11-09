@@ -11,7 +11,6 @@ import {
 import { buildPlayerVariables, renderTemplate } from "./template-vars.server";
 import { DEFAULT_INFOBIP_ACCOUNT_ID } from "./provider-accounts.server";
 import { loadHouseLinks } from "./house-links.server";
-import { deferIfOutsideWindow } from "./send-window.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
 import {
   consumeBudget,
@@ -368,25 +367,6 @@ async function planLead(lead: Lead): Promise<SendPlan | null> {
           return null;
         }
       }
-      // Janela de envio: fora dela, reagenda sem marcar falha.
-      const defer = await deferIfOutsideWindow();
-      if (defer) {
-        await supabaseAdmin
-          .from("email_flow_leads")
-          .update({ status: "running", next_run_at: defer, locked_at: null, locked_by: null })
-          .eq("id", lead.id);
-        await logEvent(
-          lead.tenant_id,
-          lead.flow_id,
-          lead.id,
-          lead.player_id,
-          "deferred_quiet_hours",
-          {
-            next_run_at: defer,
-          },
-        );
-        return null;
-      }
       const tplId = pickTemplate(block.template_ids ?? [], lastTemplateId);
       if (!tplId) {
         await logEvent(lead.tenant_id, lead.flow_id, lead.id, lead.player_id, "failed", {
@@ -606,20 +586,6 @@ export async function runEmailFlowDispatcher({
         provider: "infobip",
       });
       return { processed: 0, ids: [] as string[], paused: true };
-    }
-  }
-
-  // Janela de envio (fora dela: não claim, só registra)
-  if (!onlyLeadId) {
-    const defer = await deferIfOutsideWindow();
-    if (defer) {
-      await recordRun(startedAt, {
-        channel,
-        queue_before: queueBefore,
-        stop_reason: "outside_window",
-        provider: "infobip",
-      });
-      return { processed: 0, ids: [] as string[], deferred_until: defer };
     }
   }
 

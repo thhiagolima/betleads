@@ -3,7 +3,7 @@
 // src/components/webpush/webpush-channel-tabs.tsx,
 // src/components/channels/channel-page.tsx e channel-overview.tsx (barra
 // compartilhada com SMS/Email/Ligações, prefixo "canal."; o Web Push não tem
-// faixa de disparos pausados nem janela de envio) e
+// faixa de disparos pausados) e
 // src/lib/webpush/channel-overview.server.ts (de onde vêm os números).
 import type { HelpScreen } from "../types";
 
@@ -23,7 +23,7 @@ const screen: HelpScreen = {
       id: "canal",
       title: "Barra superior (aparece nas 2 abas)",
       intro:
-        "Mesma faixa das outras páginas de canal, com o botão de nova campanha e o aviso de saldo. O Web Push não segue a janela de envio e não tem pausa de disparos, então esses avisos não aparecem aqui.",
+        "Mesma faixa das outras páginas de canal, com o botão de nova campanha e o aviso de saldo. O Web Push não tem pausa de disparos, então esse aviso não aparece aqui.",
       items: [
         {
           anchor: "canal.header.nova-campanha",

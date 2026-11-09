@@ -56,7 +56,6 @@ vi.mock("./email-send.server", async (importOriginal) => ({
     return { ok: true, status: 200, body: {}, idempotencyKey: "k" };
   }),
 }));
-vi.mock("./send-window.server", () => ({ deferIfOutsideWindow: vi.fn(async () => null) }));
 vi.mock("./dispatch-rate.server", () => ({
   consumeBudget: vi.fn(async (_c: string, n: number) => n),
   countQueuePending: vi.fn(async () => 0),

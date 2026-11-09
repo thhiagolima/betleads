@@ -294,14 +294,6 @@ export const GLOSSARY: GlossaryTerm[] = [
     long:
       "O campo é só um texto livre, para registro — o CRM não valida nem restringe o que você escrever. Se não souber o que colocar, deixe em branco ou escreva \"Consentimento\", que é a base mais comum para contato de marketing.",
   },
-  {
-    id: "fuso-horario",
-    term: "Fuso horário",
-    short:
-      "O fuso em que os horários de início e fim da janela de envio são interpretados, no formato Continente/Cidade (ex.: America/Sao_Paulo). Mude só se a casa opera fora do horário de Brasília.",
-    long:
-      "Exemplos comuns no Brasil: America/Sao_Paulo (horário de Brasília, usado por quase todas as casas), America/Manaus (Amazonas e Rondônia), America/Rio_Branco (Acre e parte do Amazonas) e America/Noronha (Fernando de Noronha). O campo aceita qualquer texto — um nome errado não mostra erro na hora de salvar, mas os horários calculados ficam errados até corrigir. Digite exatamente como nos exemplos, sem espaços.",
-  },
 
   // --- Conta e equipe / Plano e créditos (fase 2, Task 7) ---
   {

@@ -489,10 +489,9 @@ export const triggerFlowTest = createServerFn({ method: "POST" })
       detail: { manual: true, next_run_at: nowIso },
     });
 
-    // 7. Roda dispatcher só pra esse lead, ignorando janela operacional
+    // 7. Roda dispatcher só pra esse lead
     const result = await runDispatcher({
       limit: 1,
-      bypassWindow: true,
       onlyLeadId: inserted.id,
       tenantId,
     });
@@ -512,7 +511,7 @@ export const runEvaluateAndDispatch = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
     const evalRes = await evaluateAllPlayers({ limit: 500, tenantId });
-    const dispRes = await runDispatcher({ limit: 30, bypassWindow: true, tenantId });
+    const dispRes = await runDispatcher({ limit: 30, tenantId });
     return { evaluate: evalRes, dispatch: dispRes };
   });
 
@@ -539,7 +538,6 @@ export const createMediaUploadUrl = createServerFn({ method: "POST" })
 // ============================================================
 // ANTI-BAN (teto global do dispatcher)
 // ============================================================
-const TimeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, "Formato HH:MM");
 
 const AntibanInputSchema = z.object({
   delay_min_seconds: z.number().int().min(0).max(86400),
@@ -547,8 +545,6 @@ const AntibanInputSchema = z.object({
   hourly_limit: z.number().int().min(1).max(1000),
   daily_limit: z.number().int().min(1).max(10000),
   cooldown_hours: z.number().int().min(0).max(720),
-  window_start: TimeStr,
-  window_end: TimeStr,
   randomization_enabled: z.boolean(),
   smart_suppression_enabled: z.boolean(),
   auto_pause_enabled: z.boolean(),
@@ -564,7 +560,7 @@ export const getAntibanSettings = createServerFn({ method: "GET" })
     const { data, error } = await reads
       .from("antiban_settings")
       .select(
-        "id, delay_min_seconds, delay_max_seconds, hourly_limit, daily_limit, cooldown_hours, window_start, window_end, randomization_enabled, smart_suppression_enabled, auto_pause_enabled, warmup_enabled, warmup_initial_daily, warmup_days, updated_at",
+        "id, delay_min_seconds, delay_max_seconds, hourly_limit, daily_limit, cooldown_hours, randomization_enabled, smart_suppression_enabled, auto_pause_enabled, warmup_enabled, warmup_initial_daily, warmup_days, updated_at",
       )
       .limit(1)
       .maybeSingle();

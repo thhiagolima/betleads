@@ -1,7 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { DataCard } from "@/components/ui-premium/data-card";
-import { SendWindowCard } from "@/components/send-window-card";
 import { Button } from "@/components/ui/button";
 import { tourAnchor } from "@/help/anchor";
 
@@ -12,9 +11,7 @@ export const Route = createFileRoute("/configuracoes")({
 function ConfigPage() {
   return (
     <Page className="max-w-5xl">
-      <PageHeader subtitle="Horário em que a casa pode enviar mensagens." />
-
-      <SendWindowCard />
+      <PageHeader subtitle="Atalhos para as configurações da casa." />
 
       <DataCard
         title="Equipe e permissões"

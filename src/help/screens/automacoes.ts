@@ -122,7 +122,7 @@ const screen: HelpScreen = {
         {
           anchor: "automacoes.jornadas.metricas",
           label: '"Em andamento" / "Concluíram" / "Enviados" / "Recuperado pelo CRM" (por jornada)',
-          what: '"Em andamento": quantos jogadores estão dentro desta jornada agora (aguardando a próxima etapa, a janela de envio ou pausados por prioridade — veja a aba Conflitos). "Concluíram": quantos terminaram ou saíram (por exemplo, ao depositar); quem saiu antes da primeira mensagem aparece também como "X sem mensagem". "Enviados": mensagens de fato enviadas por esta jornada. "Recuperado pelo CRM": o mesmo cálculo do topo, só desta jornada.',
+          what: '"Em andamento": quantos jogadores estão dentro desta jornada agora (aguardando a próxima etapa ou pausados por prioridade — veja a aba Conflitos). "Concluíram": quantos terminaram ou saíram (por exemplo, ao depositar); quem saiu antes da primeira mensagem aparece também como "X sem mensagem". "Enviados": mensagens de fato enviadas por esta jornada. "Recuperado pelo CRM": o mesmo cálculo do topo, só desta jornada.',
           notes:
             'Cada número com o ícone de informação (i) mostra, ao passar o mouse, a explicação completa — por exemplo, o que faz alguém contar como "sem mensagem" (pagou antes do envio, limite diário, deixou de se encaixar ou grupo de controle).',
         },

@@ -7,8 +7,7 @@
 // variable-picker,queue-tab,shared}.tsx, src/components/history/history-shell.tsx
 // (prefixo neutro "historico.", reaproveitado por SMS/Email — aqui com
 // cardLabels/showsDelivery/showStep diferentes), src/components/providers-paused-banner.tsx,
-// src/components/billing/active-tenant-wallet-notice.tsx e
-// src/components/send-window-card.tsx. "Fluxos de voz" (antigo #fluxos) mudou
+// e src/components/billing/active-tenant-wallet-notice.tsx. "Fluxos de voz" (antigo #fluxos) mudou
 // para /automações e não faz parte deste artigo.
 import type { HelpScreen } from "../types";
 
@@ -35,7 +34,7 @@ const screen: HelpScreen = {
       id: "canal",
       title: "Barra superior (aparece nas 4 abas)",
       intro:
-        "Esta faixa é a mesma em /sms, /email e /ligações: o botão de nova campanha, o aviso de disparos pausados, o aviso de saldo e a janela de envio. Fica acima das abas e não muda quando você troca de aba.",
+        "Esta faixa é a mesma em /sms, /email e /ligações: o botão de nova campanha, o aviso de disparos pausados e o aviso de saldo. Fica acima das abas e não muda quando você troca de aba.",
       items: [
         {
           anchor: "canal.header.nova-campanha",
@@ -60,13 +59,6 @@ const screen: HelpScreen = {
           anchor: "canal.carteira.aviso",
           label: 'Aviso de saldo ("Seu saldo acabou" / "Saldo baixo")',
           what: 'Aparece só para casas que pagam por SMS/voz (não isentas) com o saldo zerado ou abaixo do limite de aviso da casa. O texto explica que SMS e voz ficam bloqueados sem saldo, mas o e-mail continua dentro da franquia mensal. Quando a casa pode comprar por Pix, o texto traz um link "Saldo e consumo" (para /plano-e-creditos); senão, pede para falar com o suporte.',
-        },
-        {
-          anchor: "canal.janela.card",
-          label: "Janela de envio",
-          what: 'Faixa curta mostrando se o envio está "Dentro da janela de envio" ou "Fora da janela de envio — envios aguardando", com o horário permitido e, fora da janela, quando os envios retomam e quantos estão esperando.',
-          notes:
-            "A janela vale para todos os canais automáticos (SMS, e-mail e ligações) e é configurada em /configurações. Fora da janela, as ligações disparadas (em massa ou pela fila) ficam pendentes e saem no próximo horário permitido.",
         },
       ],
     },
@@ -160,7 +152,7 @@ const screen: HelpScreen = {
         {
           anchor: "ligacoes.massa.disparar",
           label: '"Disparar N ligações"',
-          what: 'Abre a confirmação "Disparar N ligações?", com a descrição de que elas começam a ser disparadas agora e não podem ser canceladas, que o custo depende da duração de cada chamada e do contrato do provedor, e que fora da janela de envio as ligações ficam pendentes até o próximo horário permitido. Os botões são "Cancelar" / "Disparar N ligações".',
+          what: 'Abre a confirmação "Disparar N ligações?", com a descrição de que elas começam a ser disparadas agora e não podem ser canceladas, que o custo depende da duração de cada chamada e do contrato do provedor. Os botões são "Cancelar" / "Disparar N ligações".',
           notes:
             'Fica desabilitado sem roteiro/áudio escolhido ou sem destinatário. Depois do disparo aparece a caixa "Último disparo" com Total, Disparadas, Pendentes e Falhas; havendo falha, aparecem os detalhes de cada uma (veja os estados da tela). O aviso que aparece no canto da tela depende do resultado: "N ligações disparadas" quando tudo foi disparado sem falha nem pendência; "N ligação(ões) ficaram pendentes para retentativa" quando não houve falha mas alguma ficou pendente; "Falha em todas (N)" (com a descrição "Não foi possível concluir esta chamada. Tente novamente ou contate o suporte.") quando nenhuma foi disparada; e "N disparadas, M falharam" quando o resultado foi misto. Em qualquer um desses quatro, se parte dos destinatários não chegou a ser tentada por falta de saldo, o aviso ganha o complemento ", X não tentadas por saldo insuficiente". Se o disparo nem chegar a rodar (erro de rede ou de validação), aparece "Falha no disparo em massa" (ou a mensagem específica do servidor, quando houver uma).',
         },
@@ -401,7 +393,7 @@ const screen: HelpScreen = {
     {
       id: "massa-disparo-pendente",
       title: "N ligação(ões) ficaram pendentes para retentativa",
-      what: 'Aviso mostrado quando nenhuma ligação falhou de verdade, mas parte delas não pôde ser disparada na hora (ex.: fora da janela de envio) e ficou aguardando uma nova tentativa.',
+      what: 'Aviso mostrado quando nenhuma ligação falhou de verdade, mas parte delas não pôde ser disparada na hora (ex.: o número ainda está dentro dos Limites de voz da casa) e ficou aguardando uma nova tentativa.',
       action: 'Acompanhe pela Fila de ligações ou pelo Histórico; o sistema tenta de novo sozinho.',
     },
     {

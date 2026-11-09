@@ -118,7 +118,7 @@ export const getActivationStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
-    // "Hoje" = dia do calendário em Brasília (mesmo fuso da janela de envio).
+    // "Hoje" = dia do calendário em Brasília.
     const iso = brtDayStart().toISOString();
     const [
       { data: lastRun },
@@ -317,7 +317,7 @@ export const listRecentRuns = createServerFn({ method: "GET" })
     return { runs: data ?? [] };
   });
 
-/** Resumo de prontidão da fila para a janela 06:00–22:00 BRT. */
+/** Resumo de prontidão da fila (sem janela global de envio: SMS, e-mail e ligações saem 24h). */
 export const getQueueReadiness = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -330,7 +330,6 @@ export const getQueueReadiness = createServerFn({ method: "GET" })
       lastRun,
       recentErrors,
       settings,
-      sendWindow,
     ] = await Promise.all([
       supabaseAdmin
         .from("sms_flow_leads")
@@ -372,12 +371,6 @@ export const getQueueReadiness = createServerFn({ method: "GET" })
         .eq("tenant_id", tenantId)
         .limit(1)
         .maybeSingle(),
-      supabaseAdmin
-        .from("send_window_settings")
-        .select("start_minute, end_minute, timezone, enabled, weekdays")
-        .eq("tenant_id", tenantId)
-        .eq("singleton", true)
-        .maybeSingle(),
     ]);
 
     const pending = {
@@ -388,54 +381,17 @@ export const getQueueReadiness = createServerFn({ method: "GET" })
     };
     const totalPending = pending.sms + pending.email + pending.call + pending.whatsapp;
 
-    // Próxima execução: dispatchers rodam a cada 1 min, orquestrador a cada 5 min.
-    // Se já estiver dentro da janela, é "no próximo minuto". Caso contrário, calcula 06:00 BRT.
-    const sw = sendWindow.data;
-    const startMin = sw?.start_minute ?? 360;
-    const endMin = sw?.end_minute ?? 1320;
-    const tz = sw?.timezone ?? "America/Sao_Paulo";
-
-    const now = new Date();
-    const fmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      hour12: false,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    const parts: Record<string, string> = {};
-    for (const p of fmt.formatToParts(now)) parts[p.type] = p.value;
-    const localMin = (parseInt(parts.hour, 10) % 24) * 60 + parseInt(parts.minute, 10);
-    const insideWindow = localMin >= startMin && localMin < endMin;
-
-    let nextRunAt: string;
-    if (insideWindow) {
-      // próxima execução: próximo minuto cheio
-      const next = new Date(now);
-      next.setSeconds(0, 0);
-      next.setMinutes(next.getMinutes() + 1);
-      nextRunAt = next.toISOString();
-    } else {
-      // próximo 06:00 no fuso BRT (offset fixo -03:00)
-      const diff = startMin - localMin;
-      const next = new Date(now.getTime() + (diff > 0 ? diff : diff + 1440) * 60_000);
-      next.setSeconds(0, 0);
-      nextRunAt = next.toISOString();
-    }
+    // Próxima execução: dispatchers rodam a cada 1 min (sem janela global de envio),
+    // então é sempre o próximo minuto cheio.
+    const next = new Date();
+    next.setSeconds(0, 0);
+    next.setMinutes(next.getMinutes() + 1);
+    const nextRunAt = next.toISOString();
 
     return {
       paused: !!settings.data?.paused,
       pending,
       totalPending,
-      window: {
-        start_minute: startMin,
-        end_minute: endMin,
-        timezone: tz,
-        enabled: sw?.enabled ?? true,
-      },
-      insideWindow,
       nextRunAt,
       lastRun: lastRun.data ?? null,
       recentErrors: recentErrors.data ?? [],

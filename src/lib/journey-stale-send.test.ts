@@ -42,32 +42,23 @@ describe("staleSendLatencyMinutes", () => {
   });
 });
 
-describe("staleSendLatencyMinutes with a send window", () => {
-  // PIX generated 22:30 BRT (01:30 UTC next day); window 08:00–22:00 BRT.
-  const window = { window_start: "08:00", window_end: "22:00" };
+describe("staleSendLatencyMinutes overnight (sends are 24h, no send window)", () => {
+  // PIX generated 22:30 BRT (01:30 UTC next day).
   const base = {
     triggerType: "pix_gerado_nao_pago",
     triggerConfig: {},
     enteredAt: "2026-10-16T01:30:00.000Z",
     loopIteration: 0,
-    entryRules: window,
   };
 
-  it("does not treat waiting for the window as delay", () => {
-    // Dia 1 sent 08:05 BRT (11:05 UTC): 5 min after the window opened.
+  it("counts the night as delay: the step was due at entry", () => {
+    // Sent 08:05 BRT (11:05 UTC): 575 min after entry, past the 2 h limit.
     expect(
       staleSendLatencyMinutes({ ...base, waitSecondsBefore: 0, now: Date.parse("2026-10-16T11:05:00Z") }),
-    ).toBeNull();
-    // Dia 2 planned 22:30 BRT next day → due at 08:00 BRT the day after.
+    ).toBe(575);
+    // Sent 23:30 BRT, 1 h after entry: on time.
     expect(
-      staleSendLatencyMinutes({ ...base, waitSecondsBefore: 86_400, now: Date.parse("2026-10-17T11:30:00Z") }),
+      staleSendLatencyMinutes({ ...base, waitSecondsBefore: 0, now: Date.parse("2026-10-16T02:30:00Z") }),
     ).toBeNull();
-  });
-
-  it("still flags real delay after the window opened", () => {
-    // 10:30 BRT = 150 min after the 08:00 opening.
-    expect(
-      staleSendLatencyMinutes({ ...base, waitSecondsBefore: 0, now: Date.parse("2026-10-16T13:30:00Z") }),
-    ).toBe(150);
   });
 });

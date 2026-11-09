@@ -121,9 +121,6 @@ function pixLoop(messages) {
 
 const commonRules = {
   audience: "system:all-leads",
-  window_start: "08:00",
-  window_end: "22:00",
-  weekdays: [1, 2, 3, 4, 5, 6, 0],
   max_attempts: 3,
   retry_base_seconds: 60,
 };

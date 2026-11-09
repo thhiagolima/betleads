@@ -356,27 +356,6 @@ const screen: HelpScreen = {
     },
 
     // ---------------------------------------------------------------
-    // Janela de envio
-    // ---------------------------------------------------------------
-    {
-      id: "janela",
-      title: "Janela de envio",
-      intro: "Mensagens fora deste horário aguardam a próxima abertura, no horário de Brasília.",
-      items: [
-        {
-          anchor: "jornada.janela.inicio",
-          label: "De",
-          what: "Horário em que a janela de envio abre, todos os dias da semana.",
-        },
-        {
-          anchor: "jornada.janela.fim",
-          label: "Até",
-          what: "Horário em que a janela de envio fecha.",
-        },
-      ],
-    },
-
-    // ---------------------------------------------------------------
     // Limites e duração
     // ---------------------------------------------------------------
     {

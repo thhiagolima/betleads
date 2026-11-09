@@ -13,16 +13,13 @@ vi.mock("@tanstack/react-start", () => ({
   useServerFn: (fn: unknown) => fn,
 }));
 
-// These three are only rendered on the enabled-channel path; stubbed out so
+// These two are only rendered on the enabled-channel path; stubbed out so
 // the test doesn't have to chain-mock their own server-fn/query dependencies.
 vi.mock("@/components/billing/active-tenant-wallet-notice", () => ({
   ActiveTenantWalletNotice: () => null,
 }));
 vi.mock("@/components/providers-paused-banner", () => ({
   ProvidersPausedBanner: () => null,
-}));
-vi.mock("@/components/send-window-card", () => ({
-  SendWindowCard: () => null,
 }));
 
 vi.mock("@tanstack/react-query", () => ({

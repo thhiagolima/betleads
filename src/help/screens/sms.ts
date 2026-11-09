@@ -6,7 +6,7 @@
 // (prefixo neutro "historico.", reaproveitado por Email/Ligações),
 // src/components/providers-paused-banner.tsx,
 // src/components/billing/wallet-balance-notice.tsx,
-// src/components/send-window-card.tsx, src/components/channels/channel-disabled-state.tsx
+// src/components/channels/channel-disabled-state.tsx
 // e src/lib/link-tracking-preview.ts (contador de caracteres/segmentos).
 import type { HelpScreen } from "../types";
 
@@ -27,7 +27,7 @@ const screen: HelpScreen = {
       id: "canal",
       title: "Barra superior (aparece nas 3 abas)",
       intro:
-        "Esta faixa é a mesma em /sms, /email e /ligações: o botão de nova campanha, o aviso de disparos pausados, as abas e a janela de envio. Fica acima das abas e não muda quando você troca de aba. O aviso de saldo do SMS (diferente das outras duas telas) só aparece na aba Visão geral — veja essa seção abaixo.",
+        "Esta faixa é a mesma em /sms, /email e /ligações: o botão de nova campanha, o aviso de disparos pausados e as abas. Fica acima das abas e não muda quando você troca de aba. O aviso de saldo do SMS (diferente das outras duas telas) só aparece na aba Visão geral — veja essa seção abaixo.",
       items: [
         {
           anchor: "canal.header.nova-campanha",
@@ -45,13 +45,6 @@ const screen: HelpScreen = {
           what: 'Só aparece quando os disparos de SMS da casa estão pausados (saldo esgotado no provedor, manutenção do provedor ou pausa manual). O botão "Retomar disparos" abre a confirmação "Retomar disparos de SMS?", com a descrição de que os envios voltam a sair imediatamente e os botões "Cancelar" / "Retomar disparos".',
           notes:
             "Nada se perde enquanto pausado: campanhas e pendências continuam guardadas e são processadas quando o serviço voltar.",
-        },
-        {
-          anchor: "canal.janela.card",
-          label: "Janela de envio",
-          what: 'Faixa curta mostrando se o envio está "Dentro da janela de envio" ou "Fora da janela de envio — envios aguardando", com o horário permitido e, fora da janela, quando os envios retomam e quantos estão esperando.',
-          notes:
-            "A janela vale para todos os canais automáticos (SMS, e-mail e ligações) e é configurada em /configurações.",
         },
       ],
     },

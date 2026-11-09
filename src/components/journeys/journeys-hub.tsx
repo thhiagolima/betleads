@@ -973,7 +973,7 @@ function JourneyRow({
       >
         <JourneyMetric
           label="Em andamento"
-          hint="Jogadores dentro da jornada agora: aguardando a próxima etapa, a janela de envio ou pausados por prioridade."
+          hint="Jogadores dentro da jornada agora: aguardando a próxima etapa ou pausados por prioridade."
           value={inProgress.toLocaleString("pt-BR")}
         />
         <JourneyMetric

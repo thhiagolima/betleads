@@ -12,8 +12,6 @@ export const Route = createFileRoute("/api/public/hooks/whatsapp-resume")({
       POST: async ({ request }) => {
         try { requireSharedSecret(request, "CRON_SECRET"); } catch (r) { return r as Response; }
         try {
-          const url = new URL(request.url);
-          const bypassWindow = url.searchParams.get("bypassWindow") === "1";
           const nowIso = new Date().toISOString();
 
           const { data: resumed } = await supabaseAdmin
@@ -31,7 +29,7 @@ export const Route = createFileRoute("/api/public/hooks/whatsapp-resume")({
             .lt("next_run_at", fifteenMinAgo)
             .select("id");
 
-          const result = await runDispatcher({ limit: 100, bypassWindow });
+          const result = await runDispatcher({ limit: 100 });
           return Response.json({
             ok: true,
             resumed: resumed?.length ?? 0,

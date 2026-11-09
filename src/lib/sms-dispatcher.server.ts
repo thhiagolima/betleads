@@ -13,7 +13,6 @@ import {
 import { buildPlayerVariables, houseLinkVariables, renderTemplate } from "./template-vars.server";
 import { externalRecipientHash } from "./campaign-external-list";
 import { loadHouseLinks, type HouseLinks } from "./house-links.server";
-import { deferIfOutsideWindow } from "./send-window.server";
 import { brtDayStart } from "./tz";
 import {
   consumeBudget,
@@ -191,16 +190,6 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       provider: "short-brasil",
     });
     return { processed: 0, paused: true };
-  }
-  const deferTo = await deferIfOutsideWindow();
-  if (deferTo) {
-    await recordRun(startedAt, {
-      channel,
-      queue_before: queueBefore,
-      stop_reason: "outside_window",
-      provider: "short-brasil",
-    });
-    return { processed: 0, deferred_until: deferTo };
   }
 
   // Cadência: NÃO consome budget ainda — só checa backoff.
@@ -874,7 +863,7 @@ async function runSmsFlowBatch({
 // processa cada uma com processSmsCampaignTick (sms-campaign-dispatch.server):
 // destinatários sem cadastro são pulados e reportados (ENV-06), a cota por
 // tick segue o ritmo configurado na cadência real do cron (ENV-07) e o cursor
-// só avança depois do envio registrado. Fora da janela de envio, não roda.
+// só avança depois do envio registrado.
 // ============================================================
 
 /**
@@ -1099,13 +1088,6 @@ async function maybeReconcileBulkSubmissions() {
 
 export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number } = {}) {
   await maybeReconcileBulkSubmissions();
-  // Fora da janela → deixa pra próximo tick (idem outros canais).
-  const deferTo = await deferIfOutsideWindow();
-  if (deferTo) {
-    // Idle ticks only prove liveness; they do not write dispatcher_runs rows.
-    void pingHeartbeat(SMS_CAMPAIGN_JOB, true);
-    return { processed: 0, deferred_until: deferTo };
-  }
 
   const { data: claimed, error: claimErr } = await supabaseAdmin.rpc("claim_due_sms_campaigns", {
     p_limit: limit,

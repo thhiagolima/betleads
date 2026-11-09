@@ -1673,7 +1673,7 @@ export function WhatsappAutomationFlowsPanel() {
           <DialogHeader>
             <DialogTitle>Disparar teste</DialogTitle>
             <DialogDescription>
-              Escolhe um player com WhatsApp válido. O primeiro bloco do fluxo é enviado na hora, ignorando janela operacional. Cada player só pode entrar uma vez por fluxo.
+              Escolhe um player com WhatsApp válido. O primeiro bloco do fluxo é enviado na hora. Cada player só pode entrar uma vez por fluxo.
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
@@ -2255,7 +2255,7 @@ function FilaTab() {
   });
 
   const resume = useMutation({
-    mutationFn: (bypassWindow: boolean) => resumeFn({ data: { bypassWindow } }),
+    mutationFn: () => resumeFn({ data: {} }),
     onSuccess: (r: any) => {
       const sent = r?.dispatched?.sent ?? 0;
       const skipped = r?.dispatched?.skipped;
@@ -2299,21 +2299,12 @@ function FilaTab() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
-              onClick={() => resume.mutate(false)}
+              onClick={() => resume.mutate()}
               disabled={resume.isPending || c.overdue === 0}
               size="sm"
             >
               <Zap className="h-4 w-4 mr-1" />
               {resume.isPending ? "Disparando…" : `Disparar agora (${c.overdue} atrasados)`}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => resume.mutate(true)}
-              disabled={resume.isPending}
-              title="Ignora a janela operacional do anti-ban (use só pra testar)"
-            >
-              Forçar (bypass janela)
             </Button>
             <Button
               variant="outline"
@@ -2421,8 +2412,6 @@ function AntibanTab() {
   const [msgHora, setMsgHora] = useState([40]);
   const [msgSessao, setMsgSessao] = useState([400]);
   const [cooldownLead, setCooldownLead] = useState([48]);
-  const [janelaIni, setJanelaIni] = useState("08:00");
-  const [janelaFim, setJanelaFim] = useState("22:00");
   const [randomizacao, setRandomizacao] = useState(true);
   const [supressao, setSupressao] = useState(true);
   const [pausaAuto, setPausaAuto] = useState(true);
@@ -2438,8 +2427,6 @@ function AntibanTab() {
     setMsgHora([settings.hourly_limit ?? 40]);
     setMsgSessao([settings.daily_limit ?? 400]);
     setCooldownLead([settings.cooldown_hours ?? 48]);
-    setJanelaIni((settings.window_start ?? "08:00").slice(0, 5));
-    setJanelaFim((settings.window_end ?? "22:00").slice(0, 5));
     setRandomizacao(!!settings.randomization_enabled);
     setSupressao(!!settings.smart_suppression_enabled);
     setPausaAuto(!!settings.auto_pause_enabled);
@@ -2454,8 +2441,6 @@ function AntibanTab() {
       hourly_limit: number;
       daily_limit: number;
       cooldown_hours: number;
-      window_start: string;
-      window_end: string;
       randomization_enabled: boolean;
       smart_suppression_enabled: boolean;
       auto_pause_enabled: boolean;
@@ -2479,8 +2464,6 @@ function AntibanTab() {
         hourly_limit: msgHora[0],
         daily_limit: msgSessao[0],
         cooldown_hours: cooldownLead[0],
-        window_start: janelaIni,
-        window_end: janelaFim,
         randomization_enabled: randomizacao,
         smart_suppression_enabled: supressao,
         auto_pause_enabled: pausaAuto,
@@ -2498,8 +2481,6 @@ function AntibanTab() {
     msgHora,
     msgSessao,
     cooldownLead,
-    janelaIni,
-    janelaFim,
     randomizacao,
     supressao,
     pausaAuto,
@@ -2532,18 +2513,6 @@ function AntibanTab() {
           <ToggleRow label="Supressão inteligente" desc="Não dispara se o lead respondeu, voltou ou já está em outro fluxo." checked={supressao} onChange={setSupressao} />
           <ToggleRow label="Pausa automática em risco" desc="Sessões com risco alto são pausadas até reaquecer." checked={pausaAuto} onChange={setPausaAuto} />
           <ToggleRow label="Aquecimento progressivo" desc="Novos números começam com limite reduzido." checked={aquecimento} onChange={setAquecimento} />
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label className="text-xs">Janela operacional</Label>
-            <div className="flex gap-2 items-center">
-              <Input type="time" value={janelaIni} onChange={(e) => setJanelaIni(e.target.value)} />
-              <span className="text-muted-foreground">até</span>
-              <Input type="time" value={janelaFim} onChange={(e) => setJanelaFim(e.target.value)} />
-            </div>
-            <p className="text-[11px] text-muted-foreground">Fora desta janela, mensagens ficam na fila até o próximo horário válido.</p>
-          </div>
         </CardContent>
       </Card>
 

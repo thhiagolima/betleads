@@ -22,7 +22,6 @@ vi.mock("./sms.functions", () => ({ sendSmsInternal: vi.fn() }));
 vi.mock("./consent.server", () => ({
   evaluateVoiceContactPolicy: vi.fn(async () => ({ allowed: true })),
 }));
-vi.mock("./send-window.server", () => ({ deferIfOutsideWindow: vi.fn(async () => null) }));
 vi.mock("./tenant-access.server", () => ({ listDemoTenantIds: vi.fn(async () => []) }));
 const alerts = vi.hoisted(() => ({ notifyNoBalance: vi.fn(async () => false) }));
 vi.mock("./billing/wallet-alerts.server", () => ({ notifyNoBalance: alerts.notifyNoBalance }));

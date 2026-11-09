@@ -12,7 +12,6 @@ import { logCallHistoryInsertError } from "./voice-history-log";
 import { sendSmsInternal } from "./sms.functions";
 import { buildPlayerVariables } from "./template-vars.server";
 import { loadHouseLinks } from "./house-links.server";
-import { deferIfOutsideWindow } from "./send-window.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import { listDemoTenantIds } from "./tenant-access.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
@@ -449,28 +448,6 @@ export async function advanceProgress(progressId: string) {
     return;
   }
 
-  // Janela de envio: bloquear ligação fora do horário permitido.
-  if (block.block_type === "call") {
-    const defer = await deferIfOutsideWindow(new Date(), progress.tenant_id);
-    if (defer) {
-      await supabaseAdmin
-        .from("call_flow_progress")
-        .update({ next_run_at: defer, status: "active" } as any)
-        .eq("id", progress.id);
-      await logEvent(
-        progress.id,
-        progress.flow_id,
-        progress.player_id,
-        progress.current_block_index,
-        "deferred_quiet_hours",
-        {
-          next_run_at: defer,
-        },
-      );
-      return;
-    }
-  }
-
   const player = await loadPlayer(progress.player_id);
   await executeCallBlock(progress, block, player);
 }
@@ -803,7 +780,6 @@ export async function handleCallCompletion(args: {
   // Dispara SMS condicionais
   const smsList = ((block as any).call_flow_block_sms ?? []) as any[];
   if (smsList.length > 0) {
-    const deferSms = await deferIfOutsideWindow();
     const player = await loadPlayer(progress.player_id);
     const phone = progress.phone_e164 || player?.telefone || "";
     if (phone && player) {
@@ -819,20 +795,6 @@ export async function handleCallCompletion(args: {
       for (const sms of smsList.sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))) {
         if (!sms.template) continue;
         if (!smsCondMatches(sms.condition, args.status, duration, sms.threshold_seconds)) continue;
-        if (deferSms) {
-          await logEvent(
-            progress.id,
-            progress.flow_id,
-            progress.player_id,
-            progress.current_block_index,
-            "sms_deferred_quiet_hours",
-            {
-              condition: sms.condition,
-              next_allowed_at: deferSms,
-            },
-          );
-          continue;
-        }
         try {
           const smsResult = await sendSmsInternal({
             to: phone,

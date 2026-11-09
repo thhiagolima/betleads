@@ -205,7 +205,7 @@ export function BulkCallTab() {
     const plural = count === 1 ? "ligação" : "ligações";
     const confirmed = await requestConfirmation({
       title: `Disparar ${num(count)} ${plural}?`,
-      description: `${num(count)} ${plural} com o ${source} começam a ser disparadas agora e não podem ser canceladas. O custo depende da duração de cada chamada e do contrato do provedor de voz. Fora da janela de envio configurada, as ligações ficam pendentes e saem no próximo horário permitido.`,
+      description: `${num(count)} ${plural} com o ${source} começam a ser disparadas agora e não podem ser canceladas. O custo depende da duração de cada chamada e do contrato do provedor de voz.`,
       confirmLabel: `Disparar ${num(count)} ${plural}`,
       destructive: true,
     });

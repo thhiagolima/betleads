@@ -527,7 +527,7 @@ function ConsentPage() {
         {view === "voz" && (
           <DataCard
             title="Limites de voz"
-            description="Quantas vezes o mesmo número pode receber ligação. A janela de envio da casa vale sempre, mesmo com os limites desligados."
+            description="Quantas vezes o mesmo número pode receber ligação."
           >
             <div className="grid gap-4 md:grid-cols-3">
               <label

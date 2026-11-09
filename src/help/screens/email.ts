@@ -5,8 +5,7 @@
 // src/components/email/template-editor-dialog.tsx (+ template-presets.ts),
 // src/components/history/history-shell.tsx (prefixo neutro "historico.",
 // reaproveitado por telas futuras), src/components/providers-paused-banner.tsx,
-// src/components/billing/{active-tenant-wallet-notice,wallet-balance-notice}.tsx
-// e src/components/send-window-card.tsx.
+// e src/components/billing/{active-tenant-wallet-notice,wallet-balance-notice}.tsx.
 import type { HelpScreen } from "../types";
 
 const screen: HelpScreen = {
@@ -26,7 +25,7 @@ const screen: HelpScreen = {
       id: "canal",
       title: "Barra superior (aparece nas 3 abas)",
       intro:
-        "Esta faixa é a mesma em /email, /sms e /ligações: o botão de nova campanha, o aviso de disparos pausados, o aviso de saldo e a janela de envio. Fica acima das abas e não muda quando você troca de aba.",
+        "Esta faixa é a mesma em /email, /sms e /ligações: o botão de nova campanha, o aviso de disparos pausados e o aviso de saldo. Fica acima das abas e não muda quando você troca de aba.",
       items: [
         {
           anchor: "canal.header.nova-campanha",
@@ -54,13 +53,6 @@ const screen: HelpScreen = {
           anchor: "canal.carteira.aviso",
           label: 'Aviso de saldo ("Seu saldo acabou" / "Saldo baixo")',
           what: 'Aparece só para casas que pagam por SMS/voz (não isentas) com saldo zerado ou abaixo do limite de aviso da casa. O texto explica que SMS e voz ficam bloqueados sem saldo, mas o e-mail continua dentro da franquia mensal. Quando a casa pode comprar por Pix, o texto traz um link "Saldo e consumo" (para /plano-e-creditos); senão, pede para falar com o suporte.',
-        },
-        {
-          anchor: "canal.janela.card",
-          label: "Janela de envio",
-          what: 'Faixa curta mostrando se o envio está "Dentro da janela de envio" ou "Fora da janela de envio — envios aguardando", com o horário permitido e, fora da janela, quando os envios retomam e quantos estão esperando.',
-          notes:
-            "A janela vale para todos os canais automáticos (SMS, e-mail e ligações) e é configurada em /configurações.",
         },
       ],
     },
