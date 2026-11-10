@@ -311,9 +311,9 @@ export function fetchGoalDays(tenantIds: string[], range: DateRange) {
   return rpcRowsByDay<GoalDayRow>("finance_goal_days", tenantIds, range, GOAL_METRICS.length);
 }
 
-/** Wallet usage per house, São Paulo day and channel: up to 4 rows (sms, voice_30s, email, webpush) a house-day. */
+/** Wallet usage per house, São Paulo day and channel: up to 5 rows (sms, voice_30s, email, webpush, webpush_lead) a house-day. */
 export function fetchSendUsage(tenantIds: string[], range: DateRange) {
-  return rpcRowsByDay<SendUsageRow>("finance_send_usage", tenantIds, range, 4);
+  return rpcRowsByDay<SendUsageRow>("finance_send_usage", tenantIds, range, 5);
 }
 
 /** Daily activity (counts, CRM, Meta): one row per house and day. */
@@ -321,7 +321,7 @@ export function fetchActivityDays(tenantIds: string[], range: DateRange) {
   return rpcRowsByDay<ActivityDayRow>("finance_activity_days", tenantIds, range, 1);
 }
 
-const SEND_ITEMS: SendItem[] = ["sms", "voice_30s", "email", "webpush"];
+const SEND_ITEMS: SendItem[] = ["sms", "voice_30s", "email", "webpush", "webpush_lead"];
 
 /**
  * Send rows summed per channel, ordered SMS, Voz, E-mail; each amount is rounded

@@ -19,6 +19,16 @@ import { billingView, type BillingRole } from "./billing-view";
 import { createInvoicePayment } from "./invoices.server";
 import { getEndToEndOrExternalId } from "./payment-reference.server";
 import { brtDayKey } from "../tz";
+import {
+  WEBPUSH_BILLING_MODES,
+  deriveWebpushBillingMode,
+  itemsChargedBy,
+  planWebpushBillingMode,
+  type WebpushBillingItem,
+  type WebpushBillingMode,
+  type WebpushItemPrice,
+  type WebpushItemPrices,
+} from "./webpush-billing-mode";
 
 type ServerContext = {
   userId: string;
@@ -58,7 +68,7 @@ export const getBillingPrices = createServerFn({ method: "GET" })
     return getEffectivePrices(tenantId);
   });
 
-export const billingItem = z.enum(["sms", "voice_30s", "email", "webpush"]);
+export const billingItem = z.enum(["sms", "voice_30s", "email", "webpush", "webpush_lead"]);
 
 async function assertSuperAdmin(userId: string) {
   const { data, error } = await supabaseAdmin.rpc("is_super_admin", { _user_id: userId });
@@ -214,6 +224,93 @@ export const adminClearTenantPrice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => clearTenantPriceInput.parse(data))
   .handler(async ({ data, context }) => adminClearTenantPriceFor(context as ServerContext, data));
+
+// ---------------------------------------------------------------------------
+// Web Push billing mode (per send / per lead / both). Stored as the pair of
+// per-tenant overrides of `webpush` and `webpush_lead` — see
+// `webpush-billing-mode.ts` for the derive/plan rules.
+// ---------------------------------------------------------------------------
+
+async function readWebpushItemPrices(tenantId: string): Promise<WebpushItemPrices> {
+  const read = async (item: WebpushBillingItem): Promise<WebpushItemPrice> => {
+    const { data, error } = await looseDb(supabaseAdmin).rpc("billing_effective_price", {
+      _tenant: tenantId,
+      _item: item,
+    });
+    if (error) throw new Error(error.message);
+    const row = (data ?? {}) as { unit_price?: number | string | null; source?: string | null };
+    return {
+      unitPrice: row.unit_price == null ? null : Number(row.unit_price),
+      hasOverride: row.source === "override",
+    };
+  };
+  const [webpush, webpushLead] = await Promise.all([read("webpush"), read("webpush_lead")]);
+  return { webpush, webpush_lead: webpushLead };
+}
+
+const tenantWebpushBillingModeInput = z.object({ tenantId: dbUuid() });
+
+/** Current Web Push billing mode of a house (null = neither item is charged). */
+export async function getTenantWebpushBillingModeFor(
+  ctx: ServerContext,
+  data: z.infer<typeof tenantWebpushBillingModeInput>,
+) {
+  await assertSuperAdmin(ctx.userId);
+  const prices = await readWebpushItemPrices(data.tenantId);
+  return { mode: deriveWebpushBillingMode(prices), prices };
+}
+
+export const getTenantWebpushBillingMode = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => tenantWebpushBillingModeInput.parse(data))
+  .handler(async ({ data, context }) =>
+    getTenantWebpushBillingModeFor(context as ServerContext, data),
+  );
+
+const setTenantWebpushBillingModeInput = z.object({
+  tenantId: dbUuid(),
+  mode: z.enum(WEBPUSH_BILLING_MODES as [WebpushBillingMode, ...WebpushBillingMode[]]),
+});
+
+/**
+ * Puts a house in a Web Push billing mode: an item that must be off gets an
+ * override of R$ 0 (`admin_set_tenant_price`); an item that must be on and
+ * is currently an override of R$ 0 is cleared back to the catalog price
+ * (`admin_clear_tenant_price`); a non-zero custom override is kept. Each
+ * write goes through adminSetTenantPriceFor/adminClearTenantPriceFor, so it
+ * runs as the caller and is audited like a manual price change.
+ *
+ * `unchargedItems` lists items the mode wants on that still cost R$ 0 after
+ * the change (catalog price is 0) — the caller warns about them.
+ */
+export async function adminSetTenantWebpushBillingModeFor(
+  ctx: ServerContext,
+  data: z.infer<typeof setTenantWebpushBillingModeInput>,
+) {
+  await assertSuperAdmin(ctx.userId);
+  const current = await readWebpushItemPrices(data.tenantId);
+  const steps = planWebpushBillingMode(data.mode, current);
+  for (const step of steps) {
+    if (step.action === "set_zero") {
+      await adminSetTenantPriceFor(ctx, { tenantId: data.tenantId, item: step.item, unitPrice: 0 });
+    } else {
+      await adminClearTenantPriceFor(ctx, { tenantId: data.tenantId, item: step.item });
+    }
+  }
+  const after = steps.length > 0 ? await readWebpushItemPrices(data.tenantId) : current;
+  const wanted = itemsChargedBy(data.mode);
+  const unchargedItems = (["webpush", "webpush_lead"] as const).filter(
+    (item) => wanted[item] && (after[item].unitPrice ?? 0) <= 0,
+  );
+  return { ok: true, mode: deriveWebpushBillingMode(after), steps, unchargedItems };
+}
+
+export const adminSetTenantWebpushBillingMode = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => setTenantWebpushBillingModeInput.parse(data))
+  .handler(async ({ data, context }) =>
+    adminSetTenantWebpushBillingModeFor(context as ServerContext, data),
+  );
 
 // ---------------------------------------------------------------------------
 // Task 7 — "Plano e créditos" page: getPlanOverview, payInvoice,

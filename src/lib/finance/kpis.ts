@@ -12,13 +12,14 @@ import type {
   WaterfallStep,
 } from "./types";
 
-const SEND_ITEM_ORDER: SendItem[] = ["sms", "voice_30s", "email", "webpush"];
+const SEND_ITEM_ORDER: SendItem[] = ["sms", "voice_30s", "email", "webpush", "webpush_lead"];
 
 const SEND_ITEM_LABEL: Record<SendItem, string> = {
   sms: "SMS",
   voice_30s: "Voz",
   email: "E-mail",
-  webpush: "Web Push",
+  webpush: "Web Push (envio)",
+  webpush_lead: "Web Push (lead)",
 };
 
 const SEND_ITEM_UNIT_LABEL: Record<SendItem, string> = {
@@ -26,6 +27,7 @@ const SEND_ITEM_UNIT_LABEL: Record<SendItem, string> = {
   voice_30s: "blocos de 30 s",
   email: "e-mails",
   webpush: "pushes",
+  webpush_lead: "inscrições",
 };
 
 /**

@@ -97,6 +97,7 @@ import { Route as ApiPublicHooksPlatformDigestRouteImport } from './routes/api/p
 import { Route as ApiPublicHooksRecoveryRouteImport } from './routes/api/public/hooks/recovery'
 import { Route as ApiPublicHooksSmsRefreshStatusRouteImport } from './routes/api/public/hooks/sms-refresh-status'
 import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/public/hooks/webhook-replay'
+import { Route as ApiPublicHooksWebpushLeadBillingRouteImport } from './routes/api/public/hooks/webpush-lead-billing'
 import { Route as ApiPublicHooksWhatsappResumeRouteImport } from './routes/api/public/hooks/whatsapp-resume'
 import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/meta-sync/tick'
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
@@ -577,6 +578,12 @@ const ApiPublicHooksWebhookReplayRoute =
     path: '/api/public/hooks/webhook-replay',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksWebpushLeadBillingRoute =
+  ApiPublicHooksWebpushLeadBillingRouteImport.update({
+    id: '/api/public/hooks/webpush-lead-billing',
+    path: '/api/public/hooks/webpush-lead-billing',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksWhatsappResumeRoute =
   ApiPublicHooksWhatsappResumeRouteImport.update({
     id: '/api/public/hooks/whatsapp-resume',
@@ -770,6 +777,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
+  '/api/public/hooks/webpush-lead-billing': typeof ApiPublicHooksWebpushLeadBillingRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
@@ -878,6 +886,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
+  '/api/public/hooks/webpush-lead-billing': typeof ApiPublicHooksWebpushLeadBillingRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
@@ -987,6 +996,7 @@ export interface FileRoutesById {
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
+  '/api/public/hooks/webpush-lead-billing': typeof ApiPublicHooksWebpushLeadBillingRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
@@ -1097,6 +1107,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
+    | '/api/public/hooks/webpush-lead-billing'
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
@@ -1205,6 +1216,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
+    | '/api/public/hooks/webpush-lead-billing'
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
@@ -1313,6 +1325,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/webhook-replay'
+    | '/api/public/hooks/webpush-lead-billing'
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
     | '/api/public/precall/dispatch'
@@ -1404,6 +1417,7 @@ export interface RootRouteChildren {
   ApiPublicHooksRecoveryRoute: typeof ApiPublicHooksRecoveryRoute
   ApiPublicHooksSmsRefreshStatusRoute: typeof ApiPublicHooksSmsRefreshStatusRoute
   ApiPublicHooksWebhookReplayRoute: typeof ApiPublicHooksWebhookReplayRoute
+  ApiPublicHooksWebpushLeadBillingRoute: typeof ApiPublicHooksWebpushLeadBillingRoute
   ApiPublicHooksWhatsappResumeRoute: typeof ApiPublicHooksWhatsappResumeRoute
   ApiPublicMetaSyncTickRoute: typeof ApiPublicMetaSyncTickRoute
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
@@ -2042,6 +2056,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksWebhookReplayRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/webpush-lead-billing': {
+      id: '/api/public/hooks/webpush-lead-billing'
+      path: '/api/public/hooks/webpush-lead-billing'
+      fullPath: '/api/public/hooks/webpush-lead-billing'
+      preLoaderRoute: typeof ApiPublicHooksWebpushLeadBillingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/whatsapp-resume': {
       id: '/api/public/hooks/whatsapp-resume'
       path: '/api/public/hooks/whatsapp-resume'
@@ -2395,6 +2416,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksRecoveryRoute: ApiPublicHooksRecoveryRoute,
   ApiPublicHooksSmsRefreshStatusRoute: ApiPublicHooksSmsRefreshStatusRoute,
   ApiPublicHooksWebhookReplayRoute: ApiPublicHooksWebhookReplayRoute,
+  ApiPublicHooksWebpushLeadBillingRoute: ApiPublicHooksWebpushLeadBillingRoute,
   ApiPublicHooksWhatsappResumeRoute: ApiPublicHooksWhatsappResumeRoute,
   ApiPublicMetaSyncTickRoute: ApiPublicMetaSyncTickRoute,
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,

@@ -2,7 +2,7 @@ import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-route
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { BILLING_ITEM_LABEL, num } from "@/lib/format";
+import { BILLING_ITEM_LABEL, type BillingItem, brlUnitPrice, num } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,8 +74,11 @@ import {
 import {
   adminClearTenantPrice,
   adminSetTenantPrice,
+  adminSetTenantWebpushBillingMode,
   getTenantEffectivePrice,
+  getTenantWebpushBillingMode,
 } from "@/lib/billing/billing.functions";
+import type { WebpushBillingMode } from "@/lib/billing/webpush-billing-mode";
 import { adminAdjustSmsCredits, adminSmsCreditConsole } from "@/lib/sms-credits.functions";
 import { BillingDashboardPanel } from "@/components/billing/admin/billing-dashboard-panel";
 import { BillingHealthCard } from "@/components/billing/admin/billing-health-card";
@@ -1018,7 +1021,7 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
   const setFn = useServerFn(adminSetTenantPrice);
   const clearFn = useServerFn(adminClearTenantPrice);
   const [open, setOpen] = useState(false);
-  const [item, setItem] = useState<"sms" | "voice_30s" | "email">("sms");
+  const [item, setItem] = useState<BillingItem>("sms");
   const [unitPrice, setUnitPrice] = useState("");
 
   const effective = useQuery({
@@ -1094,7 +1097,8 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
                 <SelectItem value="sms">SMS</SelectItem>
                 <SelectItem value="voice_30s">Voz</SelectItem>
                 <SelectItem value="email">E-mail</SelectItem>
-                <SelectItem value="webpush">Web Push</SelectItem>
+                <SelectItem value="webpush">{BILLING_ITEM_LABEL.webpush}</SelectItem>
+                <SelectItem value="webpush_lead">{BILLING_ITEM_LABEL.webpush_lead}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1111,6 +1115,7 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
             />
           </div>
         </div>
+        <WebpushBillingModeField tenantId={tenant.tenant_id} enabled={open} />
         <DialogFooter>
           {effective.data?.hasOverride && (
             <Button variant="outline" disabled={clear.isPending} onClick={() => clear.mutate()}>
@@ -1126,6 +1131,89 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const WEBPUSH_BILLING_MODE_LABEL: Record<WebpushBillingMode, string> = {
+  envio: "Por envio",
+  lead: "Por lead",
+  ambos: "Envio + lead",
+};
+
+const WEBPUSH_BILLING_MODE_HELP: Record<WebpushBillingMode, string> = {
+  envio: "Cobra o preço de Web Push (envio) a cada push enviado. Novos inscritos não são cobrados.",
+  lead: "Cobra o preço de Web Push (lead) a cada novo inscrito no navegador. Os envios não são cobrados.",
+  ambos: "Cobra a cada push enviado e também a cada novo inscrito no navegador.",
+};
+
+/**
+ * "Cobrança Web Push": per send, per lead or both. The mode is the pair of
+ * per-tenant prices of `webpush`/`webpush_lead` — an item at R$ 0 is not
+ * charged (see `adminSetTenantWebpushBillingMode`).
+ */
+function WebpushBillingModeField({ tenantId, enabled }: { tenantId: string; enabled: boolean }) {
+  const qc = useQueryClient();
+  const readFn = useServerFn(getTenantWebpushBillingMode);
+  const setFn = useServerFn(adminSetTenantWebpushBillingMode);
+  const current = useQuery({
+    queryKey: ["admin", "tenant-price", tenantId, "webpush-mode"],
+    queryFn: () => readFn({ data: { tenantId } }),
+    enabled,
+  });
+  const save = useMutation({
+    mutationFn: (mode: WebpushBillingMode) => setFn({ data: { tenantId, mode } }),
+    onSuccess: (result) => {
+      if (result.unchargedItems.length > 0) {
+        toast.warning(
+          `Modo salvo, mas ${result.unchargedItems
+            .map((item) => BILLING_ITEM_LABEL[item])
+            .join(" e ")} continua a R$ 0 (preço padrão zerado). Defina um preço para cobrar.`,
+        );
+      } else {
+        toast.success("Cobrança Web Push atualizada");
+      }
+      qc.invalidateQueries({ queryKey: ["admin", "balance"] });
+      qc.invalidateQueries({ queryKey: ["admin", "tenant-price"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const mode = current.data?.mode ?? null;
+  const prices = current.data?.prices;
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <Label>Cobrança Web Push</Label>
+      <Select
+        value={mode ?? ""}
+        disabled={current.isLoading || save.isPending}
+        onValueChange={(value) => save.mutate(value as WebpushBillingMode)}
+      >
+        <SelectTrigger>
+          <SelectValue
+            placeholder={current.isLoading ? "Carregando…" : "Nenhuma (envio e lead a R$ 0)"}
+          />
+        </SelectTrigger>
+        <SelectContent>
+          {(Object.keys(WEBPUSH_BILLING_MODE_LABEL) as WebpushBillingMode[]).map((value) => (
+            <SelectItem key={value} value={value}>
+              {WEBPUSH_BILLING_MODE_LABEL[value]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">
+        {mode
+          ? WEBPUSH_BILLING_MODE_HELP[mode]
+          : "Por envio: R$ por push enviado. Por lead: R$ por novo inscrito no navegador. Envio + lead: os dois."}
+        {prices && (
+          <>
+            {" "}
+            Hoje: envio {brlUnitPrice(prices.webpush.unitPrice ?? 0)}, lead{" "}
+            {brlUnitPrice(prices.webpush_lead.unitPrice ?? 0)}.
+          </>
+        )}
+      </p>
+    </div>
   );
 }
 
@@ -1227,7 +1315,7 @@ function MetricsTab() {
 
 // ─── Aba Preços ──────────────────────────────────────────────────────────────
 type PriceBookRow = {
-  item: "sms" | "voice_30s" | "email";
+  item: BillingItem;
   unit_price: number;
   provider_unit_cost: number | null;
   free_monthly_units: number;

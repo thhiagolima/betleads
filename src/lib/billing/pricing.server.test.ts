@@ -17,6 +17,7 @@ describe("getReportUnitPrices", () => {
       voice_30s: 0.09,
       email: 0.002,
       webpush: 0.01,
+      webpush_lead: 0.01,
     };
     rpc.mockImplementation((fn: string, args: { _tenant: string; _item: string }) => {
       expect(fn).toBe("billing_report_unit_price");
@@ -25,7 +26,7 @@ describe("getReportUnitPrices", () => {
 
     const prices = await getReportUnitPrices("tenant-1");
 
-    expect(prices).toEqual({ sms: 0.08, voice_30s: 0.09, email: 0.002, webpush: 0.01 });
+    expect(prices).toEqual({ sms: 0.08, voice_30s: 0.09, email: 0.002, webpush: 0.01, webpush_lead: 0.01 });
   });
 
   it("throws if any item comes back null", async () => {

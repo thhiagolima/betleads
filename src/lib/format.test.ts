@@ -48,6 +48,8 @@ describe("billingItemLabel", () => {
     expect(billingItemLabel("sms")).toBe("SMS");
     expect(billingItemLabel("voice_30s")).toBe("Voz");
     expect(billingItemLabel("email")).toBe("E-mail");
+    expect(billingItemLabel("webpush")).toBe("Web Push (envio)");
+    expect(billingItemLabel("webpush_lead")).toBe("Web Push (lead)");
   });
 
   it("returns '-' for null/undefined", () => {

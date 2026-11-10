@@ -97,7 +97,7 @@ export type CostLine = {
   auto: boolean;
 };
 
-export type SendItem = "sms" | "voice_30s" | "email" | "webpush";
+export type SendItem = "sms" | "voice_30s" | "email" | "webpush" | "webpush_lead";
 
 export type SendUsage = {
   item: SendItem;

@@ -7536,6 +7536,8 @@ export type Database = {
           first_seen_at: string | null;
           id: string;
           last_seen_at: string | null;
+          lead_billed_at: string | null;
+          lead_billing_ledger_id: string | null;
           linked_at: string | null;
           player_id: string | null;
           status: string;
@@ -7549,6 +7551,8 @@ export type Database = {
           first_seen_at?: string | null;
           id?: string;
           last_seen_at?: string | null;
+          lead_billed_at?: string | null;
+          lead_billing_ledger_id?: string | null;
           linked_at?: string | null;
           player_id?: string | null;
           status?: string;
@@ -7562,6 +7566,8 @@ export type Database = {
           first_seen_at?: string | null;
           id?: string;
           last_seen_at?: string | null;
+          lead_billed_at?: string | null;
+          lead_billing_ledger_id?: string | null;
           linked_at?: string | null;
           player_id?: string | null;
           status?: string;
@@ -7575,6 +7581,13 @@ export type Database = {
             columns: ["app_id"];
             isOneToOne: false;
             referencedRelation: "tenant_webpush_apps";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "push_subscriptions_lead_billing_ledger_id_fkey";
+            columns: ["lead_billing_ledger_id"];
+            isOneToOne: false;
+            referencedRelation: "wallet_ledger";
             referencedColumns: ["id"];
           },
           {
@@ -9368,6 +9381,14 @@ export type Database = {
       webpush_app_active_count: {
         Args: { p_app: string };
         Returns: number;
+      };
+      webpush_lead_billing_tenants: {
+        Args: { _limit?: number };
+        Returns: string[];
+      };
+      webpush_lead_bill_tenant: {
+        Args: { _limit?: number; _tenant: string };
+        Returns: Json;
       };
     };
     Enums: {
