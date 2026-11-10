@@ -21,7 +21,7 @@ const screen: HelpScreen = {
         {
           anchor: "eventos.lista",
           label: "Linha de evento",
-          what: 'Cada linha mostra um ícone colorido por tipo de evento (cadastro, login, logout, depósito, saque, jogo, bônus, ou um ícone neutro de "falhou"/evento desconhecido), o nome do jogador (ou "Jogador sem cadastro", quando o evento não está ligado a nenhum cadastro), a ação, o jogo quando existir (depois de "·"), o ID do jogador quando existir ("ID <id> · "), há quanto tempo aconteceu e, quando o evento tiver valor, o valor em destaque à direita.',
+          what: 'Cada linha mostra um ícone colorido por tipo de evento (cadastro, login, logout, depósito, saque, jogo, bônus, ou um ícone neutro de "falhou"/evento desconhecido), o nome do jogador (ou "Jogador sem cadastro", quando o evento não está ligado a nenhum cadastro), a ação, o jogo quando existir (depois de "·") e, quando o evento tiver valor, o valor em destaque à direita. Embaixo: o número do PIX ou do saque na casa (em depósitos e saques, por exemplo "PIX #311"; códigos longos mostram só o final), o ID do jogador quando existir, a hora em que aconteceu (com a data quando não é de hoje) e há quanto tempo. Um depósito pendente aparece como "PIX gerado": o jogador pode gerar vários PIX e pagar só um, e cada um tem o seu número.',
           notes:
             "Repete-se em cada linha da lista; a âncora marca a lista inteira, não uma linha específica.",
         },
@@ -50,7 +50,8 @@ const screen: HelpScreen = {
       id: "sem-eventos",
       title: "Nenhum evento recebido ainda",
       what: 'Mostrado quando a casa ainda não tem nenhum evento. Mostra a descrição "Os eventos chegam quando a plataforma de apostas está conectada." e o botão "Abrir Integrações".',
-      action: 'Clique em "Abrir Integrações" para ir a /webhooks e conferir a conexão com a plataforma.',
+      action:
+        'Clique em "Abrir Integrações" para ir a /webhooks e conferir a conexão com a plataforma.',
     },
   ],
 

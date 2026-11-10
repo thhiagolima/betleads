@@ -8,7 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { timeAgo } from "@/lib/format";
 import { useMoney } from "@/hooks/use-tenant-currency";
-import { describeEventType, type EventTypeDisplay } from "@/lib/webhook-events";
+import {
+  describeEventType,
+  eventTransactionRef,
+  shortTransactionRef,
+  type EventTypeDisplay,
+} from "@/lib/webhook-events";
 import { IdentityIcon } from "@/components/identity/identity-badge";
 import { EVENT_IDENTITY, type EventKind } from "@/components/identity/identity";
 import { Activity } from "lucide-react";
@@ -39,14 +44,50 @@ const CATEGORY_KIND: Record<NonNullable<EventTypeDisplay["categoria"]>, EventKin
   Bônus: "bonus",
 };
 
+// No feed, "Depósito Pendente" é só um PIX gerado: o jogador pode gerar
+// vários e pagar um. O nome do endpoint (WEBHOOK_EVENTS) fica igual.
+const FEED_LABEL: Record<string, string> = {
+  "deposito-pendente": "PIX gerado",
+};
+
 /** Label from WEBHOOK_EVENTS (single source); unknown types show as a neutral "Evento". */
 function eventConfig(tipo: string | null | undefined) {
+  const slug = (tipo ?? "").trim().toLowerCase();
   const display = describeEventType(tipo);
   const kind: EventKind = display.failed
     ? "failed"
-    : (SLUG_KIND[(tipo ?? "").trim().toLowerCase()] ??
-      (display.categoria ? CATEGORY_KIND[display.categoria] : "other"));
-  return { tone: EVENT_IDENTITY[kind], label: display.label };
+    : (SLUG_KIND[slug] ?? (display.categoria ? CATEGORY_KIND[display.categoria] : "other"));
+  return {
+    tone: EVENT_IDENTITY[kind],
+    label: FEED_LABEL[slug] ?? display.label,
+    categoria: display.categoria,
+  };
+}
+
+/** Número do PIX/saque na casa, para diferenciar transações iguais em sequência. */
+function transactionText(categoria: EventTypeDisplay["categoria"], metadata: unknown) {
+  if (categoria !== "Depósito" && categoria !== "Saque") return null;
+  const ref = eventTransactionRef(metadata);
+  if (!ref) return null;
+  return `${categoria === "Depósito" ? "PIX" : "Saque"} ${shortTransactionRef(ref)}`;
+}
+
+/** Hora do evento em Brasília; com a data quando não é de hoje. */
+function clockTime(iso: string) {
+  const at = new Date(iso);
+  const day = (d: Date) => d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  const time = at.toLocaleTimeString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  if (day(at) === day(new Date())) return time;
+  const date = at.toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+  });
+  return `${date} ${time}`;
 }
 
 function EventosPage() {
@@ -123,6 +164,7 @@ function EventosPage() {
             <ul className="divide-y divide-border" {...tourAnchor("eventos.lista")}>
               {visible.map((e: any) => {
                 const cfg = eventConfig(e.tipo);
+                const transaction = transactionText(cfg.categoria, e.metadata);
                 return (
                   <li key={e.id} className="flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5">
                     <IdentityIcon tone={cfg.tone} />
@@ -139,10 +181,15 @@ function EventosPage() {
                         )}
                       </p>
                       <p className="text-meta text-muted-foreground">
-                        {e.players?.player_external_id
-                          ? `ID ${e.players.player_external_id} · `
-                          : ""}
-                        {timeAgo(e.created_at)}
+                        {[
+                          transaction,
+                          e.players?.player_external_id
+                            ? `ID ${e.players.player_external_id}`
+                            : null,
+                          `${clockTime(e.created_at)} · ${timeAgo(e.created_at)}`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </p>
                     </div>
                     {e.valor != null && (

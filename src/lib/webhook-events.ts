@@ -96,3 +96,50 @@ export function describeEventType(tipo: string | null | undefined): EventTypeDis
   if (legacy) return { ...legacy, failed: false };
   return { label: "Evento", categoria: null, failed: false };
 }
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function idString(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return undefined;
+}
+
+/**
+ * Id da transação (PIX/saque) na casa, lido do payload gravado em
+ * `events.metadata`. Cada formato de webhook guarda num lugar: envelope
+ * `user` em `deposit`/`withdraw.id`, formato plano em `transaction_id`,
+ * `data.transactionId` ou o `subject` de `payment_transaction`. É o mesmo id
+ * no evento pendente e no pago, e muda a cada PIX gerado.
+ */
+export function eventTransactionRef(metadata: unknown): string | null {
+  const m = asObject(metadata);
+  const data = asObject(m.data);
+  const subject = asObject(m.subject);
+  return (
+    [
+      asObject(m.deposit).id,
+      asObject(m.withdraw).id,
+      asObject(m.withdrawal).id,
+      m.internal_id,
+      m.transaction_id,
+      m.transactionId,
+      data.transactionId,
+      data.transaction_id,
+      data.referenceId,
+      data.operationId,
+      subject.type === "payment_transaction" ? subject.id : undefined,
+    ]
+      .map(idString)
+      .find(Boolean) ?? null
+  );
+}
+
+/** "#311" para ids curtos; ids longos (uuid, hash) mostram só o final. */
+export function shortTransactionRef(ref: string): string {
+  return ref.length <= 8 ? `#${ref}` : `#…${ref.slice(-6)}`;
+}
