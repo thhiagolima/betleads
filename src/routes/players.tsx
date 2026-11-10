@@ -354,6 +354,7 @@ type SortKey =
   | "ultimo_login"
   | "ultimo_jogo"
   | "ultimo_deposito"
+  | "created_at"
   | "total_depositado"
   | "total_sacado"
   | "lucro"
@@ -366,7 +367,22 @@ const MOBILE_SORTS: ReadonlyArray<{ value: string; label: string; key: SortKey |
   { value: "total_depositado", label: "Maior total depositado", key: "total_depositado" },
   { value: "ultimo_deposito", label: "Último depósito mais recente", key: "ultimo_deposito" },
   { value: "ultimo_login", label: "Último acesso mais recente", key: "ultimo_login" },
+  { value: "created_at", label: "Cadastro mais recente", key: "created_at" },
 ];
+
+/** Instante ISO -> data e hora do cadastro em São Paulo. */
+function brtDateTime(iso: string | null | undefined): { date: string; time: string } | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return {
+    date: d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }),
+    time: d.toLocaleTimeString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  };
+}
 
 function PlayersPage() {
   const navigate = useNavigate();
@@ -983,6 +999,8 @@ function PlayersPage() {
                 return p.ultimo_login ? new Date(p.ultimo_login).getTime() : 0;
               case "ultimo_jogo":
                 return p.ultimo_jogo ? new Date(p.ultimo_jogo).getTime() : 0;
+              case "created_at":
+                return p.created_at ? new Date(p.created_at).getTime() : 0;
               case "total_depositado":
                 return Number(p.total_depositado);
               case "total_sacado":
@@ -1845,7 +1863,7 @@ function PlayersPage() {
             <div className={cn("transition-opacity", isPlaceholderData && "opacity-60")}>
               {/* Desktop: tabela, com a coluna do nome fixa ao rolar para o lado. */}
               <div className="hidden md:block">
-                <Table className="min-w-[880px]">
+                <Table className="min-w-[980px]">
                   <TableHeader>
                     <TableRow className="border-border/60 hover:bg-transparent">
                       <TableHead className="sticky left-0 z-10 w-10 bg-card">
@@ -1867,6 +1885,9 @@ function PlayersPage() {
                         <SortHeader k="ultimo_deposito" label="Último depósito" />
                       </TableHead>
                       <TableHead>
+                        <SortHeader k="created_at" label="Criado em" />
+                      </TableHead>
+                      <TableHead>
                         <SortHeader k="origem" label="Veio de" />
                       </TableHead>
                       <TableHead className="w-12">
@@ -1878,7 +1899,7 @@ function PlayersPage() {
                     {isLoading &&
                       Array.from({ length: 8 }).map((_, i) => (
                         <TableRow key={i}>
-                          {Array.from({ length: 9 }).map((_, j) => (
+                          {Array.from({ length: 10 }).map((_, j) => (
                             <TableCell key={j}>
                               <Skeleton className="h-4 w-20" />
                             </TableCell>
@@ -1888,6 +1909,7 @@ function PlayersPage() {
                     {paged.map((p, rowIndex) => {
                       const extId = (p.player_external_id ?? "").trim();
                       const depositsCount = Number(p.deposits_count ?? 0);
+                      const createdAt = brtDateTime(p.created_at);
                       return (
                         <TableRow key={p.id} className="group border-border/40">
                           <TableCell className="sticky left-0 z-10 w-10 bg-card group-hover:bg-secondary">
@@ -1961,6 +1983,18 @@ function PlayersPage() {
                           </TableCell>
                           <TableCell className="text-label text-muted-foreground">
                             {timeAgo(p.ultimo_deposito ?? p.ftd_em)}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap tabular-nums">
+                            {createdAt ? (
+                              <>
+                                <div className="text-body">{createdAt.date}</div>
+                                <div className="text-meta text-muted-foreground">
+                                  {createdAt.time}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="max-w-[240px]">
@@ -2593,6 +2627,7 @@ function PlayerCardContent({
   awaiting: boolean;
 }) {
   const { money } = useMoney();
+  const createdAt = brtDateTime(player.created_at);
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2">
@@ -2607,6 +2642,12 @@ function PlayerCardContent({
         <span className="tabular-nums text-foreground/90">{money(player.total_depositado)}</span>
         <span aria-hidden="true">·</span>
         <span>último depósito {timeAgo(player.ultimo_deposito ?? player.ftd_em)}</span>
+        {createdAt && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>criado em {createdAt.date}</span>
+          </>
+        )}
       </p>
     </div>
   );

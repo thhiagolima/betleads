@@ -50,6 +50,7 @@ type Input = {
     | "total_depositado"
     | "total_sacado"
     | "ultimo_deposito"
+    | "created_at"
     | "saldo"
     | "lucro"
     | "status"
@@ -477,11 +478,13 @@ export const getPlayersPage = createServerFn({ method: "POST" })
                 ? "total_sacado"
                 : sortKey === "ultimo_deposito"
                   ? "ultimo_deposito"
-                  : sortKey === "status"
-                    ? "status"
-                    : sortKey === "origem"
-                      ? "origem"
-                      : "ultimo_login";
+                  : sortKey === "created_at"
+                    ? "created_at"
+                    : sortKey === "status"
+                      ? "status"
+                      : sortKey === "origem"
+                        ? "origem"
+                        : "ultimo_login";
       const ascending = sortDir === "asc";
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
@@ -903,6 +906,7 @@ const EXPORT_SORT_COLUMNS = new Set([
   "total_depositado",
   "total_sacado",
   "ultimo_deposito",
+  "created_at",
   "status",
   "origem",
 ]);
