@@ -300,6 +300,9 @@ export type WebpushIntegrationApp = WebpushAppRow & {
 
 export type WebpushIntegrationState = {
   enabled: boolean;
+  /** The house's public loader token ("" before settings exist) — shown on
+   * its own for houses whose platform already ships the integration. */
+  publicToken: string;
   loaderSnippet: string;
   playerSnippet: string;
   prompt: PromptConfig;
@@ -351,6 +354,7 @@ export async function getWebpushIntegrationState(
 
   return {
     enabled: current !== null,
+    publicToken: settings?.publicToken ?? "",
     loaderSnippet: settings ? buildLoaderSnippet(settings.publicToken) : "",
     playerSnippet: WEBPUSH_PLAYER_SNIPPET,
     prompt: settings?.prompt ?? DEFAULT_PROMPT,

@@ -184,36 +184,67 @@ export function copyToClipboard(text: string, message: string) {
 // Etapa 1 — Instalação no site (arquivo + script + jogador + status)
 // ============================================================================
 
-export function InstallationStepView({
+/** How the house installs web push: `plataforma` = its backoffice platform
+ * already ships the worker file and the loader, so the house only pastes its
+ * token there; `manual` = the house (or its platform's support) uploads the
+ * file and pastes the script by hand. Both end with the same file and script
+ * on the site, so the status row and its checks are shared. */
+export type InstallMode = "plataforma" | "manual";
+
+export const INSTALL_MODE_LABELS: Record<InstallMode, string> = {
+  plataforma: "Minha plataforma já tem integração com a Betleads",
+  manual: "Vou instalar manualmente",
+};
+
+/** The house's platform already ships the worker file and the loader: the
+ * house only pastes its token in the platform's backoffice. */
+function PlatformInstallBlock({ origin, publicToken }: { origin: string; publicToken: string }) {
+  return (
+    <div
+      className="space-y-3 rounded-lg border border-border/60 bg-background/30 p-3"
+      {...tourAnchor("webhooks.webpush.bloco-token")}
+    >
+      <p className="text-sm text-muted-foreground">
+        O arquivo e o script já vêm com a plataforma. No backoffice dela, ative o web push e cole o
+        token abaixo.
+      </p>
+      <div className="space-y-1.5">
+        <p className="text-label text-muted-foreground">Token da casa</p>
+        <div className="flex gap-2">
+          <Input value={publicToken} readOnly className="font-mono text-meta" />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!publicToken}
+            onClick={() => copyToClipboard(publicToken, "Token copiado")}
+          >
+            <Copy className="h-3.5 w-3.5" /> Copiar
+          </Button>
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Depois de salvar, abra <span className="font-mono text-foreground/85">{origin}</span> uma vez
+        e confira o status abaixo.
+      </p>
+    </div>
+  );
+}
+
+/** Manual install: one support ticket with the file, the script and the
+ * player snippet, plus the same content in three blocks. */
+function ManualInstallBlock({
   origin,
   workerUrl,
   downloadUrl,
   loaderSnippet,
   playerSnippet,
-  canAdvance,
-  verifyingWorker,
-  workerVerifyResult,
-  onVerifyWorker,
-  scriptSeen,
-  checkingScript,
-  onCheckScript,
-  playerLinked,
-  onNext,
 }: {
   origin: string;
   workerUrl: string;
   downloadUrl: string;
   loaderSnippet: string;
   playerSnippet: string;
-  canAdvance: boolean;
-  verifyingWorker: boolean;
-  workerVerifyResult: WorkerCheckResult | null;
-  onVerifyWorker: () => void;
-  scriptSeen: boolean;
-  checkingScript: boolean;
-  onCheckScript: () => void;
-  playerLinked: boolean;
-  onNext: () => void;
 }) {
   const ticketText = buildSupportTicketText({
     origin,
@@ -224,7 +255,7 @@ export function InstallationStepView({
   });
 
   return (
-    <div className="space-y-5">
+    <>
       <p className="text-sm text-muted-foreground">
         Envie as instruções abaixo para o suporte da plataforma do site em um único chamado.
       </p>
@@ -303,6 +334,81 @@ export function InstallationStepView({
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+export function InstallationStepView({
+  origin,
+  workerUrl,
+  downloadUrl,
+  publicToken,
+  installMode,
+  onInstallModeChange,
+  loaderSnippet,
+  playerSnippet,
+  canAdvance,
+  verifyingWorker,
+  workerVerifyResult,
+  onVerifyWorker,
+  scriptSeen,
+  checkingScript,
+  onCheckScript,
+  playerLinked,
+  onNext,
+}: {
+  origin: string;
+  workerUrl: string;
+  downloadUrl: string;
+  publicToken: string;
+  installMode: InstallMode;
+  onInstallModeChange: (mode: InstallMode) => void;
+  loaderSnippet: string;
+  playerSnippet: string;
+  canAdvance: boolean;
+  verifyingWorker: boolean;
+  workerVerifyResult: WorkerCheckResult | null;
+  onVerifyWorker: () => void;
+  scriptSeen: boolean;
+  checkingScript: boolean;
+  onCheckScript: () => void;
+  playerLinked: boolean;
+  onNext: () => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <div
+        role="radiogroup"
+        aria-label="Como instalar"
+        className="flex flex-wrap gap-2"
+        {...tourAnchor("webhooks.webpush.modo-instalacao")}
+      >
+        {(["plataforma", "manual"] as InstallMode[]).map((mode) => (
+          <Button
+            key={mode}
+            type="button"
+            role="radio"
+            aria-checked={installMode === mode}
+            variant={installMode === mode ? "default" : "outline"}
+            size="sm"
+            onClick={() => onInstallModeChange(mode)}
+          >
+            {INSTALL_MODE_LABELS[mode]}
+          </Button>
+        ))}
+      </div>
+
+      {installMode === "plataforma" ? (
+        <PlatformInstallBlock origin={origin} publicToken={publicToken} />
+      ) : (
+        <ManualInstallBlock
+          origin={origin}
+          workerUrl={workerUrl}
+          downloadUrl={downloadUrl}
+          loaderSnippet={loaderSnippet}
+          playerSnippet={playerSnippet}
+        />
+      )}
 
       <div
         className="grid gap-4 sm:grid-cols-3"
@@ -495,12 +601,14 @@ export type WebpushWizardApp = AppProgress & {
 
 export function WebpushSetupWizard({
   app,
+  publicToken,
   loaderSnippet,
   playerSnippet,
   onProgress,
   onCheckScript,
 }: {
   app: WebpushWizardApp;
+  publicToken: string;
   loaderSnippet: string;
   playerSnippet: string;
   /** Called after any server-side progress (verify success, a sent test
@@ -518,6 +626,7 @@ export function WebpushSetupWizard({
   const [step, setStep] = useState<WizardStepId>(() => initialWizardStep(app));
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [checkingScript, setCheckingScript] = useState(false);
+  const [installMode, setInstallMode] = useState<InstallMode>("manual");
 
   const verifyWorkerFn = useServerFn(verifyWebpushWorkerFn);
   const listSubsFn = useServerFn(listRecentWebpushSubscriptionsFn);
@@ -572,6 +681,9 @@ export function WebpushSetupWizard({
           origin={app.origin}
           workerUrl={app.workerUrl}
           downloadUrl={downloadUrl}
+          publicToken={publicToken}
+          installMode={installMode}
+          onInstallModeChange={setInstallMode}
           loaderSnippet={loaderSnippet}
           playerSnippet={playerSnippet}
           canAdvance={canAdvanceStep(1, app)}

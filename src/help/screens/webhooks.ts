@@ -296,6 +296,18 @@ const screen: HelpScreen = {
           what: 'Mensagem mostrada no lugar do assistente quando a casa ainda não tem nenhuma origem (site) ativada para o Web Push: "O Web Push ainda não foi ativado para esta casa. Fale com a Betleads."',
         },
         {
+          anchor: "webhooks.webpush.modo-instalacao",
+          label: "Como instalar: plataforma ou manual",
+          what: '"Minha plataforma já tem integração com a Betleads" é para casas cujo backoffice já traz o arquivo e o script: basta colar o token da casa lá. "Vou instalar manualmente" mostra o arquivo, o script e as instruções para o suporte do site. Os dois caminhos usam o mesmo status logo abaixo.',
+        },
+        {
+          anchor: "webhooks.webpush.bloco-token",
+          label: "Token da casa",
+          what: "O token público que identifica a casa no script da Betleads. No caminho pela plataforma, é o único dado que a casa cola no backoffice para ativar o Web Push. Não é segredo: ele vai no HTML do site.",
+          notes:
+            'O botão mostra "Token copiado" ao copiar com sucesso, ou "Não foi possível copiar. Selecione o texto e copie manualmente." se falhar.',
+        },
+        {
           anchor: "webhooks.webpush.copiar-instrucoes",
           label: "Copiar instruções para o suporte",
           what: "Copia, num só texto, tudo que o suporte do site da casa precisa para instalar o Web Push: o arquivo do service worker, o script e a identificação do jogador — para abrir um único chamado em vez de três.",
@@ -566,6 +578,12 @@ const screen: HelpScreen = {
         anchor: "webhooks.webpush.abas",
         title: "Assistente e Convite",
         body: "O Assistente instala e testa o Web Push; o Convite configura o pedido de permissão.",
+        articleSection: "webpush",
+      },
+      {
+        anchor: "webhooks.webpush.modo-instalacao",
+        title: "Plataforma ou manual",
+        body: "Se o backoffice já tem a integração, só cole o token; senão, instale à mão.",
         articleSection: "webpush",
       },
       {

@@ -31,6 +31,7 @@ import {
   CLIPBOARD_ERROR_MESSAGE,
   copyToClipboard,
   initialWizardStep,
+  INSTALL_MODE_LABELS,
   InstallationStepView,
   isWizardComplete,
   nextWizardStep,
@@ -246,6 +247,9 @@ describe("InstallationStepView (etapa 1 — Instalação no site)", () => {
         origin="https://casa.bet.br"
         workerUrl="https://casa.bet.br/push/onesignal/OneSignalSDKWorker.js"
         downloadUrl="https://crm.betleads.io/api/public/push/worker.js"
+        publicToken="tok_casa_123"
+        installMode="manual"
+        onInstallModeChange={() => {}}
         loaderSnippet='<script src="https://betleads.io/loader.js" async></script>'
         playerSnippet='<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>'
         canAdvance={false}
@@ -274,6 +278,40 @@ describe("InstallationStepView (etapa 1 — Instalação no site)", () => {
     expect(html).toContain("betleads.io/loader.js");
     expect(html).toContain("3. Jogador logado");
     expect(html).toContain("ID_DO_JOGADOR");
+  });
+
+  it("modo manual (padrão) mostra a escolha dos dois caminhos e não mostra o bloco do token", () => {
+    const html = render();
+
+    expect(html).toContain(INSTALL_MODE_LABELS.plataforma);
+    expect(html).toContain(INSTALL_MODE_LABELS.manual);
+    expect(html).not.toContain("Token da casa");
+  });
+
+  it("modo plataforma mostra só o token e esconde arquivo, script e instruções para o suporte", () => {
+    const html = render({ installMode: "plataforma" });
+
+    expect(html).toContain("Token da casa");
+    expect(html).toContain("tok_casa_123");
+    expect(html).toContain("No backoffice dela, ative o web push e cole o");
+    expect(html).not.toContain("Copiar instruções para o suporte");
+    expect(html).not.toContain("Baixar OneSignalSDKWorker.js");
+    expect(html).not.toContain("betleads.io/loader.js");
+  });
+
+  it("modo plataforma mantém a linha de status e o 'Próxima etapa'", () => {
+    const html = render({ installMode: "plataforma", scriptSeen: true });
+
+    expect(html).toContain("Verificar agora");
+    expect(html).toContain("Script detectado");
+    expect(html).toContain("Próxima etapa");
+  });
+
+  it("modo plataforma sem token deixa o botão de copiar desabilitado", () => {
+    const html = render({ installMode: "plataforma", publicToken: "" });
+    const tokenBlock = html.slice(html.indexOf("Token da casa"));
+
+    expect(isDisabled(findButtonOpenTag(tokenBlock, "Copiar"))).toBe(true);
   });
 
   it("linha de status: arquivo com 'Verificar agora', script aguardando com botão 'Verificar', jogador informativo", () => {
@@ -347,6 +385,7 @@ describe("WebpushSetupWizard (render inicial a partir do progresso do app)", () 
     const html = renderToStaticMarkup(
       <WebpushSetupWizard
         app={app()}
+        publicToken="tok_casa_123"
         loaderSnippet={'<script src="https://betleads.io/loader.js" async></script>'}
         playerSnippet='<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>'
         onProgress={() => {}}
@@ -366,6 +405,7 @@ describe("WebpushSetupWizard (render inicial a partir do progresso do app)", () 
           workerVerifiedAt: "2026-11-05T00:00:00.000Z",
           scriptSeenAt: "2026-11-05T00:00:00.000Z",
         })}
+        publicToken="tok_casa_123"
         loaderSnippet={'<script src="https://betleads.io/loader.js" async></script>'}
         playerSnippet='<script>window.betleads = { playerId: "ID_DO_JOGADOR" };</script>'
         onProgress={() => {}}

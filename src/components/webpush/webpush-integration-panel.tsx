@@ -119,6 +119,7 @@ export function WebpushIntegrationPanel() {
                     playerLinkedAt: current.playerLinkedAt,
                     testSentAt: current.testSentAt,
                   }}
+                  publicToken={data.publicToken}
                   loaderSnippet={data.loaderSnippet}
                   playerSnippet={data.playerSnippet}
                   onProgress={onProgress}

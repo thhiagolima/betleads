@@ -132,6 +132,7 @@ describe("Task 7: web push integration state", () => {
 
       const state = await getWebpushIntegrationState(db.client, TENANT);
 
+      expect(state.publicToken).toBe("tok123");
       expect(state.loaderSnippet).toBe(
         '<script src="https://app.example.test/api/public/push/loader.js?t=tok123" async></script>',
       );
