@@ -21,14 +21,14 @@ const screen: HelpScreen = {
       id: "periodo",
       title: "Período",
       intro:
-        "Todos os números da tela (menos \"Ao vivo\", que é sempre em tempo real) seguem o período escolhido aqui.",
+        'Todos os números da tela (menos "Ao vivo", que é sempre em tempo real) seguem o período escolhido aqui.',
       items: [
         {
           anchor: "inicio.periodo",
           label: "Hoje / Ontem / 7 dias / 30 dias / Este mês / Mês passado / Datas",
           what: 'Seis atalhos de período e o botão "Datas", que abre um calendário de dois meses para escolher qualquer intervalo manualmente (clique no primeiro dia e depois no último).',
           notes:
-            "Os dias contam no horário de Brasília. Enquanto o período escolhido inclui o dia de hoje, a tela atualiza sozinha e mostra \"hoje ainda está entrando\" ao lado do título, porque os números de hoje ainda podem mudar.",
+            'Os dias contam no horário de Brasília. Enquanto o período escolhido inclui o dia de hoje, a tela atualiza sozinha e mostra "hoje ainda está entrando" ao lado do título, porque os números de hoje ainda podem mudar.',
         },
         {
           label: 'Texto "Operação de X · atualizado Y"',
@@ -48,8 +48,9 @@ const screen: HelpScreen = {
       items: [
         {
           anchor: "inicio.aviso-dominio.fechar",
-          label: 'Aviso "Domínio X verificado — já está sendo usado nos seus envios." e o X para fechar',
-          what: "Aparece um aviso por domínio que acabou de ficar verificado (encurtador ou e-mail), avisando que ele já está em uso nos envios. O X (\"Fechar aviso\") dispensa aquele aviso específico.",
+          label:
+            'Aviso "Domínio X verificado — já está sendo usado nos seus envios." e o X para fechar',
+          what: 'Aparece um aviso por domínio que acabou de ficar verificado (encurtador ou e-mail), avisando que ele já está em uso nos envios. O X ("Fechar aviso") dispensa aquele aviso específico.',
           roles: ["admin"],
           notes:
             "Só quem é administrador vê este aviso — para os outros perfis ele nunca aparece, mesmo que exista um domínio recém-verificado.",
@@ -125,7 +126,8 @@ const screen: HelpScreen = {
           anchor: "inicio.metricas-secundarias",
           label: "Novos clientes, Ticket médio, Redepósitos, PIX pagos e PIX não pagos",
           what: 'Novos clientes: jogadores cadastrados no período. Ticket médio: valor médio de cada depósito (total depositado dividido pelo número de depósitos). Redepósitos: valor depositado por jogadores que já tinham depositado antes, com o detalhe de quantos jogadores. PIX pagos: dos PIX gerados (QR Code/código emitido) no período, quantos % foram de fato pagos, com o detalhe "<pagos> de <gerados>". PIX não pagos: quantos PIX gerados ficaram sem pagamento no período — aparece em laranja quando maior que zero.',
-          notes: "Todos têm uma seta de variação contra o período anterior, igual aos indicadores principais.",
+          notes:
+            "Todos têm uma seta de variação contra o período anterior, igual aos indicadores principais.",
         },
       ],
     },
@@ -137,7 +139,8 @@ const screen: HelpScreen = {
       items: [
         {
           label: "Lista de eventos recentes",
-          what: 'Até 6 eventos mais recentes da casa: um ponto colorido por tipo de evento, o nome do jogador, a ação, o jogo (quando existir) e, quando tiver valor, o valor em destaque e há quanto tempo aconteceu.',
+          what: "Os 6 eventos mais recentes da casa, do mais novo para o mais antigo (no computador, desce a coluna da esquerda e depois a da direita). Cada linha tem um ícone do tipo de evento (pessoa = criou conta, QR code = gerou um PIX, seta verde = depositou, seta roxa = sacou), o nome do jogador, a ação e há quanto tempo aconteceu e, quando tiver valor, o valor à direita (verde quando é depósito).",
+          notes: "Clique no nome do jogador para abrir a ficha dele.",
         },
         {
           anchor: "inicio.ao-vivo.ver-todos",
@@ -177,7 +180,7 @@ const screen: HelpScreen = {
       {
         anchor: "inicio.periodo",
         title: "Período",
-        body: "Seis atalhos (Hoje, Ontem, 7 dias, 30 dias, Este mês, Mês passado) e \"Datas\" para escolher qualquer intervalo. Todos os números da tela seguem este período.",
+        body: 'Seis atalhos (Hoje, Ontem, 7 dias, 30 dias, Este mês, Mês passado) e "Datas" para escolher qualquer intervalo. Todos os números da tela seguem este período.',
         articleSection: "periodo",
       },
       {
@@ -201,7 +204,7 @@ const screen: HelpScreen = {
       {
         anchor: "inicio.recuperado.em-jornada",
         title: "Recuperado pelo CRM",
-        body: "O valor que o CRM recuperou: depósitos feitos em até 7 dias depois de um clique humano em link de campanha ou jornada. \"Em jornada agora\" mostra quantos jogadores estão em jornada neste momento — clique para ver em /jornadas.",
+        body: 'O valor que o CRM recuperou: depósitos feitos em até 7 dias depois de um clique humano em link de campanha ou jornada. "Em jornada agora" mostra quantos jogadores estão em jornada neste momento — clique para ver em /jornadas.',
         articleSection: "recuperado",
       },
       {

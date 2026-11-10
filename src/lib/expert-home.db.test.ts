@@ -1,5 +1,6 @@
 // Início do expert — SQL tests for
-// supabase/migrations/20261216100000_expert_home_summary.sql
+// supabase/migrations/20261216100000_expert_home_summary.sql (with the
+// "Ao vivo" playerId from 20261221100100_expert_home_live_player_id.sql)
 //
 // Runs the migration inside an in-memory Postgres (PGlite) over a minimal
 // schema with only the columns expert_home_summary reads (players,
@@ -19,6 +20,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const root = resolve(__dirname, "../..");
 const MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261216100000_expert_home_summary.sql"),
+  "utf8",
+);
+const LIVE_PLAYER_ID_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261221100100_expert_home_live_player_id.sql"),
   "utf8",
 );
 
@@ -161,7 +166,7 @@ async function activity(tenant: string, playerId: string, base: number) {
 
 type Summary = Record<string, unknown> & {
   cashflowChart: Array<{ key: string; deposits: number; withdrawals: number }>;
-  liveEvents: Array<{ player: string; tone: string }>;
+  liveEvents: Array<{ player: string; tone: string; playerId: string | null }>;
 };
 
 async function summary(affiliates: string[] | null, tenant = T, resetAt?: string) {
@@ -176,6 +181,7 @@ beforeAll(async () => {
   db = new PGlite();
   await db.exec(SCHEMA);
   await db.exec(MIGRATION);
+  await db.exec(LIVE_PLAYER_ID_MIGRATION);
 
   // Mine (affiliate A): 2 players, one registered + FTD in the period.
   const ana = await player(T, "Ana", "A", "2026-11-02T10:00:00Z", "2026-11-02T12:00:00Z");
@@ -230,6 +236,12 @@ describe("expert_home_summary — restrito", () => {
     expect(s.liveEvents.length).toBeGreaterThan(0);
     expect(s.liveEvents.length).toBeLessThanOrEqual(8);
     for (const e of s.liveEvents) expect(["Ana", "Bia"]).toContain(e.player);
+    // Cada evento aponta para a ficha do lead (o nome vira link no "Ao vivo").
+    const ids = await db.query<{ id: string; nome: string }>(
+      `select id, nome from public.players where nome in ('Ana', 'Bia')`,
+    );
+    const idByName = new Map(ids.rows.map((r) => [r.nome, r.id]));
+    for (const e of s.liveEvents) expect(e.playerId).toBe(idByName.get(e.player));
     expect(new Set(s.liveEvents.map((e) => e.tone))).toEqual(
       new Set(["blue", "green", "purple", "orange"]),
     );

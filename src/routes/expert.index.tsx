@@ -350,7 +350,7 @@ function ExpertHomePage() {
 
           <SecondaryMetrics data={data} />
 
-          <LiveFeed events={data.liveEvents} />
+          <LiveFeed events={data.liveEvents} playerLink="expert" />
 
           <p className="text-xs leading-relaxed text-muted-foreground">
             Só entram os seus leads

@@ -6,7 +6,14 @@
 // LiveFeed).
 import { Link } from "@tanstack/react-router";
 import { type ReactNode } from "react";
-import { ChevronRight, RefreshCw } from "lucide-react";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  ChevronRight,
+  QrCode,
+  RefreshCw,
+  UserPlus,
+} from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -341,22 +348,35 @@ export function SecondaryMetrics({ data }: { data: HomeDashboardData }) {
   );
 }
 
-const eventDot = {
-  blue: "bg-sky-400",
-  green: "bg-emerald-400",
-  orange: "bg-amber-400",
-  purple: "bg-violet-400",
+// Um ícone por tipo de evento (o tom vem do SQL), para não depender de
+// legenda de cor: criou conta, gerou PIX, depositou, sacou.
+const eventKind = {
+  blue: { icon: UserPlus, className: "bg-sky-400/12 text-sky-400" },
+  orange: { icon: QrCode, className: "bg-amber-400/12 text-amber-400" },
+  green: { icon: ArrowDownLeft, className: "bg-emerald-400/12 text-emerald-400" },
+  purple: { icon: ArrowUpRight, className: "bg-violet-400/12 text-violet-400" },
 } as const;
+
+// Linhas por coluna no desktop (até 6 eventos em 2 colunas).
+const feedRows = { 1: "md:grid-rows-1", 2: "md:grid-rows-2", 3: "md:grid-rows-3" } as const;
+
+function capitalize(text: string) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 export function LiveFeed({
   events,
   showAllEventsLink = false,
+  playerLink = "house",
 }: {
   events: HomeDashboardData["liveEvents"];
   /** Link "Ver todos os eventos" (/eventos), uma tela só da casa. */
   showAllEventsLink?: boolean;
+  /** Para onde o nome do jogador leva: ficha da casa ou ficha do lead do expert. */
+  playerLink?: "house" | "expert";
 }) {
   const { money } = useMoney();
+  const shown = events.slice(0, 6);
   return (
     <HomeCard className="p-4 sm:px-5">
       <div className="flex items-center justify-between gap-3">
@@ -371,35 +391,80 @@ export function LiveFeed({
           </Link>
         )}
       </div>
-      {events.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="py-4 text-sm text-muted-foreground">
           Ainda sem eventos recentes para exibir.
         </p>
       ) : (
-        <ul className="mt-1 grid grid-cols-[minmax(0,1fr)] gap-x-8 md:grid-cols-2">
-          {events.slice(0, 6).map((event) => (
-            <li
-              key={event.id}
-              className="flex items-center gap-3 border-b border-border/70 py-2.5 text-[13.5px]"
-            >
-              <span
-                className={cn(
-                  "size-[7px] shrink-0 rounded-full",
-                  eventDot[event.tone] ?? "bg-sky-400",
+        // No desktop, duas colunas lidas de cima para baixo (a mais recente no
+        // topo da esquerda), em vez de zigue-zague entre as colunas.
+        <ul
+          className={cn(
+            "mt-1 grid grid-cols-[minmax(0,1fr)] gap-x-8",
+            "md:grid-flow-col md:grid-cols-2",
+            feedRows[Math.ceil(shown.length / 2) as 1 | 2 | 3],
+          )}
+        >
+          {shown.map((event) => {
+            const kind = eventKind[event.tone] ?? eventKind.blue;
+            const Icon = kind.icon;
+            const hasAmount = typeof event.amount === "number" && event.amount > 0;
+            return (
+              <li
+                key={event.id}
+                className="flex items-center gap-3 border-b border-border/70 py-2.5"
+              >
+                <span
+                  className={cn(
+                    "flex size-8 shrink-0 items-center justify-center rounded-lg",
+                    kind.className,
+                  )}
+                  aria-hidden="true"
+                >
+                  <Icon className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13.5px] font-semibold">
+                    {event.playerId ? (
+                      playerLink === "expert" ? (
+                        <Link
+                          to="/expert/leads/$playerId"
+                          params={{ playerId: event.playerId }}
+                          className="underline-offset-2 hover:underline focus-visible:underline"
+                        >
+                          {event.player}
+                        </Link>
+                      ) : (
+                        <Link
+                          to="/players/$playerId"
+                          params={{ playerId: event.playerId }}
+                          search={{ id: undefined, focus: undefined }}
+                          className="underline-offset-2 hover:underline focus-visible:underline"
+                        >
+                          {event.player}
+                        </Link>
+                      )
+                    ) : (
+                      event.player
+                    )}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {capitalize(event.action)} · {timeAgo(event.at)}
+                  </p>
+                </div>
+                {hasAmount && (
+                  <strong
+                    className={cn(
+                      "shrink-0 text-[13.5px] font-semibold tabular-nums",
+                      event.tone === "green" && "text-success",
+                    )}
+                  >
+                    {money(event.amount as number)}
+                  </strong>
                 )}
-                aria-hidden="true"
-              />
-              <p className="min-w-0 flex-1 truncate">
-                <strong className="font-semibold">{event.player}</strong> {event.action}
-              </p>
-              {typeof event.amount === "number" && event.amount > 0 && (
-                <strong className="shrink-0 font-semibold tabular-nums">
-                  {money(event.amount)}
-                </strong>
-              )}
-              <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(event.at)}</span>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </HomeCard>

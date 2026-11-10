@@ -54,6 +54,8 @@ export type DashboardRpc = {
     action: string;
     amount?: number | string | null;
     at: string;
+    /** Id do jogador, para o nome virar link no "Ao vivo" (null sem jogador). */
+    playerId?: string | null;
   }>;
 };
 
