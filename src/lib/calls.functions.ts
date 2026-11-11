@@ -896,8 +896,7 @@ const bulkDispatchCallsInput = z
           phone_number: z.string().max(40).nullable().optional(),
         }),
       )
-      .min(1)
-      .max(200),
+      .min(1),
   })
   .refine((value) => Boolean(value.script_id) !== Boolean(value.asset_id), {
     message: "Selecione um script TTS ou um áudio fixo da biblioteca.",

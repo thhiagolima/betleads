@@ -5,9 +5,6 @@
 // functions and the campaign worker.
 import { normalizeBrazilianPhone } from "./phone-normalization";
 
-/** Same cap as the other SMS campaign inputs. */
-export const EXTERNAL_LIST_MAX_PHONES = 20_000;
-
 export type ParsedPhoneList = {
   /** Valid numbers, canonical `+55…`, first occurrence order, no duplicates. */
   phones: string[];

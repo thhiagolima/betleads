@@ -5,6 +5,10 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { applyActiveWithin, applyInactiveAtLeast, applyInactivityWindow } from "./player-activity";
 
 const DAY = 86400000;
+/** PostgREST `max_rows` (1000 on Supabase): every response is cut there without an error. */
+const PAGE_SIZE = 1000;
+/** Ids per `in(...)` filter: keeps the request URL short. */
+const ID_CHUNK = 300;
 const ago = (n: number) => new Date(Date.now() - n * DAY).toISOString();
 
 function requireTenant(tenantId: string) {
@@ -13,15 +17,35 @@ function requireTenant(tenantId: string) {
 
 // Roda com service role, então o filtro por tenant é a única barreira entre
 // casas: nunca remover o `.eq("tenant_id", ...)` destas consultas.
-export async function loadPlayersForSegment(
+// Sem teto: pagina por id (keyset) até o fim do segmento.
+export async function loadPlayersForSegment(tenantId: string, segmento: string): Promise<any[]> {
+  requireTenant(tenantId);
+  const rows: any[] = [];
+  let lastId: string | null = null;
+  for (;;) {
+    let q = segmentQuery(tenantId, segmento);
+    if (lastId !== null) q = q.gt("id", lastId);
+    const { data, error } = await q.order("id", { ascending: true }).limit(PAGE_SIZE);
+    if (error) {
+      console.error("loadPlayersForSegment", segmento, error.message);
+      return [];
+    }
+    const page = (data ?? []) as any[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return rows;
+    lastId = String(page[page.length - 1].id);
+  }
+}
+
+function segmentQuery(
   tenantId: string,
   segmento: string,
-  limit = 5000,
-): Promise<any[]> {
-  requireTenant(tenantId);
+  columns = "*",
+  options?: { count: "exact"; head: true },
+) {
   let q = supabaseAdmin
     .from("players")
-    .select("*")
+    .select(columns, options)
     .eq("tenant_id", tenantId)
     .not("email", "is", null)
     .neq("email", "");
@@ -78,27 +102,35 @@ export async function loadPlayersForSegment(
       break;
   }
 
-  const { data, error } = await q.limit(limit);
-  if (error) {
-    console.error("loadPlayersForSegment", segmento, error.message);
-    return [];
-  }
-  return data ?? [];
+  return q;
 }
 
 export async function countPlayersForSegment(tenantId: string, segmento: string): Promise<number> {
-  const list = await loadPlayersForSegment(tenantId, segmento, 5000);
-  return list.length;
+  requireTenant(tenantId);
+  const { count, error } = await segmentQuery(tenantId, segmento, "id", {
+    count: "exact",
+    head: true,
+  });
+  if (error) {
+    console.error("countPlayersForSegment", segmento, error.message);
+    return 0;
+  }
+  return count ?? 0;
 }
 
 /** Leads escolhidos à mão: ids de outra casa são descartados silenciosamente. */
 export async function loadPlayersByIds(tenantId: string, ids: string[]): Promise<any[]> {
   requireTenant(tenantId);
-  const { data, error } = await supabaseAdmin
-    .from("players")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .in("id", ids);
-  if (error) throw new Error(error.message);
-  return data ?? [];
+  const rows: any[] = [];
+  const unique = Array.from(new Set(ids));
+  for (let i = 0; i < unique.length; i += ID_CHUNK) {
+    const { data, error } = await supabaseAdmin
+      .from("players")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .in("id", unique.slice(i, i + ID_CHUNK));
+    if (error) throw new Error(error.message);
+    rows.push(...(data ?? []));
+  }
+  return rows;
 }

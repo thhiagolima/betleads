@@ -12,6 +12,10 @@ import type { BulkDispatchCallsInput } from "./calls.functions";
 
 /** Targets left out after the house ran out of balance in "Disparar agora". */
 const VOICE_NOT_ATTEMPTED_MESSAGE = "Não tentado: saldo insuficiente";
+/** "Disparar agora" dials up to this many targets inside the request; more are queued. */
+export const VOICE_DISPATCH_NOW_INLINE = 200;
+/** Rows per call_queue insert of a queued bulk send. */
+export const CALL_QUEUE_INSERT_CHUNK = 500;
 
 /** Body of `bulkDispatchCalls` (the `*For` convention keeps it unit testable). */
 export async function bulkDispatchCallsFor(
@@ -42,6 +46,44 @@ export async function bulkDispatchCallsFor(
       throw new Error(signedError?.message ?? "Não foi possível preparar o áudio fixo.");
     fixedAudioUrl = signed.signedUrl;
   }
+
+  // Scheduled, or too many to dial inside this request: every target goes to
+  // the queue in chunked inserts and the per-minute voice dispatcher dials
+  // them (it re-signs a library audio per call, so a long queue never plays an
+  // expired URL). No cap on the list size.
+  if (isScheduled || data.targets.length > VOICE_DISPATCH_NOW_INLINE) {
+    const scheduledFor = scheduledAt?.toISOString() ?? new Date().toISOString();
+    const items = data.targets.map((target) => ({
+      lead_id: target.lead_id ?? null,
+      script_id: data.script_id ?? null,
+      voice_asset_id: data.asset_id ?? null,
+      trigger_name: data.campaign_name ?? null,
+      phone_number: target.phone_number ?? null,
+      scheduled_at: scheduledFor,
+      status: "audio_ready",
+      audio_generation_id: null,
+      audio_url: fixedAudioUrl,
+    }));
+    for (let i = 0; i < items.length; i += CALL_QUEUE_INSERT_CHUNK) {
+      const { error } = await supabase
+        .from("call_queue")
+        .insert(items.slice(i, i + CALL_QUEUE_INSERT_CHUNK));
+      if (error) throw new Error(error.message);
+    }
+    console.log(`[calls] bulk dispatch queued: total=${items.length} scheduled=${isScheduled}`);
+    return {
+      total: items.length,
+      queued: 0,
+      pending: items.length,
+      failed: 0,
+      notAttempted: 0,
+      scheduled: isScheduled,
+      /** Everything went to the queue; the dispatcher dials it (nothing failed or retried). */
+      enfileirado: true as const,
+      results: [],
+    };
+  }
+
   const results: Array<{
     ok: boolean;
     lead_id: string | null;
@@ -85,16 +127,6 @@ export async function bulkDispatchCallsFor(
           audio_url: fixedAudioUrl,
         })
         .eq("id", q.id);
-
-      if (isScheduled) {
-        pending += 1;
-        results.push({
-          ok: true,
-          lead_id: target.lead_id ?? null,
-          phone: target.phone_number ?? null,
-        });
-        continue;
-      }
 
       // 4. dispara
       const dispatchResult = await runVoiceQueueDispatcher(1, q.id);

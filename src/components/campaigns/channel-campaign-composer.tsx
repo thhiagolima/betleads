@@ -111,7 +111,6 @@ import {
   type EmailCampaignRunResult,
 } from "@/lib/email-campaign-messages";
 import {
-  EXTERNAL_LIST_MAX_PHONES,
   externalListBlockedVariables,
   externalListVariablesError,
   parsePhoneList,
@@ -698,10 +697,6 @@ export function ChannelCampaignComposer({
     ? remainingAfterSend(expertUsageData, expertCost ?? 0)
     : null;
   const approvalMode = isExpert && expertOptions.data?.envioModo === "aprovacao";
-  const channelLimitError =
-    channel === "voice" && recipients > 200
-      ? "Voz aceita até 200 destinatários por campanha."
-      : null;
   // The input is read in Brasília time, whatever the browser's timezone.
   const scheduleIso = fromBrtInput(scheduledAt);
   const scheduleTooSoon = !scheduleIso || Date.parse(scheduleIso) < Date.now() + 60_000;
@@ -734,9 +729,6 @@ export function ChannelCampaignComposer({
         : !audience || recipients === 0
           ? "Escolha um público com destinatários elegíveis."
           : null,
-    isExternalList && recipients > EXTERNAL_LIST_MAX_PHONES
-      ? `A lista aceita até ${num(EXTERNAL_LIST_MAX_PHONES)} números por campanha.`
-      : null,
     externalBlockedVariables.length ? externalListVariablesError(externalBlockedVariables) : null,
     channel === "sms" && !smsContent.trim() ? "Escreva ou selecione a mensagem de SMS." : null,
     channel === "email" && !emailTemplateId ? "Selecione um template de e-mail." : null,
@@ -753,7 +745,6 @@ export function ChannelCampaignComposer({
     ...(invalidVariables.length
       ? [`Variáveis não reconhecidas: ${invalidVariables.join(", ")}`]
       : []),
-    channelLimitError,
     expertCapBlock,
     smsPreview && recipients > 0 && smsPreview.resolved === 0
       ? isExternalList
@@ -935,7 +926,6 @@ export function ChannelCampaignComposer({
         throw new Error("Escolha um público com destinatários elegíveis.");
       if (invalidVariables.length)
         throw new Error(`Variáveis inválidas: ${invalidVariables.join(", ")}`);
-      if (channelLimitError) throw new Error(channelLimitError);
       if (when === "schedule" && !scheduledAt)
         throw new Error("Escolha a data e hora do agendamento.");
       if (when === "schedule" && scheduleTooSoon)

@@ -173,7 +173,13 @@ export function BulkCallTab() {
       const notAttempted = Number(res.notAttempted ?? 0);
       const notAttemptedNote =
         notAttempted > 0 ? `, ${notAttempted} não tentadas por saldo insuficiente` : "";
-      if (res.failed === 0 && (res.pending ?? 0) === 0) {
+      if (res.enfileirado) {
+        toast.success(
+          res.scheduled
+            ? `${res.pending} ligações agendadas`
+            : `${res.pending} ligações na fila; o disparo começa em até 1 minuto`,
+        );
+      } else if (res.failed === 0 && (res.pending ?? 0) === 0) {
         toast.success(`${res.queued} ligações disparadas`);
       } else if (res.failed === 0) {
         toast.info(`${res.pending} ligação(ões) ficaram pendentes para retentativa`);

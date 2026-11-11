@@ -186,15 +186,11 @@ describe("critério de seleção", () => {
     ).toThrow();
   });
 
-  it("recusa id que não é uuid e lista acima de 50 mil", () => {
+  it("recusa id que não é uuid; aceita lista de qualquer tamanho", () => {
     expect(() => normalizeSmsAudienceCriteria(selection(["abc"]))).toThrow();
-    const tooMany = Array.from({ length: 50_001 }, (_, i) => pid(i + 1));
+    const large = Array.from({ length: 50_001 }, (_, i) => pid(i + 1));
     expect(
-      smsAudienceCriteriaSchema.safeParse({ timing: "selection", playerIds: tooMany }).success,
-    ).toBe(false);
-    const max = Array.from({ length: 50_000 }, (_, i) => pid(i + 1));
-    expect(
-      smsAudienceCriteriaSchema.safeParse({ timing: "selection", playerIds: max }).success,
+      smsAudienceCriteriaSchema.safeParse({ timing: "selection", playerIds: large }).success,
     ).toBe(true);
   });
 

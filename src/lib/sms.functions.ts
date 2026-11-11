@@ -1273,7 +1273,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
-        phones: z.array(z.string().min(8).max(20)).min(0).max(20000).optional().default([]),
+        phones: z.array(z.string().min(8).max(20)).min(0).optional().default([]),
         recipients: z
           .array(
             z.object({
@@ -1281,7 +1281,6 @@ export const sendBulkSms = createServerFn({ method: "POST" })
               playerId: dbUuid().optional(),
             }),
           )
-          .max(20000)
           .optional()
           .default([]),
         content: z.string().min(1).max(480),
@@ -2257,7 +2256,7 @@ export const resendFailedSms = createServerFn({ method: "POST" })
 
 /** Exportado para testes. */
 export const ScheduleBulkSchema = z.object({
-  phones: z.array(z.string().min(8).max(20)).min(0).max(20000).optional().default([]),
+  phones: z.array(z.string().min(8).max(20)).min(0).optional().default([]),
   recipients: z
     .array(
       z.object({
@@ -2265,7 +2264,6 @@ export const ScheduleBulkSchema = z.object({
         playerId: dbUuid().optional(),
       }),
     )
-    .max(20000)
     .optional()
     .default([]),
   content: z.string().min(1).max(480),
@@ -2295,10 +2293,9 @@ export const previewSmsCampaignRecipients = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
-        phones: z.array(z.string().min(1).max(40)).max(20000).optional().default([]),
+        phones: z.array(z.string().min(1).max(40)).optional().default([]),
         recipients: z
           .array(z.object({ phone: z.string().min(1).max(40), playerId: dbUuid().optional() }))
-          .max(20000)
           .optional()
           .default([]),
         recipientSource: recipientSourceSchema,

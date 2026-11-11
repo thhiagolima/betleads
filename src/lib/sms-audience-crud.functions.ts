@@ -3,7 +3,6 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   isSelectionAudience,
-  MAX_SELECTION_PLAYER_IDS,
   normalizeSmsAudienceCriteria,
   toSelectionReference,
 } from "@/lib/sms-audience-criteria";
@@ -200,11 +199,7 @@ export const deleteSmsAudience = createServerFn({ method: "POST" })
 const selectionInput = z.object({
   playerIds: z
     .array(z.string().uuid())
-    .min(1, "Nenhum jogador selecionado.")
-    .max(
-      MAX_SELECTION_PLAYER_IDS,
-      `A seleção passa de ${MAX_SELECTION_PLAYER_IDS.toLocaleString("pt-BR")} jogadores.`,
-    ),
+    .min(1, "Nenhum jogador selecionado."),
   label: z.string().max(120).optional(),
 });
 /**

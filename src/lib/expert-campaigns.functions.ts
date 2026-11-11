@@ -46,14 +46,14 @@ import {
   sendExpertEmailCampaignNowFor,
   type ExpertServerContext,
 } from "@/lib/expert-campaigns.server";
-import { MAX_SELECTION_PLAYER_IDS, campaignAudienceCriteriaInput } from "@/lib/sms-audience-criteria";
+import { campaignAudienceCriteriaInput } from "@/lib/sms-audience-criteria";
 import { campaignDraftSaveSchema } from "@/lib/campaign-drafts.functions";
 import { dbUuid } from "@/lib/zod-helpers";
 
 type AdminContext = Parameters<typeof requireExpertAdminTenant>[0];
 
 const channel = z.enum(["sms", "email", "voice"]);
-const playerIds = z.array(dbUuid()).max(MAX_SELECTION_PLAYER_IDS).optional();
+const playerIds = z.array(dbUuid()).optional();
 /** Saved audience id, house audience (total experts) or rules. Never a phone/e-mail list. */
 const audienceCriteria = campaignAudienceCriteriaInput;
 
@@ -85,11 +85,7 @@ export const deleteExpertAudience = createServerFn({ method: "POST" })
 const selectionInput = z.object({
   playerIds: z
     .array(dbUuid())
-    .min(1, "Nenhum jogador selecionado.")
-    .max(
-      MAX_SELECTION_PLAYER_IDS,
-      `A seleção passa de ${MAX_SELECTION_PLAYER_IDS.toLocaleString("pt-BR")} jogadores.`,
-    ),
+    .min(1, "Nenhum jogador selecionado."),
   label: z.string().max(120).optional(),
 });
 
