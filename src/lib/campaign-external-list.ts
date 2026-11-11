@@ -1,8 +1,9 @@
-// SMS campaign to an external phone list (e.g. leads of another house).
-// The numbers are NOT saved as players: they live only in the campaign row
-// (`sms_campaigns.recipients`), in the send logs and, hashed, in the tracked
-// link dispatches. Pure and client-safe: used by the composer, the server
-// functions and the campaign worker.
+// Campaigns to an external list (e.g. leads of another house): phone numbers
+// for SMS and voice, e-mail addresses for e-mail. The contacts are NOT saved
+// as players: they live only in the campaign row (`sms_campaigns.recipients`,
+// `email_campaigns.audience_filter.extra_emails`, the voice call rows), in the
+// send logs and, for SMS, hashed in the tracked link dispatches. Pure and
+// client-safe: used by the composer, the server functions and the campaign worker.
 import { normalizeBrazilianPhone } from "./phone-normalization";
 
 export type ParsedPhoneList = {
@@ -48,6 +49,55 @@ export function parsePhoneList(text: string): ParsedPhoneList {
     phones.push(phone);
   }
   return { phones, invalid, invalidCount, duplicates };
+}
+
+export type ParsedEmailList = {
+  /** Valid addresses, lowercased, first occurrence order, no duplicates. */
+  emails: string[];
+  /** Cells with an "@" that are not a valid address (sample kept short). */
+  invalid: string[];
+  invalidCount: number;
+  duplicates: number;
+};
+
+// Same shape zod's `.email()` accepts (server schema of `extraEmails`), so
+// every address kept here passes the save validation.
+const EMAIL_PATTERN =
+  /^(?!\.)(?!.*\.\.)([a-z0-9_'+\-.]*)[a-z0-9_+-]@([a-z0-9][a-z0-9-]*\.)+[a-z]{2,}$/;
+const MAX_EMAIL_LENGTH = 255;
+
+/**
+ * Extracts e-mail addresses from pasted text or a CSV/TXT/spreadsheet export.
+ * Cells are split on line breaks, column separators and spaces; quotes,
+ * `<…>` and `mailto:` are stripped. Cells without "@" (headers, names) are
+ * ignored; cells with "@" that are not a valid address are counted invalid.
+ */
+export function parseEmailList(text: string): ParsedEmailList {
+  const seen = new Set<string>();
+  const emails: string[] = [];
+  const invalid: string[] = [];
+  let invalidCount = 0;
+  let duplicates = 0;
+  for (const rawCell of text.split(/[\s,;|]+/)) {
+    const cell = rawCell
+      .replace(/^["'<]+|["'>]+$/g, "")
+      .replace(/^mailto:/i, "")
+      .trim()
+      .toLowerCase();
+    if (!cell.includes("@")) continue;
+    if (cell.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(cell)) {
+      invalidCount++;
+      if (invalid.length < INVALID_SAMPLE) invalid.push(cell.slice(0, 40));
+      continue;
+    }
+    if (seen.has(cell)) {
+      duplicates++;
+      continue;
+    }
+    seen.add(cell);
+    emails.push(cell);
+  }
+  return { emails, invalid, invalidCount, duplicates };
 }
 
 /** `{link}` and every `{link_*}` come from the house config, not from a player. */

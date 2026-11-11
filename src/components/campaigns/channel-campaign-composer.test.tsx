@@ -132,13 +132,14 @@ vi.mock("@/hooks/use-enabled-channels", () => ({
 
 import { ChannelCampaignComposer, EXPERT_APPROVAL_NOTICE } from "./channel-campaign-composer";
 
-const render = (channel: "sms" | "email" | "voice" | "webpush" = "sms") =>
+const render = (channel: "sms" | "email" | "voice" | "webpush" = "sms", initialAudienceId = "") =>
   renderToStaticMarkup(
     <ChannelCampaignComposer
       open
       onOpenChange={() => undefined}
       onCreated={() => undefined}
       initialChannel={channel}
+      initialAudienceId={initialAudienceId}
     />,
   ).replace(/\u00a0/g, " ");
 
@@ -232,6 +233,26 @@ describe("ChannelCampaignComposer — house", () => {
     expect(render("email")).not.toContain("Enviar por");
   });
 
+  it("offers the number list in voice, without the SMS-only player exclusion copy", () => {
+    expect(render("voice")).toContain(">Lista de números<");
+    const html = render("voice", "external:list");
+    expect(html).toContain('aria-label="Números da lista"');
+    expect(html).toContain("quem revogou o consentimento para ligações não recebe");
+    expect(html).not.toContain("quem já é jogador da casa fica de fora");
+    expect(html).toContain("Cole ou envie uma lista com números de celular válidos.");
+  });
+
+  it("offers the e-mail list in e-mail only", () => {
+    expect(render("email")).toContain(">Lista de e-mails<");
+    expect(render("sms")).not.toContain("Lista de e-mails");
+    expect(render("voice")).not.toContain("Lista de e-mails");
+    const html = render("email", "external:emails");
+    expect(html).toContain('aria-label="E-mails da lista"');
+    expect(html).toContain("Enviar arquivo (CSV, TXT, XLS)");
+    expect(html).toContain("Lista de e-mails · 0 válido(s)");
+    expect(html).toContain("Cole ou envie uma lista com e-mails válidos.");
+  });
+
   it("não lista Voz no seletor de canal quando voz está desligada", () => {
     enabledChannels.isEnabled = (channel) => channel !== "voice";
     const html = render("sms");
@@ -268,6 +289,8 @@ describe("ChannelCampaignComposer — expert", () => {
 
     const email = render("email");
     expect(email).not.toContain("Remetente");
+    expect(email).not.toContain("Lista de e-mails");
+    expect(render("voice")).not.toContain("Lista de números");
     expect(email).not.toContain("Domínio do encurtador");
     expect(email).not.toContain("Novo template");
     expect(email).toContain("Boas-vindas");

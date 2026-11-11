@@ -114,6 +114,7 @@ import {
 import {
   externalListBlockedVariables,
   externalListVariablesError,
+  parseEmailList,
   parsePhoneList,
 } from "@/lib/campaign-external-list";
 import { PHONE_LIST_FILE_ACCEPT, readPhoneListFile } from "@/lib/phone-list-file";
@@ -151,8 +152,10 @@ type AudienceOption = {
 };
 type ResolvedAudience = ResolvedCampaignAudience;
 
-/** Audience option of SMS campaigns to numbers that are not players. */
+/** Audience option of SMS/voice campaigns to numbers that are not players. */
 const EXTERNAL_LIST_ID = "external:list";
+/** Audience option of e-mail campaigns to addresses that are not players. */
+const EXTERNAL_EMAIL_LIST_ID = "external:emails";
 
 const channelMeta: Record<Channel, { label: string; icon: typeof MessageSquare }> = {
   sms: { label: "SMS", icon: MessageSquare },
@@ -306,6 +309,11 @@ export function ChannelCampaignComposer({
   const [externalFile, setExternalFile] = useState<{ name: string; text: string } | null>(null);
   const [externalFileLoading, setExternalFileLoading] = useState(false);
   const externalFileRef = useRef<HTMLInputElement>(null);
+  // Same for the e-mail list (e-mail channel only).
+  const [emailListText, setEmailListText] = useState("");
+  const [emailListFile, setEmailListFile] = useState<{ name: string; text: string } | null>(null);
+  const [emailListFileLoading, setEmailListFileLoading] = useState(false);
+  const emailListFileRef = useRef<HTMLInputElement>(null);
   const [smsTemplateId, setSmsTemplateId] = useState("");
   const [smsContent, setSmsContent] = useState("");
   const smsContentRef = useRef<HTMLTextAreaElement>(null);
@@ -498,6 +506,8 @@ export function ChannelCampaignComposer({
     setAudience(null);
     setExternalText("");
     setExternalFile(null);
+    setEmailListText("");
+    setEmailListFile(null);
     setSmsTemplateId("");
     setSmsContent("");
     setEmailTemplateId("");
@@ -644,22 +654,51 @@ export function ChannelCampaignComposer({
           : (activeScript?.content ?? "");
   const invalidVariables =
     channel === "webpush" ? [] : unknownMessageVariables(previewContent, channel);
-  const isExternalList = !isExpert && channel === "sms" && audienceId === EXTERNAL_LIST_ID;
+  // External lists (house only): phone numbers for SMS and voice, addresses for e-mail.
+  const isPhoneList =
+    !isExpert && (channel === "sms" || channel === "voice") && audienceId === EXTERNAL_LIST_ID;
+  const isEmailList = !isExpert && channel === "email" && audienceId === EXTERNAL_EMAIL_LIST_ID;
+  const isListAudience = isPhoneList || isEmailList;
   const externalList = useMemo(
     () => parsePhoneList(`${externalText}\n${externalFile?.text ?? ""}`),
     [externalText, externalFile],
   );
-  const externalBlockedVariables = isExternalList ? externalListBlockedVariables(smsContent) : [];
+  const emailList = useMemo(
+    () => parseEmailList(`${emailListText}\n${emailListFile?.text ?? ""}`),
+    [emailListText, emailListFile],
+  );
+  // No player behind a listed number: the SMS text and the TTS script (which
+  // the dispatcher would fill with a sample player) may only use house links.
+  const externalBlockedVariables = isPhoneList
+    ? externalListBlockedVariables(
+        channel === "sms"
+          ? smsContent
+          : voiceMode === "script"
+            ? (activeScript?.content ?? "")
+            : "",
+      )
+    : [];
+  // E-mail list: player variables just go out empty, so it warns instead of blocking.
+  const emailListPlayerVariables = isEmailList
+    ? externalListBlockedVariables(
+        `${activeEmailTemplate?.subject ?? activeEmailTemplate?.assunto ?? ""}\n${
+          activeEmailTemplate?.body_html ?? activeEmailTemplate?.corpo ?? ""
+        }`,
+      )
+    : [];
   const recipients =
     channel === "webpush"
       ? (webpushCounts?.subscriptions ?? 0)
-      : isExternalList
+      : isPhoneList
         ? externalList.phones.length
-        : (audience?.eligibleTotal ?? 0);
+        : isEmailList
+          ? emailList.emails.length
+          : (audience?.eligibleTotal ?? 0);
   // ENV-06: a campanha de SMS só envia a quem corresponde a um jogador
   // cadastrado; os demais são reportados. A prévia usa o mesmo resolvedor do envio.
   // Lista externa: o inverso — só vai para quem ainda NÃO é jogador.
-  const smsPhones = isExternalList ? externalList.phones : (audience?.eligibleIdentifiers ?? []);
+  const smsPhones =
+    channel === "sms" && isPhoneList ? externalList.phones : (audience?.eligibleIdentifiers ?? []);
   const smsRecipientPreview = useQuery({
     queryKey: [
       "sms-campaign-recipient-preview",
@@ -672,7 +711,7 @@ export function ChannelCampaignComposer({
       previewSmsRecipients({
         data: {
           phones: smsPhones,
-          recipientSource: isExternalList ? "external_list" : "players",
+          recipientSource: isPhoneList ? "external_list" : "players",
         },
       }),
     enabled: open && !isExpert && channel === "sms" && smsPhones.length > 0,
@@ -732,13 +771,17 @@ export function ChannelCampaignComposer({
       ? (webpushAudienceKind === "filtro" && !audienceCriteria) || recipients === 0
         ? "Escolha um público com destinatários elegíveis."
         : null
-      : isExternalList
+      : isPhoneList
         ? recipients === 0
           ? "Cole ou envie uma lista com números de celular válidos."
           : null
-        : !audience || recipients === 0
-          ? "Escolha um público com destinatários elegíveis."
-          : null,
+        : isEmailList
+          ? recipients === 0
+            ? "Cole ou envie uma lista com e-mails válidos."
+            : null
+          : !audience || recipients === 0
+            ? "Escolha um público com destinatários elegíveis."
+            : null,
     externalBlockedVariables.length ? externalListVariablesError(externalBlockedVariables) : null,
     channel === "sms" && !smsContent.trim() ? "Escreva ou selecione a mensagem de SMS." : null,
     smsAccountError,
@@ -758,7 +801,7 @@ export function ChannelCampaignComposer({
       : []),
     expertCapBlock,
     smsPreview && recipients > 0 && smsPreview.resolved === 0
-      ? isExternalList
+      ? isPhoneList
         ? "Nenhum número da lista pode receber: todos já são jogadores ou foram bloqueados."
         : "Nenhum destinatário deste público corresponde a um jogador cadastrado."
       : null,
@@ -928,11 +971,13 @@ export function ChannelCampaignComposer({
       if (channel === "webpush") {
         if ((webpushAudienceKind === "filtro" && !audienceCriteria) || recipients === 0)
           throw new Error("Escolha um público com destinatários elegíveis.");
-      } else if (isExternalList) {
+      } else if (isPhoneList) {
         if (recipients === 0)
           throw new Error("Cole ou envie uma lista com números de celular válidos.");
         if (externalBlockedVariables.length)
           throw new Error(externalListVariablesError(externalBlockedVariables));
+      } else if (isEmailList) {
+        if (recipients === 0) throw new Error("Cole ou envie uma lista com e-mails válidos.");
       } else if (!audience || recipients === 0)
         throw new Error("Escolha um público com destinatários elegíveis.");
       if (invalidVariables.length)
@@ -1006,8 +1051,8 @@ export function ChannelCampaignComposer({
         if (!smsContent.trim()) throw new Error("Escreva ou selecione a mensagem de SMS.");
         if (smsAccountError) throw new Error(smsAccountError);
         const payload = {
-          phones: isExternalList ? externalList.phones : audience!.eligibleIdentifiers,
-          recipientSource: isExternalList ? ("external_list" as const) : ("players" as const),
+          phones: isPhoneList ? externalList.phones : audience!.eligibleIdentifiers,
+          recipientSource: isPhoneList ? ("external_list" as const) : ("players" as const),
           content: smsContent,
           campaignName: name,
           route: "iGaming" as const,
@@ -1026,7 +1071,7 @@ export function ChannelCampaignComposer({
                   ...payload,
                   scheduledAt: scheduleAt!,
                   // Público dinâmico: o worker recalcula quem se enquadra no horário do envio.
-                  audienceCriteria: isExternalList ? undefined : (audienceCriteria ?? undefined),
+                  audienceCriteria: isPhoneList ? undefined : (audienceCriteria ?? undefined),
                 },
               })
             : sendSms({ data: payload });
@@ -1040,8 +1085,8 @@ export function ChannelCampaignComposer({
         const created = await saveEmail({
           data: {
             nome: name,
-            audienceMode: "leads",
-            segmento: "Público salvo",
+            audienceMode: isEmailList ? "emails" : "leads",
+            segmento: isEmailList ? "Lista de e-mails" : "Público salvo",
             template:
               activeEmailTemplate?.nome ?? activeEmailTemplate?.name ?? "Template selecionado",
             smtp: "Remetente padrão",
@@ -1052,8 +1097,8 @@ export function ChannelCampaignComposer({
             agendadoPara: scheduleAt ?? null,
             // "Enviar agora" claims it from rascunho (claimEmailCampaignForSendNow).
             status: when === "schedule" ? "agendada" : "rascunho",
-            targetPlayerIds: audience!.eligiblePlayerIds,
-            extraEmails: [],
+            targetPlayerIds: isEmailList ? [] : audience!.eligiblePlayerIds,
+            extraEmails: isEmailList ? emailList.emails : [],
             trackLinks,
             conversionObjective: "conversion",
           },
@@ -1074,7 +1119,9 @@ export function ChannelCampaignComposer({
           scheduled_at: scheduleAt,
           script_id: voiceMode === "script" ? voiceSourceId : undefined,
           asset_id: voiceMode === "asset" ? voiceSourceId : undefined,
-          targets: audience!.eligibleIdentifiers.map((phone) => ({ phone_number: phone })),
+          targets: (isPhoneList ? externalList.phones : audience!.eligibleIdentifiers).map(
+            (phone) => ({ phone_number: phone }),
+          ),
         },
       });
       if (draftId) await submitDraft({ data: { id: draftId } });
@@ -1208,17 +1255,30 @@ export function ChannelCampaignComposer({
   // D-36: one block for everything the operator should know before sending —
   // what is still missing (blocks the send) and who will be left out (does not).
   const audienceWarnings = [
-    isExternalList && externalList.invalidCount > 0
+    isPhoneList && externalList.invalidCount > 0
       ? `${num(externalList.invalidCount)} número(s) inválido(s) ignorado(s)${
           externalList.invalid.length
             ? ` (ex.: ${externalList.invalid.slice(0, 3).join(", ")})`
             : ""
         }.`
       : null,
-    isExternalList && externalList.duplicates > 0
+    isPhoneList && externalList.duplicates > 0
       ? `${num(externalList.duplicates)} número(s) repetido(s) na lista recebem uma única vez.`
       : null,
-    !isExternalList && audience && audience.excludedTotal > 0
+    isEmailList && emailList.invalidCount > 0
+      ? `${num(emailList.invalidCount)} e-mail(s) inválido(s) ignorado(s)${
+          emailList.invalid.length ? ` (ex.: ${emailList.invalid.slice(0, 3).join(", ")})` : ""
+        }.`
+      : null,
+    isEmailList && emailList.duplicates > 0
+      ? `${num(emailList.duplicates)} e-mail(s) repetido(s) na lista recebem uma única vez.`
+      : null,
+    emailListPlayerVariables.length
+      ? `Variáveis de jogador (${emailListPlayerVariables
+          .map((key) => `{${key}}`)
+          .join(", ")}) saem vazias para e-mails da lista.`
+      : null,
+    !isListAudience && audience && audience.excludedTotal > 0
       ? isExpert
         ? `${num(audience.excludedTotal)} ${audience.excludedTotal === 1 ? "lead fica" : "leads ficam"} de fora por cadastro inválido, sem contato ou sem consentimento.`
         : `${num(audience.excludedTotal)} ${audience.excludedTotal === 1 ? "jogador fica" : "jogadores ficam"} de fora por cadastro inválido, sem contato ou sem consentimento.`
@@ -1290,8 +1350,12 @@ export function ChannelCampaignComposer({
                     value={channel}
                     onValueChange={(item) => {
                       setChannel(item);
-                      // The external phone list is an SMS-only audience.
-                      if (audienceId === EXTERNAL_LIST_ID && item !== "sms") setAudienceId("");
+                      // The phone list serves SMS and voice; the e-mail list only e-mail.
+                      if (
+                        (audienceId === EXTERNAL_LIST_ID && item !== "sms" && item !== "voice") ||
+                        (audienceId === EXTERNAL_EMAIL_LIST_ID && item !== "email")
+                      )
+                        setAudienceId("");
                       // Web push counts subscriptions (countWebpushAudienceFn), it never
                       // goes through resolveCampaignAudience like the other channels.
                       if (item === "webpush") return;
@@ -1334,7 +1398,8 @@ export function ChannelCampaignComposer({
                   onValueChange={(value) => {
                     setAudienceId(value);
                     setAudience(null);
-                    if (value === EXTERNAL_LIST_ID) setAudienceCriteria(null);
+                    if (value === EXTERNAL_LIST_ID || value === EXTERNAL_EMAIL_LIST_ID)
+                      setAudienceCriteria(null);
                     const selected = audienceOptions.find((item) => item.id === value);
                     if (selected) {
                       setAudienceCriteria(selected.criteria);
@@ -1347,7 +1412,10 @@ export function ChannelCampaignComposer({
                     aria-labelledby={fieldIds.audienceLabel}
                     aria-describedby={fieldIds.validation}
                     aria-invalid={
-                      submitAttempted && Boolean(!audience && !audienceMutation.isPending)
+                      submitAttempted &&
+                      (isListAudience
+                        ? recipients === 0
+                        : Boolean(!audience && !audienceMutation.isPending))
                     }
                     {...tourAnchor("campanhas.compositor.publico")}
                   >
@@ -1358,6 +1426,12 @@ export function ChannelCampaignComposer({
                       <SelectItem value={EXTERNAL_LIST_ID}>
                         Lista de números · quem ainda não é jogador
                       </SelectItem>
+                    ) : null}
+                    {channel === "voice" && !isExpert ? (
+                      <SelectItem value={EXTERNAL_LIST_ID}>Lista de números</SelectItem>
+                    ) : null}
+                    {channel === "email" && !isExpert ? (
+                      <SelectItem value={EXTERNAL_EMAIL_LIST_ID}>Lista de e-mails</SelectItem>
                     ) : null}
                     {audienceOptions.map((item) => (
                       <SelectItem key={item.id} value={item.id}>
@@ -1376,7 +1450,7 @@ export function ChannelCampaignComposer({
                     Calculando o público…
                   </p>
                 ) : null}
-                {isExternalList ? (
+                {isPhoneList ? (
                   <div className="space-y-2">
                     <Textarea
                       name="external-phone-list"
@@ -1438,11 +1512,85 @@ export function ChannelCampaignComposer({
                         </Badge>
                       ) : null}
                     </div>
+                    {channel === "sms" ? (
+                      <p className="text-meta text-muted-foreground">
+                        {num(externalList.phones.length)} número(s) válido(s). Os números não são
+                        salvos como jogadores e quem já é jogador da casa fica de fora. Se a pessoa
+                        clicar no link e se cadastrar com o mesmo telefone, o cadastro e os
+                        depósitos entram no relatório da campanha.
+                      </p>
+                    ) : (
+                      <p className="text-meta text-muted-foreground">
+                        {num(externalList.phones.length)} número(s) válido(s). Os números não são
+                        salvos como jogadores e quem revogou o consentimento para ligações não
+                        recebe.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+                {isEmailList ? (
+                  <div className="space-y-2">
+                    <Textarea
+                      name="external-email-list"
+                      rows={4}
+                      value={emailListText}
+                      onChange={(event) => setEmailListText(event.target.value)}
+                      placeholder="Cole os e-mails: um por linha ou separados por vírgula ou ponto e vírgula"
+                      aria-label="E-mails da lista"
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        ref={emailListFileRef}
+                        type="file"
+                        accept={PHONE_LIST_FILE_ACCEPT}
+                        className="hidden"
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = "";
+                          if (!file) return;
+                          setEmailListFileLoading(true);
+                          try {
+                            setEmailListFile({
+                              name: file.name,
+                              text: await readPhoneListFile(file),
+                            });
+                          } catch (error) {
+                            toast.error(
+                              error instanceof Error
+                                ? error.message
+                                : "Não foi possível ler o arquivo.",
+                            );
+                          } finally {
+                            setEmailListFileLoading(false);
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={emailListFileLoading}
+                        onClick={() => emailListFileRef.current?.click()}
+                      >
+                        <Upload className="mr-1.5 size-3.5" aria-hidden="true" />
+                        {emailListFileLoading ? "Lendo arquivo…" : "Enviar arquivo (CSV, TXT, XLS)"}
+                      </Button>
+                      {emailListFile ? (
+                        <Badge variant="secondary" className="gap-1">
+                          {emailListFile.name}
+                          <button
+                            type="button"
+                            aria-label="Remover arquivo"
+                            onClick={() => setEmailListFile(null)}
+                          >
+                            <X className="size-3" aria-hidden="true" />
+                          </button>
+                        </Badge>
+                      ) : null}
+                    </div>
                     <p className="text-meta text-muted-foreground">
-                      {num(externalList.phones.length)} número(s) válido(s). Os números não são
-                      salvos como jogadores e quem já é jogador da casa fica de fora. Se a pessoa
-                      clicar no link e se cadastrar com o mesmo telefone, o cadastro e os depósitos
-                      entram no relatório da campanha.
+                      {num(emailList.emails.length)} e-mail(s) válido(s). Os e-mails não são
+                      salvos como jogadores e endereços descadastrados ou bloqueados ficam de fora.
                     </p>
                   </div>
                 ) : null}
@@ -1893,12 +2041,17 @@ export function ChannelCampaignComposer({
                     ? "…"
                     : num(sendableRecipients)}
                 </p>
-                {isExternalList ? (
+                {isPhoneList ? (
                   <p className="text-meta text-muted-foreground">
                     Lista de números · {num(externalList.phones.length)} válido(s)
                   </p>
                 ) : null}
-                {audience && audienceName && !isExternalList ? (
+                {isEmailList ? (
+                  <p className="text-meta text-muted-foreground">
+                    Lista de e-mails · {num(emailList.emails.length)} válido(s)
+                  </p>
+                ) : null}
+                {audience && audienceName && !isListAudience ? (
                   <p className="text-meta text-muted-foreground">
                     {audienceName} · {num(audience.total)}{" "}
                     {isExpert
