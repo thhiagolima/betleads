@@ -12,6 +12,7 @@ import { isChannelEnabled } from "./tenant-channels.server";
 import { isDemoBlockedError } from "./demo-tenant";
 import { ExpertVoiceGate, loadExpertQueueOwners } from "./expert-voice.server";
 import { loadHouseLinks } from "./house-links.server";
+import { normalizeBrazilianPhone } from "./phone-normalization";
 import { DEFAULT_CURRENCY, formatMoney, type TenantCurrency } from "./currency";
 
 // ============================================================
@@ -281,6 +282,30 @@ function positiveSeconds(value: unknown): number | null {
 }
 
 /**
+ * The tenant player behind a queued phone (`players.telefone` is stored
+ * canonical), the most recently updated one on duplicates. Null when the
+ * number is not a player or the lookup fails: the script then renders with
+ * neutral fallbacks instead of failing the call.
+ */
+async function findPlayerByPhone(tenantId: string, phone: string): Promise<LeadLike | null> {
+  const telefone = normalizeBrazilianPhone(phone);
+  if (!telefone) return null;
+  const { data, error } = await supabaseAdmin
+    .from("players")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("telefone", telefone)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("[voice-queue] player lookup by phone failed", { error: error.message });
+    return null;
+  }
+  return data as LeadLike | null;
+}
+
+/**
  * Duration of a queued call's generated audio (call_queue.audio_generation_id),
  * used as the reservation's maxSeconds. Null when unknown; never throws (the
  * env default is a safe cap).
@@ -464,6 +489,10 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           .maybeSingle();
         player = data as LeadLike | null;
         if (!phone) phone = player?.telefone ?? "";
+      } else if (phone && item.script_id) {
+        // Campaign items carry only the phone: the script is rendered for the
+        // player behind it (never the FAKE_LEAD preview data).
+        player = await findPlayerByPhone(item.tenant_id, phone);
       }
       if (!phone) throw new Error("Telefone do destinatário ausente.");
       const to = normalizeE164BR(phone);
@@ -523,7 +552,8 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           .maybeSingle();
         if (!script?.content) throw new Error("Script de voz não encontrado.");
         const { currency } = await loadHouseLinks(item.tenant_id);
-        renderedText = renderCallScript(script.content, player ?? FAKE_LEAD, currency);
+        // No player (external number): neutral fallbacks ("amigo"), not FAKE_LEAD.
+        renderedText = renderCallScript(script.content, player ?? {}, currency);
         content = { type: "tts", text: renderedText, language: "pt" };
       } else {
         if (!audioUrl) throw new Error("Áudio da ligação não está pronto.");
@@ -633,7 +663,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
 
       const { error: historyInsertError } = await supabaseAdmin.from("call_history").insert({
         tenant_id: item.tenant_id,
-        lead_id: item.lead_id,
+        lead_id: item.lead_id ?? player?.id ?? null,
         script_id: item.script_id,
         call_queue_id: item.id,
         audio_url: audioUrl,
