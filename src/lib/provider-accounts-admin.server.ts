@@ -10,6 +10,7 @@ import { auditAdminAction } from "@/lib/admin-audit.server";
 import { assertSuperAdmin } from "@/lib/provider-governance.server";
 import {
   cleanCredential,
+  cleanInfobipApiKey,
   DEFAULT_INFOBIP_ACCOUNT_ID,
   DEFAULT_ONESIGNAL_ACCOUNT_ID,
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
@@ -561,7 +562,8 @@ export async function adminSaveProviderAccountFor(
 
   const credentials: Record<string, string> = {};
   for (const key of CREDENTIAL_KEYS[data.provider]) {
-    const value = cleanCredential(data.credentials[key] ?? stored[key]);
+    const raw = data.credentials[key] ?? stored[key];
+    const value = key === "api_key" ? cleanInfobipApiKey(raw) : cleanCredential(raw);
     if (value) credentials[key] = value;
   }
   const hasCredentials =
@@ -692,7 +694,9 @@ export async function adminTestProviderAccountFor(
         const body = (await response.json().catch(() => null)) as {
           balance?: number;
           currency?: string;
+          requestError?: { serviceException?: { text?: string } };
         } | null;
+        const detail = body?.requestError?.serviceException?.text?.trim();
         result = response.ok
           ? {
               ok: true,
@@ -703,10 +707,14 @@ export async function adminTestProviderAccountFor(
             }
           : {
               ok: false,
+              // 403 = chave válida sem o escopo de saldo (chaves só de
+              // SMS/e-mail/voz): não é chave errada, o envio pode funcionar.
               message:
-                response.status === 401 || response.status === 403
-                  ? "A Infobip recusou a API key."
-                  : `A Infobip respondeu HTTP ${response.status}.`,
+                response.status === 401
+                  ? `A Infobip recusou a API key (401${detail ? `: ${detail}` : ""}). Confira a chave e a URL base da mesma conta.`
+                  : response.status === 403
+                    ? `A chave foi aceita, mas não tem permissão para consultar o saldo (403${detail ? `: ${detail}` : ""}). Libere o escopo de saldo/conta na chave da Infobip ou faça um envio de teste.`
+                    : `A Infobip respondeu HTTP ${response.status}${detail ? `: ${detail}` : ""}.`,
             };
       } catch (error) {
         result = {

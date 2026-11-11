@@ -605,6 +605,54 @@ describe("provider accounts admin", () => {
         expect(result).toEqual({ ok: false, message: "A OneSignal respondeu HTTP 500." });
       });
 
+      async function ownInfobip(apiKey = "ib-key-1") {
+        const { id } = await save({
+          provider: "infobip",
+          label: "Infobip Casa Um",
+          channels: ["sms"],
+          config: { base_url: "https://x.api.infobip.com" },
+          credentials: { api_key: apiKey },
+        });
+        return id;
+      }
+
+      it("Infobip 403 says the key lacks the balance scope, not that it is wrong", async () => {
+        const id = await ownInfobip();
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async () => new Response("{}", { status: 403 })),
+        );
+        const result = await adminTestProviderAccountFor(ADMIN, { id });
+        expect(result.ok).toBe(false);
+        expect(result.message).toMatch(/aceita, mas não tem permissão para consultar o saldo \(403\)/);
+      });
+
+      it("Infobip 401 carries the provider's error text", async () => {
+        const id = await ownInfobip();
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(
+            async () =>
+              new Response(
+                JSON.stringify({ requestError: { serviceException: { text: "Invalid login details" } } }),
+                { status: 401 },
+              ),
+          ),
+        );
+        const result = await adminTestProviderAccountFor(ADMIN, { id });
+        expect(result.message).toMatch(/^A Infobip recusou a API key \(401: Invalid login details\)/);
+      });
+
+      it("Infobip key pasted with the 'App ' prefix is sent once", async () => {
+        const id = await ownInfobip("App ib-key-2");
+        const fetchMock = vi.fn(async () => new Response('{"balance":1}', { status: 200 }));
+        vi.stubGlobal("fetch", fetchMock);
+        const result = await adminTestProviderAccountFor(ADMIN, { id });
+        expect(result.ok).toBe(true);
+        const init = (fetchMock.mock.calls[0] as unknown[])[1] as { headers: Record<string, string> };
+        expect(init.headers.Authorization).toBe("App ib-key-2");
+      });
+
       it("never calls the real OneSignal API when unconfigured", async () => {
         fake.db.rows("provider_accounts").push({
           id: "99999999-9999-4999-8999-999999999999",

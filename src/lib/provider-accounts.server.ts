@@ -108,6 +108,11 @@ export function cleanCredential(raw: string | undefined): string {
     .trim();
 }
 
+/** API key da Infobip sem o prefixo "App " (colado junto do valor, viraria "App App …"). */
+export function cleanInfobipApiKey(raw: string | undefined): string {
+  return cleanCredential(raw).replace(/^App\s+/i, "");
+}
+
 function trimBaseUrl(raw: string | undefined): string {
   return (raw ?? "").trim().replace(/\/$/, "");
 }
@@ -345,7 +350,7 @@ async function buildDbAccount(row: AccountRow): Promise<AnyProviderAccount> {
       provider: "infobip",
       label: row.label,
       baseUrl: trimBaseUrl(configString(config, "base_url")),
-      apiKey: creds.api_key?.trim() ?? "",
+      apiKey: cleanInfobipApiKey(creds.api_key),
       voiceFrom: configString(config, "voice_from")?.replace(/\D/g, "") ?? "",
       smsFrom: configString(config, "sms_from") ?? "",
     };
