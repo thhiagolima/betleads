@@ -1,6 +1,8 @@
 // Início do expert — SQL tests for
 // supabase/migrations/20261216100000_expert_home_summary.sql (with the
-// "Ao vivo" playerId from 20261221100100_expert_home_live_player_id.sql)
+// "Ao vivo" playerId from 20261221100100_expert_home_live_player_id.sql and
+// the payment time / pending-PIX-only feed from
+// 20261223100000_ao_vivo_hora_do_pagamento.sql)
 //
 // Runs the migration inside an in-memory Postgres (PGlite) over a minimal
 // schema with only the columns expert_home_summary reads (players,
@@ -26,6 +28,12 @@ const LIVE_PLAYER_ID_MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261221100100_expert_home_live_player_id.sql"),
   "utf8",
 );
+// Also redefines dashboard_summary_v2, which this schema doesn't have: run
+// only the expert_home_summary part.
+const PAYMENT_TIME_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261223100000_ao_vivo_hora_do_pagamento.sql"),
+  "utf8",
+).split("create or replace function public.expert_home_summary")[1];
 
 const SCHEMA = `
 create role anon nologin;
@@ -46,7 +54,8 @@ create table public.deposits (
   player_id uuid,
   valor numeric not null default 0,
   status text not null default 'pendente',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
 );
 create table public.withdrawals (
   id uuid primary key default gen_random_uuid(),
@@ -54,7 +63,8 @@ create table public.withdrawals (
   player_id uuid,
   valor numeric not null default 0,
   status text not null default 'pendente',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
 );
 create table public.events (
   id uuid primary key default gen_random_uuid(),
@@ -159,14 +169,20 @@ async function activity(tenant: string, playerId: string, base: number) {
     [tenant, playerId],
   );
   await db.query(
-    `insert into public.events (tenant_id, player_id, tipo, valor, created_at) values ($1, $2, 'pix_generated', 999, $3)`,
+    `insert into public.events (tenant_id, player_id, tipo, valor, created_at) values ($1, $2, 'deposito-pendente', 999, $3)`,
     [tenant, playerId, CUR],
   );
 }
 
 type Summary = Record<string, unknown> & {
   cashflowChart: Array<{ key: string; deposits: number; withdrawals: number }>;
-  liveEvents: Array<{ player: string; tone: string; playerId: string | null }>;
+  liveEvents: Array<{
+    player: string;
+    tone: string;
+    playerId: string | null;
+    action: string;
+    at: string;
+  }>;
 };
 
 async function summary(affiliates: string[] | null, tenant = T, resetAt?: string) {
@@ -182,6 +198,7 @@ beforeAll(async () => {
   await db.exec(SCHEMA);
   await db.exec(MIGRATION);
   await db.exec(LIVE_PLAYER_ID_MIGRATION);
+  await db.exec(`create or replace function public.expert_home_summary${PAYMENT_TIME_MIGRATION}`);
 
   // Mine (affiliate A): 2 players, one registered + FTD in the period.
   const ana = await player(T, "Ana", "A", "2026-11-02T10:00:00Z", "2026-11-02T12:00:00Z");
@@ -289,6 +306,38 @@ describe("expert_home_summary — total (null affiliate ids)", () => {
     // Exact-instant metrics (depositors) drop what happened before reset_at.
     expect(s.depositors).toBe(0);
     expect(s.cashflowChart[0].key).toBe("2026-11-03");
+  });
+});
+
+describe("expert_home_summary — ordem do Ao vivo", () => {
+  // Cadastro, PIX gerado 25 s depois e pago 43 s depois do PIX: a linha de
+  // deposits nasce pendente (created_at = hora do PIX) e ganha completed_at
+  // no pagamento; o webhook também grava o evento 'deposito-aprovado'.
+  const LIVE_T = "00000000-0000-4000-8000-00000000000c";
+
+  beforeAll(async () => {
+    const id = await player(LIVE_T, "Thiago", "Z", "2026-11-10T23:55:25Z");
+    await db.query(
+      `insert into public.deposits (tenant_id, player_id, valor, status, created_at, completed_at)
+       values ($1, $2, 30, 'aprovado', '2026-11-10T23:55:50Z', '2026-11-10T23:56:33Z')`,
+      [LIVE_T, id],
+    );
+    await db.query(
+      `insert into public.events (tenant_id, player_id, tipo, valor, created_at) values
+         ($1, $2, 'cadastro', null, '2026-11-10T23:55:25Z'),
+         ($1, $2, 'deposito-pendente', 30, '2026-11-10T23:55:50Z'),
+         ($1, $2, 'deposito-aprovado', 30, '2026-11-10T23:56:33Z')`,
+      [LIVE_T, id],
+    );
+  });
+
+  it.each([
+    ["total", null],
+    ["restrito", ["Z"]],
+  ])("shows the payment after the PIX it paid, once (%s)", async (_label, affiliates) => {
+    const s = await summary(affiliates, LIVE_T);
+    expect(s.liveEvents.map((e) => e.action)).toEqual(["depositou", "gerou um PIX", "criou conta"]);
+    expect(new Date(s.liveEvents[0].at).toISOString()).toBe("2026-11-10T23:56:33.000Z");
   });
 });
 
