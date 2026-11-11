@@ -115,6 +115,12 @@ export const GLOSSARY: GlossaryTerm[] = [
     short: 'Sigla de "first time deposit": o primeiro depósito que um jogador faz na casa.',
   },
   {
+    id: "ftd-redeposito",
+    term: "FTDs que redepositaram",
+    short:
+      "Dos jogadores que fizeram o primeiro depósito (FTD) no período, quantos % voltaram a depositar pelo menos mais uma vez dentro do mesmo período. Mostra se quem entrou está ficando na casa. A variação vem em p.p., porque já é uma taxa.",
+  },
+  {
     id: "grupo-de-controle",
     term: "Grupo de controle",
     short:
@@ -251,7 +257,7 @@ export const GLOSSARY: GlossaryTerm[] = [
     id: "pp",
     term: "p.p.",
     short:
-      "Sigla de \"pontos percentuais\": a diferença entre duas taxas (ex.: de 20% para 21% é +1,0 p.p.), não a variação relativa entre elas. Usado na variação da Conversão cadastro → FTD, que já é uma taxa.",
+      "Sigla de \"pontos percentuais\": a diferença entre duas taxas (ex.: de 20% para 21% é +1,0 p.p.), não a variação relativa entre elas. Usado na variação de taxas, como a Conversão cadastro → FTD e \"FTDs que redepositaram\".",
   },
 
   // --- Ligações / Voz (fase 2, Task 5) ---

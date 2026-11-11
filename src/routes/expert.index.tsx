@@ -1,13 +1,13 @@
 // Área do Expert (Fase 1, Task 9; cartão "Para chamar hoje" na Fase 2, Task
 // 8; relatório de rendimento, Task 6): tela "Início" do expert. O topo tem a
 // mesma cara do Início da casa (blocos de dashboard-blocks.tsx: os 4
-// cartões com tendência, depósitos e saques por dia, Recuperado, métricas
-// secundárias e Ao vivo, com o mesmo seletor de período), mas só com os
-// números dos leads do expert (`getExpertHomeSummary`: restrito = os
+// cartões com tendência, depósitos e saques por dia ou por hora, Recuperado,
+// métricas secundárias e Ao vivo, com o mesmo seletor de período), mas só com
+// os números dos leads do expert (`getExpertHomeSummary`: restrito = os
 // affiliate_ids dele, total = a casa inteira). Sem o que é só da casa
-// (checklist de configuração, aviso de domínio, gasto em SMS, retorno sobre
-// o envio, jornadas ativas/total, saldo). Abaixo ficam os blocos do expert:
-// "Para chamar hoje" (retornos, entraram em risco, clicaram e não
+// (checklist de configuração, aviso de domínio, gasto e envios de SMS,
+// retorno sobre o envio, jornadas ativas/total, saldo). Abaixo ficam os blocos
+// do expert: "Para chamar hoje" (retornos, entraram em risco, clicaram e não
 // depositaram), o consumo do mês, o total de leads com o botão para
 // /expert/leads e o atalho "Ver relatório completo" (/expert/rendimento,
 // créditos e comissão).
@@ -19,8 +19,7 @@ import { ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
 import {
-  CashflowChart,
-  CrmCard,
+  CashflowCrmRow,
   DashboardError,
   DashboardSkeleton,
   HomeHeader,
@@ -339,14 +338,7 @@ function ExpertHomePage() {
         <>
           <HomeKpiCards data={data} sparkline={sparkline} />
 
-          <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-            <div className="order-2 min-w-0 lg:order-1">
-              <CashflowChart data={data} />
-            </div>
-            <div className="order-1 lg:order-2">
-              <CrmCard data={data} />
-            </div>
-          </div>
+          <CashflowCrmRow data={data} />
 
           <SecondaryMetrics data={data} />
 

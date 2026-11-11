@@ -30,3 +30,25 @@ describe("KpiCard", () => {
     expect(html).not.toMatch(/[↑↓→]/);
   });
 });
+
+describe("KpiCard meta", () => {
+  it("renders the meta line under the value, outside the trend footer", () => {
+    const html = renderToStaticMarkup(
+      <KpiCard
+        title="Depositado"
+        value="R$ 225,00"
+        meta="8 depósitos · ticket R$ 28,13"
+        trend={trendDisplay(5)}
+        detail="vs dia anterior"
+      />,
+    );
+    expect(html).toContain("8 depósitos · ticket R$ 28,13");
+    expect(html.indexOf("8 depósitos")).toBeLessThan(html.indexOf("↑ 5,0%"));
+    expect(html).toContain("mt-auto");
+  });
+
+  it("renders nothing extra without meta", () => {
+    const html = renderToStaticMarkup(<KpiCard title="FTD" value="3" />);
+    expect(html).not.toContain("text-foreground/80");
+  });
+});

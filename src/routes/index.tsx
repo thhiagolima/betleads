@@ -4,8 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useMemo } from "react";
 
 import {
-  CashflowChart,
-  CrmCard,
+  CashflowCrmRow,
   DashboardError,
   DashboardSkeleton,
   HomeHeader,
@@ -108,14 +107,7 @@ function Dashboard() {
 
       <HomeKpiCards data={data} sparkline={sparkline} />
 
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="order-2 min-w-0 lg:order-1">
-          <CashflowChart data={data} />
-        </div>
-        <div className="order-1 lg:order-2">
-          <CrmCard data={data} house={data} />
-        </div>
-      </div>
+      <CashflowCrmRow data={data} house={data} />
 
       <SecondaryMetrics data={data} />
 

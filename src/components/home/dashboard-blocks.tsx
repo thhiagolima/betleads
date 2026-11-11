@@ -24,6 +24,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { formatCount } from "@/components/finance/format";
 import { HomeCard, KpiCard, MetricRow, TrendText } from "@/components/home/home-cards";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -43,12 +44,31 @@ export type HomeDashboardData = LeadScopedDashboard;
 /** Campos do Recuperado que só a casa tem (custo de SMS, jornadas, carteira). */
 export type HouseCrmFields = Pick<
   ReturnType<typeof mapDashboardRpc>,
-  "messageCost" | "messageRoi" | "activeFlows" | "totalFlows" | "walletBalance" | "exempt"
+  | "messageCost"
+  | "messageRoi"
+  | "activeFlows"
+  | "totalFlows"
+  | "walletBalance"
+  | "exempt"
+  | "smsSent"
+  | "smsClicks"
+  | "smsCtr"
 >;
 
 /** Quanto cada R$ 1 em SMS trouxe, em reais ("R$ 7,90"). */
 function fmtRoi(value: number) {
   return brl(value);
+}
+
+/** Número com 1 casa decimal no padrão pt-BR ("1,3"). */
+function fmtDecimal(value: number) {
+  return value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+/** "1,3 depósito por jogador" (singular abaixo de 2, como se lê "1,5 depósito"). */
+function depositsPerPlayerText(value: number) {
+  const rounded = Math.round(value * 10) / 10;
+  return `${fmtDecimal(rounded)} ${rounded < 2 ? "depósito" : "depósitos"} por jogador`;
 }
 
 function comparisonText(periodDays: number) {
@@ -118,6 +138,10 @@ export function HomeKpiCards({
         className="col-span-2 xl:col-span-1"
         title="Depositado"
         value={money(data.depositAmount)}
+        meta={
+          formatCount(data.depositCount, "depósito", "depósitos") +
+          (data.ticket > 0 ? ` · ticket ${money(data.ticket)}` : "")
+        }
         trend={trendDisplay(data.depositGrowth)}
         detail={comparison}
         sparkline={sparkline}
@@ -125,6 +149,11 @@ export function HomeKpiCards({
       <KpiCard
         title="Depositantes"
         value={num(data.depositors)}
+        meta={
+          data.depositsPerDepositor > 0
+            ? depositsPerPlayerText(data.depositsPerDepositor)
+            : undefined
+        }
         trend={trendDisplay(data.depositorsGrowth)}
         detail={comparison}
       />
@@ -135,6 +164,14 @@ export function HomeKpiCards({
           </>
         }
         value={num(data.ftd)}
+        meta={
+          data.ftd > 0
+            ? // FTD já contado mas o valor do depósito ainda não sincronizou: "—", não R$ 0,00.
+              data.ftdAmount > 0
+              ? `${money(data.ftdAmount)} · ticket ${money(data.ftdTicket)}`
+              : "—"
+            : undefined
+        }
         trend={trendDisplay(data.ftdGrowth)}
         detail={comparison}
       />
@@ -146,27 +183,62 @@ export function HomeKpiCards({
           </>
         }
         value={fmtPct(data.conversion)}
+        meta={`${num(data.ftd)} de ${formatCount(data.newPlayers, "cadastro", "cadastros")}`}
         trend={trendDisplay(data.conversionGrowth, "pp")}
-        detail={`${num(data.ftd)} de ${num(data.newPlayers)} cadastros`}
+        detail={comparison}
       />
     </div>
   );
 }
 
+/** Com menos de 2 pontos não há linha para desenhar: o gráfico some. */
+export function hasCashflowChart(data: HomeDashboardData) {
+  return data.cashflowChart.length >= 2;
+}
+
+/**
+ * Linha do gráfico "Depósitos e saques" + "Recuperado pelo CRM". Sem gráfico
+ * (menos de 2 pontos), o Recuperado ocupa a linha inteira.
+ */
+export function CashflowCrmRow({
+  data,
+  house,
+}: {
+  data: HomeDashboardData;
+  house?: HouseCrmFields;
+}) {
+  if (!hasCashflowChart(data)) return <CrmCard data={data} house={house} />;
+  return (
+    <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="order-2 min-w-0 lg:order-1">
+        <CashflowChart data={data} />
+      </div>
+      <div className="order-1 lg:order-2">
+        <CrmCard data={data} house={house} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Evolução de depósitos e saques. Em período de 1 dia os pontos vêm por hora
+ * ("14h"); nos demais, por dia. O eixo X só usa o rótulo pronto.
+ */
 export function CashflowChart({ data }: { data: HomeDashboardData }) {
   const { money } = useMoney();
   return (
     <HomeCard className="flex h-full flex-col p-4 sm:p-5" {...tourAnchor("inicio.fluxo.grafico")}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[15px] font-semibold">Depósitos e saques</h2>
+        {/* Só os nomes: os totais já estão nos indicadores e em "Líquido". */}
         <div className="flex gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span className="h-[3px] w-2.5 rounded-full bg-chart-1" aria-hidden="true" />
-            Depósitos <strong className="text-foreground">{money(data.depositAmount)}</strong>
+            Depósitos
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-[3px] w-2.5 rounded-full bg-chart-5" aria-hidden="true" />
-            Saques <strong className="text-foreground">{money(data.withdrawalAmount)}</strong>
+            Saques
           </span>
         </div>
       </div>
@@ -219,22 +291,37 @@ function HouseCrmDetails({ data, house }: { data: HomeDashboardData; house: Hous
   // Recuperado vem na moeda da casa e o gasto em SMS é sempre BRL: só faz
   // sentido dividir um pelo outro quando a casa também opera em BRL.
   const roi = currency === "BRL" ? house.messageRoi : 0;
+  const smsEnabled = isEnabled("sms");
   return (
     <>
       <div className="mt-3">
-        {isEnabled("sms") && <MetricRow label="Custo em SMS" value={brl(house.messageCost)} />}
-        <MetricRow
-          label="Cada R$ 1 em SMS trouxe"
-          value={roi > 0 ? fmtRoi(roi) : "—"}
-          valueClassName={roi > 0 ? "text-success" : undefined}
-        />
+        {smsEnabled && <MetricRow label="Custo em SMS" value={brl(house.messageCost)} />}
+        {smsEnabled && (
+          <MetricRow
+            label="SMS enviados"
+            value={
+              num(house.smsSent) +
+              (house.smsSent > 0
+                ? ` · ${formatCount(house.smsClicks, "clique", "cliques")} (${fmtPct(house.smsCtr)})`
+                : "")
+            }
+          />
+        )}
+        {/* Sem retorno para mostrar ("—"), a linha some. */}
+        {roi > 0 && (
+          <MetricRow
+            label="Cada R$ 1 em SMS trouxe"
+            value={fmtRoi(roi)}
+            valueClassName="text-success"
+          />
+        )}
         <MetricRow
           label="Em jornada agora"
           value={`${num(data.reactivationQueue)} · ${num(house.activeFlows)}/${num(house.totalFlows)} ativas`}
           to="/jornadas"
           {...tourAnchor("inicio.recuperado.em-jornada")}
         />
-        <MetricRow label="Saldo" value={house.exempt ? "Isenta" : brl(house.walletBalance)} />
+        {!house.exempt && <MetricRow label="Saldo" value={brl(house.walletBalance)} />}
       </div>
       <Button
         asChild
@@ -253,7 +340,8 @@ function HouseCrmDetails({ data, house }: { data: HomeDashboardData; house: Hous
 
 /**
  * "Recuperado pelo CRM". Com `house`, mostra também o que é só da casa:
- * custo em SMS, quanto cada R$ 1 em SMS trouxe, jornadas ativas/total, saldo e o
+ * custo e envios/cliques de SMS (canal liberado), quanto cada R$ 1 em SMS
+ * trouxe (só quando há retorno), jornadas ativas/total, saldo (não isenta) e o
  * botão para a Central de Resultados. Sem `house` (expert), fica só o
  * recuperado e "Em jornada agora" dos leads.
  */
@@ -265,10 +353,9 @@ export function CrmCard({ data, house }: { data: HomeDashboardData; house?: Hous
       <p className="mt-1.5 text-[28px] font-semibold tracking-[-0.03em] tabular-nums sm:text-[32px]">
         {money(data.recoveredAmount)}
       </p>
-      <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
-        {data.recoveredPlayers > 0
-          ? `${num(data.recoveredPlayers)} jogador(es) que estavam parados depositaram até 7 dias depois de clicar num link de campanha ou jornada.`
-          : "Ainda não há depósitos após clique em link no período."}
+      {/* A regra dos 7 dias fica na nota do rodapé e na ajuda. */}
+      <p className="mt-1.5 text-[12.5px] text-muted-foreground">
+        {formatCount(data.recoveredPlayers, "jogador recuperado", "jogadores recuperados")}
       </p>
       {house ? (
         <HouseCrmDetails data={data} house={house} />
@@ -283,6 +370,7 @@ export function CrmCard({ data, house }: { data: HomeDashboardData; house?: Hous
 
 export function SecondaryMetrics({ data }: { data: HomeDashboardData }) {
   const { money } = useMoney();
+  const hasFtdCohort = data.ftdCohort > 0;
   const cells: Array<{
     label: ReactNode;
     value: ReactNode;
@@ -291,35 +379,47 @@ export function SecondaryMetrics({ data }: { data: HomeDashboardData }) {
     valueClassName?: string;
   }> = [
     {
-      label: "Novos clientes",
-      value: num(data.newPlayers),
-      trend: trendDisplay(data.newPlayersGrowth),
+      label: "Líquido",
+      value: money(data.netAmount),
+      trend: data.netGrowth === null ? null : trendDisplay(data.netGrowth),
+      detail: `saques ${money(data.withdrawalAmount)} · ${formatCount(data.withdrawalCount, "saque", "saques")}`,
+      valueClassName: data.netAmount < 0 ? "text-danger" : undefined,
     },
-    { label: "Ticket médio", value: money(data.ticket), trend: trendDisplay(data.ticketGrowth) },
     {
-      label: "Redepósitos",
+      label: <Term id="redeposito">Redepósitos</Term>,
       value: money(data.redepositAmount),
       trend: trendDisplay(data.redepositGrowth),
-      detail: `${num(data.redepositPlayers)} jogadores`,
+      detail: formatCount(data.redepositPlayers, "jogador", "jogadores"),
+    },
+    {
+      label: <Term id="ftd-redeposito">FTDs que redepositaram</Term>,
+      // Sem FTD no período não há taxa: "—" e sem seta.
+      value: hasFtdCohort ? fmtPct(data.ftdRedepositRate) : "—",
+      trend:
+        hasFtdCohort && data.ftdRedepositRateGrowth != null
+          ? trendDisplay(data.ftdRedepositRateGrowth, "pp")
+          : null,
+      detail: hasFtdCohort
+        ? `${num(data.ftdCohortRedeposited)} de ${formatCount(data.ftdCohort, "FTD", "FTDs")}`
+        : "nenhum FTD no período",
     },
     {
       label: (
         <>
-          <Term id="pix-gerado-pago">PIX</Term> pagos
+          <Term id="pix-gerado-pago">PIX</Term> não pagos
         </>
       ),
-      value: fmtPct(data.pixPayRate),
-      detail: `${num(data.depositCount)} de ${num(data.pixGenerated)}`,
-    },
-    {
-      label: "PIX não pagos",
       value: num(data.pixUnpaid),
+      detail:
+        data.pixGenerated > 0
+          ? `${money(data.pixUnpaidAmount)} · ${fmtPct(data.pixPayRate)} pagos`
+          : undefined,
       valueClassName: data.pixUnpaid > 0 ? "text-warning" : undefined,
     },
   ];
   return (
     <HomeCard
-      className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5"
+      className="grid grid-cols-2 xl:grid-cols-4"
       {...tourAnchor("inicio.metricas-secundarias")}
     >
       {cells.map((cell, index) => (
@@ -327,11 +427,10 @@ export function SecondaryMetrics({ data }: { data: HomeDashboardData }) {
           key={index}
           className={cn(
             "border-border/70 p-4 sm:px-5",
-            // Hairlines between cells on every breakpoint without doubling them up.
-            "border-b xl:border-b-0",
+            // Hairlines between cells (2x2 below xl, one row on xl) without doubling them up.
+            index < 2 && "max-xl:border-b",
+            index % 2 === 0 && "max-xl:border-r",
             index < cells.length - 1 && "xl:border-r",
-            index % 2 === 0 && "max-sm:border-r",
-            index === cells.length - 1 && "max-sm:col-span-2 max-sm:border-b-0",
           )}
         >
           <p className="text-[12.5px] text-muted-foreground">{cell.label}</p>

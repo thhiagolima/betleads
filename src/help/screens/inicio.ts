@@ -1,6 +1,6 @@
 // Help article for "Início" (/), a tela sem abas. Fonte: src/routes/index.tsx
 // (o componente Dashboard), os blocos em src/components/home/dashboard-blocks.tsx
-// (HomeHeader, HomeKpiCards, CashflowChart, CrmCard, SecondaryMetrics, LiveFeed —
+// (HomeHeader, HomeKpiCards, CashflowCrmRow/CashflowChart/CrmCard, SecondaryMetrics, LiveFeed —
 // compartilhados com o Início do expert, /expert, que tem artigo próprio
 // pendente), src/components/home/{home-cards,period-picker}.tsx,
 // src/components/onboarding/{domain-verified-notice,house-setup-checklist}.tsx
@@ -12,9 +12,9 @@ const screen: HelpScreen = {
   route: "/",
   title: "Início",
   purpose:
-    "Visão geral da casa no período escolhido: os 4 indicadores principais, o fluxo de depósitos e saques, o quanto o CRM recuperou, 5 métricas secundárias e os eventos mais recentes dos jogadores.",
+    "Visão geral da casa no período escolhido: os 4 indicadores principais, o fluxo de depósitos e saques, o quanto o CRM recuperou, 4 métricas complementares e os eventos mais recentes dos jogadores.",
   roles: ["admin", "gestor", "member"],
-  terms: ["ftd", "pix-gerado-pago", "pp"],
+  terms: ["ftd", "pix-gerado-pago", "pp", "redeposito", "ftd-redeposito"],
   sections: [
     // ---------------------------------------------------------------
     {
@@ -73,9 +73,9 @@ const screen: HelpScreen = {
         {
           anchor: "inicio.kpis",
           label: "Depositado, Depositantes, Primeiros depósitos (FTD) e Conversão cadastro → FTD",
-          what: 'Depositado: soma de todos os depósitos aprovados no período (com uma mini-linha mostrando a tendência dos últimos dias). Depositantes: quantos jogadores diferentes depositaram. "Primeiros depósitos (FTD)": quantos jogadores fizeram o primeiro depósito da casa dentro do período — FTD é a sigla de "first time deposit" (primeiro depósito). Conversão cadastro → FTD: dos jogadores cadastrados no período, quantos % já fizeram o primeiro depósito, com o detalhe "<FTD> de <cadastros> cadastros".',
+          what: 'Cada cartão tem o número principal e, logo abaixo, uma linha de apoio. Depositado: soma de todos os depósitos aprovados no período (com uma mini-linha mostrando a tendência), e abaixo quantos depósitos foram e o ticket médio (ex.: "8 depósitos · ticket R$ 28,13"; o ticket some quando não houve depósito). Depositantes: quantos jogadores diferentes depositaram, e abaixo quantos depósitos cada um fez em média (ex.: "1,3 depósito por jogador"). "Primeiros depósitos (FTD)": quantos jogadores fizeram o primeiro depósito da casa dentro do período — FTD é a sigla de "first time deposit" (primeiro depósito) —, e abaixo o valor somado desses primeiros depósitos e o ticket deles (ex.: "R$ 175,00 · ticket R$ 29,17"). Conversão cadastro → FTD: dos jogadores cadastrados no período, quantos % já fizeram o primeiro depósito, e abaixo "<FTD> de <cadastros> cadastros".',
           notes:
-            'A seta ao lado de cada número compara com o período anterior de mesmo tamanho ("vs dia anterior" ou "vs N dias anteriores"): seta para cima e número verde é alta, seta para baixo e número vermelho é queda, seta para o lado é sem variação. Nos três primeiros a variação vem em porcentagem; na Conversão, que já é uma taxa, a variação vem em pontos percentuais (p.p.) — ver o termo no glossário.',
+            'A seta no rodapé de cada cartão compara só o número principal (não a linha de apoio) com o período anterior de mesmo tamanho ("vs dia anterior" ou "vs N dias anteriores"): seta para cima e número verde é alta, seta para baixo e número vermelho é queda, seta para o lado é sem variação. Nos três primeiros a variação vem em porcentagem; na Conversão, que já é uma taxa, a variação vem em pontos percentuais (p.p.) — ver o termo no glossário. No FTD, a linha de apoio mostra "—" quando o primeiro depósito já foi contado mas o valor dele ainda não chegou da plataforma; ela some quando não houve FTD (e, em Depositantes, quando ninguém depositou).',
         },
       ],
     },
@@ -88,7 +88,9 @@ const screen: HelpScreen = {
         {
           anchor: "inicio.fluxo.grafico",
           label: '"Depósitos e saques" (gráfico)',
-          what: 'Mostra a evolução diária de depósitos (linha cheia) e saques (linha de contorno) no período. A legenda acima do gráfico traz o total de cada um ("Depósitos R$ X" / "Saques R$ Y"); passar o mouse num ponto mostra o valor daquele dia.',
+          what: 'Mostra a evolução de depósitos (linha cheia) e saques (linha de contorno) no período: dia a dia quando o período tem vários dias, e hora a hora (0h, 1h... 23h) quando é um dia só (Hoje, Ontem ou uma data; em Hoje, até a hora atual). A legenda acima do gráfico só identifica as duas linhas — os totais ficam nos indicadores e em "Líquido"; passar o mouse num ponto mostra o valor daquele dia ou daquela hora.',
+          notes:
+            'Quando há menos de dois pontos para desenhar, o gráfico não aparece e o cartão "Recuperado pelo CRM" ocupa a linha inteira.',
         },
       ],
     },
@@ -100,9 +102,9 @@ const screen: HelpScreen = {
       items: [
         {
           label: 'Cartão "Recuperado pelo CRM"',
-          what: 'Mostra o valor recuperado e, abaixo, "<N> jogador(es) que estavam parados depositaram até 7 dias depois de clicar num link de campanha ou jornada" (ou "Ainda não há depósitos após clique em link no período.", quando não houve nenhum). Em seguida, quatro linhas: "Custo em SMS" (preço por segmento vezes os segmentos enviados no período; só aparece quando o canal SMS está liberado para a casa), "Cada R$ 1 em SMS trouxe" (recuperado ÷ custo em SMS, em reais, por exemplo "R$ 7,90", em verde quando positivo, ou "—" sem custo), "Em jornada agora" (quantos jogadores estão em jornada neste momento e quantas jornadas estão ativas do total) e "Saldo" ("Isenta" para casa isenta de cobrança, ou o saldo em R$).',
+          what: 'Mostra o valor recuperado e, abaixo, quantos jogadores foram recuperados ("<N> jogadores recuperados"). Em seguida, as linhas: "Custo em SMS" (preço por segmento vezes os segmentos enviados no período), "SMS enviados" (quantos SMS saíram no período e, quando houve envio, quantos cliques vieram deles e a taxa de clique, ex.: "1.234 · 56 cliques (4,5%)"), "Cada R$ 1 em SMS trouxe" (recuperado ÷ custo em SMS, em reais, por exemplo "R$ 7,90", em verde), "Em jornada agora" (quantos jogadores estão em jornada neste momento e quantas jornadas estão ativas do total) e "Saldo" (o saldo da carteira em R$).',
           notes:
-            'Recuperado pelo CRM considera só depósitos feitos em até 7 dias depois de um clique humano (não de robô) num link de campanha ou jornada, e não conta quem já estava ativo antes do clique. Casas que não operam em reais (moeda diferente de BRL) sempre veem "—" em "Cada R$ 1 em SMS trouxe": o custo em SMS é sempre em reais, e não faz sentido dividir um valor recuperado em outra moeda por ele.',
+            'Algumas linhas só aparecem quando fazem sentido: "Custo em SMS" e "SMS enviados", só com o canal SMS liberado para a casa; "Cada R$ 1 em SMS trouxe", só quando houve custo em SMS e algo recuperado; "Saldo", só para casa que não é isenta de cobrança. Recuperado pelo CRM considera só depósitos feitos em até 7 dias depois de um clique humano (não de robô) num link de campanha ou jornada, e não conta quem já estava ativo antes do clique (a regra também está na nota no fim da tela). Casas que não operam em reais (moeda diferente de BRL) não veem "Cada R$ 1 em SMS trouxe": o custo em SMS é sempre em reais, e não faz sentido dividir um valor recuperado em outra moeda por ele.',
         },
         {
           anchor: "inicio.recuperado.em-jornada",
@@ -120,14 +122,14 @@ const screen: HelpScreen = {
     // ---------------------------------------------------------------
     {
       id: "metricas-secundarias",
-      title: "5 métricas secundárias",
+      title: "4 métricas complementares",
       items: [
         {
           anchor: "inicio.metricas-secundarias",
-          label: "Novos clientes, Ticket médio, Redepósitos, PIX pagos e PIX não pagos",
-          what: 'Novos clientes: jogadores cadastrados no período. Ticket médio: valor médio de cada depósito (total depositado dividido pelo número de depósitos). Redepósitos: valor depositado por jogadores que já tinham depositado antes, com o detalhe de quantos jogadores. PIX pagos: dos PIX gerados (QR Code/código emitido) no período, quantos % foram de fato pagos, com o detalhe "<pagos> de <gerados>". PIX não pagos: quantos PIX gerados ficaram sem pagamento no período — aparece em laranja quando maior que zero.',
+          label: "Líquido, Redepósitos, FTDs que redepositaram e PIX não pagos",
+          what: 'Líquido: depositado menos sacado no período (em vermelho quando os saques passam os depósitos), com o detalhe do total sacado e de quantos saques ("saques R$ 90,00 · 3 saques"). Redepósitos: valor depositado por jogadores que já tinham depositado antes, com o detalhe de quantos jogadores. FTDs que redepositaram: dos jogadores que fizeram o primeiro depósito no período, quantos % voltaram a depositar dentro do mesmo período, com o detalhe "<redepositaram> de <N> FTDs" (mostra "—" quando não houve FTD no período; a seta, em p.p., some quando o período anterior não teve FTD). PIX não pagos: quantos PIX gerados (QR Code/código emitido) ficaram sem pagamento no período — aparece em laranja quando maior que zero —, com o detalhe do valor dos que seguem pendentes e de quantos % dos gerados foram pagos ("R$ 450,00 · 88,9% pagos").',
           notes:
-            "Todos têm uma seta de variação contra o período anterior, igual aos indicadores principais.",
+            'Líquido, Redepósitos e FTDs que redepositaram têm uma seta de variação contra o período anterior, igual aos indicadores principais (em FTDs que redepositaram, que já é uma taxa, a variação vem em p.p.). No Líquido, a seta só aparece quando o período anterior teve líquido positivo (de um líquido negativo para um positivo, a porcentagem não diria nada). Ticket médio e novos cadastros continuam na tela: o ticket fica abaixo de "Depositado" e os cadastros, abaixo da Conversão.',
         },
       ],
     },
@@ -165,8 +167,8 @@ const screen: HelpScreen = {
     },
     {
       id: "sem-recuperado",
-      title: "Ainda não há depósitos após clique em link no período.",
-      what: 'Mostrado no lugar do texto de depósitos recuperados, no cartão "Recuperado pelo CRM", quando nenhum jogador depositou depois de clicar num link de campanha ou jornada no período escolhido.',
+      title: "0 jogadores recuperados",
+      what: 'Mostrado no cartão "Recuperado pelo CRM" quando nenhum jogador depositou depois de clicar num link de campanha ou jornada no período escolhido.',
     },
     {
       id: "sem-eventos-ao-vivo",
@@ -192,13 +194,13 @@ const screen: HelpScreen = {
       {
         anchor: "inicio.kpis",
         title: "Os 4 indicadores",
-        body: "Depositado, Depositantes, Primeiros depósitos (FTD) e Conversão cadastro → FTD, com a variação contra o período anterior.",
+        body: "Depositado, Depositantes, Primeiros depósitos (FTD) e Conversão cadastro → FTD. Abaixo de cada número vem uma linha de apoio (quantidade, ticket, cadastros); a seta compara só o número principal com o período anterior.",
         articleSection: "kpis",
       },
       {
         anchor: "inicio.fluxo.grafico",
         title: "Depósitos e saques",
-        body: "A evolução diária de depósitos e saques no período escolhido.",
+        body: "A evolução de depósitos e saques no período escolhido: por dia, ou por hora quando o período é de um dia só.",
         articleSection: "fluxo",
       },
       {
@@ -215,8 +217,8 @@ const screen: HelpScreen = {
       },
       {
         anchor: "inicio.metricas-secundarias",
-        title: "Métricas secundárias",
-        body: "Novos clientes, ticket médio, redepósitos e quanto dos PIX gerados foi de fato pago.",
+        title: "Métricas complementares",
+        body: "Líquido (depositado menos sacado), redepósitos, quantos FTDs voltaram a depositar e os PIX gerados que ficaram sem pagamento.",
         articleSection: "metricas-secundarias",
       },
       {
