@@ -183,10 +183,10 @@ const screen: HelpScreen = {
       items: [
         {
           anchor: "webhooks.meta.guia",
-          label: "Guia de preparação (4 passos)",
-          what: 'Aparece sem nenhuma chave conectada ainda, com um link direto para cada passo na Meta: 1) nas Configurações do negócio, abrir Usuários → Usuários do sistema e criar um Usuário do Sistema (função Administrador ou Funcionário); 2) em Atribuir ativos, dar a esse Usuário do Sistema acesso às contas de anúncio que devem entrar nos relatórios; 3) clicar em Gerar token, escolher o app da operação, marcar a permissão ads_read e deixar a validade como "Nunca"; 4) copiar a chave gerada e colar no CRM — ela só aparece uma vez na Meta.',
+          label: "Guia de preparação (passo a passo)",
+          what: 'Aparece sem nenhuma chave conectada ainda (e no painel de adicionar chave), com o passo a passo completo e link direto para cada tela da Meta. "Antes de começar": é preciso ser administrador da BM, fazer pelo computador (uns 10 minutos), e quem já tem Usuário do Sistema com acesso às contas pode ir direto à Parte 3. Parte 1 — Criar o app da operação: criar o app no painel de desenvolvedores (caso de uso "Outro", tipo "Empresa"), escolher a BM da operação em "Portfólio empresarial" e adicionar o produto "API de Marketing"; o app não precisa ser publicado. Parte 2 — Criar o Usuário do Sistema e dar acesso: criar o Usuário do Sistema (função Administrador), em "Atribuir ativos" dar "Ver desempenho" nas contas de anúncio e "Gerenciar app" no app da Parte 1. Parte 3 — Gerar a chave: "Gerar novo token", escolher o app, validade "Nunca", marcar só ads_read, copiar a chave (começa com EAA) e colar no CRM — ela só aparece uma vez na Meta. Cada parte abre e fecha clicando no título.',
           notes:
-            'Avisa: "Tem mais de uma BM? Crie um Usuário do Sistema em cada BM e conecte uma chave por BM. Outra opção: atribua as contas das BMs parceiras a um só Usuário do Sistema; uma chave alcança todas." e "Use a chave do Usuário do Sistema. A chave de um usuário comum expira em poucas semanas e é recusada."',
+            'Avisa: "Tem mais de uma BM? Crie um Usuário do Sistema em cada BM e conecte uma chave por BM. Outra opção: atribua as contas das BMs parceiras a um só Usuário do Sistema; uma chave alcança todas." e "Use a chave do Usuário do Sistema. A chave de um usuário comum expira em poucas semanas e é recusada." O bloco "Deu erro ao validar a chave?" (fechado de início) explica o que fazer em cada recusa: chave de perfil pessoal, sem ads_read, sem contas atribuídas, app sem "Ads Management Standard Access" e chave inválida.',
         },
         {
           anchor: "webhooks.meta.chave-input",
