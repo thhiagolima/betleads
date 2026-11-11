@@ -38,6 +38,7 @@ import {
 } from "./campaign-recipients.server";
 import {
   processSmsCampaignTick,
+  SMS_CAMPAIGN_ACCOUNT_UNAVAILABLE_MESSAGE,
   type CampaignDispatchDeps,
   type CampaignTarget,
   type ProviderGateDecision,
@@ -46,7 +47,11 @@ import {
 import { PLATFORM_SMS_BREAKER_KEY, smsBreakerKey } from "./sms-provider-breaker.server";
 import { SmsAccountGates } from "./sms-account-gates.server";
 import { isChannelEnabled } from "./tenant-channels.server";
-import { ProviderAccountUnavailableError, resolveSmsAccount } from "./provider-accounts.server";
+import {
+  ProviderAccountUnavailableError,
+  resolveSmsAccount,
+  smsSendChoiceProblem,
+} from "./provider-accounts.server";
 import { PROVIDER_ACCOUNT_DEFER_MS } from "./rate-limit/provider-errors.server";
 import { notifyNoBalance } from "./billing/wallet-alerts.server";
 import { notifyExpertCapReached } from "./billing/expert-cap-alerts.server";
@@ -915,12 +920,13 @@ async function campaignRecipientHash(tenantId: string, target: CampaignTarget) {
  * ENV-10 bulk path for a house: SMS_BULK_ENABLED and the house's SMS account
  * uses the legacy usuario/chave API (the Bearer API keeps the per-recipient
  * path). A house whose own account is unavailable stays on the per-recipient
- * path, where each send fails as misconfigured.
+ * path, where each send fails as misconfigured. `accountId`: the account
+ * chosen for the campaign (empty = the house's default).
  */
-async function campaignUsesBulk(tenantId: string): Promise<boolean> {
+async function campaignUsesBulk(tenantId: string, accountId?: string | null): Promise<boolean> {
   if (!smsBulkEnabled()) return false;
   try {
-    return smsBulkTransport(await resolveSmsAccount(tenantId)) === "short-brasil-bulk";
+    return smsBulkTransport(await resolveSmsAccount(tenantId, accountId)) === "short-brasil-bulk";
   } catch (error) {
     if (error instanceof ProviderAccountUnavailableError) return false;
     throw error;
@@ -1003,6 +1009,7 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
             },
         deliveryKey,
         ...(expertId ? { expertId } : {}),
+        providerAccountId: campaign.provider_account_id ?? null,
       });
       const errorKind = r.ok ? undefined : (r as { errorKind?: unknown }).errorKind;
       const providerAccount = errorKind === "provider_account";
@@ -1032,6 +1039,7 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
               await Promise.all(
                 items.map(async (it) => ({
                   tenantId: campaign.tenant_id,
+                  providerAccountId: campaign.provider_account_id ?? null,
                   to: it.target.phone,
                   content: renderSmsVariables(
                     campaign.content,
@@ -1158,7 +1166,7 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
                 scope,
               ),
           })
-        : campaignDeps(await campaignUsesBulk(c.tenant_id));
+        : campaignDeps(await campaignUsesBulk(c.tenant_id, c.provider_account_id));
       if (!scoped) continue;
       const deps = {
         ...scoped,
@@ -1221,15 +1229,35 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
  * before each batch. The first ask may get the half-open probe (ONE send);
  * the next ask of the same campaign learns its verdict. A campaign whose
  * account is refused stops before its next batch without moving the cursor;
- * campaigns of houses on other accounts keep sending.
+ * campaigns of houses on other accounts keep sending. A campaign sent through
+ * an account chosen by the house (provider_account_id) whose option was
+ * removed, or whose account was disabled / lost its credentials, is paused
+ * (accountUnavailable) instead of failing every recipient as misconfigured.
  */
 export async function campaignProviderGate(
   gates: SmsAccountGates,
-  campaign: Pick<SmsCampaignRow, "id" | "tenant_id">,
+  campaign: Pick<SmsCampaignRow, "id" | "tenant_id" | "provider_account_id">,
 ): Promise<ProviderGateDecision> {
   const itemId = `campaign:${campaign.id}`;
   await gates.settle(itemId);
-  const admission = await gates.admit(campaign.tenant_id, itemId);
+  const accountId = campaign.provider_account_id ?? null;
+  if (accountId) {
+    const problem = await smsSendChoiceProblem(campaign.tenant_id, accountId);
+    if (problem) {
+      console.warn("[sms-campaigns] conta de envio escolhida indisponível; pausando", {
+        campaignId: campaign.id,
+        tenantId: campaign.tenant_id,
+        accountId,
+        problem,
+      });
+      return {
+        mode: "open",
+        message: SMS_CAMPAIGN_ACCOUNT_UNAVAILABLE_MESSAGE,
+        accountUnavailable: true,
+      };
+    }
+  }
+  const admission = await gates.admit(campaign.tenant_id, itemId, accountId);
   return admission.mode === "open"
     ? { mode: "open", message: admission.message }
     : { mode: admission.mode };

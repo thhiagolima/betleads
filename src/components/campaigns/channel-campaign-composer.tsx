@@ -89,6 +89,7 @@ import {
 import { SYSTEM_SMS_AUDIENCES, type SmsAudienceCriteria } from "@/lib/sms-audience-criteria";
 import { listSmsTemplates } from "@/lib/sms-templates.functions";
 import { previewSmsCampaignRecipients, scheduleBulkSms, sendBulkSms } from "@/lib/sms.functions";
+import { SmsSendAccountSelect, useSmsSendAccounts } from "@/components/sms/sms-send-account-select";
 import { fromBrtInput, toBrtInput } from "@/components/journeys/journey-editor-config";
 import { getComposerOptions } from "@/lib/house-config.functions";
 import { COMPOSER_OPTIONS_QUERY_KEY } from "@/components/house-config/house-config-query";
@@ -211,6 +212,7 @@ export function ChannelCampaignComposer({
   // <Term>) to their selects.
   const fieldId = useId();
   const smsDomainId = `${fieldId}-sms-dominio`;
+  const smsAccountFieldId = `${fieldId}-sms-conta`;
   const emailSenderFieldId = `${fieldId}-email-remetente`;
   const emailDomainId = `${fieldId}-email-dominio`;
   // House or expert data source, by the shell role (campaign-data-source.ts).
@@ -310,6 +312,8 @@ export function ChannelCampaignComposer({
   const [emailTemplateId, setEmailTemplateId] = useState("");
   // null = "padrão da casa" (the tenant's current default verified domain/sender).
   const [shortDomainId, setShortDomainId] = useState<string | null>(null);
+  // House SMS only: account the campaign goes out through; null = "Padrão da casa".
+  const [smsAccountId, setSmsAccountId] = useState<string | null>(null);
   const [senderId, setSenderId] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<"script" | "asset">("asset");
   const [voiceSourceId, setVoiceSourceId] = useState("");
@@ -360,6 +364,11 @@ export function ChannelCampaignComposer({
   });
   const smsPrice = pricesQuery.data?.sms ?? null;
   const smsExempt = smsPrice?.exempt ?? false;
+  // House SMS campaigns may pick one of the accounts the super admin linked to
+  // the house; the expert always sends through the house default.
+  const smsAccount = useSmsSendAccounts(smsAccountId, open && channel === "sms" && !isExpert);
+  const smsAccountName = smsAccount.selectedName;
+  const smsAccountError = channel === "sms" ? smsAccount.error : null;
   const smsTemplatesQuery = useQuery({
     queryKey: ["sms-templates"],
     queryFn: () => listSmsTemplateFn(),
@@ -493,6 +502,7 @@ export function ChannelCampaignComposer({
     setSmsContent("");
     setEmailTemplateId("");
     setShortDomainId(null);
+    setSmsAccountId(null);
     setSenderId(null);
     setVoiceMode("asset");
     setVoiceSourceId("");
@@ -731,6 +741,7 @@ export function ChannelCampaignComposer({
           : null,
     externalBlockedVariables.length ? externalListVariablesError(externalBlockedVariables) : null,
     channel === "sms" && !smsContent.trim() ? "Escreva ou selecione a mensagem de SMS." : null,
+    smsAccountError,
     channel === "email" && !emailTemplateId ? "Selecione um template de e-mail." : null,
     channel === "voice" && !voiceSourceId
       ? voiceMode === "script"
@@ -993,6 +1004,7 @@ export function ChannelCampaignComposer({
 
       if (channel === "sms") {
         if (!smsContent.trim()) throw new Error("Escreva ou selecione a mensagem de SMS.");
+        if (smsAccountError) throw new Error(smsAccountError);
         const payload = {
           phones: isExternalList ? externalList.phones : audience!.eligibleIdentifiers,
           recipientSource: isExternalList ? ("external_list" as const) : ("players" as const),
@@ -1004,6 +1016,8 @@ export function ChannelCampaignComposer({
           templateId: smsTemplateId || undefined,
           conversionObjective: "conversion" as const,
           shortDomainId,
+          // Only meaningful when the house has extra accounts; null = "Padrão da casa".
+          providerAccountId: smsAccount.providerAccountId,
         };
         const result =
           when === "schedule"
@@ -1172,7 +1186,9 @@ export function ChannelCampaignComposer({
           });
       const typed = await requestTextInput({
         title: when === "schedule" ? "Confirmar agendamento em massa" : "Confirmar envio em massa",
-        description: `${sendSummary}. Para confirmar, digite a quantidade de destinatários. Depois de iniciado, o envio não pode ser desfeito.`,
+        description: `${sendSummary}${
+          channel === "sms" && smsAccountName ? ` · Enviar por: ${smsAccountName}` : ""
+        }. Para confirmar, digite a quantidade de destinatários. Depois de iniciado, o envio não pode ser desfeito.`,
         label: `Digite ${num(count)} para confirmar`,
         placeholder: num(count),
         confirmLabel: when === "schedule" ? "Agendar" : "Enviar",
@@ -1554,6 +1570,15 @@ export function ChannelCampaignComposer({
                       </div>
                     </div>
                   )}
+                  {smsAccount.showChoice ? (
+                    <SmsSendAccountSelect
+                      id={smsAccountFieldId}
+                      choices={smsAccount.choices}
+                      value={smsAccountId}
+                      onChange={setSmsAccountId}
+                      invalid={submitAttempted && Boolean(smsAccountError)}
+                    />
+                  ) : null}
                 </div>
               )}
               {channel === "email" && (
@@ -1900,6 +1925,12 @@ export function ChannelCampaignComposer({
                         ? "Sem teto mensal definido."
                         : `Restante do teto após este envio: ${brl(Math.max(0, expertRemainingAfter ?? 0))}`}
                   </p>
+                </div>
+              ) : null}
+              {channel === "sms" && smsAccountName ? (
+                <div>
+                  <p className="text-meta text-muted-foreground">Enviar por</p>
+                  <p className="font-medium">{smsAccountName}</p>
                 </div>
               ) : null}
               {channel === "sms" && !isExpert ? (

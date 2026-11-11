@@ -22,15 +22,18 @@ import {
   loadProviderAccountForAdmin,
   oneSignalConfigured,
   shortBrasilConfigured,
+  SMS_DEFAULT_CHOICE_NAME,
   type ProviderChannel,
 } from "@/lib/provider-accounts.server";
 import { decryptProviderCredentials, encryptProviderCredentials } from "@/lib/secret-box.server";
 import { requireBrazilianPhone } from "@/lib/phone-normalization";
 import {
+  addTenantSmsAccountOptionInput,
   deleteProviderAccountInput,
   PROVIDER_CHANNEL_LABEL,
   PROVIDER_CHANNELS,
   PROVIDER_LABEL,
+  removeTenantSmsAccountOptionInput,
   saveProviderAccountInput,
   setPlatformDefaultInput,
   setProviderAccountStatusInput,
@@ -76,6 +79,41 @@ async function channelsDefaultedTo(accountId: string): Promise<ProviderChannel[]
   return CHANNELS.filter((channel) => defaults[channel] === accountId);
 }
 
+type OptionRow = {
+  tenant_id: string;
+  channel: ProviderChannel;
+  provider_account_id: string;
+  display_name: string;
+};
+
+/** Tabela de opções ainda não criada (app novo antes da migração 20261224100000). */
+function isMissingRelationError(error: { code?: string; message?: string } | null | undefined) {
+  if (!error) return false;
+  return (
+    error.code === "42P01" ||
+    error.code === "PGRST205" ||
+    /does not exist|could not find the table/i.test(error.message ?? "")
+  );
+}
+
+/** Casas (distintas) que têm `accountId` como conta extra nos canais dados. */
+async function tenantsWithAccountOption(
+  accountId: string,
+  channels?: ProviderChannel[],
+): Promise<string[]> {
+  let query = db()
+    .from("tenant_channel_account_options")
+    .select("tenant_id, channel")
+    .eq("provider_account_id", accountId);
+  if (channels) query = query.in("channel", channels);
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingRelationError(error)) return [];
+    throw new Error(error.message);
+  }
+  return [...new Set(((data ?? []) as Array<{ tenant_id: string }>).map((r) => r.tenant_id))];
+}
+
 /** Nenhuma casa pode usar `accountId` nos canais que estão saindo da conta, e
  * a conta não pode ser hoje a padrão de nenhum desses canais (senão toda
  * casa sem override naquele canal ficaria sem conta). */
@@ -100,6 +138,12 @@ async function assertNoHouseUsesRemovedChannels(
   if (error) throw new Error(error.message);
   if ((inUse ?? []).length) {
     throw new Error("Há casas usando esta conta nos canais removidos. Mude essas casas de conta antes.");
+  }
+  const optionTenants = await tenantsWithAccountOption(accountId, removedChannels);
+  if (optionTenants.length) {
+    throw new Error(
+      `Esta conta é conta extra de ${optionTenants.length} casa(s) nos canais removidos. Remova-a dessas casas antes.`,
+    );
   }
 }
 
@@ -211,6 +255,8 @@ export type TenantProvidersView = {
   accounts: Record<ProviderChannel, string | null>;
   /** Canais ligados para a casa (padrão quando não há linha em tenant_channels). */
   channels: Record<ProviderChannel, boolean>;
+  /** Contas extras de SMS que a casa pode escolher na campanha, com o nome que a casa vê. */
+  smsOptions: { accountId: string; displayName: string }[];
 };
 
 function hint(value: string): string {
@@ -296,7 +342,7 @@ async function accountView(
 
 export async function adminListProviderAccountsFor(context: AdminContext) {
   await assertSuperAdmin(context.userId);
-  const [accounts, assignments, tenants, tenantChannels, verifiedEmailDomains, defaults] =
+  const [accounts, assignments, tenants, tenantChannels, verifiedEmailDomains, defaults, options] =
     await Promise.all([
       db()
         .from("provider_accounts")
@@ -314,7 +360,23 @@ export async function adminListProviderAccountsFor(context: AdminContext) {
         .eq("status", "verified")
         .is("removed_at", null),
       currentDefaults(),
+      db()
+        .from("tenant_channel_account_options")
+        .select("tenant_id, channel, provider_account_id, display_name")
+        .eq("channel", "sms"),
     ]);
+  if (options?.error && !isMissingRelationError(options.error)) {
+    throw new Error(options.error.message);
+  }
+  const smsOptionsByTenant = new Map<string, { accountId: string; displayName: string }[]>();
+  for (const option of ((options?.error ? [] : (options?.data ?? [])) as OptionRow[])
+    .slice()
+    .sort((a, b) => a.display_name.localeCompare(b.display_name, "pt-BR"))) {
+    smsOptionsByTenant.set(option.tenant_id, [
+      ...(smsOptionsByTenant.get(option.tenant_id) ?? []),
+      { accountId: option.provider_account_id, displayName: option.display_name },
+    ]);
+  }
   for (const result of [accounts, assignments, tenants, tenantChannels, verifiedEmailDomains]) {
     if (result.error) throw new Error(result.error.message);
   }
@@ -382,6 +444,7 @@ export async function adminListProviderAccountsFor(context: AdminContext) {
         nome: tenant.nome,
         accounts: byTenant.get(tenant.id) ?? { sms: null, email: null, voice: null, webpush: null },
         channels: channelsOf(tenant.id),
+        smsOptions: smsOptionsByTenant.get(tenant.id) ?? [],
       }),
     ),
     defaults,
@@ -565,8 +628,12 @@ export async function adminSaveProviderAccountFor(
 export async function adminSetProviderAccountStatusFor(
   context: AdminContext,
   data: z.infer<typeof setProviderAccountStatusInput>,
-) {
+): Promise<{ ok: true; smsOptionTenants: number }> {
   await assertSuperAdmin(context.userId);
+  // Casas que têm a conta como conta extra: desativar não remove a opção (a
+  // casa a vê como indisponível e campanhas com ela pausam); o número volta
+  // para a tela avisar o super admin.
+  let smsOptionTenants = 0;
   if (data.status === "disabled") {
     const [defaultedChannel] = await channelsDefaultedTo(data.id);
     if (defaultedChannel) {
@@ -574,6 +641,7 @@ export async function adminSetProviderAccountStatusFor(
         `Esta conta é a padrão de ${PROVIDER_CHANNEL_LABEL[defaultedChannel]}. Escolha outra padrão antes.`,
       );
     }
+    smsOptionTenants = (await tenantsWithAccountOption(data.id, ["sms"])).length;
   }
   const { data: row, error } = await db()
     .from("provider_accounts")
@@ -587,9 +655,14 @@ export async function adminSetProviderAccountStatusFor(
   await auditAdminAction({
     actorUserId: context.userId,
     action: `provider_account.${data.status === "active" ? "enable" : "disable"}`,
-    after: { id: data.id, label: (row as { label: string }).label, status: data.status },
+    after: {
+      id: data.id,
+      label: (row as { label: string }).label,
+      status: data.status,
+      ...(smsOptionTenants ? { sms_option_tenants: smsOptionTenants } : {}),
+    },
   });
-  return { ok: true };
+  return { ok: true, smsOptionTenants };
 }
 
 // ---------------------------------------------------------------------------
@@ -881,6 +954,139 @@ async function moveDefaultEmailDomains(opts: { skipOnAccountId?: string } = {}):
 }
 
 // ---------------------------------------------------------------------------
+// A house's extra SMS accounts (chosen per campaign)
+
+/** Campanhas de SMS que ainda vão (ou podem voltar a) enviar. */
+const LIVE_SMS_CAMPAIGN_STATUSES = ["agendada", "enviando", "pausada", "aguardando_aprovacao"];
+
+/** Conta que a padrão de SMS da casa usa hoje (override ou padrão da plataforma). */
+async function houseDefaultSmsAccountId(tenantId: string): Promise<string> {
+  const { data, error } = await db()
+    .from("tenant_channel_providers")
+    .select("provider_account_id")
+    .eq("tenant_id", tenantId)
+    .eq("channel", "sms")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const override = (data as { provider_account_id: string } | null)?.provider_account_id;
+  return override ?? (await currentDefaults()).sms;
+}
+
+export async function adminAddTenantSmsAccountOptionFor(
+  context: AdminContext,
+  data: z.infer<typeof addTenantSmsAccountOptionInput>,
+): Promise<{ ok: true }> {
+  await assertSuperAdmin(context.userId);
+  const displayName = data.displayName.trim();
+  const lower = displayName.toLocaleLowerCase("pt-BR");
+  if (lower === SMS_DEFAULT_CHOICE_NAME.toLocaleLowerCase("pt-BR")) {
+    throw new Error(`"${SMS_DEFAULT_CHOICE_NAME}" é reservado. Escolha outro nome.`);
+  }
+
+  const { data: row, error } = await db()
+    .from("provider_accounts")
+    .select("id, provider, label, channels, status")
+    .eq("id", data.accountId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const account = row as Pick<AccountRow, "id" | "provider" | "label" | "channels" | "status"> | null;
+  if (!account) throw new Error("Conta de provedor não encontrada.");
+  if (account.status !== "active") throw new Error("Esta conta está desativada.");
+  if (
+    !(account.channels ?? []).includes("sms") ||
+    !SUPPORTED_CHANNELS[account.provider].includes("sms")
+  ) {
+    throw new Error("Esta conta não atende SMS.");
+  }
+  if ((await houseDefaultSmsAccountId(data.tenantId)) === data.accountId) {
+    throw new Error("Esta conta já é a padrão de SMS desta casa.");
+  }
+
+  const { data: existing, error: existingError } = await db()
+    .from("tenant_channel_account_options")
+    .select("provider_account_id, display_name")
+    .eq("tenant_id", data.tenantId)
+    .eq("channel", "sms");
+  if (existingError) throw new Error(existingError.message);
+  const current = (existing ?? []) as Array<{ provider_account_id: string; display_name: string }>;
+  if (current.some((o) => o.provider_account_id === data.accountId)) {
+    throw new Error("Esta conta já é uma conta extra desta casa.");
+  }
+  if (current.some((o) => o.display_name.trim().toLocaleLowerCase("pt-BR") === lower)) {
+    throw new Error("Já existe uma conta extra com este nome nesta casa.");
+  }
+
+  const { error: insertError } = await db().from("tenant_channel_account_options").insert({
+    tenant_id: data.tenantId,
+    channel: "sms",
+    provider_account_id: data.accountId,
+    display_name: displayName,
+    created_by: context.userId,
+  });
+  if (insertError) {
+    if ((insertError as { code?: string }).code === "23505") {
+      throw new Error("Esta conta ou este nome já está em uso nesta casa.");
+    }
+    throw new Error(insertError.message);
+  }
+  invalidateProviderAccountsCache();
+  await auditAdminAction({
+    actorUserId: context.userId,
+    action: "tenant_sms_account_option.add",
+    tenantId: data.tenantId,
+    after: { provider_account_id: data.accountId, label: account.label, display_name: displayName },
+  });
+  return { ok: true };
+}
+
+export async function adminRemoveTenantSmsAccountOptionFor(
+  context: AdminContext,
+  data: z.infer<typeof removeTenantSmsAccountOptionInput>,
+): Promise<{ ok: true }> {
+  await assertSuperAdmin(context.userId);
+  const { data: row, error } = await db()
+    .from("tenant_channel_account_options")
+    .select("provider_account_id, display_name")
+    .eq("tenant_id", data.tenantId)
+    .eq("channel", "sms")
+    .eq("provider_account_id", data.accountId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const option = row as { provider_account_id: string; display_name: string } | null;
+  if (!option) throw new Error("Esta conta não é uma conta extra desta casa.");
+
+  // Campanhas ainda vivas com esta conta perderiam a conta escolhida.
+  const { count, error: countError } = await db()
+    .from("sms_campaigns")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", data.tenantId)
+    .eq("provider_account_id", data.accountId)
+    .in("status", LIVE_SMS_CAMPAIGN_STATUSES);
+  if (countError) throw new Error(countError.message);
+  if ((count ?? 0) > 0) {
+    throw new Error(
+      `${count} campanha(s) de SMS desta casa (agendadas, em envio ou pausadas) usam "${option.display_name}". Espere terminarem ou cancele-as antes de remover.`,
+    );
+  }
+
+  const { error: deleteError } = await db()
+    .from("tenant_channel_account_options")
+    .delete()
+    .eq("tenant_id", data.tenantId)
+    .eq("channel", "sms")
+    .eq("provider_account_id", data.accountId);
+  if (deleteError) throw new Error(deleteError.message);
+  invalidateProviderAccountsCache();
+  await auditAdminAction({
+    actorUserId: context.userId,
+    action: "tenant_sms_account_option.remove",
+    tenantId: data.tenantId,
+    before: { provider_account_id: data.accountId, display_name: option.display_name },
+  });
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // Delete
 
 export async function adminDeleteProviderAccountFor(
@@ -916,6 +1122,13 @@ export async function adminDeleteProviderAccountFor(
   if (inUseError) throw new Error(inUseError.message);
   if ((inUse ?? []).length) {
     throw new Error("Uma ou mais casas usam esta conta em algum canal. Mude essas casas de conta antes de excluir.");
+  }
+
+  const optionTenants = await tenantsWithAccountOption(data.id);
+  if (optionTenants.length) {
+    throw new Error(
+      `Esta conta é conta extra de ${optionTenants.length} casa(s). Remova-a dessas casas antes de excluir.`,
+    );
   }
 
   const { data: domainsInUse, error: domainsError } = await db()

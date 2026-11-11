@@ -82,6 +82,8 @@ const DB_CHUNK = 200;
 
 export type SmsBatchItem = {
   tenantId: string;
+  /** Account chosen for the campaign (a house option); empty = the house's default. */
+  providerAccountId?: string | null;
   to: string;
   /** Final text: template variables already applied. Links are rewritten here. */
   content: string;
@@ -674,20 +676,24 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
   }
 
   // Provedores por casa: cada lote sai por UMA conta. Itens de casas com
-  // contas diferentes viram um lote por conta; a casa cuja conta está
-  // indisponível falha como misconfigured (sem fallback para a conta padrão).
+  // contas diferentes (ou de campanhas com conta escolhida) viram um lote por
+  // conta; a casa cuja conta está indisponível falha como misconfigured (sem
+  // fallback para a conta padrão).
+  const accountKey = (item: SmsBatchItem) => `${item.tenantId}:${item.providerAccountId ?? ""}`;
   const accountOf = new Map<string, SmsAccount | { unavailable: string }>();
-  for (const tenantId of new Set(items.map((i) => i.tenantId))) {
+  for (const item of items) {
+    const key = accountKey(item);
+    if (accountOf.has(key)) continue;
     try {
-      accountOf.set(tenantId, await resolveSmsAccount(tenantId));
+      accountOf.set(key, await resolveSmsAccount(item.tenantId, item.providerAccountId));
     } catch (error) {
       if (!(error instanceof ProviderAccountUnavailableError)) throw error;
-      accountOf.set(tenantId, { unavailable: error.message });
+      accountOf.set(key, { unavailable: error.message });
     }
   }
   const byAccount = new Map<string, Array<{ item: SmsBatchItem; index: number }>>();
   items.forEach((item, index) => {
-    const resolved = accountOf.get(item.tenantId)!;
+    const resolved = accountOf.get(accountKey(item))!;
     if ("unavailable" in resolved) {
       outcomes[index] = {
         deliveryKey: item.deliveryKey,
@@ -714,7 +720,7 @@ export async function sendSmsBatch(items: SmsBatchItem[]): Promise<SmsBatchResul
     }
     return result(lotes, httpCalls);
   }
-  const account = accountOf.get(items[0].tenantId) as SmsAccount;
+  const account = accountOf.get(accountKey(items[0])) as SmsAccount;
 
   const transport = smsBulkTransport(account);
   if (transport === "misconfigured") {

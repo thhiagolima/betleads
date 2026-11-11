@@ -3,11 +3,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
+  addTenantSmsAccountOptionInput,
   deleteProviderAccountInput,
   saveProviderAccountInput,
   setPlatformDefaultInput,
   setProviderAccountStatusInput,
   setTenantChannelProviderInput,
+  removeTenantSmsAccountOptionInput,
   testProviderAccountInput,
 } from "./provider-accounts.shared";
 import { setTenantChannelInput, tenantChannelImpactInput } from "./tenant-channels.shared";
@@ -57,6 +59,25 @@ export const adminSetPlatformDefault = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { adminSetPlatformDefaultFor } = await import("./provider-accounts-admin.server");
     return adminSetPlatformDefaultFor(context, data);
+  });
+
+/** Vincula uma conta extra de SMS à casa (escolhível na campanha, com o nome que a casa vê). */
+export const adminAddTenantSmsAccountOption = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => addTenantSmsAccountOptionInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const { adminAddTenantSmsAccountOptionFor } = await import("./provider-accounts-admin.server");
+    return adminAddTenantSmsAccountOptionFor(context, data);
+  });
+
+/** Remove a conta extra de SMS da casa (bloqueado se houver campanhas vivas com ela). */
+export const adminRemoveTenantSmsAccountOption = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => removeTenantSmsAccountOptionInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const { adminRemoveTenantSmsAccountOptionFor } =
+      await import("./provider-accounts-admin.server");
+    return adminRemoveTenantSmsAccountOptionFor(context, data);
   });
 
 export const adminDeleteProviderAccount = createServerFn({ method: "POST" })

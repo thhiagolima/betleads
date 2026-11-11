@@ -22,8 +22,10 @@ vi.mock("@/lib/tenant-domains.server", () => ({
 }));
 
 import {
+  adminAddTenantSmsAccountOptionFor,
   adminDeleteProviderAccountFor,
   adminListProviderAccountsFor,
+  adminRemoveTenantSmsAccountOptionFor,
   adminSaveProviderAccountFor,
   adminSetPlatformDefaultFor,
   adminSetProviderAccountStatusFor,
@@ -35,9 +37,14 @@ import {
   DEFAULT_INFOBIP_ACCOUNT_ID,
   DEFAULT_ONESIGNAL_ACCOUNT_ID,
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+  listSmsSendChoices,
   resolveOneSignalAccount,
 } from "./provider-accounts.server";
-import { saveProviderAccountInput } from "./provider-accounts.shared";
+import {
+  addTenantSmsAccountOptionInput,
+  removeTenantSmsAccountOptionInput,
+  saveProviderAccountInput,
+} from "./provider-accounts.shared";
 import { decryptProviderCredentials, encryptProviderCredentials } from "./secret-box.server";
 
 const ADMIN = { userId: "00000000-0000-4000-8000-0000000000ad" };
@@ -155,6 +162,7 @@ describe("provider accounts admin", () => {
         nome: "Casa Um",
         accounts: { sms: null, email: null, voice: null, webpush: null },
         channels: { sms: true, email: true, voice: true, webpush: false },
+        smsOptions: [],
       },
     ]);
   });
@@ -931,5 +939,160 @@ describe("provider accounts admin", () => {
         /apps de web push/,
       );
     });
+  });
+});
+
+describe("contas extras de SMS por casa (tenant_channel_account_options)", () => {
+  const EXTRA = "abababab-1111-4222-8333-444444444444";
+  const add = (data: Record<string, unknown>) =>
+    adminAddTenantSmsAccountOptionFor(ADMIN, addTenantSmsAccountOptionInput.parse(data));
+  const remove = (data: Record<string, unknown>) =>
+    adminRemoveTenantSmsAccountOptionFor(ADMIN, removeTenantSmsAccountOptionInput.parse(data));
+
+  async function extraSmsAccount() {
+    return create(
+      {
+        provider: "short_brasil",
+        label: "Short Brasil rota 2 (interno)",
+        channels: ["sms"],
+        credentials: { shortcode_token: "token-rota-2" },
+      },
+      EXTRA,
+    );
+  }
+
+  it("only the super admin can add or remove", async () => {
+    await extraSmsAccount();
+    await expect(
+      adminAddTenantSmsAccountOptionFor(NOT_ADMIN, {
+        tenantId: TENANT,
+        accountId: EXTRA,
+        displayName: "Rota principal",
+      }),
+    ).rejects.toThrow();
+    await expect(
+      adminRemoveTenantSmsAccountOptionFor(NOT_ADMIN, { tenantId: TENANT, accountId: EXTRA }),
+    ).rejects.toThrow();
+  });
+
+  it("adds an option: audited, listed in smsOptions, and offered to the house by its name only", async () => {
+    await extraSmsAccount();
+    await add({ tenantId: TENANT, accountId: EXTRA, displayName: "  Rota principal " });
+
+    expect(fake.db.rows("tenant_channel_account_options")).toEqual([
+      expect.objectContaining({
+        tenant_id: TENANT,
+        channel: "sms",
+        provider_account_id: EXTRA,
+        display_name: "Rota principal",
+        created_by: ADMIN.userId,
+      }),
+    ]);
+    expect(audit.calls.at(-1)).toMatchObject({
+      action: "tenant_sms_account_option.add",
+      tenantId: TENANT,
+    });
+    const listing = await adminListProviderAccountsFor(ADMIN);
+    expect(listing.tenants.find((t) => t.id === TENANT)?.smsOptions).toEqual([
+      { accountId: EXTRA, displayName: "Rota principal" },
+    ]);
+    // The resolver sees it right away (cache invalidated).
+    const choices = await listSmsSendChoices(TENANT);
+    expect(choices).toEqual([
+      { id: null, name: "Padrão da casa", available: true },
+      { id: EXTRA, name: "Rota principal", available: true },
+    ]);
+    expect(JSON.stringify(choices)).not.toMatch(/Short Brasil|interno/);
+  });
+
+  it("refuses: disabled account, no sms, the house default, duplicates and reserved name", async () => {
+    await extraSmsAccount();
+    // Default of the house (platform default).
+    await expect(
+      add({ tenantId: TENANT, accountId: DEFAULT_SHORT_BRASIL_ACCOUNT_ID, displayName: "Rota" }),
+    ).rejects.toThrow(/já é a padrão de SMS/);
+    // Account that does not serve sms.
+    await expect(
+      add({ tenantId: TENANT, accountId: DEFAULT_INFOBIP_ACCOUNT_ID, displayName: "Rota" }),
+    ).rejects.toThrow(/não atende SMS/);
+    await expect(
+      add({ tenantId: TENANT, accountId: EXTRA, displayName: "padrão da casa" }),
+    ).rejects.toThrow(/reservado/);
+
+    await add({ tenantId: TENANT, accountId: EXTRA, displayName: "Rota principal" });
+    await expect(
+      add({ tenantId: TENANT, accountId: EXTRA, displayName: "Outra" }),
+    ).rejects.toThrow(/já é uma conta extra/);
+
+    const OTHER_EXTRA = "cdcdcdcd-1111-4222-8333-444444444444";
+    await create(
+      {
+        provider: "short_brasil",
+        label: "Rota 3",
+        channels: ["sms"],
+        credentials: { shortcode_token: "t3" },
+      },
+      OTHER_EXTRA,
+    );
+    await expect(
+      add({ tenantId: TENANT, accountId: OTHER_EXTRA, displayName: "ROTA PRINCIPAL" }),
+    ).rejects.toThrow(/mesmo nome|com este nome/);
+
+    fake.db.rows("provider_accounts").find((r) => r.id === OTHER_EXTRA)!.status = "disabled";
+    await expect(
+      add({ tenantId: TENANT, accountId: OTHER_EXTRA, displayName: "Rota 3" }),
+    ).rejects.toThrow(/desativada/);
+  });
+
+  it("removal is blocked while live campaigns use it (with the count); allowed afterwards", async () => {
+    await extraSmsAccount();
+    await add({ tenantId: TENANT, accountId: EXTRA, displayName: "Rota principal" });
+    fake.db.rows("sms_campaigns").push(
+      { id: "c1", tenant_id: TENANT, provider_account_id: EXTRA, status: "agendada" },
+      { id: "c2", tenant_id: TENANT, provider_account_id: EXTRA, status: "pausada" },
+      { id: "c3", tenant_id: TENANT, provider_account_id: EXTRA, status: "enviado" },
+    );
+    await expect(remove({ tenantId: TENANT, accountId: EXTRA })).rejects.toThrow(
+      /2 campanha\(s\) de SMS/,
+    );
+    for (const c of fake.db.rows("sms_campaigns")) c.status = "enviado";
+    await remove({ tenantId: TENANT, accountId: EXTRA });
+    expect(fake.db.rows("tenant_channel_account_options")).toEqual([]);
+    expect(audit.calls.at(-1)).toMatchObject({ action: "tenant_sms_account_option.remove" });
+    await expect(remove({ tenantId: TENANT, accountId: EXTRA })).rejects.toThrow(
+      /não é uma conta extra/,
+    );
+  });
+
+  it("an account that is an option cannot be deleted; disabling it reports the houses", async () => {
+    await extraSmsAccount();
+    await add({ tenantId: TENANT, accountId: EXTRA, displayName: "Rota principal" });
+    await expect(adminDeleteProviderAccountFor(ADMIN, { id: EXTRA })).rejects.toThrow(
+      /conta extra de 1 casa/,
+    );
+    expect(await adminSetProviderAccountStatusFor(ADMIN, { id: EXTRA, status: "disabled" })).toEqual(
+      { ok: true, smsOptionTenants: 1 },
+    );
+    // The house still sees the option, now unavailable.
+    expect(await listSmsSendChoices(TENANT)).toContainEqual({
+      id: EXTRA,
+      name: "Rota principal",
+      available: false,
+    });
+  });
+
+  it("cannot drop sms from an account that is a house option", async () => {
+    const INFOBIP_EXTRA = "efefefef-1111-4222-8333-444444444444";
+    const account = {
+      provider: "infobip",
+      label: "Infobip rota",
+      config: { base_url: "https://own.api.infobip.test" },
+      credentials: { api_key: "k" },
+    };
+    await create({ ...account, channels: ["sms", "email"] }, INFOBIP_EXTRA);
+    await add({ tenantId: TENANT, accountId: INFOBIP_EXTRA, displayName: "Rota Infobip" });
+    await expect(save({ ...account, id: INFOBIP_EXTRA, channels: ["email"] })).rejects.toThrow(
+      /conta extra de 1 casa/,
+    );
   });
 });

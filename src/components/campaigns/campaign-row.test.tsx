@@ -90,6 +90,16 @@ describe("CampaignRow", () => {
     expect(html).toContain('href="/plano-e-creditos"');
   });
 
+  it("sms: shows the send account only when it isn't the house default", () => {
+    expect(row({ ...pausedSms, send_account_name: "Rota principal" })).toContain(
+      "por Rota principal",
+    );
+    expect(row({ ...pausedSms, send_account_name: "Padrão da casa" })).not.toContain(
+      "por Padrão da casa",
+    );
+    expect(row(pausedSms)).not.toContain(" · por ");
+  });
+
   it("webpush: paused for lack of balance shows Retomar and the wallet link", () => {
     const html = row(pausedWebpush);
     expect(html).toContain("Retomar");

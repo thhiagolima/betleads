@@ -5831,6 +5831,7 @@ export type Database = {
           locked_at: string | null;
           locked_by: string | null;
           name: string;
+          provider_account_id: string | null;
           rate_per_minute: number;
           recipients: Json;
           route: string;
@@ -5857,6 +5858,7 @@ export type Database = {
           locked_at?: string | null;
           locked_by?: string | null;
           name: string;
+          provider_account_id?: string | null;
           rate_per_minute?: number;
           recipients?: Json;
           route?: string;
@@ -5883,6 +5885,7 @@ export type Database = {
           locked_at?: string | null;
           locked_by?: string | null;
           name?: string;
+          provider_account_id?: string | null;
           rate_per_minute?: number;
           recipients?: Json;
           route?: string;
@@ -6776,6 +6779,41 @@ export type Database = {
             foreignKeyName: "tenant_billing_tenant_id_fkey";
             columns: ["tenant_id"];
             isOneToOne: true;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      tenant_channel_account_options: {
+        Row: {
+          channel: string;
+          created_at: string;
+          created_by: string | null;
+          display_name: string;
+          provider_account_id: string;
+          tenant_id: string;
+        };
+        Insert: {
+          channel: string;
+          created_at?: string;
+          created_by?: string | null;
+          display_name: string;
+          provider_account_id: string;
+          tenant_id: string;
+        };
+        Update: {
+          channel?: string;
+          created_at?: string;
+          created_by?: string | null;
+          display_name?: string;
+          provider_account_id?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "tenant_channel_account_options_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
             referencedRelation: "tenants";
             referencedColumns: ["id"];
           },

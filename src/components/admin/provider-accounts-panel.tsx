@@ -38,8 +38,10 @@ import {
 } from "@/components/ui/table";
 import { requestConfirmation, requestTextInput } from "@/components/system-dialog-host";
 import {
+  adminAddTenantSmsAccountOption,
   adminDeleteProviderAccount,
   adminListProviderAccounts,
+  adminRemoveTenantSmsAccountOption,
   adminSaveProviderAccount,
   adminSetPlatformDefault,
   adminSetProviderAccountStatus,
@@ -654,6 +656,8 @@ type TenantRow = {
   nome: string;
   accounts: Record<ProviderChannelName, string | null>;
   channels: Record<ProviderChannelName, boolean>;
+  /** Extra SMS accounts the house may pick per campaign (besides its default). */
+  smsOptions?: Array<{ accountId: string; displayName: string }>;
 };
 
 function TenantProvidersCard({
@@ -672,6 +676,8 @@ function TenantProvidersCard({
   const impactFn = useServerFn(adminTenantChannelImpact);
   const setChannelFn = useServerFn(adminSetTenantChannel);
   const [search, setSearch] = useState("");
+  const [smsOptionsTenantId, setSmsOptionsTenantId] = useState<string | null>(null);
+  const smsOptionsTenant = tenants.find((t) => t.id === smsOptionsTenantId) ?? null;
 
   const optionsByChannel = useMemo(() => {
     const out = {} as Record<ProviderChannelName, ProviderAccountView[]>;
@@ -848,6 +854,17 @@ function TenantProvidersCard({
                           ))}
                         </SelectContent>
                       </Select>
+                      {channel === "sms" && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="mt-1 h-7 px-2 text-meta"
+                          onClick={() => setSmsOptionsTenantId(tenant.id)}
+                        >
+                          Contas extras ({tenant.smsOptions?.length ?? 0})
+                        </Button>
+                      )}
                     </TableCell>
                   );
                 })}
@@ -856,6 +873,179 @@ function TenantProvidersCard({
           </TableBody>
         </Table>
       </CardContent>
+      <TenantSmsOptionsDialog
+        tenant={smsOptionsTenant}
+        accounts={accounts}
+        smsAccounts={optionsByChannel.sms}
+        defaultAccountId={
+          smsOptionsTenant ? (smsOptionsTenant.accounts.sms ?? defaults.sms ?? null) : null
+        }
+        onClose={() => setSmsOptionsTenantId(null)}
+      />
     </Card>
+  );
+}
+
+/**
+ * Extra SMS accounts of one house: the house picks one of them (or its default)
+ * when it sends an SMS campaign or test, and only ever sees `displayName`.
+ */
+export function TenantSmsOptionsDialog({
+  tenant,
+  accounts,
+  smsAccounts,
+  defaultAccountId,
+  onClose,
+}: {
+  tenant: TenantRow | null;
+  accounts: ProviderAccountView[];
+  /** Active accounts that can send SMS. */
+  smsAccounts: ProviderAccountView[];
+  /** Account the house's "Padrão da casa" resolves to today. */
+  defaultAccountId: string | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const addFn = useServerFn(adminAddTenantSmsAccountOption);
+  const removeFn = useServerFn(adminRemoveTenantSmsAccountOption);
+  const [accountId, setAccountId] = useState("");
+  const [displayName, setDisplayName] = useState("");
+
+  const options = tenant?.smsOptions ?? [];
+  const labelOf = (id: string) => accounts.find((a) => a.id === id)?.label ?? "conta removida";
+  const available = smsAccounts.filter(
+    (a) => a.id !== defaultAccountId && !options.some((o) => o.accountId === a.id),
+  );
+
+  const add = useMutation({
+    mutationFn: (input: { tenantId: string; accountId: string; displayName: string }) =>
+      addFn({ data: input }),
+    onSuccess: (_result, input) => {
+      void qc.invalidateQueries({ queryKey: QUERY_KEY });
+      toast.success(`Conta extra "${input.displayName}" adicionada.`);
+      setAccountId("");
+      setDisplayName("");
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+
+  const remove = useMutation({
+    mutationFn: (input: { tenantId: string; accountId: string }) => removeFn({ data: input }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: QUERY_KEY });
+      toast.success("Conta extra removida.");
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+
+  async function confirmRemove(option: { accountId: string; displayName: string }) {
+    if (!tenant) return;
+    const ok = await requestConfirmation({
+      title: `Remover "${option.displayName}"?`,
+      description: `${tenant.nome} deixa de poder escolher esta conta nos envios de SMS. Campanhas agendadas, em andamento ou pausadas nesta conta impedem a remoção.`,
+      confirmLabel: "Remover",
+      destructive: true,
+    });
+    if (!ok) return;
+    remove.mutate({ tenantId: tenant.id, accountId: option.accountId });
+  }
+
+  function close() {
+    setAccountId("");
+    setDisplayName("");
+    onClose();
+  }
+
+  const trimmedName = displayName.trim();
+
+  return (
+    <Dialog open={tenant !== null} onOpenChange={(next) => !next && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Contas extras de SMS{tenant ? ` · ${tenant.nome}` : ""}</DialogTitle>
+          <DialogDescription>
+            Além da conta padrão, a casa pode escolher estas contas ao enviar SMS. Ela vê só o nome
+            definido aqui, nunca o fornecedor.
+          </DialogDescription>
+        </DialogHeader>
+
+        {options.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhuma conta extra.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {options.map((option) => (
+              <li
+                key={option.accountId}
+                className="flex items-center justify-between gap-3 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{option.displayName}</p>
+                  <p className="truncate text-meta text-muted-foreground">
+                    {labelOf(option.accountId)}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Remover ${option.displayName}`}
+                  disabled={remove.isPending}
+                  onClick={() => void confirmRemove(option)}
+                >
+                  <Trash2 />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <form
+          className="space-y-3 border-t border-border pt-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!tenant || !accountId || !trimmedName) return;
+            add.mutate({ tenantId: tenant.id, accountId, displayName: trimmedName });
+          }}
+        >
+          <div className="space-y-1">
+            <Label htmlFor="sms-option-account">Conta</Label>
+            <Select value={accountId} onValueChange={setAccountId}>
+              <SelectTrigger id="sms-option-account">
+                <SelectValue
+                  placeholder={
+                    available.length === 0 ? "Nenhuma conta disponível" : "Escolha a conta"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {available.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="sms-option-name">Nome que a casa vê</Label>
+            <Input
+              id="sms-option-name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Ex.: Rota principal"
+              maxLength={60}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={close}>
+              Fechar
+            </Button>
+            <Button type="submit" disabled={add.isPending || !accountId || !trimmedName}>
+              <Plus /> {add.isPending ? "Adicionando…" : "Adicionar"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

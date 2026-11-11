@@ -65,6 +65,7 @@ vi.mock("@/lib/webpush/campaigns.functions", () => ({
 }));
 vi.mock("@/lib/sms-templates.functions", () => ({ listSmsTemplates: vi.fn() }));
 vi.mock("@/lib/sms.functions", () => ({
+  listSmsSendAccounts: vi.fn(),
   previewSmsCampaignRecipients: vi.fn(),
   scheduleBulkSms: vi.fn(),
   sendBulkSms: vi.fn(),
@@ -205,6 +206,32 @@ describe("ChannelCampaignComposer — house", () => {
     expect(html).not.toContain("Título da notificação");
   });
 
+  it("SMS: sem contas extras, não mostra “Enviar por”", () => {
+    queryData["sms-send-accounts"] = {
+      choices: [{ id: null, name: "Padrão da casa", available: true }],
+    };
+    expect(render("sms")).not.toContain("Enviar por");
+  });
+
+  it("SMS: com contas extras, mostra “Enviar por” com a padrão e as indisponíveis marcadas", () => {
+    queryData["sms-send-accounts"] = {
+      choices: [
+        { id: null, name: "Padrão da casa", available: true },
+        { id: "11111111-1111-4111-8111-111111111111", name: "Rota principal", available: true },
+        { id: "22222222-2222-4222-8222-222222222222", name: "Rota reserva", available: false },
+      ],
+    };
+    const html = render("sms");
+    expect(html).toContain("Enviar por");
+    expect(html).toContain(">Padrão da casa<");
+    expect(html).toContain(">Rota principal<");
+    expect(html).toContain(">Rota reserva (indisponível)<");
+    // Never the vendor.
+    expect(html).not.toMatch(/Short Brasil|Infobip/);
+    // The email channel never offers it.
+    expect(render("email")).not.toContain("Enviar por");
+  });
+
   it("não lista Voz no seletor de canal quando voz está desligada", () => {
     enabledChannels.isEnabled = (channel) => channel !== "voice";
     const html = render("sms");
@@ -279,6 +306,19 @@ describe("ChannelCampaignComposer — expert", () => {
     };
     const html = render("sms");
     expect(html).toContain("Seus envios estão bloqueados: o teto mensal é R$ 0,00.");
+  });
+
+  it("never offers the SMS account choice (the expert sends through the house default)", () => {
+    queryData["expert-composer-options"] = expertOptions("livre");
+    queryData["sms-send-accounts"] = {
+      choices: [
+        { id: null, name: "Padrão da casa", available: true },
+        { id: "11111111-1111-4111-8111-111111111111", name: "Rota principal", available: true },
+      ],
+    };
+    const html = render("sms");
+    expect(html).not.toContain("Enviar por");
+    expect(html).not.toContain("Rota principal");
   });
 
   it("labels house and system audiences for the expert", () => {

@@ -643,6 +643,43 @@ describe("processSmsCampaignTick with the SMS provider breaker (incident 15/10/2
     });
   });
 
+  it("chosen account no longer available: campaign paused, nothing sent, cursor untouched", async () => {
+    const { state, deps } = world();
+    const reason = "A conta de envio escolhida não está mais disponível para a casa.";
+    deps.providerGate = async () => ({ mode: "open", message: reason, accountUnavailable: true });
+    const r = await processSmsCampaignTick(campaign(recipients(10)), deps, { deadline: 45_000 });
+    expect(r).toMatchObject({
+      sent: 0,
+      failed: 0,
+      advanced: 0,
+      status: "pausada",
+      stopReason: "account_unavailable",
+    });
+    expect(state.sendCalls).toHaveLength(0);
+    expect(state.patches.some((p) => "sent_cursor" in p)).toBe(false);
+    expect(lastPatch(state.patches)).toMatchObject({
+      status: "pausada",
+      last_error: reason,
+      locked_by: null,
+    });
+  });
+
+  it("chosen account lost mid-tick: batches already sent are kept, then the campaign pauses", async () => {
+    const { state, deps } = world();
+    let calls = 0;
+    deps.providerGate = async () =>
+      ++calls === 1
+        ? { mode: "closed" }
+        : { mode: "open", message: "indisponível", accountUnavailable: true };
+    const r = await processSmsCampaignTick(campaign(recipients(200)), deps, { deadline: 45_000 });
+    expect(r.status).toBe("pausada");
+    expect(r.stopReason).toBe("account_unavailable");
+    expect(r.failed).toBe(0);
+    expect(r.sent).toBeGreaterThan(0);
+    expect(r.sent).toBe(state.sendCalls.length);
+    expect(lastPatch(state.patches)).toMatchObject({ status: "pausada", last_error: "indisponível" });
+  });
+
   it("half-open probe: exactly one recipient is sent, then the tick stops while still open", async () => {
     const { state, deps } = world();
     const gates: Array<"probe" | "open"> = ["probe", "open"];

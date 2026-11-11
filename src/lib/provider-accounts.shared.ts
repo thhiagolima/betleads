@@ -90,3 +90,21 @@ export const setPlatformDefaultInput = z.object({
 export const deleteProviderAccountInput = z.object({
   id: dbUuid(),
 });
+
+/** Nome que a casa vê para uma conta extra de SMS (ex.: "Rota principal"). */
+export const TENANT_SMS_OPTION_NAME_MAX = 60;
+
+export const addTenantSmsAccountOptionInput = z.object({
+  tenantId: dbUuid(),
+  accountId: dbUuid(),
+  displayName: z
+    .string()
+    .trim()
+    .min(1, "Informe o nome que a casa vê.")
+    .max(TENANT_SMS_OPTION_NAME_MAX, `Use até ${TENANT_SMS_OPTION_NAME_MAX} caracteres.`),
+});
+
+export const removeTenantSmsAccountOptionInput = z.object({
+  tenantId: dbUuid(),
+  accountId: dbUuid(),
+});

@@ -35,15 +35,17 @@ type Gate = {
 };
 
 /**
- * Breaker key of the account that sends the house's SMS. null when the
- * house's own account is unavailable: there is nothing to gate, the send
- * itself fails as `misconfigured`.
+ * Breaker key of the account that sends the house's SMS (`accountId`: the
+ * account chosen for a campaign; empty = the house's default). null when
+ * that account is unavailable: there is nothing to gate, the send itself
+ * fails as `misconfigured`.
  */
 export async function smsBreakerKeyForTenant(
   tenantId: string | null | undefined,
+  accountId?: string | null,
 ): Promise<string | null> {
   try {
-    return smsBreakerKey((await resolveSmsAccount(tenantId)).id);
+    return smsBreakerKey((await resolveSmsAccount(tenantId, accountId)).id);
   } catch (error) {
     if (error instanceof ProviderAccountUnavailableError) return null;
     throw error;
@@ -67,8 +69,8 @@ export class SmsAccountGates {
 
   constructor(readonly holder: string) {}
 
-  keyFor(tenantId: string | null | undefined): Promise<string | null> {
-    return smsBreakerKeyForTenant(tenantId);
+  keyFor(tenantId: string | null | undefined, accountId?: string | null): Promise<string | null> {
+    return smsBreakerKeyForTenant(tenantId, accountId);
   }
 
   /**
@@ -99,9 +101,16 @@ export class SmsAccountGates {
     await pending;
   }
 
-  /** Admission of one SMS item (`itemId` identifies it for the probe verdict). */
-  async admit(tenantId: string | null | undefined, itemId: string): Promise<SmsAdmission> {
-    const key = await this.keyFor(tenantId);
+  /**
+   * Admission of one SMS item (`itemId` identifies it for the probe verdict).
+   * `accountId`: account chosen for a campaign (empty = the house's default).
+   */
+  async admit(
+    tenantId: string | null | undefined,
+    itemId: string,
+    accountId?: string | null,
+  ): Promise<SmsAdmission> {
+    const key = await this.keyFor(tenantId, accountId);
     if (key === null) return { mode: "closed", key };
     await this.refresh(key);
     const gate = this.gates.get(key)!;
@@ -155,8 +164,8 @@ export class SmsAccountGates {
    * The provider refused the account of this house on a regular (non-probe)
    * send: no further item of that account is sent by this run.
    */
-  async markOpen(tenantId: string | null | undefined, itemId: string) {
-    const key = await this.keyFor(tenantId);
+  async markOpen(tenantId: string | null | undefined, itemId: string, accountId?: string | null) {
+    const key = await this.keyFor(tenantId, accountId);
     if (key === null) return;
     const gate = this.gates.get(key);
     if (gate?.probeItem === itemId) return; // settle() reads the verdict
@@ -170,8 +179,12 @@ export class SmsAccountGates {
   }
 
   /** When an item of this house held back by its breaker should come back. */
-  async retryAt(tenantId: string | null | undefined, fallbackMs: number): Promise<string> {
-    const key = await this.keyFor(tenantId);
+  async retryAt(
+    tenantId: string | null | undefined,
+    fallbackMs: number,
+    accountId?: string | null,
+  ): Promise<string> {
+    const key = await this.keyFor(tenantId, accountId);
     const snapshot = key === null ? null : cachedSmsBreaker(key);
     return breakerRetryAt(snapshot && snapshot.state !== "closed" ? snapshot : null, fallbackMs);
   }

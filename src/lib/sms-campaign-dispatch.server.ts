@@ -48,6 +48,8 @@ export type SmsCampaignRow = {
   expert_id?: string | null;
   /** Área do Expert: 'pendente' | 'aprovada' | 'recusada'; null = house / free mode. */
   approval_status?: string | null;
+  /** Account chosen for the campaign (a house option); null = the house's default at send time. */
+  provider_account_id?: string | null;
 };
 
 export type AudienceTarget = { phone: string; playerId: string | null };
@@ -138,15 +140,24 @@ export const SMS_CAMPAIGN_EXPERT_INACTIVE_MESSAGE =
   "O expert dono desta campanha foi desativado; nada será enviado.";
 /** last_error of a campaign cancelled because the house's SMS channel was turned off. */
 export const SMS_CAMPAIGN_CHANNEL_DISABLED_MESSAGE = "Canal SMS desabilitado para a casa.";
+/** last_error of a campaign paused because its chosen sending account is no longer usable. */
+export const SMS_CAMPAIGN_ACCOUNT_UNAVAILABLE_MESSAGE =
+  "A conta de envio escolhida não está mais disponível para a casa. Cancele a campanha ou retome quando a conta voltar.";
 
 /**
  * SMS provider circuit breaker, asked before every batch:
  *   closed -> normal batch; open -> the tick stops before the batch
  *   (stop_reason provider_unavailable, cursor untouched); probe -> a batch of
- *   ONE recipient (the half-open probe).
+ *   ONE recipient (the half-open probe). open + accountUnavailable: the
+ *   account chosen for the campaign can no longer be used (option removed,
+ *   account disabled/without credentials) — the campaign is paused
+ *   (stop_reason account_unavailable, cursor untouched) instead of failing
+ *   every recipient.
  */
 export type ProviderGateDecision =
-  { mode: "closed" } | { mode: "probe" } | { mode: "open"; message: string };
+  | { mode: "closed" }
+  | { mode: "probe" }
+  | { mode: "open"; message: string; accountUnavailable?: boolean };
 
 export type CampaignSendItem = {
   target: CampaignTarget;
@@ -218,7 +229,8 @@ export type CampaignTickResult = {
     | "insufficient_balance"
     | "expert_cap"
     | "expert_inactive"
-    | "channel_disabled";
+    | "channel_disabled"
+    | "account_unavailable";
   /** ENV-10: sends whose provider outcome is unknown (counted in `sent`). */
   pendingConfirmation?: number;
 };
@@ -504,9 +516,10 @@ export async function processSmsCampaignTick(
       ? await deps.providerGate()
       : { mode: "closed" };
     if (gate.mode === "open") {
-      // Provider refuses the account: nothing is sent, the cursor stays.
+      // Provider refuses the account (or the chosen account is gone): nothing
+      // is sent, the cursor stays.
       lastError = gate.message;
-      stop = "provider_unavailable";
+      stop = gate.accountUnavailable ? "account_unavailable" : "provider_unavailable";
       break;
     }
     const want =
@@ -725,7 +738,7 @@ export async function processSmsCampaignTick(
     ? totalSent + totalDedup === 0
       ? "falhou"
       : "enviado"
-    : stop === "insufficient_balance" || stop === "expert_cap"
+    : stop === "insufficient_balance" || stop === "expert_cap" || stop === "account_unavailable"
       ? "pausada"
       : stop === "expert_inactive" || stop === "channel_disabled"
         ? "cancelada"
@@ -738,6 +751,7 @@ export async function processSmsCampaignTick(
   };
   if (
     result.stopReason === "provider_unavailable" ||
+    result.stopReason === "account_unavailable" ||
     result.stopReason === "insufficient_balance" ||
     result.stopReason === "expert_cap" ||
     result.stopReason === "expert_inactive" ||

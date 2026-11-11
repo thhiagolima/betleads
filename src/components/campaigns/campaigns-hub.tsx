@@ -113,7 +113,12 @@ export type Campaign = {
   batch_in_progress?: boolean;
   /** Expert campaign refused by the admin: why. */
   rejection_reason?: string | null;
+  /** SMS: name of the send account the house sees ("Padrão da casa" for the default). */
+  send_account_name?: string | null;
 };
+
+/** Name listScheduledSmsCampaigns returns for a campaign on the house default account. */
+const SMS_DEFAULT_ACCOUNT_NAME = "Padrão da casa";
 
 type EmailCampaignRow = {
   id: string;
@@ -743,6 +748,11 @@ export function CampaignRow({
       ? `${num(Number(campaign.completed_count))} concluídas`
       : null,
     repeated > 0 ? `${num(repeated)} repetidos ignorados` : null,
+    campaign.channel === "sms" &&
+    campaign.send_account_name &&
+    campaign.send_account_name !== SMS_DEFAULT_ACCOUNT_NAME
+      ? `por ${campaign.send_account_name}`
+      : null,
   ].filter(Boolean);
 
   const status = (
