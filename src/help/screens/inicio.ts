@@ -139,7 +139,7 @@ const screen: HelpScreen = {
       items: [
         {
           label: "Lista de eventos recentes",
-          what: "Os 6 eventos mais recentes da casa, do mais novo para o mais antigo (no computador, desce a coluna da esquerda e depois a da direita). Cada linha tem um ícone do tipo de evento (pessoa = criou conta, QR code = gerou um PIX, seta verde = depositou, seta roxa = sacou), o nome do jogador, a ação e há quanto tempo aconteceu e, quando tiver valor, o valor à direita (verde quando é depósito).",
+          what: "Os 6 eventos mais recentes da casa, do mais novo para o mais antigo (no computador, desce a coluna da esquerda e depois a da direita). Cada linha tem um ícone do tipo de evento (pessoa = criou conta, QR code = gerou um PIX, seta verde = depositou, seta roxa = sacou), o nome do jogador, a ação e há quanto tempo aconteceu (no depósito e no saque, conta a hora em que foi pago, não a hora em que o PIX foi gerado) e, quando tiver valor, o valor à direita (verde quando é depósito).",
           notes: "Clique no nome do jogador para abrir a ficha dele.",
         },
         {
