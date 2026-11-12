@@ -173,7 +173,13 @@ export function BulkCallTab() {
       const notAttempted = Number(res.notAttempted ?? 0);
       const notAttemptedNote =
         notAttempted > 0 ? `, ${notAttempted} não tentadas por saldo insuficiente` : "";
-      if (res.enfileirado) {
+      // The campaign was cancelled during the run: the rest was never dialed.
+      const campaignCancelled = Number(res.campaignCancelled ?? 0);
+      if (campaignCancelled > 0) {
+        toast.info(
+          `Campanha cancelada: ${res.queued} disparadas, ${campaignCancelled} não tentadas`,
+        );
+      } else if (res.enfileirado) {
         toast.success(
           res.scheduled
             ? `${res.pending} ligações agendadas`

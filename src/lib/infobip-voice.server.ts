@@ -262,6 +262,23 @@ export async function callInfobipVoice(
   return { ...result, billing, providerAccountId: account.id };
 }
 
+/**
+ * Answering-machine detection for the CML create request
+ * (`POST /markuplanguage/1/create`, field `machineDetection`). SYNC mode makes
+ * Infobip deliver `machineDetectionResult` (HUMAN | MACHINE | MACHINE_EOM_*)
+ * in the request to `callback.url` (cml.ts), which answers `hangup` for a
+ * machine instead of playing the message. AMD is an Infobip account add-on,
+ * charged per answered call, and a request asking for it on an account
+ * without the add-on may be refused: it is opt-in, sent only when
+ * `INFOBIP_VOICE_MACHINE_DETECTION` is `on`/`true`/`1`. No `detectionTime`:
+ * the provider default applies.
+ */
+export function voiceMachineDetection(): { mode: { type: "SYNC" } } | undefined {
+  const flag = process.env.INFOBIP_VOICE_MACHINE_DETECTION?.trim().toLowerCase();
+  if (flag !== "on" && flag !== "true" && flag !== "1") return undefined;
+  return { mode: { type: "SYNC" } };
+}
+
 async function placeCall(
   baseUrl: string,
   apiKey: string,
@@ -285,6 +302,7 @@ async function placeCall(
         notifyUrl,
         from,
         customData: idempotencyKey,
+        machineDetection: voiceMachineDetection(),
       }),
       signal: AbortSignal.timeout(20_000),
     });

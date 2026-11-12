@@ -27,7 +27,10 @@ vi.mock("@/lib/email.functions", () => ({
   listEmailCampaigns: vi.fn(),
   sendEmailCampaignNow: vi.fn(),
 }));
-vi.mock("@/lib/calls.functions", () => ({ listCallQueue: vi.fn() }));
+vi.mock("@/lib/calls.functions", () => ({
+  listVoiceCampaigns: vi.fn(),
+  cancelVoiceCampaign: vi.fn(),
+}));
 vi.mock("@/lib/campaign-drafts.functions", () => ({
   deleteCampaignDraft: vi.fn(),
   listCampaignDrafts: vi.fn(),

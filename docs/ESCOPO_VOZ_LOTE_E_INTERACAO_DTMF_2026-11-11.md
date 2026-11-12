@@ -96,11 +96,11 @@ A configuração das teclas é a mesma para os dois caminhos e fica na campanha 
 
 | Tabela / coluna | Conteúdo |
 |---|---|
-| `voice_campaigns` | `id`, `tenant_id`, `name`, `channel_mode` (`cml` \| `bulk`), `voice_asset_id`/`script_id`, `scheduled_at`, `status` (`draft`, `scheduled`, `sending`, `paused`, `cancelled`, `finished`), `dtmf_enabled`, `dtmf_max_digits`, `dtmf_timeout_s`, `repeat_digit`, `no_input_action_id` (D5), contadores. A tela de campanhas passa a ler daqui, e não do agrupamento por `trigger_name`. |
+| `voice_campaigns` | `id`, `tenant_id`, `name`, `dispatch_mode` (`cml` \| `bulk`), `voice_asset_id`/`script_id`, `scheduled_at`, `status` (`draft`, `scheduled`, `sending`, `paused`, `cancelled`, `finished`), `dtmf_enabled`, `dtmf_max_digits`, `dtmf_timeout_s`, `repeat_digit`, `recipient_count`. "Não apertou nada" (D5) é uma linha `digit = no_input` em `voice_dtmf_options`. Contadores vêm da função `voice_campaign_item_counts`. A tela de campanhas passa a ler daqui, e não do agrupamento por `trigger_name`. |
 | `voice_campaign_batches` | Um registro por lote enviado: `campaign_id`, `bulk_id` (único, determinístico: `vc:<campanha>:<n>`), `message_count`, `destination_count`, `status`, `provider_response`, `sent_at`. |
 | `call_queue` (+colunas) | `voice_campaign_id`, `batch_id`, `provider_message_id`, `dispatch_mode`. |
 | `call_history` (+colunas) | `provider_message_id`, `bulk_id`, `answered_by`, `dtmf_codes`. |
-| `voice_dtmf_options` | `owner_type` (`campaign` \| `script`), `owner_id`, `digit` (0–9, `*`; `no_input` para D5), `label`, `action_type`, `action_config` (jsonb), `position`. Única por (`owner`, `digit`). |
+| `voice_dtmf_options` | `owner_type` (`campaign` \| `script`), `owner_id`, `digit` (0–9, `*`; `no_input` para D5), `label`, `action_type`, `action_config` (jsonb), `position`. Única por (`tenant_id`, `owner_type`, `owner_id`, `digit`). |
 | `voice_dtmf_responses` | `tenant_id`, `call_history_id`, `call_queue_id`, `player_id` (nulo para lista de números), `phone`, `digits`, `matched_option_id`, `received_via` (`report` \| `cml`), `received_at`. Única por ligação. |
 | `voice_dtmf_action_runs` | `response_id`, `action_type`, `status` (`pending`, `done`, `failed`, `skipped`), `attempts`, `result`, `error`. Única por (`response_id`, `option_id`) — garante que uma ação nunca roda duas vezes. |
 | `player_tags` | `tenant_id`, `player_id`, `tag`, `source`, `created_at`. Única por (`tenant_id`, `player_id`, `tag`). Novo: não existe etiqueta hoje. |
@@ -214,4 +214,5 @@ Um único executor (`voice-dtmf-actions.server.ts`) lê `voice_dtmf_action_runs`
 
 | ID | Status | Commit | Evidência | Data |
 |---|---|---|---|---|
-| V1-01 a V5-04 | Não iniciado | — | — | — |
+| V1-01 a V1-04 | Implementado, aguardando migration e deploy | — | Testes da fase; revisão independente | 11/11/2026 |
+| V2-01 a V5-04 | Não iniciado | — | — | — |

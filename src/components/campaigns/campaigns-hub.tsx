@@ -27,10 +27,9 @@ import {
   campaignStopReason,
   friendlyChannelReason,
   getChannelOperationState,
-  groupVoiceQueueItems,
   isFinishedCampaignStatus,
   isPausedCampaignStatus,
-  type VoiceQueueItem,
+  type VoiceCampaignGroup,
 } from "@/lib/channel-operation-state";
 import {
   cancelScheduledSmsCampaign,
@@ -47,7 +46,7 @@ import {
   type EmailCampaignRunResult,
 } from "@/lib/email-campaign-messages";
 import { CampaignBlockedBadge } from "@/components/house-config/campaign-blocked-badge";
-import { listCallQueue } from "@/lib/calls.functions";
+import { cancelVoiceCampaign, listVoiceCampaigns } from "@/lib/calls.functions";
 import { deleteCampaignDraft, listCampaignDrafts } from "@/lib/campaign-drafts.functions";
 import {
   cancelWebpushCampaignFn,
@@ -98,6 +97,8 @@ export type Campaign = {
   date_is_creation?: boolean;
   /** Voice campaigns grouped from more than one queue item have no single report. */
   has_report?: boolean;
+  /** Voice: id the report opens (the call of a one-call campaign), when not `id`. */
+  report_id?: string;
   /** ENV-06: recipients skipped because they did not resolve to a player. */
   unresolved_count?: number | null;
   /** Why the campaign stopped (provider error, or who cancelled it). */
@@ -156,7 +157,8 @@ export function CampaignsHub() {
   const { isEnabled } = useEnabledChannels();
   const listCampaigns = useServerFn(listScheduledSmsCampaigns);
   const listEmailCampaignsFn = useServerFn(listEmailCampaigns);
-  const listCallQueueFn = useServerFn(listCallQueue);
+  const listVoiceCampaignsFn = useServerFn(listVoiceCampaigns);
+  const cancelVoiceCampaignFn = useServerFn(cancelVoiceCampaign);
   const cancelCampaign = useServerFn(cancelScheduledSmsCampaign);
   const resumeCampaign = useServerFn(resumeSmsCampaign);
   const sendEmailNow = useServerFn(sendEmailCampaignNow);
@@ -211,7 +213,7 @@ export function CampaignsHub() {
   });
   const voiceQueue = useQuery({
     queryKey: ["call-queue", "campaigns-hub"],
-    queryFn: () => listCallQueueFn({ data: { limit: 200, order: "recent" } }),
+    queryFn: () => listVoiceCampaignsFn(),
     refetchInterval: 30_000,
   });
   const drafts = useQuery({
@@ -237,6 +239,14 @@ export function CampaignsHub() {
     onSuccess: () => {
       toast.success("Campanha retomada. Se ainda faltar saldo, ela volta a pausar.");
       queryClient.invalidateQueries({ queryKey: ["sms-scheduled-campaigns"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const cancelVoice = useMutation({
+    mutationFn: (id: string) => cancelVoiceCampaignFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Campanha cancelada");
+      queryClient.invalidateQueries({ queryKey: ["call-queue"] });
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -320,9 +330,10 @@ export function CampaignsHub() {
       };
     },
   );
-  // The queue has one item per call; group them back into campaigns.
-  const voiceRows: Campaign[] = groupVoiceQueueItems(
-    (voiceQueue.data?.items ?? []) as VoiceQueueItem[],
+  // `voice_campaigns` rows plus the older queue items grouped back into
+  // campaigns by trigger_name (both summarized by listVoiceCampaigns).
+  const voiceRows: Campaign[] = (
+    (voiceQueue.data?.campaigns ?? []) as Array<VoiceCampaignGroup & { isCampaign: boolean }>
   ).map((group) => ({
     id: group.id,
     name: group.name,
@@ -335,8 +346,11 @@ export function CampaignsHub() {
     finished_count: group.finished,
     has_planned_total: true,
     has_report: group.total === 1,
+    report_id: group.isCampaign ? group.itemIds[0] : undefined,
     channel: "voice",
-    cancellable: false,
+    // Only a campaign entity can be cancelled as a whole (legacy groups have no id).
+    cancellable:
+      group.isCampaign && (group.status === "agendada" || group.status === "paused_limit"),
   }));
   const webpushRows: Campaign[] = (
     (webpushCampaigns.data ?? []) as WebpushCampaignSummaryRow[]
@@ -555,8 +569,12 @@ export function CampaignsHub() {
                     key={`${campaign.channel}-${campaign.id}`}
                     campaign={campaign}
                     isFirst={index === 0}
-                    cancelPending={cancel.isPending || cancelWebpush.isPending}
-                    resumePending={resume.isPending || resumeEmail.isPending || resumeWebpush.isPending}
+                    cancelPending={
+                      cancel.isPending || cancelWebpush.isPending || cancelVoice.isPending
+                    }
+                    resumePending={
+                      resume.isPending || resumeEmail.isPending || resumeWebpush.isPending
+                    }
                     onCancel={async () => {
                       const confirmed = await requestConfirmation({
                         title: "Cancelar o envio desta campanha?",
@@ -567,6 +585,7 @@ export function CampaignsHub() {
                       });
                       if (!confirmed) return;
                       if (campaign.channel === "webpush") cancelWebpush.mutate(campaign.id);
+                      else if (campaign.channel === "voice") cancelVoice.mutate(campaign.id);
                       else cancel.mutate(campaign.id);
                     }}
                     onResume={async () => {
@@ -817,7 +836,10 @@ export function CampaignRow({
             asChild
             {...(isFirst ? tourAnchor("campanhas.hub.relatorio") : {})}
           >
-            <Link to="/campanhas/$campaignId/relatorio" params={{ campaignId: campaign.id }}>
+            <Link
+              to="/campanhas/$campaignId/relatorio"
+              params={{ campaignId: campaign.report_id ?? campaign.id }}
+            >
               Relatório
             </Link>
           </Button>
