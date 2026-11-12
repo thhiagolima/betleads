@@ -98,7 +98,9 @@ export async function updateOneSignalAppIcon(
   const response = await fetch(`${ONESIGNAL_BASE_URL}/apps/${appId}`, {
     method: "PUT",
     headers: commonHeaders(apiKey),
-    body: JSON.stringify({ chrome_web_default_notification_icon: iconUrl }),
+    // OneSignal rejects this PUT (400 "must include an 'app_id' key")
+    // unless the body repeats the app id from the path.
+    body: JSON.stringify({ app_id: appId, chrome_web_default_notification_icon: iconUrl }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!response.ok) {

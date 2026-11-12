@@ -310,6 +310,7 @@ describe("updateOneSignalAppIcon", () => {
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Key org-test-key");
     const body = JSON.parse(init.body as string);
+    expect(body.app_id).toBe("app-1");
     expect(body.chrome_web_default_notification_icon).toBe("https://x.com/icon.png");
   });
 
