@@ -25,6 +25,11 @@ export type UpperConfig = { apiKey: string; webhookSecret: string | null; apiBas
 export type SpacePayConfig = {
   gatewayToken: string;
   casinoToken: string | null;
+  /**
+   * X-Platform-Id header value (from SpacePay's /create_gateway_token; an
+   * identifier, not a secret). Optional: null sends the gateway token itself.
+   */
+  platformId: string | null;
   callbackSecret: string;
   apiBase: string | null;
   payer: { name: string; document: string; email: string; phone: string };
@@ -71,6 +76,7 @@ function envSpacePayConfig(): SpacePayConfig | null {
   return {
     gatewayToken,
     casinoToken: env("SPACEPAY_CASINO_TOKEN"),
+    platformId: env("SPACEPAY_PLATFORM_ID"),
     callbackSecret,
     apiBase: env("SPACEPAY_API_BASE"),
     payer: { name, document, email, phone },
@@ -99,6 +105,7 @@ function toStored(provider: PixProvider, creds: GatewayConfig): Record<string, s
     const c = creds as SpacePayConfig;
     put("gatewayToken", c.gatewayToken);
     put("casinoToken", c.casinoToken);
+    put("platformId", c.platformId);
     put("callbackSecret", c.callbackSecret);
     put("apiBase", c.apiBase);
     put("payerName", c.payer?.name);
@@ -127,6 +134,8 @@ function fromStored(provider: PixProvider, stored: Record<string, string>): Gate
   return {
     gatewayToken,
     casinoToken: get("casinoToken"),
+    // Rows saved before platformId existed simply lack it (null).
+    platformId: get("platformId"),
     callbackSecret,
     apiBase: get("apiBase"),
     payer: { name, document, email, phone },
@@ -172,6 +181,8 @@ function buildHints(provider: PixProvider, creds: GatewayConfig): Record<string,
   const c = creds as SpacePayConfig;
   hints.gatewayToken = maskSecret(c.gatewayToken);
   if (c.casinoToken) hints.casinoToken = maskSecret(c.casinoToken);
+  // An identifier, not a secret: shown in clear (nothing when unset).
+  if (c.platformId) hints.platformId = c.platformId;
   hints.callbackSecret = maskSecret(c.callbackSecret);
   if (c.apiBase) hints.apiBase = c.apiBase;
   hints.payerName = c.payer.name;

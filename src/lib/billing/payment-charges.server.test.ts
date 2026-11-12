@@ -911,6 +911,37 @@ describe("reconcilePendingCharges", () => {
     );
   });
 
+  it("never marks a SpacePay charge FAILED on a 404 PLATFORM_NOT_FOUND (bad X-Platform-Id, not a missing charge)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        provider: "spacepay",
+        status: "ACTIVE",
+        created_at: "2026-10-22T11:50:00Z", // 20 min before NOW
+      }),
+    );
+    fake.admin
+      .rows("credit_topup_orders")
+      .push({ id: "order-1", tenant_id: TENANT, status: "pending" });
+    spacePayGet.mockRejectedValue(
+      new PixGatewayError("Cassino não encontrado para o platformId informado", {
+        provider: "spacepay",
+        status: 404,
+        code: "PLATFORM_NOT_FOUND",
+        retryable: false,
+      }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result).toEqual({ checked: 1, credited: 0, expired: 0, errors: 1 });
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("ACTIVE");
+    expect(row.last_error ?? null).toBeNull();
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("pending");
+  });
+
   it("reconciles Upper and SpacePay charges in the same pass, each through its own gateway", async () => {
     fake.admin
       .rows("payment_charges")

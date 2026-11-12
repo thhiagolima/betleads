@@ -21,6 +21,10 @@ import {
   generateCallbackSecret,
   isBlank,
   PaymentGatewaysCard,
+  PUBLIC_APP_URL_LOCAL_WARNING,
+  PUBLIC_APP_URL_MISSING_WARNING,
+  publicAppUrlWarning,
+  SpacePayEditForm,
   spacePayPayload,
   upperPayload,
 } from "./payment-gateways-card";
@@ -38,6 +42,7 @@ describe("PaymentGatewaysCard", () => {
           updatedAt: "2026-11-10T15:30:00Z",
         },
       },
+      publicAppUrl: "https://crm.betleads.com",
     };
     const html = renderToStaticMarkup(<PaymentGatewaysCard />);
     expect(html).toContain("Gateways de pagamento");
@@ -47,8 +52,12 @@ describe("PaymentGatewaysCard", () => {
     expect(html).toContain("eyJh…9f2c");
     expect(html).toContain("***.982.247-**");
     expect(html).toContain("Atualizado em 10/11/2026");
-    expect(html).toContain("/api/public/upper/webhook");
-    expect(html).toContain("/api/public/spacepay/webhook/&lt;token&gt;");
+    // Both URLs come from the server's PUBLIC_APP_URL only.
+    expect(html).toContain("https://crm.betleads.com/api/public/upper/webhook");
+    expect(html).toContain("https://crm.betleads.com/api/public/spacepay/webhook/&lt;token&gt;");
+    expect(html).not.toContain("localhost");
+    expect(html).not.toContain(PUBLIC_APP_URL_MISSING_WARNING);
+    expect(html).not.toContain(PUBLIC_APP_URL_LOCAL_WARNING);
     // Only the inactive one can become active; only the DB row can be removed.
     expect(html.match(/Usar para novas cobranças/g)).toHaveLength(1);
     expect(html.match(/Remover do banco/g)).toHaveLength(1);
@@ -63,10 +72,68 @@ describe("PaymentGatewaysCard", () => {
         upper: { source: "env", hints: { apiKey: "upk_…abcd" }, updatedAt: null },
         spacepay: { source: "none", hints: {}, updatedAt: null },
       },
+      publicAppUrl: "https://crm.betleads.com",
     };
     const html = renderToStaticMarkup(<PaymentGatewaysCard />);
     expect(html).toContain("Não configurado");
     expect(html).toContain("Nenhuma credencial configurada.");
+  });
+
+  it("warns when the server has no PUBLIC_APP_URL (and never guesses one)", () => {
+    queryState.data = {
+      activeProvider: "spacepay",
+      activeSource: "database",
+      gateways: {
+        upper: { source: "none", hints: {}, updatedAt: null },
+        spacepay: { source: "database", hints: {}, updatedAt: null },
+      },
+      publicAppUrl: null,
+    };
+    const html = renderToStaticMarkup(<PaymentGatewaysCard />);
+    expect(html).toContain(PUBLIC_APP_URL_MISSING_WARNING);
+    expect(html).toContain("&lt;PUBLIC_APP_URL&gt;/api/public/spacepay/webhook/&lt;token&gt;");
+    expect(html).not.toContain("localhost");
+  });
+
+  it("warns when PUBLIC_APP_URL points to a local address", () => {
+    queryState.data = {
+      activeProvider: "spacepay",
+      activeSource: "database",
+      gateways: {
+        upper: { source: "none", hints: {}, updatedAt: null },
+        spacepay: { source: "database", hints: {}, updatedAt: null },
+      },
+      publicAppUrl: "http://localhost:3000",
+    };
+    const html = renderToStaticMarkup(<PaymentGatewaysCard />);
+    expect(html).toContain(PUBLIC_APP_URL_LOCAL_WARNING);
+    expect(html).toContain("http://localhost:3000/api/public/spacepay/webhook/&lt;token&gt;");
+  });
+
+});
+
+describe("SpacePayEditForm", () => {
+  it("has a plain-text Platform ID input right after the gateway token, with the stored hint", () => {
+    const html = renderToStaticMarkup(
+      <SpacePayEditForm
+        info={{
+          source: "database",
+          hints: { gatewayToken: "eyJh…9f2c", platformId: "casino-42" },
+          updatedAt: null,
+        }}
+        onSaved={() => undefined}
+      />,
+    );
+    const labels = [...html.matchAll(/<label[^>]*>([^<]*)<\/label>/g)].map((m) => m[1]);
+    const tokenIdx = labels.indexOf("Token do gateway");
+    expect(labels[tokenIdx + 1]).toBe("Platform ID (X-Platform-Id) — opcional");
+    expect(html).toContain(
+      "Vem do /create_gateway_token da SpacePay. Em branco, o próprio token do gateway é enviado como X-Platform-Id.",
+    );
+    expect(html).toContain("Apagar o Platform ID salvo");
+    const input = html.match(/<input[^>]*placeholder="Salvo: casino-42[^"]*"[^>]*>/)?.[0];
+    expect(input).toBeDefined();
+    expect(input).toContain('type="text"');
   });
 });
 
@@ -90,6 +157,7 @@ describe("helpers", () => {
       {
         gatewayToken: "",
         casinoToken: "",
+        platformId: " p-1 ",
         callbackSecret: "",
         apiBase: "",
         payerName: "Empresa",
@@ -97,10 +165,19 @@ describe("helpers", () => {
         payerEmail: "",
         payerPhone: "",
       },
-      ["casinoToken", "callbackSecret"],
+      ["casinoToken", "callbackSecret", "platformId"],
     );
     expect(sp.credentials.payer).toEqual({ name: "Empresa", document: "", email: "", phone: "" });
-    expect(sp.clearFields).toEqual(["casinoToken"]);
+    expect(sp.credentials.platformId).toBe(" p-1 ");
+    expect(sp.clearFields).toEqual(["casinoToken", "platformId"]);
+  });
+
+  it("publicAppUrlWarning", () => {
+    expect(publicAppUrlWarning(null)).toBe(PUBLIC_APP_URL_MISSING_WARNING);
+    expect(publicAppUrlWarning("")).toBe(PUBLIC_APP_URL_MISSING_WARNING);
+    expect(publicAppUrlWarning("http://localhost:3000")).toBe(PUBLIC_APP_URL_LOCAL_WARNING);
+    expect(publicAppUrlWarning("http://127.0.0.1:8080")).toBe(PUBLIC_APP_URL_LOCAL_WARNING);
+    expect(publicAppUrlWarning("https://crm.betleads.com")).toBeNull();
   });
 
   it("isBlank", () => {

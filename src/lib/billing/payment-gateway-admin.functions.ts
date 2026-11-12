@@ -41,6 +41,7 @@ export const PAYMENT_GATEWAY_LABEL: Record<PixProvider, string> = {
 };
 
 export const SPACEPAY_CALLBACK_SECRET_MIN = 32;
+export const SPACEPAY_PLATFORM_ID_MAX = 200;
 
 // ---------------------------------------------------------------------------
 // Document / field validation
@@ -102,6 +103,8 @@ const upperCredentialsInput = z.object({
 const spacePayCredentialsInput = z.object({
   gatewayToken: optionalText(4000),
   casinoToken: optionalText(4000),
+  /** X-Platform-Id (optional; blank = keep, clearFields erases; unset sends the gateway token). */
+  platformId: optionalText(SPACEPAY_PLATFORM_ID_MAX),
   callbackSecret: optionalText(500).refine(
     (v) => v === undefined || v.length >= SPACEPAY_CALLBACK_SECRET_MIN,
     `O segredo do callback precisa ter ao menos ${SPACEPAY_CALLBACK_SECRET_MIN} caracteres.`,
@@ -128,7 +131,7 @@ const spacePayCredentialsInput = z.object({
 });
 
 const UPPER_CLEARABLE = ["webhookSecret", "apiBase"] as const;
-const SPACEPAY_CLEARABLE = ["casinoToken", "apiBase"] as const;
+const SPACEPAY_CLEARABLE = ["casinoToken", "platformId", "apiBase"] as const;
 
 const providerInput = z.enum(["upper", "spacepay"]);
 
@@ -188,12 +191,13 @@ function mergeUpper(
 }
 
 function mergeSpacePay(input: SpacePayInput, stored: SpacePayConfig | null, clear: readonly string[] = []) {
-  const pick = (key: "casinoToken" | "apiBase") =>
+  const pick = (key: "casinoToken" | "platformId" | "apiBase") =>
     input[key] ?? (clear.includes(key) ? null : (stored?.[key] ?? null));
   const payer = input.payer ?? {};
   return {
     gatewayToken: input.gatewayToken ?? stored?.gatewayToken ?? null,
     casinoToken: pick("casinoToken"),
+    platformId: pick("platformId"),
     callbackSecret: input.callbackSecret ?? stored?.callbackSecret ?? null,
     apiBase: pick("apiBase"),
     payer: {
@@ -226,9 +230,19 @@ function changedFields(before: unknown, after: unknown, prefix = ""): string[] {
 // ---------------------------------------------------------------------------
 // Bodies (exported for unit tests)
 
+/**
+ * PUBLIC_APP_URL as the server sees it (no trailing slash), or null. The
+ * SpacePay callback URL and the Upper webhook URL are built from it on the
+ * server, so the admin card shows exactly this (never a client-side guess).
+ */
+export function serverPublicAppUrl(): string | null {
+  const raw = process.env.PUBLIC_APP_URL?.trim();
+  return raw ? raw.replace(/\/+$/, "") || null : null;
+}
+
 export async function adminListPaymentGatewaysFor(context: AdminContext) {
   await assertSuperAdmin(context.userId);
-  return describePaymentGateways();
+  return { ...(await describePaymentGateways()), publicAppUrl: serverPublicAppUrl() };
 }
 
 export async function adminSavePaymentGatewayFor(
@@ -263,6 +277,7 @@ export async function adminSavePaymentGatewayFor(
     next = {
       gatewayToken: m.gatewayToken,
       casinoToken: m.casinoToken,
+      platformId: m.platformId,
       callbackSecret: m.callbackSecret,
       apiBase: m.apiBase,
       payer: {
@@ -312,6 +327,7 @@ export async function adminTestPaymentGatewayFor(
       ? await testSpacePayConnection({
           gatewayToken: creds.gatewayToken,
           casinoToken: creds.casinoToken ?? null,
+          platformId: creds.platformId ?? null,
           apiBase: creds.apiBase ?? null,
         })
       : { ok: false, message: "SpacePay sem token do gateway configurado." };

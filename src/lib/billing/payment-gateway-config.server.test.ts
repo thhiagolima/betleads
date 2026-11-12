@@ -38,6 +38,7 @@ const ENV_KEYS = [
   "UPPER_API_BASE",
   "SPACEPAY_GATEWAY_TOKEN",
   "SPACEPAY_CASINO_TOKEN",
+  "SPACEPAY_PLATFORM_ID",
   "SPACEPAY_CALLBACK_SECRET",
   "SPACEPAY_API_BASE",
   "SPACEPAY_PAYER_NAME",
@@ -66,6 +67,7 @@ const DB_UPPER: UpperConfig = {
 const DB_SPACEPAY: SpacePayConfig = {
   gatewayToken: "eyJhbGciOiJIUzI1NiJ9.payload.sig9f2c",
   casinoToken: null,
+  platformId: "casino-platform-42",
   callbackSecret: "db-callback-secret-2222222222",
   apiBase: "https://sandbox.spacedev.pro",
   payer: {
@@ -112,12 +114,18 @@ describe("env fallback", () => {
   });
 
   it("spacepay: env when every required var is set", async () => {
-    setEnv({ ...SPACEPAY_ENV, SPACEPAY_CASINO_TOKEN: "casino", SPACEPAY_API_BASE: "https://x" });
+    setEnv({
+      ...SPACEPAY_ENV,
+      SPACEPAY_CASINO_TOKEN: "casino",
+      SPACEPAY_PLATFORM_ID: " platform-7 ",
+      SPACEPAY_API_BASE: "https://x",
+    });
     expect(await getSpacePayConfig()).toEqual({
       source: "env",
       config: {
         gatewayToken: SPACEPAY_ENV.SPACEPAY_GATEWAY_TOKEN,
         casinoToken: "casino",
+        platformId: "platform-7",
         callbackSecret: SPACEPAY_ENV.SPACEPAY_CALLBACK_SECRET,
         apiBase: "https://x",
         payer: {
@@ -128,6 +136,16 @@ describe("env fallback", () => {
         },
       },
     });
+  });
+
+  it("spacepay: SPACEPAY_PLATFORM_ID is optional (null when unset)", async () => {
+    setEnv(SPACEPAY_ENV);
+    const loaded = await getSpacePayConfig();
+    expect(loaded.source).toBe("env");
+    expect(loaded.config?.platformId).toBeNull();
+    expect((await describePaymentGateways()).gateways.spacepay.hints).not.toHaveProperty(
+      "platformId",
+    );
   });
 
   it.each(Object.keys(SPACEPAY_ENV))("spacepay: none when %s is missing", async (missing) => {
@@ -150,6 +168,31 @@ describe("database rows", () => {
     setEnv(SPACEPAY_ENV);
     await savePaymentGatewayCredentials("spacepay", DB_SPACEPAY, ACTOR);
     expect(await getSpacePayConfig()).toEqual({ source: "database", config: DB_SPACEPAY });
+  });
+
+  it("a SpacePay row saved before platformId existed loads fine (platformId null)", async () => {
+    const legacy = await encryptProviderCredentials({
+      gatewayToken: DB_SPACEPAY.gatewayToken,
+      callbackSecret: DB_SPACEPAY.callbackSecret,
+      payerName: "Outra Empresa",
+      payerDocument: "12.345.678/0001-90",
+      payerEmail: "pix@outra.com",
+      payerPhone: "11977776666",
+    });
+    fake.admin.rows("payment_gateway_accounts").push({
+      provider: "spacepay",
+      credentials_encrypted: legacy,
+      hints: {},
+      updated_at: "2026-11-01T00:00:00Z",
+    });
+    expect(await getSpacePayConfig()).toEqual({
+      source: "database",
+      config: { ...DB_SPACEPAY, apiBase: null, platformId: null },
+    });
+    expect(console.error).not.toHaveBeenCalled();
+    const view = await describePaymentGateways();
+    expect(view.gateways.spacepay.source).toBe("database");
+    expect(view.gateways.spacepay.hints).not.toHaveProperty("platformId");
   });
 
   it("decrypt failure falls back to env and never logs the secret", async () => {
@@ -338,6 +381,7 @@ describe("savePaymentGatewayCredentials", () => {
     }
     expect(await decryptProviderCredentials(encrypted)).toEqual({
       gatewayToken: DB_SPACEPAY.gatewayToken,
+      platformId: "casino-platform-42",
       callbackSecret: DB_SPACEPAY.callbackSecret,
       apiBase: DB_SPACEPAY.apiBase,
       payerName: "Outra Empresa",
@@ -347,6 +391,7 @@ describe("savePaymentGatewayCredentials", () => {
     });
     expect(row.hints).toEqual({
       gatewayToken: "eyJh…9f2c",
+      platformId: "casino-platform-42",
       callbackSecret: "db-c…2222",
       apiBase: "https://sandbox.spacedev.pro",
       payerName: "Outra Empresa",

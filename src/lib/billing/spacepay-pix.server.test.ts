@@ -10,6 +10,7 @@ vi.mock("./billing-signals.server", () => ({ recordBillingSignal }));
 type TestSpacePayConfig = {
   gatewayToken: string;
   casinoToken: string | null;
+  platformId: string | null;
   callbackSecret: string;
   apiBase: string | null;
   payer: { name: string; document: string; email: string; phone: string };
@@ -24,7 +25,12 @@ vi.mock("./payment-gateway-config.server", () => ({
 
 import { PixGatewayError, isPixNotFound } from "./pix-gateway-error";
 import { verifySpacePayCallbackToken } from "./spacepay-callback-token";
-import { SpacePayError, spacePayCallbackUrl, spacePayGateway } from "./spacepay-pix.server";
+import {
+  SpacePayError,
+  effectivePlatformId,
+  spacePayCallbackUrl,
+  spacePayGateway,
+} from "./spacepay-pix.server";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -33,6 +39,7 @@ function setConfigured() {
     apiBase: "https://spacepay.test/",
     gatewayToken: "gw-token",
     casinoToken: null,
+    platformId: "platform-42",
     callbackSecret: "cb-secret",
     payer: {
       name: "Betleads Ltda",
@@ -62,11 +69,9 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function errorResponse(status: number, message = "erro") {
-  return json(
-    { statusCode: status, timestamp: "2026-11-12T00:00:00Z", path: "/x", message },
-    status,
-  );
+/** Real SpacePay error body shape: {success, message, data: {errors: [...]}}. */
+function errorResponse(status: number, errors: string[] = []) {
+  return json({ success: false, message: "Requisição inválida", data: { errors } }, status);
 }
 
 const cashIn = (overrides: Record<string, unknown> = {}) => ({
@@ -162,6 +167,11 @@ describe("spacepay-pix.server", () => {
       gatewayConfig.spacepay!.casinoToken = null;
       expect(await spacePayGateway.isConfigured()).toBe(true);
     });
+
+    it("does not require the platformId", async () => {
+      gatewayConfig.spacepay!.platformId = null;
+      expect(await spacePayGateway.isConfigured()).toBe(true);
+    });
   });
 
   it("callback URL uses PUBLIC_APP_URL without trailing slash and a verifiable token", async () => {
@@ -202,6 +212,7 @@ describe("spacepay-pix.server", () => {
       expect(url).toBe("https://spacepay.test/create_gateway_cash_in");
       expect(init.method).toBe("POST");
       expect((init.headers as Record<string, string>).Authorization).toBe("Bearer gw-token");
+      expect((init.headers as Record<string, string>)["X-Platform-Id"]).toBe("platform-42");
       expect(body).toEqual({
         document: "12.345.678/0001-90",
         email: "financeiro@example.com",
@@ -322,14 +333,16 @@ describe("spacepay-pix.server", () => {
     });
 
     it("does not retry on 400 and maps it to VALIDATION", async () => {
-      const fetchMock = vi.fn().mockResolvedValue(errorResponse(400, "amount inválido"));
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(errorResponse(400, ["Header X-Platform-Id é obrigatório", "outro"]));
       vi.stubGlobal("fetch", fetchMock);
 
       await expect(spacePayGateway.create(createInput)).rejects.toMatchObject({
         status: 400,
         code: "VALIDATION",
         retryable: false,
-        message: "amount inválido",
+        message: "SpacePay respondeu 400: Header X-Platform-Id é obrigatório",
       });
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(recordBillingSignal).not.toHaveBeenCalled();
@@ -356,7 +369,7 @@ describe("spacepay-pix.server", () => {
       );
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce(errorResponse(409, "duplicate"))
+        .mockResolvedValueOnce(errorResponse(409, ["duplicate"]))
         .mockResolvedValueOnce(
           json({ status: "success", data: others, meta: { page: 1, perPage: 100, total: 101 } }),
         )
@@ -400,7 +413,7 @@ describe("spacepay-pix.server", () => {
     it("on 409 with no matching transaction rethrows the 409", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce(errorResponse(409, "duplicate"))
+        .mockResolvedValueOnce(errorResponse(409, ["duplicate"]))
         .mockResolvedValueOnce(
           json({ status: "success", data: [], meta: { page: 1, perPage: 100, total: 0 } }),
         );
@@ -620,10 +633,111 @@ describe("spacepay-pix.server", () => {
     });
 
     it("by id passes a 404 through as NOT_FOUND", async () => {
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(errorResponse(404)));
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(errorResponse(404, ["Transação não encontrada"])),
+      );
+      const err = await spacePayGateway
+        .get({ externalId: "bl-top-abc", providerChargeId: "missing" })
+        .catch((e: unknown) => e);
+      expect(err).toMatchObject({ status: 404, code: "NOT_FOUND", retryable: false });
+      expect(isPixNotFound(err)).toBe(true);
+    });
+
+    it("sends X-Platform-Id on the /transactions reads too", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(json({ status: "success", data: tx() }));
+      vi.stubGlobal("fetch", fetchMock);
+      await spacePayGateway.get({ externalId: "bl-top-abc", providerChargeId: "id" });
+      const listMock = vi.fn().mockResolvedValue(json({ status: "success", data: [tx()] }));
+      vi.stubGlobal("fetch", listMock);
+      await spacePayGateway.get({ externalId: "bl-top-abc", providerChargeId: null });
+      for (const mock of [fetchMock, listMock]) {
+        const headers = call(mock, 0).init.headers as Record<string, string>;
+        expect(headers["X-Platform-Id"]).toBe("platform-42");
+      }
+    });
+
+    it("a 404 for an unknown platformId is PLATFORM_NOT_FOUND, never 'charge not found'", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          errorResponse(404, ["Cassino não encontrado para o platformId informado"]),
+        ),
+      );
+      for (const providerChargeId of ["id", null]) {
+        recordBillingSignal.mockClear();
+        const err = await spacePayGateway
+          .get({ externalId: "bl-top-abc", providerChargeId })
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(SpacePayError);
+        expect(err).toMatchObject({
+          status: 404,
+          code: "PLATFORM_NOT_FOUND",
+          retryable: false,
+          message: "SpacePay respondeu 404: Cassino não encontrado para o platformId informado",
+        });
+        expect(isPixNotFound(err)).toBe(false);
+        expect(recordBillingSignal).toHaveBeenCalledWith(
+          "spacepay_unauthorized",
+          "404 PLATFORM_NOT_FOUND",
+        );
+      }
+    });
+
+    it("sanitizes data.errors: first entry only, no control chars, no tokens, ≤160 chars", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            errorResponse(400, [`token gw-token\n${"x".repeat(300)}`, "segundo erro"]),
+          ),
+      );
+      const err = (await spacePayGateway.create(createInput).catch((e: unknown) => e)) as Error;
+      const detail = err.message.slice("SpacePay respondeu 400: ".length);
+      expect(err.message.startsWith("SpacePay respondeu 400: token •••• x")).toBe(true);
+      expect(detail.length).toBeLessThanOrEqual(160);
+      expect(err.message).not.toContain("gw-token");
+      expect(err.message).not.toContain("\n");
+      expect(err.message).not.toContain("segundo");
+    });
+
+    it("never puts a body without data.errors into the message", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(json({ statusCode: 400, message: "secret stuff", detail: "x" }, 400)),
+      );
       await expect(
-        spacePayGateway.get({ externalId: "bl-top-abc", providerChargeId: "missing" }),
-      ).rejects.toMatchObject({ status: 404, code: "NOT_FOUND", retryable: false });
+        spacePayGateway.get({ externalId: "bl-top-abc", providerChargeId: "id" }),
+      ).rejects.toMatchObject({ message: "SpacePay respondeu 400.", code: "VALIDATION" });
+    });
+
+    it("sends the gateway token as X-Platform-Id when platformId is blank (reads and create)", async () => {
+      gatewayConfig.spacepay!.platformId = " ";
+      gatewayConfig.spacepay!.casinoToken = "casino-token";
+      const fetchMock = vi.fn().mockResolvedValue(json({ status: "success", data: tx() }));
+      vi.stubGlobal("fetch", fetchMock);
+      await spacePayGateway.get({ externalId: "bl-top-abc", providerChargeId: "id" });
+      let headers = call(fetchMock, 0).init.headers as Record<string, string>;
+      // Reads authenticate with the casino token, but X-Platform-Id is the gateway token.
+      expect(headers.Authorization).toBe("Bearer casino-token");
+      expect(headers["X-Platform-Id"]).toBe("gw-token");
+
+      gatewayConfig.spacepay!.platformId = null;
+      const createMock = vi.fn().mockResolvedValue(json(cashIn()));
+      vi.stubGlobal("fetch", createMock);
+      await spacePayGateway.create(createInput);
+      headers = call(createMock, 0).init.headers as Record<string, string>;
+      expect(headers["X-Platform-Id"]).toBe("gw-token");
+    });
+
+    it("effectivePlatformId: platformId when set, else the gateway token", () => {
+      expect(effectivePlatformId({ platformId: " p-1 ", gatewayToken: "gw" })).toBe("p-1");
+      expect(effectivePlatformId({ platformId: null, gatewayToken: " gw " })).toBe("gw");
+      expect(effectivePlatformId({ platformId: "", gatewayToken: "" })).toBeNull();
+      expect(effectivePlatformId(null)).toBeNull();
     });
 
     it.each([

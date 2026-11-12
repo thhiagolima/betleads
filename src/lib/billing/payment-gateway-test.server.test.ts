@@ -83,12 +83,14 @@ describe("testSpacePayConnection", () => {
     const result = await testSpacePayConnection({
       gatewayToken: "gw-token",
       casinoToken: "casino-token",
+      platformId: " platform-42 ",
       apiBase: "https://sp.test/",
     });
     expect(result).toEqual({ ok: true, message: "Conectado. A SpacePay aceitou o token do cassino." });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://sp.test/transactions?perPage=1");
     expect(init.headers.Authorization).toBe("Bearer casino-token");
+    expect(init.headers["X-Platform-Id"]).toBe("platform-42");
   });
 
   it("falls back to the gateway token; 401/403 = refused", async () => {
@@ -97,6 +99,7 @@ describe("testSpacePayConnection", () => {
     const result = await testSpacePayConnection({
       gatewayToken: "gw-token",
       casinoToken: null,
+      platformId: "p1",
       apiBase: null,
     });
     expect(result).toEqual({
@@ -112,8 +115,77 @@ describe("testSpacePayConnection", () => {
   it("network failure is reported without details", async () => {
     stubFetch();
     fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));
-    const result = await testSpacePayConnection({ gatewayToken: "gw", casinoToken: null, apiBase: null });
+    const result = await testSpacePayConnection({
+      gatewayToken: "gw",
+      casinoToken: null,
+      platformId: "p1",
+      apiBase: null,
+    });
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/Não foi possível falar com a SpacePay/);
+  });
+
+  function spacePayError(status: number, errors: string[]) {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ success: false, message: "Requisição inválida", data: { errors } }),
+        { status },
+      ),
+    );
+  }
+
+  const creds = {
+    gatewayToken: "gw-secret-token-123",
+    casinoToken: null,
+    platformId: "p1",
+    apiBase: null,
+  };
+
+  it("404 naming the platformId = Platform ID não encontrado", async () => {
+    stubFetch();
+    spacePayError(404, ["Cassino não encontrado para o platformId informado"]);
+    expect(await testSpacePayConnection(creds)).toEqual({
+      ok: false,
+      message: "Platform ID não encontrado na SpacePay.",
+    });
+  });
+
+  it("400 shows the first data.errors message, sanitized and without tokens", async () => {
+    stubFetch();
+    spacePayError(400, ["Header X-Platform-Id é obrigatório", "outro"]);
+    expect(await testSpacePayConnection(creds)).toEqual({
+      ok: false,
+      message: "A SpacePay recusou: Header X-Platform-Id é obrigatório",
+    });
+
+    spacePayError(400, [`bad gw-secret-token-123\n${"y".repeat(400)}`]);
+    const long = await testSpacePayConnection(creds);
+    expect(long.message).not.toContain("gw-secret-token-123");
+    expect(long.message).not.toContain("\n");
+    expect(long.message.length).toBeLessThanOrEqual("A SpacePay recusou: ".length + 160);
+  });
+
+  it("400 without data.errors and other statuses never echo the body", async () => {
+    stubFetch();
+    fetchMock.mockResolvedValueOnce(
+      new Response('{"message":"gw-secret-token-123"}', { status: 400 }),
+    );
+    expect(await testSpacePayConnection(creds)).toEqual({
+      ok: false,
+      message: "A SpacePay respondeu HTTP 400.",
+    });
+    spacePayError(404, ["Rota não encontrada"]);
+    expect((await testSpacePayConnection(creds)).message).toBe("A SpacePay respondeu HTTP 404.");
+  });
+
+  it("blank Platform ID sends the gateway token as X-Platform-Id", async () => {
+    stubFetch();
+    respond(200);
+    respond(200);
+    await testSpacePayConnection({ ...creds, platformId: " " });
+    await testSpacePayConnection({ ...creds, casinoToken: "casino-tok", platformId: null });
+    expect(fetchMock.mock.calls[0][1].headers["X-Platform-Id"]).toBe("gw-secret-token-123");
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer casino-tok");
+    expect(fetchMock.mock.calls[1][1].headers["X-Platform-Id"]).toBe("gw-secret-token-123");
   });
 });

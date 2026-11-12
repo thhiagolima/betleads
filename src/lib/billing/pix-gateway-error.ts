@@ -31,9 +31,17 @@ export class PixGatewayError extends Error {
   }
 }
 
-/** The gateway has never heard of this charge (HTTP 404). */
+/**
+ * The gateway has never heard of this charge (HTTP 404). A SpacePay 404 for
+ * an unknown X-Platform-Id (code PLATFORM_NOT_FOUND) is a config problem, not
+ * a missing charge: it must never make reconcile give up on a charge.
+ */
 export function isPixNotFound(error: unknown): boolean {
-  return error instanceof PixGatewayError && error.status === 404;
+  return (
+    error instanceof PixGatewayError &&
+    error.status === 404 &&
+    error.code !== "PLATFORM_NOT_FOUND"
+  );
 }
 
 /** Short `CODE (status)` text stored in `payment_charges.last_error`. Never a secret or body. */

@@ -28,6 +28,27 @@ citadas mas sem ambiente de teste descrito).
 | Imagem do QR | `GET /qr/{transaction_id}.png` | pública, cache 1 dia |
 | Gerar token | `POST /create_gateway_token` (header `x-admin-secret`) | **feito pelo SpacePay**, não por nós |
 
+**Header obrigatório não documentado: `X-Platform-Id`.** Toda chamada (`POST /create_gateway_cash_in`,
+`GET /transactions`, `GET /transactions/{id}`) exige o header `X-Platform-Id: <platformId>`. O valor
+vem do `POST /create_gateway_token` da SpacePay (o mesmo que emite o nosso token do gateway); ainda
+não sabemos se é o próprio token emitido ou um campo separado da resposta. Por isso o `platformId`
+é **opcional**: quando configurado, ele é enviado; em branco, enviamos o próprio token do gateway.
+Sem o header:
+HTTP 400 `Header X-Platform-Id é obrigatório`; com um valor desconhecido: HTTP 404
+`Cassino não encontrado para o platformId informado`. No nosso cliente esse 404 vira o código
+`PLATFORM_NOT_FOUND` (sinal `spacepay_unauthorized`) e **nunca** é lido como "cobrança não
+encontrada": a reconciliação não marca cobrança como FAILED por causa dele. Configuração:
+`platformId` nas credenciais do admin (opcional, pode ser apagado), ou `SPACEPAY_PLATFORM_ID` no
+ambiente (opcional).
+
+**Corpo real dos erros** (a doc descreve `{statusCode, timestamp, path, message, detail}`, mas a API
+responde):
+```json
+{"success": false, "message": "Requisição inválida", "data": {"errors": ["Header X-Platform-Id é obrigatório"]}}
+```
+Só a primeira entrada de `data.errors` (higienizada, até 160 caracteres, sem tokens) entra na
+mensagem do erro e no "Testar conexão"; o resto do corpo nunca é guardado nem logado.
+
 **Cash-in — request** (todos obrigatórios exceto `ip_address`):
 `document` (CPF/CNPJ), `email`, `name`, `amount` (**reais**, 2 casas), `webhook` (URL https nossa),
 `idempotency_key` (1–255, repetida no mesmo gateway → **409**), `phone` (10–13 dígitos),
@@ -209,6 +230,7 @@ BILLING_PIX_PROVIDER=upper            # gateway para NOVAS cobranças
 SPACEPAY_API_BASE=https://integration.prod.spacedev.pro
 SPACEPAY_GATEWAY_TOKEN=               # JWT GatewayBearer (gerado pelo SpacePay, não expira)
 SPACEPAY_CASINO_TOKEN=                # se /transactions exigir (Q2)
+SPACEPAY_PLATFORM_ID=                 # opcional: header X-Platform-Id (em branco = o token do gateway)
 SPACEPAY_CALLBACK_SECRET=             # nosso, para assinar a URL do webhook
 ```
 O GatewayBearer **não expira** e carrega as credenciais do PSP → tratar como segredo de produção,

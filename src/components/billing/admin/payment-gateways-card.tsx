@@ -34,6 +34,8 @@ export type PaymentGatewaysView = {
     PixProvider,
     { source: GatewaySource; hints: Record<string, string>; updatedAt: string | null }
   >;
+  /** PUBLIC_APP_URL as the server sees it (callback/webhook URLs are built from it), or null. */
+  publicAppUrl: string | null;
 };
 
 type TestResult = { ok: boolean; message: string };
@@ -57,6 +59,7 @@ const HINT_LABEL: Record<string, string> = {
   apiBase: "URL da API",
   gatewayToken: "Token do gateway",
   casinoToken: "Token do cassino",
+  platformId: "Platform ID",
   callbackSecret: "Segredo do callback",
   payerName: "Pagador",
   payerDocument: "CPF/CNPJ do pagador",
@@ -81,17 +84,23 @@ export function generateCallbackSecret(length = CALLBACK_SECRET_LENGTH): string 
   return out.join("");
 }
 
-/** Public URL of this app (same env the server uses to build callback URLs). */
-export function publicAppUrl(): string {
-  const fromEnv = (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ?? "";
-  const base = fromEnv || (typeof window !== "undefined" ? window.location.origin : "");
-  return base.replace(/\/+$/, "");
+export const PUBLIC_APP_URL_MISSING_WARNING =
+  "PUBLIC_APP_URL não está configurada no servidor: a SpacePay não conseguirá avisar os pagamentos.";
+export const PUBLIC_APP_URL_LOCAL_WARNING =
+  "PUBLIC_APP_URL aponta para um endereço local; a SpacePay não alcança esse endereço.";
+
+/** Warnings about the server's PUBLIC_APP_URL, from which the SpacePay callback URL is built. */
+export function publicAppUrlWarning(url: string | null | undefined): string | null {
+  if (!url) return PUBLIC_APP_URL_MISSING_WARNING;
+  if (/localhost|127\.0\.0\.1/i.test(url)) return PUBLIC_APP_URL_LOCAL_WARNING;
+  return null;
 }
 
 export type UpperForm = { apiKey: string; webhookSecret: string; apiBase: string };
 export type SpacePayForm = {
   gatewayToken: string;
   casinoToken: string;
+  platformId: string;
   callbackSecret: string;
   apiBase: string;
   payerName: string;
@@ -104,6 +113,7 @@ const EMPTY_UPPER: UpperForm = { apiKey: "", webhookSecret: "", apiBase: "" };
 const EMPTY_SPACEPAY: SpacePayForm = {
   gatewayToken: "",
   casinoToken: "",
+  platformId: "",
   callbackSecret: "",
   apiBase: "",
   payerName: "",
@@ -129,6 +139,7 @@ export function spacePayPayload(form: SpacePayForm, clearFields: string[] = []) 
     credentials: {
       gatewayToken: form.gatewayToken,
       casinoToken: form.casinoToken,
+      platformId: form.platformId,
       callbackSecret: form.callbackSecret,
       apiBase: form.apiBase,
       payer: {
@@ -138,9 +149,9 @@ export function spacePayPayload(form: SpacePayForm, clearFields: string[] = []) 
         phone: form.payerPhone,
       },
     },
-    clearFields: clearFields.filter((f) => f === "casinoToken" || f === "apiBase") as Array<
-      "casinoToken" | "apiBase"
-    >,
+    clearFields: clearFields.filter(
+      (f) => f === "casinoToken" || f === "platformId" || f === "apiBase",
+    ) as Array<"casinoToken" | "platformId" | "apiBase">,
   };
 }
 
@@ -197,6 +208,7 @@ export function PaymentGatewaysCard() {
                 provider={provider}
                 info={data.gateways[provider]}
                 active={data.activeProvider === provider}
+                publicAppUrl={data.publicAppUrl ?? null}
               />
             ))}
           </div>
@@ -210,10 +222,12 @@ function GatewayPanel({
   provider,
   info,
   active,
+  publicAppUrl,
 }: {
   provider: PixProvider;
   info: PaymentGatewaysView["gateways"][PixProvider];
   active: boolean;
+  publicAppUrl: string | null;
 }) {
   const label = PROVIDER_LABEL[provider];
   const queryClient = useQueryClient();
@@ -289,7 +303,7 @@ function GatewayPanel({
       )}
       {updated && <p className="text-xs text-muted-foreground">Atualizado em {updated}.</p>}
 
-      <GatewayUrlNote provider={provider} />
+      <GatewayUrlNote provider={provider} publicAppUrl={publicAppUrl} />
 
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" size="sm" onClick={() => setEditing((v) => !v)}>
@@ -361,8 +375,15 @@ function GatewayPanel({
   );
 }
 
-function GatewayUrlNote({ provider }: { provider: PixProvider }) {
-  const base = publicAppUrl() || "https://seu-dominio";
+function GatewayUrlNote({
+  provider,
+  publicAppUrl,
+}: {
+  provider: PixProvider;
+  publicAppUrl: string | null;
+}) {
+  // Only the server's PUBLIC_APP_URL: it is what the callback URLs are built from.
+  const base = publicAppUrl ?? "<PUBLIC_APP_URL>";
   if (provider === "upper") {
     return (
       <p className="text-xs text-muted-foreground">
@@ -371,13 +392,21 @@ function GatewayUrlNote({ provider }: { provider: PixProvider }) {
       </p>
     );
   }
+  const warning = publicAppUrlWarning(publicAppUrl);
   return (
-    <p className="text-xs text-muted-foreground">
-      Não há webhook a cadastrar na SpacePay: cada cobrança leva a própria URL de callback,{" "}
-      <code className="break-all rounded bg-muted px-1">{`${base}/api/public/spacepay/webhook/<token>`}</code>
-      , assinada com o segredo do callback. Ao trocar o segredo, o anterior continua aceito por 24 h,
-      então os Pix já emitidos seguem confirmando normalmente.
-    </p>
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">
+        Não há webhook a cadastrar na SpacePay: cada cobrança leva a própria URL de callback,{" "}
+        <code className="break-all rounded bg-muted px-1">{`${base}/api/public/spacepay/webhook/<token>`}</code>
+        , assinada com o segredo do callback. Ao trocar o segredo, o anterior continua aceito por 24 h,
+        então os Pix já emitidos seguem confirmando normalmente.
+      </p>
+      {warning && (
+        <p className="text-sm text-destructive" role="alert">
+          {warning}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -432,6 +461,7 @@ function Field({
   secret,
   hint,
   placeholder,
+  help,
   children,
 }: {
   label: string;
@@ -440,6 +470,8 @@ function Field({
   secret?: boolean;
   hint?: string;
   placeholder?: string;
+  /** Short help text under the input. */
+  help?: string;
   children?: ReactNode;
 }) {
   const id = useId();
@@ -457,6 +489,7 @@ function Field({
         />
         {children}
       </div>
+      {help && <p className="text-xs text-muted-foreground">{help}</p>}
     </div>
   );
 }
@@ -587,7 +620,7 @@ function UpperEditForm({
   );
 }
 
-function SpacePayEditForm({
+export function SpacePayEditForm({
   info,
   onSaved,
 }: {
@@ -611,6 +644,14 @@ function SpacePayEditForm({
         onChange={set("gatewayToken")}
         hint={hints.gatewayToken}
       />
+      <Field
+        label="Platform ID (X-Platform-Id) — opcional"
+        value={form.platformId}
+        onChange={set("platformId")}
+        hint={hints.platformId}
+        help="Vem do /create_gateway_token da SpacePay. Em branco, o próprio token do gateway é enviado como X-Platform-Id."
+      />
+      <ClearToggle field="platformId" label="o Platform ID" hints={hints} clear={clear} setClear={setClear} />
       <Field
         label="Token do cassino (opcional, usado nas consultas)"
         secret

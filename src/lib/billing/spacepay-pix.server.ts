@@ -13,10 +13,24 @@
 //   body carries the PSP's own callback bodies (`payload`, `history[].payload`,
 //   with the real payer's name/CPF under arbitrary keys) and our `callbackUrl`
 //   (with the secret callback token); none of that is ever stored.
+// - Every request carries `X-Platform-Id` (not in their docs; value from their
+//   /create_gateway_token): config platformId, else the gateway token itself.
+//   Missing → 400 "Header X-Platform-Id é obrigatório"; unknown →
+//   404 "Cassino não encontrado para o platformId informado" (PLATFORM_NOT_FOUND,
+//   never read as "charge not found").
+// - Real error body: {success, message, data: {errors: [...]}}. Only the first
+//   data.errors entry (sanitized, ≤160 chars) reaches the error message.
 
 import { recordBillingSignal } from "./billing-signals.server";
 import { getSpacePayConfig, type SpacePayConfig } from "./payment-gateway-config.server";
 import { PixGatewayError } from "./pix-gateway-error";
+import {
+  effectivePlatformId,
+  firstSpacePayError,
+  isSpacePayPlatformNotFound,
+} from "./spacepay-protocol";
+
+export { effectivePlatformId };
 // Type-only: pix-gateway.server imports this module at runtime.
 import type {
   CreatePixChargeInput,
@@ -311,8 +325,6 @@ function parseTransaction(tx: unknown): PixCharge {
   };
 }
 
-type SpacePayErrorBody = { statusCode?: number; message?: unknown };
-
 function errorCode(status: number): string {
   if (status === 400 || status === 422) return "VALIDATION";
   if (status === 401) return "INVALID_TOKEN";
@@ -346,6 +358,8 @@ async function spacePayRequest(
   body?: unknown,
 ): Promise<unknown> {
   if (!config || !token) throw notConfigured("SPACEPAY_GATEWAY_TOKEN");
+  const platformId = effectivePlatformId(config);
+  if (!platformId) throw notConfigured("SPACEPAY_GATEWAY_TOKEN");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -358,6 +372,7 @@ async function spacePayRequest(
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
         Accept: "application/json",
         Authorization: `Bearer ${token}`,
+        "X-Platform-Id": platformId,
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
@@ -382,15 +397,20 @@ async function spacePayRequest(
 
   if (!response.ok) {
     const status = response.status;
-    const code = errorCode(status);
-    const errorBody = (parsed ?? {}) as SpacePayErrorBody;
-    const message =
-      typeof errorBody.message === "string" && errorBody.message
-        ? errorBody.message
-        : `SpacePay respondeu ${status}.`;
-    // Bad/missing token blocks every charge; 5xx means the proxy is down.
-    // Fire-and-forget, never changes the error thrown.
-    if (status === 401 || status === 403) {
+    const platformNotFound = isSpacePayPlatformNotFound(status, parsed);
+    const code = platformNotFound ? "PLATFORM_NOT_FOUND" : errorCode(status);
+    // Only the first data.errors entry, sanitized; never the body otherwise.
+    const detail = firstSpacePayError(parsed, [
+      config.gatewayToken,
+      config.casinoToken,
+      config.callbackSecret,
+    ]);
+    const message = detail
+      ? `SpacePay respondeu ${status}: ${detail}`
+      : `SpacePay respondeu ${status}.`;
+    // Bad/missing token or unknown platform id blocks every charge; 5xx means
+    // the proxy is down. Fire-and-forget, never changes the error thrown.
+    if (status === 401 || status === 403 || platformNotFound) {
       void recordBillingSignal("spacepay_unauthorized", `${status} ${code}`);
     } else if (status >= 500) {
       void recordBillingSignal("spacepay_unavailable", `${status} ${code}`);

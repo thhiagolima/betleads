@@ -52,6 +52,7 @@ const SECRET_48 = "s".repeat(48);
 const STORED_SPACEPAY = {
   gatewayToken: "stored-gateway-token",
   casinoToken: "stored-casino-token",
+  platformId: "stored-platform",
   callbackSecret: "c".repeat(40),
   apiBase: null,
   payer: { name: "BetLeads Ltda", document: "52998224725", email: "fin@betleads.test", phone: "11999998888" },
@@ -70,7 +71,9 @@ beforeEach(() => {
   fake.db.onRpc("is_super_admin", (args) => ({ data: args._user_id === ADMIN.userId, error: null }));
 });
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function allAuditText() {
   return JSON.stringify(audit.calls);
@@ -113,7 +116,19 @@ describe("adminListPaymentGatewaysFor", () => {
       },
     };
     loader.describePaymentGateways.mockResolvedValue(described);
-    expect(await adminListPaymentGatewaysFor(ADMIN)).toEqual(described);
+    vi.stubEnv("PUBLIC_APP_URL", " https://crm.betleads.test// ");
+    expect(await adminListPaymentGatewaysFor(ADMIN)).toEqual({
+      ...described,
+      publicAppUrl: "https://crm.betleads.test",
+    });
+  });
+
+  it("publicAppUrl is null when PUBLIC_APP_URL is unset or blank on the server", async () => {
+    loader.describePaymentGateways.mockResolvedValue({ gateways: {} });
+    vi.stubEnv("PUBLIC_APP_URL", "  ");
+    expect((await adminListPaymentGatewaysFor(ADMIN)).publicAppUrl).toBeNull();
+    vi.stubEnv("PUBLIC_APP_URL", undefined);
+    expect((await adminListPaymentGatewaysFor(ADMIN)).publicAppUrl).toBeNull();
   });
 });
 
@@ -189,6 +204,7 @@ describe("adminSavePaymentGatewayFor — SpacePay", () => {
   const full = {
     gatewayToken: "new-gateway-token",
     casinoToken: "",
+    platformId: "  casino-77  ",
     callbackSecret: SECRET_48,
     apiBase: "",
     payer: { name: "BetLeads Ltda", document: VALID_CNPJ, email: "fin@betleads.test", phone: "(11) 99999-8888" },
@@ -201,6 +217,7 @@ describe("adminSavePaymentGatewayFor — SpacePay", () => {
       {
         gatewayToken: "new-gateway-token",
         casinoToken: null,
+        platformId: "casino-77",
         callbackSecret: SECRET_48,
         apiBase: null,
         payer: { name: "BetLeads Ltda", document: "11222333000181", email: "fin@betleads.test", phone: "11999998888" },
@@ -217,6 +234,7 @@ describe("adminSavePaymentGatewayFor — SpacePay", () => {
     const bad = (patch: Record<string, unknown>) =>
       adminSavePaymentGatewayFor(ADMIN, { provider: "spacepay", credentials: { ...full, ...patch } });
     await expect(bad({ callbackSecret: "short" })).rejects.toThrow(/32 caracteres/);
+    await expect(bad({ platformId: "p".repeat(201) })).rejects.toThrow();
     await expect(bad({ payer: { ...full.payer, document: "123.456.789-00" } })).rejects.toThrow(/CPF ou CNPJ/);
     await expect(bad({ payer: { ...full.payer, email: "nope" } })).rejects.toThrow(/E-mail/);
     await expect(bad({ payer: { ...full.payer, phone: "1234" } })).rejects.toThrow(/Telefone/);
@@ -250,6 +268,40 @@ describe("adminSavePaymentGatewayFor — SpacePay", () => {
     });
     expect(audit.calls[0].after).toEqual({ provider: "spacepay", fields_changed: ["payer.email"] });
   });
+
+  it("platformId is optional: saves without it (null) and a stored row without it stays valid", async () => {
+    await adminSavePaymentGatewayFor(ADMIN, {
+      provider: "spacepay",
+      credentials: { ...full, platformId: "  " },
+    });
+    expect(loader.savePaymentGatewayCredentials.mock.calls[0][1].platformId).toBeNull();
+
+    loader.getSpacePayConfig.mockResolvedValue({
+      source: "database",
+      config: { ...STORED_SPACEPAY, platformId: null },
+    });
+    await adminSavePaymentGatewayFor(ADMIN, {
+      provider: "spacepay",
+      credentials: { platformId: " new-platform " },
+    });
+    expect(loader.savePaymentGatewayCredentials.mock.calls[1][1]).toEqual({
+      ...STORED_SPACEPAY,
+      platformId: "new-platform",
+    });
+    expect(audit.calls[1].after).toEqual({ provider: "spacepay", fields_changed: ["platformId"] });
+  });
+
+  it("clearFields erases a stored platformId (blank alone keeps it)", async () => {
+    loader.getSpacePayConfig.mockResolvedValue({ source: "database", config: STORED_SPACEPAY });
+    await adminSavePaymentGatewayFor(ADMIN, { provider: "spacepay", credentials: { platformId: "" } });
+    expect(loader.savePaymentGatewayCredentials.mock.calls[0][1].platformId).toBe("stored-platform");
+    await adminSavePaymentGatewayFor(ADMIN, {
+      provider: "spacepay",
+      credentials: {},
+      clearFields: ["platformId"],
+    });
+    expect(loader.savePaymentGatewayCredentials.mock.calls[1][1].platformId).toBeNull();
+  });
 });
 
 describe("adminTestPaymentGatewayFor", () => {
@@ -278,7 +330,18 @@ describe("adminTestPaymentGatewayFor", () => {
     expect(probe.testSpacePayConnection).toHaveBeenCalledWith({
       gatewayToken: "candidate-token",
       casinoToken: "stored-casino-token",
+      platformId: "stored-platform",
       apiBase: "https://sp.test",
+    });
+    await adminTestPaymentGatewayFor(ADMIN, {
+      provider: "spacepay",
+      credentials: { platformId: " candidate-platform " },
+    });
+    expect(probe.testSpacePayConnection).toHaveBeenLastCalledWith({
+      gatewayToken: "stored-gateway-token",
+      casinoToken: "stored-casino-token",
+      platformId: "candidate-platform",
+      apiBase: null,
     });
     expect(loader.savePaymentGatewayCredentials).not.toHaveBeenCalled();
     expect(allAuditText()).not.toContain("candidate-token");
