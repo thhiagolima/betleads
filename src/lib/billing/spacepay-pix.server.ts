@@ -114,7 +114,7 @@ export async function spacePayCallbackUrl(
   if (!appUrl) throw notConfigured("PUBLIC_APP_URL");
   const secret = trimmed((config === undefined ? await loadConfig() : config)?.callbackSecret);
   if (!secret) throw notConfigured("SPACEPAY_CALLBACK_SECRET");
-  return `${appUrl.replace(/\/+$/, "")}/api/public/spacepay/webhook/${spacePayCallbackToken(externalId, secret)}`;
+  return `${appUrl.replace(/\/+$/, "")}/api/public/spacepay/webhook/${await spacePayCallbackToken(externalId, secret)}`;
 }
 
 /** Cents → reais without float noise (integer / 100 always prints as the exact 2-decimal value). */

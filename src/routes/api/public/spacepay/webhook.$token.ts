@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { createFileRoute } from "@tanstack/react-router";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
@@ -58,8 +56,11 @@ type SpacePayWebhookBody = {
   event?: unknown;
 };
 
-function sha256Prefix(rawBody: string): string {
-  return createHash("sha256").update(rawBody, "utf8").digest("hex").slice(0, 16);
+async function sha256Prefix(rawBody: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawBody));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 16);
 }
 
 function eventNameFrom(parsed: unknown): string | null {
@@ -156,11 +157,11 @@ async function handlePost(request: Request, token: string): Promise<Response> {
     );
   }
 
-  let verification = verifySpacePayCallbackToken(token, secrets[0]);
+  let verification = await verifySpacePayCallbackToken(token, secrets[0]);
   for (const secret of secrets.slice(1)) {
     // "malformed" doesn't depend on the secret; only a bad signature is retried.
     if (verification.ok || verification.reason !== "bad_signature") break;
-    verification = verifySpacePayCallbackToken(token, secret);
+    verification = await verifySpacePayCallbackToken(token, secret);
   }
   if (!verification.ok) {
     // Nothing written to payment_webhook_events; the billing health monitor
@@ -190,7 +191,7 @@ async function handlePost(request: Request, token: string): Promise<Response> {
     }
   }
 
-  const eventId = `spacepay:${externalId}:${sha256Prefix(rawBody)}`;
+  const eventId = `spacepay:${externalId}:${await sha256Prefix(rawBody)}`;
   const eventName = eventNameFrom(parsedBody);
 
   // Stage 1: record the event. A failure here is logged and processing

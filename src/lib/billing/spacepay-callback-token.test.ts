@@ -6,41 +6,41 @@ import { spacePayCallbackToken, verifySpacePayCallbackToken } from "./spacepay-c
 const SECRET = "callback-secret-0123456789abcdef";
 
 describe("spacepay-callback-token", () => {
-  it("builds base64url(externalId).hexHmac", () => {
-    const token = spacePayCallbackToken("bl-inv-123", SECRET);
+  it("builds base64url(externalId).hexHmac", async () => {
+    const token = await spacePayCallbackToken("bl-inv-123", SECRET);
     const [encoded, sig] = token.split(".");
     expect(Buffer.from(encoded, "base64url").toString("utf8")).toBe("bl-inv-123");
     expect(sig).toBe(createHmac("sha256", SECRET).update("bl-inv-123").digest("hex"));
     expect(token).toMatch(/^[A-Za-z0-9_-]+\.[0-9a-f]{64}$/);
   });
 
-  it("round-trips, including ids that need URL-safe base64", () => {
+  it("round-trips, including ids that need URL-safe base64", async () => {
     for (const id of ["bl-top-abc", "a?b/c+d=é", "x".repeat(255)]) {
-      const token = spacePayCallbackToken(id, SECRET);
-      expect(verifySpacePayCallbackToken(token, SECRET)).toEqual({ ok: true, externalId: id });
+      const token = await spacePayCallbackToken(id, SECRET);
+      expect(await verifySpacePayCallbackToken(token, SECRET)).toEqual({ ok: true, externalId: id });
       expect(token).not.toMatch(/[+/=]/);
     }
   });
 
-  it("rejects a token signed with another secret", () => {
-    const token = spacePayCallbackToken("bl-inv-123", "other-secret");
-    expect(verifySpacePayCallbackToken(token, SECRET)).toEqual({
+  it("rejects a token signed with another secret", async () => {
+    const token = await spacePayCallbackToken("bl-inv-123", "other-secret");
+    expect(await verifySpacePayCallbackToken(token, SECRET)).toEqual({
       ok: false,
       reason: "bad_signature",
     });
   });
 
-  it("rejects a swapped externalId with a valid signature for another id", () => {
-    const sig = spacePayCallbackToken("bl-inv-1", SECRET).split(".")[1];
+  it("rejects a swapped externalId with a valid signature for another id", async () => {
+    const sig = (await spacePayCallbackToken("bl-inv-1", SECRET)).split(".")[1];
     const forged = `${Buffer.from("bl-inv-2").toString("base64url")}.${sig}`;
-    expect(verifySpacePayCallbackToken(forged, SECRET)).toEqual({
+    expect(await verifySpacePayCallbackToken(forged, SECRET)).toEqual({
       ok: false,
       reason: "bad_signature",
     });
   });
 
-  it("flags malformed tokens", () => {
-    const valid = spacePayCallbackToken("bl-inv-123", SECRET);
+  it("flags malformed tokens", async () => {
+    const valid = await spacePayCallbackToken("bl-inv-123", SECRET);
     const [encoded, sig] = valid.split(".");
     for (const bad of [
       "",
@@ -53,12 +53,12 @@ describe("spacepay-callback-token", () => {
       `${encoded}=.${sig}`,
       `a+b.${sig}`,
     ]) {
-      expect(verifySpacePayCallbackToken(bad, SECRET)).toEqual({ ok: false, reason: "malformed" });
+      expect(await verifySpacePayCallbackToken(bad, SECRET)).toEqual({ ok: false, reason: "malformed" });
     }
   });
 
-  it("treats an empty secret as unverifiable", () => {
-    const token = spacePayCallbackToken("bl-inv-123", SECRET);
-    expect(verifySpacePayCallbackToken(token, "")).toEqual({ ok: false, reason: "malformed" });
+  it("treats an empty secret as unverifiable", async () => {
+    const token = await spacePayCallbackToken("bl-inv-123", SECRET);
+    expect(await verifySpacePayCallbackToken(token, "")).toEqual({ ok: false, reason: "malformed" });
   });
 });

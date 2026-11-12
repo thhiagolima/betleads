@@ -266,6 +266,15 @@ describe("POST /api/public/spacepay/webhook/$token", () => {
   });
 
   describe("callback deadline (SpacePay rolls back a slow callback)", () => {
+    // The route hashes the body with Web Crypto (real async work) before it
+    // starts the deadline timer, so wait on real macrotasks (setImmediate is
+    // not faked) until processing has begun before moving the fake clock.
+    async function untilProcessingStarts() {
+      for (let i = 0; i < 1000 && confirmCharge.mock.calls.length === 0; i += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    }
+
     afterEach(() => {
       vi.useRealTimers();
     });
@@ -280,6 +289,7 @@ describe("POST /api/public/spacepay/webhook/$token", () => {
         settled = true;
         return r;
       });
+      await untilProcessingStarts();
       await vi.advanceTimersByTimeAsync(2999);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
@@ -312,6 +322,7 @@ describe("POST /api/public/spacepay/webhook/$token", () => {
         );
 
         const pending = validPost({ status: "paid" });
+        await untilProcessingStarts();
         await vi.advanceTimersByTimeAsync(3000);
         expect((await pending).status).toBe(200);
 

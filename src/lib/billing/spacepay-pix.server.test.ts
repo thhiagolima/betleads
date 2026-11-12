@@ -169,7 +169,7 @@ describe("spacepay-pix.server", () => {
     const prefix = "https://crm.example.com/api/public/spacepay/webhook/";
     expect(url.startsWith(prefix)).toBe(true);
     const token = url.slice(prefix.length);
-    expect(verifySpacePayCallbackToken(token, "cb-secret")).toEqual({
+    expect(await verifySpacePayCallbackToken(token, "cb-secret")).toEqual({
       ok: true,
       externalId: "bl-inv-9",
     });
@@ -179,8 +179,8 @@ describe("spacepay-pix.server", () => {
     gatewayConfig.spacepay!.callbackSecret = "rotated-secret";
     const url = await spacePayCallbackUrl("bl-inv-9");
     const token = url.split("/").pop()!;
-    expect(verifySpacePayCallbackToken(token, "rotated-secret")).toMatchObject({ ok: true });
-    expect(verifySpacePayCallbackToken(token, "cb-secret")).toMatchObject({ ok: false });
+    expect(await verifySpacePayCallbackToken(token, "rotated-secret")).toMatchObject({ ok: true });
+    expect(await verifySpacePayCallbackToken(token, "cb-secret")).toMatchObject({ ok: false });
   });
 
   it("callback URL throws NOT_CONFIGURED without a SpacePay config", async () => {
