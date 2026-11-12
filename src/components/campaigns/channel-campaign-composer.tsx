@@ -1883,12 +1883,11 @@ export function ChannelCampaignComposer({
                       )}
                     </div>
                   </div>
-                  <p className="text-meta text-muted-foreground">
-                    Até 200 jogadores por campanha de voz.
-                    {voiceMode === "script" && activeScript
-                      ? ` Roteiro v${activeScript.version ?? 1} · ${previewContent.length} caracteres. A voz é gerada a partir do texto e um roteiro repetido reaproveita o áudio já gerado.`
-                      : ""}
-                  </p>
+                  {voiceMode === "script" && activeScript ? (
+                    <p className="text-meta text-muted-foreground">
+                      {`Roteiro v${activeScript.version ?? 1} · ${previewContent.length} caracteres. A voz é gerada a partir do texto e um roteiro repetido reaproveita o áudio já gerado.`}
+                    </p>
+                  ) : null}
                   {voiceMode === "script" && (
                     <div {...tourAnchor("campanhas.compositor.voz-variaveis")}>
                       <MessageVariablePicker
