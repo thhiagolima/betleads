@@ -9,11 +9,20 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
-import { recordChargeSnapshot } from "./payment-charges.server";
+import { confirmCharge, recordChargeSnapshot } from "./payment-charges.server";
+import {
+  activePixGateway,
+  getPixGateway,
+  pixErrorSummary,
+  type PixCharge,
+  type PixChargeRef,
+  type PixGateway,
+  type PixProvider,
+} from "./pix-gateway.server";
+import { currentRequestIp } from "./request-ip.server";
 import { truncateDescription } from "./topup";
-import { cancelUpperCharge, createUpperCharge, UpperError, type UpperCharge } from "./upper-pix.server";
 
-const GENERIC_UPPER_FAILURE_MESSAGE =
+const GENERIC_PIX_FAILURE_MESSAGE =
   "Não foi possível gerar o Pix agora. Tente de novo em instantes.";
 const PIX_UNAVAILABLE_MESSAGE = "Pagamento por Pix indisponível no momento.";
 const INVOICE_ALREADY_PAID_MESSAGE = "Esta fatura já está paga.";
@@ -23,8 +32,15 @@ const GENERATING_MESSAGE = "Gerando o Pix, tente de novo em instantes.";
 
 const MIN_EXPIRES_IN_SECONDS = 3600;
 const MAX_EXPIRES_IN_SECONDS = 604800;
-/** A reusable ACTIVE charge must still have more than this left before expiry. */
-const REUSE_MIN_REMAINING_MS = 5 * 60_000;
+/**
+ * A reusable ACTIVE charge must still have more than this left before
+ * expiry. Upper QRs live hours/days, so 5 min of slack; a SpacePay QR may
+ * live only ~5 min in total, so it is reused only while > 60 s remain.
+ */
+const REUSE_MIN_REMAINING_MS: Record<PixProvider, number> = {
+  upper: 5 * 60_000,
+  spacepay: 60_000,
+};
 /**
  * Fix round 1: at most one retry, and only for an `external_id` collision
  * with a leftover terminal-status row (same invoice, an old sequence
@@ -40,15 +56,6 @@ type LooseRow = Record<string, unknown>;
 
 export function isBillingInvoicesEnabled(): boolean {
   return process.env.BILLING_INVOICES_ENABLED === "true";
-}
-
-function isUpperConfigured(): boolean {
-  return Boolean(process.env.UPPER_API_KEY?.trim());
-}
-
-/** Code+status only, never the raw response body (LGPD/secrets concern). */
-function upperErrorSummary(error: UpperError): string {
-  return `${error.code ?? "UNKNOWN"} (${error.status})`;
 }
 
 function errorMessage(error: unknown): string {
@@ -351,6 +358,7 @@ async function getTenantName(tenantId: string): Promise<string> {
 
 type OpenChargeRow = {
   id: string;
+  provider: string | null;
   external_id: string;
   status: string;
   amount_cents: number;
@@ -368,7 +376,9 @@ type OpenChargeRow = {
 async function findOpenCharge(invoiceId: string): Promise<OpenChargeRow | null> {
   const { data, error } = await supabaseAdmin
     .from("payment_charges")
-    .select("id, external_id, status, amount_cents, emv, qr_code_image, payment_url, expires_at")
+    .select(
+      "id, provider, external_id, status, amount_cents, emv, qr_code_image, payment_url, expires_at",
+    )
     .eq("kind", "invoice")
     .eq("ref_id", invoiceId)
     .in("status", ["PENDING", "ACTIVE"])
@@ -379,12 +389,30 @@ async function findOpenCharge(invoiceId: string): Promise<OpenChargeRow | null> 
   return (data as OpenChargeRow | null) ?? null;
 }
 
-/** ACTIVE, the exact invoice amount, and more than 5 min left before expiry. */
-function isReusable(charge: OpenChargeRow, amountCents: number, now: Date): boolean {
+/** Rows written before the provider column mattered are Upper's (the column default). */
+function chargeProvider(charge: OpenChargeRow): PixProvider {
+  return charge.provider === "spacepay" ? "spacepay" : "upper";
+}
+
+/**
+ * ACTIVE, created on the currently ACTIVE gateway, the exact invoice
+ * amount, and more than the provider's minimum left before expiry (5 min
+ * for Upper, 60 s for SpacePay's short-lived QR).
+ */
+function isReusable(
+  charge: OpenChargeRow,
+  amountCents: number,
+  now: Date,
+  activeProvider: PixProvider,
+): boolean {
   if (charge.status !== "ACTIVE") return false;
+  const provider = chargeProvider(charge);
+  if (provider !== activeProvider) return false;
   if (charge.amount_cents !== amountCents) return false;
   if (!charge.expires_at) return false;
-  return new Date(charge.expires_at).getTime() - now.getTime() > REUSE_MIN_REMAINING_MS;
+  return (
+    new Date(charge.expires_at).getTime() - now.getTime() > REUSE_MIN_REMAINING_MS[provider]
+  );
 }
 
 function chargeResult(charge: OpenChargeRow): CreateInvoicePaymentResult {
@@ -431,6 +459,7 @@ type InsertChargeResult =
  *   it re-reads that charge instead (`handleOpenChargeRace`).
  */
 async function insertPendingCharge(input: {
+  provider: PixProvider;
   tenantId: string;
   invoiceId: string;
   amountCents: number;
@@ -443,7 +472,7 @@ async function insertPendingCharge(input: {
       tenant_id: input.tenantId,
       kind: "invoice",
       ref_id: input.invoiceId,
-      provider: "upper",
+      provider: input.provider,
       external_id: input.externalId,
       status: "PENDING",
       amount_cents: input.amountCents,
@@ -482,15 +511,28 @@ async function markChargeFailed(chargeId: string, summary: string): Promise<void
 async function handleOpenChargeRace(
   invoice: InvoiceRow,
   now: Date,
+  activeProvider: PixProvider,
 ): Promise<CreateInvoicePaymentResult> {
   const openCharge = await findOpenCharge(invoice.id);
-  if (openCharge && isReusable(openCharge, invoice.amount_cents, now)) {
+  if (openCharge && isReusable(openCharge, invoice.amount_cents, now, activeProvider)) {
     return chargeResult(openCharge);
   }
   if (openCharge && openCharge.status === "PENDING") {
     throw new Error(GENERATING_MESSAGE);
   }
-  throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+  throw new Error(GENERIC_PIX_FAILURE_MESSAGE);
+}
+
+/**
+ * `cancelOpenInvoiceCharges` before a new attempt. A SpacePay charge found
+ * PAID while being closed means the house already paid this invoice: never
+ * create a second Pix on top — same answer as an invoice already paid
+ * (`getOpenInvoiceOrThrow`), even if crediting itself is still pending or
+ * flagged for review.
+ */
+async function releaseOpenChargesOrThrowIfPaid(invoiceId: string): Promise<void> {
+  const { paid } = await cancelOpenInvoiceCharges(invoiceId);
+  if (paid > 0) throw new Error(INVOICE_ALREADY_PAID_MESSAGE);
 }
 
 /**
@@ -505,8 +547,12 @@ async function handleOpenChargeRace(
  * isn't reusable (still `PENDING`, or ACTIVE but near expiry) is left alone
  * — the caller is told to wait rather than getting a second Pix. Creating a
  * genuinely new charge follows `createCreditTopupFor`'s pattern
- * (topup.functions.ts): insert `PENDING` before calling Upper, `FAILED`
- * with the generic message on an Upper failure. A unique `external_id`
+ * (topup.functions.ts): insert `PENDING` before calling the ACTIVE Pix
+ * gateway, `FAILED` with the generic message on a gateway failure. An open
+ * ACTIVE charge created on another gateway (the active provider was
+ * switched), or a SpacePay one with <= 60 s left, is closed
+ * (`cancelOpenInvoiceCharges`) and attempt `n+1` is created on the active
+ * gateway. A unique `external_id`
  * conflict (an old attempt's row, never the open-charge index) retries once
  * with `n+1`; a conflict with the open-charge index itself never retries —
  * see `handleOpenChargeRace`.
@@ -514,32 +560,46 @@ async function handleOpenChargeRace(
 export async function createInvoicePayment(
   invoiceId: string,
   actorUserId: string,
+  options: { requestIp?: string | null } = {},
 ): Promise<CreateInvoicePaymentResult> {
-  if (!isBillingInvoicesEnabled() || !isUpperConfigured()) {
+  const gateway = activePixGateway();
+  if (!isBillingInvoicesEnabled() || !gateway.isConfigured()) {
     throw new Error(PIX_UNAVAILABLE_MESSAGE);
   }
+  // Server-fn callers don't pass it: read it off the current request (null in cron/tests).
+  const requestIp = options.requestIp !== undefined ? options.requestIp : currentRequestIp();
 
   const invoice = await getOpenInvoiceOrThrow(invoiceId);
   const now = new Date();
 
   const openCharge = await findOpenCharge(invoice.id);
   if (openCharge) {
-    if (isReusable(openCharge, invoice.amount_cents, now)) {
+    if (isReusable(openCharge, invoice.amount_cents, now, gateway.provider)) {
       return chargeResult(openCharge);
     }
     if (openCharge.amount_cents !== invoice.amount_cents) {
       // The invoice was repriced after this charge was created: it can
       // never be paid for the right amount, so release it before creating
       // a fresh one for the current amount.
-      await cancelOpenInvoiceCharges(invoice.id);
+      await releaseOpenChargesOrThrowIfPaid(invoice.id);
     } else if (openCharge.status === "PENDING") {
       // Same amount, still being created (by this request's own earlier
       // attempt or a concurrent one) — never pile a second charge on top.
       throw new Error(GENERATING_MESSAGE);
+    } else if (
+      chargeProvider(openCharge) !== gateway.provider ||
+      chargeProvider(openCharge) === "spacepay"
+    ) {
+      // ACTIVE but created on the other gateway (the active provider was
+      // switched), or a short-lived SpacePay QR about to expire: close it
+      // (SpacePay has no cancel — closed locally only) and create attempt
+      // n+1 on the active gateway. A late payment of the closed one is
+      // still caught by the normal confirm path (credited or flagged).
+      await releaseOpenChargesOrThrowIfPaid(invoice.id);
     } else {
-      // ACTIVE, same amount, but <=5 min left: let it run its course
+      // Upper, ACTIVE, same amount, but <=5 min left: let it run its course
       // (expire/reconcile) instead of creating a duplicate open charge.
-      throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+      throw new Error(GENERIC_PIX_FAILURE_MESSAGE);
     }
   }
 
@@ -553,6 +613,7 @@ export async function createInvoicePayment(
   for (let attempt = 0; ; attempt += 1) {
     externalId = `bl-inv-${invoice.id}-${n}`;
     const result = await insertPendingCharge({
+      provider: gateway.provider,
       tenantId: invoice.tenant_id,
       invoiceId: invoice.id,
       amountCents: invoice.amount_cents,
@@ -564,35 +625,35 @@ export async function createInvoicePayment(
       break;
     }
     if (result.reason === "open_charge") {
-      return await handleOpenChargeRace(invoice, now);
+      return await handleOpenChargeRace(invoice, now, gateway.provider);
     }
-    if (attempt >= MAX_EXTERNAL_ID_RETRIES) throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+    if (attempt >= MAX_EXTERNAL_ID_RETRIES) throw new Error(GENERIC_PIX_FAILURE_MESSAGE);
     n += 1;
   }
 
-  let upper: UpperCharge;
+  let pix: PixCharge;
   try {
-    upper = await createUpperCharge({
+    pix = await gateway.create({
       amountCents: invoice.amount_cents,
       description,
       externalId,
       expiresIn,
       metadata: { tenantId: invoice.tenant_id, kind: "invoice", refId: invoice.id },
+      requestIp,
     });
   } catch (error) {
-    const summary = error instanceof UpperError ? upperErrorSummary(error) : "UNKNOWN_ERROR (0)";
-    await markChargeFailed(chargeId, summary);
-    throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+    await markChargeFailed(chargeId, pixErrorSummary(error));
+    throw new Error(GENERIC_PIX_FAILURE_MESSAGE);
   }
 
-  await recordChargeSnapshot(chargeId, upper);
+  await recordChargeSnapshot(chargeId, pix);
 
   return {
     chargeId,
-    emv: upper.emv,
-    qrCodeImage: upper.qrCodeImage,
-    paymentUrl: upper.paymentUrl,
-    expiresAt: upper.expiresAt,
+    emv: pix.emv,
+    qrCodeImage: pix.qrCodeImage,
+    paymentUrl: pix.paymentUrl,
+    expiresAt: pix.expiresAt,
     amountCents: invoice.amount_cents,
   };
 }
@@ -601,43 +662,122 @@ export async function createInvoicePayment(
 // cancelOpenInvoiceCharges
 // ---------------------------------------------------------------------------
 
-/** Per-charge Upper cancel failure, reported back so callers can audit it truthfully. */
+/** Per-charge gateway cancel failure, reported back so callers can audit it truthfully. */
 export type CancelOpenInvoiceChargesFailure = { chargeId: string; error: string };
 
 export type CancelOpenInvoiceChargesResult = {
   canceled: number;
   failed: CancelOpenInvoiceChargesFailure[];
+  /** Charges found PAID at the gateway instead of closed (SpacePay only; see below). */
+  paid: number;
 };
 
+/** No gateway cancel (SpacePay): close the row here, only if nothing moved it on meanwhile. */
+async function markChargeCancelledLocally(chargeId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("payment_charges")
+    .update({ status: "CANCELLED", updated_at: new Date().toISOString() })
+    .eq("id", chargeId)
+    .in("status", ["PENDING", "ACTIVE"]);
+  if (error) throw new Error(error.message);
+}
+
 /**
- * Cancels every still-open (PENDING/ACTIVE) Pix charge of an invoice at
- * Upper and records it CANCELLED, through the same `recordChargeSnapshot`
- * path used everywhere else a charge's state changes. Used by the
- * superadmin discount and cancel actions (Task 8) before changing an
- * invoice that may already have an open Pix out. One charge failing to
- * cancel at Upper is logged and never stops the others, but it is reported
- * back in `failed` (fix round 1, I1) so a caller auditing this action does
- * not claim success when Upper actually rejected the cancel.
+ * SpacePay has no cancel, so a QR closed locally can still be paid. Right
+ * before closing it, asks SpacePay once more: PAID → records it and runs the
+ * normal confirm path (credit or needs_review) and returns true, so the
+ * caller does not close it. A failed read (or confirm) is only logged: false
+ * → the caller closes the row locally, and a late PAID is still caught by
+ * the reconcile cron's terminal re-check.
+ */
+async function settledAsPaidAtGateway(
+  chargeId: string,
+  gateway: PixGateway,
+  ref: PixChargeRef,
+): Promise<boolean> {
+  let fresh: PixCharge;
+  try {
+    fresh = await gateway.get(ref);
+  } catch (err) {
+    console.error("[billing/invoices] pre-close gateway read failed; closing locally", {
+      chargeId,
+      provider: gateway.provider,
+      error: errorMessage(err),
+    });
+    return false;
+  }
+  if (fresh.status !== "PAID") return false;
+
+  await recordChargeSnapshot(chargeId, fresh);
+  try {
+    await confirmCharge(ref.externalId);
+  } catch (err) {
+    // The row is already PAID: the reconcile cron credits it (or flags it).
+    console.error("[billing/invoices] confirm after pre-close PAID read failed", {
+      chargeId,
+      error: errorMessage(err),
+    });
+  }
+  return true;
+}
+
+/**
+ * Cancels every still-open (PENDING/ACTIVE) Pix charge of an invoice on
+ * the gateway that created it (`payment_charges.provider`, never the active
+ * one) and records it CANCELLED, through the same `recordChargeSnapshot`
+ * path used everywhere else a charge's state changes. A gateway with no
+ * cancel endpoint (SpacePay: `cancel` → null) only closes the row locally,
+ * and only while it is still PENDING/ACTIVE (a concurrent PAID is never
+ * overwritten) — after one fresh read: a SpacePay charge already PAID is
+ * recorded/confirmed instead and counted in `paid`, not `canceled`. A row
+ * whose gateway is no longer configured (e.g. UPPER_API_KEY removed after
+ * switching to SpacePay) is closed locally too, instead of failing. Used by the superadmin discount and cancel actions (Task 8)
+ * before changing an invoice that may already have an open Pix out. One
+ * charge failing to cancel is logged and never stops the others, but it is
+ * reported back in `failed` (fix round 1, I1) so a caller auditing this
+ * action does not claim success when the gateway actually rejected the cancel.
  */
 export async function cancelOpenInvoiceCharges(
   invoiceId: string,
 ): Promise<CancelOpenInvoiceChargesResult> {
   const { data, error } = await supabaseAdmin
     .from("payment_charges")
-    .select("id, external_id")
+    .select("id, provider, external_id, provider_charge_id")
     .eq("kind", "invoice")
     .eq("ref_id", invoiceId)
     .in("status", ["PENDING", "ACTIVE"]);
   if (error) throw new Error(error.message);
 
   let canceled = 0;
+  let paid = 0;
   const failed: CancelOpenInvoiceChargesFailure[] = [];
   for (const row of (data ?? []) as LooseRow[]) {
     const chargeId = row.id as string;
     const externalId = row.external_id as string;
+    const providerChargeId = (row.provider_charge_id as string | null | undefined) ?? null;
     try {
-      const upper = await cancelUpperCharge(externalId);
-      await recordChargeSnapshot(chargeId, upper);
+      // The column defaults to 'upper'; a missing value means the same.
+      const gateway = getPixGateway((row.provider as string | null | undefined) ?? "upper");
+      const ref: PixChargeRef = { externalId, providerChargeId };
+      const configured = gateway.isConfigured();
+      if (!configured) {
+        console.warn("[billing/invoices] gateway not configured; closing charge locally", {
+          chargeId,
+          provider: gateway.provider,
+        });
+      }
+      const cancelled = configured ? await gateway.cancel(ref) : null;
+      if (cancelled) {
+        await recordChargeSnapshot(chargeId, cancelled);
+      } else if (
+        gateway.provider === "spacepay" &&
+        (await settledAsPaidAtGateway(chargeId, gateway, ref))
+      ) {
+        paid += 1;
+        continue;
+      } else {
+        await markChargeCancelledLocally(chargeId);
+      }
       canceled += 1;
     } catch (err) {
       const message = errorMessage(err);
@@ -648,5 +788,5 @@ export async function cancelOpenInvoiceCharges(
       failed.push({ chargeId, error: message });
     }
   }
-  return { canceled, failed };
+  return { canceled, failed, paid };
 }

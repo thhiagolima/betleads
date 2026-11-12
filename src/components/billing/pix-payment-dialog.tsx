@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Copy, ExternalLink, Loader2 } from "lucide-react";
+import { Clock, Copy, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,7 @@ export type PixChargePayload = {
   expiresAt: string | null;
   amountCents: number;
   /**
-   * Upper's status at creation time (e.g. "ACTIVE"). Optional — only the
+   * Gateway status at creation time (e.g. "ACTIVE"). Optional — only the
    * credit top-up's `createCreditTopup` returns it today; `createInvoicePayment`
    * doesn't. Used only as a fallback before the first status poll resolves.
    */
@@ -45,6 +45,14 @@ function formatCountdown(seconds: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/** Whole seconds until `expiresAt` (negative once past), or null without a valid date. */
+export function secondsUntil(expiresAt: string | null | undefined, nowMs = Date.now()) {
+  if (!expiresAt) return null;
+  const at = new Date(expiresAt).getTime();
+  if (Number.isNaN(at)) return null;
+  return Math.round((at - nowMs) / 1000);
+}
+
 /**
  * Generic Pix payment dialog (Task 7, ruling 1): extracted from
  * `buy-credits-dialog.tsx` so a monthly-fee payment and a credit top-up
@@ -53,6 +61,13 @@ function formatCountdown(seconds: number) {
  * etc. — rendered as `children` while `charge` is still null) and owns the
  * status-poll function (`getStatus`) and the credited copy (`successTitle`/
  * `successText`). `onPaid` fires once, the instant `credited` turns true.
+ *
+ * Expiry: SpacePay QR codes may last only ~5 min (Upper's 1 h–7 d), so the
+ * countdown ("Expira em 4:32") is always visible, and once it hits zero the
+ * QR/Copia-e-Cola are hidden behind "Este Pix expirou" + "Gerar novo Pix",
+ * which calls `onRegenerate` (the caller re-runs its own charge creation).
+ * The status poll keeps running after local expiry, so a late PAID still
+ * wins over the expired screen (`topupView` ranks PAID first).
  */
 export function PixPaymentDialog({
   open,
@@ -62,6 +77,7 @@ export function PixPaymentDialog({
   statusQueryKey,
   onReset,
   onPaid,
+  onRegenerate,
   successTitle = "Pagamento confirmado",
   successText,
   children,
@@ -76,28 +92,44 @@ export function PixPaymentDialog({
   /** Clears `charge` on the caller's side (dialog close, or "Gerar outro"). */
   onReset: () => void;
   onPaid?: () => void;
+  /**
+   * "Gerar novo Pix" on the expired screen: re-runs the same server call that
+   * created this charge and must end with the caller setting the new `charge`.
+   * Without it the button falls back to `onReset` (back to `children`).
+   */
+  onRegenerate?: () => Promise<unknown> | void;
   successTitle?: string;
   successText: string;
   /** The charge-creation UI (package picker, "Pagar mensalidade" button...), shown while `charge` is null. */
   children?: ReactNode;
 }) {
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
-  const [localExpired, setLocalExpired] = useState(false);
+  // Seeded from `expiresAt` so the first paint already shows the countdown
+  // (or the expired screen) instead of waiting for the first tick.
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(() =>
+    secondsUntil(charge?.expiresAt),
+  );
+  const [localExpired, setLocalExpired] = useState(() => {
+    const left = secondsUntil(charge?.expiresAt);
+    return left !== null && left <= 0;
+  });
   const [paidFired, setPaidFired] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  // Bumped on every regenerate so the countdown restarts even if the server
+  // hands back the same charge (same id/expiresAt).
+  const [regenNonce, setRegenNonce] = useState(0);
 
   // Countdown to `expiresAt`, ticking every second. At 0 the dialog shows
   // "Este Pix expirou" even before the server confirms EXPIRED.
   useEffect(() => {
     setLocalExpired(false);
     setPaidFired(false);
-    if (!charge?.expiresAt) {
+    if (secondsUntil(charge?.expiresAt) === null) {
       setSecondsLeft(null);
       return;
     }
-    const expiresAt = new Date(charge.expiresAt).getTime();
     const interval = setInterval(tick, 1000);
     function tick() {
-      const remaining = Math.round((expiresAt - Date.now()) / 1000);
+      const remaining = secondsUntil(charge?.expiresAt) ?? 0;
       setSecondsLeft(remaining);
       if (remaining <= 0) {
         setLocalExpired(true);
@@ -107,7 +139,7 @@ export function PixPaymentDialog({
     tick();
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-key on chargeId, not the whole object
-  }, [charge?.chargeId, charge?.expiresAt]);
+  }, [charge?.chargeId, charge?.expiresAt, regenNonce]);
 
   const status = useQuery({
     queryKey: statusQueryKey,
@@ -145,6 +177,22 @@ export function PixPaymentDialog({
   const handleOpenChange = (next: boolean) => {
     if (!next) onReset();
     onOpenChange(next);
+  };
+
+  const regenerate = async () => {
+    if (!onRegenerate) {
+      onReset();
+      return;
+    }
+    setRegenerating(true);
+    try {
+      await onRegenerate();
+      setRegenNonce((n) => n + 1);
+    } catch {
+      // The caller reports its own error (toast); stay on the expired screen.
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   const copyPix = async () => {
@@ -205,12 +253,23 @@ export function PixPaymentDialog({
           <>
             <DialogHeader>
               <DialogTitle>Este Pix expirou</DialogTitle>
-              <DialogDescription className="sr-only">
-                O prazo para pagar este Pix acabou. Gere um novo código para continuar.
+              <DialogDescription>
+                O prazo para pagar este Pix acabou. Não pague o código antigo — gere um novo para
+                continuar ({brl(charge.amountCents / 100)}).
               </DialogDescription>
             </DialogHeader>
-            <Button type="button" className="w-full" onClick={onReset}>
-              Gerar outro
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => void regenerate()}
+              disabled={regenerating}
+            >
+              {regenerating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Gerar novo Pix
             </Button>
           </>
         ) : (
@@ -221,11 +280,20 @@ export function PixPaymentDialog({
               <>
                 <DialogHeader>
                   <DialogTitle>Pague com Pix</DialogTitle>
-                  <DialogDescription>
-                    {brl(charge.amountCents / 100)}
-                    {secondsLeft !== null && <> — expira em {formatCountdown(secondsLeft)}</>}
-                  </DialogDescription>
+                  <DialogDescription>{brl(charge.amountCents / 100)}</DialogDescription>
                 </DialogHeader>
+                {secondsLeft !== null && (
+                  <p
+                    className={`flex items-center justify-center gap-1.5 text-sm font-medium tabular-nums ${
+                      secondsLeft <= 60 ? "text-amber-500" : "text-muted-foreground"
+                    }`}
+                    aria-live="off"
+                    data-testid="pix-countdown"
+                  >
+                    <Clock className="h-4 w-4" />
+                    Expira em {formatCountdown(secondsLeft)}
+                  </p>
+                )}
                 {qrSrc && (
                   <div className="flex justify-center">
                     <img

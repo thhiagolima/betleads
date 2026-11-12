@@ -114,6 +114,7 @@ import { Route as ApiPublicInfobipSmsEventsRouteImport } from './routes/api/publ
 import { Route as ApiPublicInfobipVoiceCmlRouteImport } from './routes/api/public/infobip/voice/cml'
 import { Route as ApiPublicInfobipVoiceEventsRouteImport } from './routes/api/public/infobip/voice/events'
 import { Route as ApiPublicInfobipVoiceReconcileRouteImport } from './routes/api/public/infobip/voice/reconcile'
+import { Route as ApiPublicSpacepayWebhookTokenRouteImport } from './routes/api/public/spacepay/webhook.$token'
 import { Route as ApiPublicWebhookTokenEventoRouteImport } from './routes/api/public/webhook.$token.$evento'
 import { Route as ApiPublicPushCCampaignIdKeyRouteImport } from './routes/api/public/push/c.$campaignId.$key'
 
@@ -675,6 +676,12 @@ const ApiPublicInfobipVoiceReconcileRoute =
     path: '/api/public/infobip/voice/reconcile',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicSpacepayWebhookTokenRoute =
+  ApiPublicSpacepayWebhookTokenRouteImport.update({
+    id: '/api/public/spacepay/webhook/$token',
+    path: '/api/public/spacepay/webhook/$token',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicWebhookTokenEventoRoute =
   ApiPublicWebhookTokenEventoRouteImport.update({
     id: '/api/public/webhook/$token/$evento',
@@ -794,6 +801,7 @@ export interface FileRoutesByFullPath {
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
+  '/api/public/spacepay/webhook/$token': typeof ApiPublicSpacepayWebhookTokenRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
   '/api/public/push/c/$campaignId/$key': typeof ApiPublicPushCCampaignIdKeyRoute
 }
@@ -903,6 +911,7 @@ export interface FileRoutesByTo {
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
+  '/api/public/spacepay/webhook/$token': typeof ApiPublicSpacepayWebhookTokenRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
   '/api/public/push/c/$campaignId/$key': typeof ApiPublicPushCCampaignIdKeyRoute
 }
@@ -1013,6 +1022,7 @@ export interface FileRoutesById {
   '/api/public/infobip/voice/cml': typeof ApiPublicInfobipVoiceCmlRoute
   '/api/public/infobip/voice/events': typeof ApiPublicInfobipVoiceEventsRoute
   '/api/public/infobip/voice/reconcile': typeof ApiPublicInfobipVoiceReconcileRoute
+  '/api/public/spacepay/webhook/$token': typeof ApiPublicSpacepayWebhookTokenRoute
   '/api/public/webhook/$token/$evento': typeof ApiPublicWebhookTokenEventoRoute
   '/api/public/push/c/$campaignId/$key': typeof ApiPublicPushCCampaignIdKeyRoute
 }
@@ -1124,6 +1134,7 @@ export interface FileRouteTypes {
     | '/api/public/infobip/voice/cml'
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
+    | '/api/public/spacepay/webhook/$token'
     | '/api/public/webhook/$token/$evento'
     | '/api/public/push/c/$campaignId/$key'
   fileRoutesByTo: FileRoutesByTo
@@ -1233,6 +1244,7 @@ export interface FileRouteTypes {
     | '/api/public/infobip/voice/cml'
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
+    | '/api/public/spacepay/webhook/$token'
     | '/api/public/webhook/$token/$evento'
     | '/api/public/push/c/$campaignId/$key'
   id:
@@ -1342,6 +1354,7 @@ export interface FileRouteTypes {
     | '/api/public/infobip/voice/cml'
     | '/api/public/infobip/voice/events'
     | '/api/public/infobip/voice/reconcile'
+    | '/api/public/spacepay/webhook/$token'
     | '/api/public/webhook/$token/$evento'
     | '/api/public/push/c/$campaignId/$key'
   fileRoutesById: FileRoutesById
@@ -1434,6 +1447,7 @@ export interface RootRouteChildren {
   ApiPublicInfobipVoiceCmlRoute: typeof ApiPublicInfobipVoiceCmlRoute
   ApiPublicInfobipVoiceEventsRoute: typeof ApiPublicInfobipVoiceEventsRoute
   ApiPublicInfobipVoiceReconcileRoute: typeof ApiPublicInfobipVoiceReconcileRoute
+  ApiPublicSpacepayWebhookTokenRoute: typeof ApiPublicSpacepayWebhookTokenRoute
   ApiPublicWebhookTokenEventoRoute: typeof ApiPublicWebhookTokenEventoRoute
   ApiPublicPushCCampaignIdKeyRoute: typeof ApiPublicPushCCampaignIdKeyRoute
 }
@@ -2175,6 +2189,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicInfobipVoiceReconcileRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/spacepay/webhook/$token': {
+      id: '/api/public/spacepay/webhook/$token'
+      path: '/api/public/spacepay/webhook/$token'
+      fullPath: '/api/public/spacepay/webhook/$token'
+      preLoaderRoute: typeof ApiPublicSpacepayWebhookTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/webhook/$token/$evento': {
       id: '/api/public/webhook/$token/$evento'
       path: '/api/public/webhook/$token/$evento'
@@ -2433,6 +2454,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicInfobipVoiceCmlRoute: ApiPublicInfobipVoiceCmlRoute,
   ApiPublicInfobipVoiceEventsRoute: ApiPublicInfobipVoiceEventsRoute,
   ApiPublicInfobipVoiceReconcileRoute: ApiPublicInfobipVoiceReconcileRoute,
+  ApiPublicSpacepayWebhookTokenRoute: ApiPublicSpacepayWebhookTokenRoute,
   ApiPublicWebhookTokenEventoRoute: ApiPublicWebhookTokenEventoRoute,
   ApiPublicPushCCampaignIdKeyRoute: ApiPublicPushCCampaignIdKeyRoute,
 }

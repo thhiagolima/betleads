@@ -146,6 +146,9 @@ function PlanoECreditosPage() {
   );
   const [buyOpen, setBuyOpen] = useState(false);
   const [payCharge, setPayCharge] = useState<PixChargePayload | null>(null);
+  // Invoice behind `payCharge`, so "Gerar novo Pix" can call payInvoice again
+  // (the server opens a new attempt when the current one is expired/near expiry).
+  const [payInvoiceId, setPayInvoiceId] = useState<string | null>(null);
   const [paySuccessText, setPaySuccessText] = useState("Mensalidade paga.");
   const [receiptInvoiceId, setReceiptInvoiceId] = useState<string | null>(null);
 
@@ -169,7 +172,10 @@ function PlanoECreditosPage() {
 
   const payMutation = useMutation({
     mutationFn: (invoiceId: string) => payInvoiceFn({ data: { tenantId, invoiceId } }),
-    onSuccess: (result) => setPayCharge(result as PixChargePayload),
+    onSuccess: (result, invoiceId) => {
+      setPayInvoiceId(invoiceId);
+      setPayCharge(result as PixChargePayload);
+    },
     onError: (error: Error) => toast.error(error.message),
   });
 
@@ -321,6 +327,7 @@ function PlanoECreditosPage() {
         }}
         charge={payCharge}
         onReset={() => setPayCharge(null)}
+        onRegenerate={payInvoiceId ? () => payMutation.mutateAsync(payInvoiceId) : undefined}
         getStatus={(chargeId) => getStatusFn({ data: { chargeId } })}
         statusQueryKey={["billing", "invoice-status", payCharge?.chargeId]}
         onPaid={handleInvoicePaid}

@@ -16,7 +16,10 @@ export type BillingSignalCode =
   | "webhook_invalid_signature"
   | "upper_feature_disabled"
   | "upper_unauthorized"
-  | "upper_unavailable";
+  | "upper_unavailable"
+  | "spacepay_unauthorized"
+  | "spacepay_unavailable"
+  | "spacepay_webhook_invalid_token";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LooseDb = any;

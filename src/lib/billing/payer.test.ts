@@ -60,6 +60,30 @@ describe("maskDocumentsDeep", () => {
     expect(input.payer.document).toBe("123.456.789-09");
   });
 
+  it("masks cpf/cnpj/tax id/payer document/document number keys, any case", () => {
+    const input = {
+      cpf: "123.456.789-09",
+      CNPJ: "12345678000199",
+      payer: { taxId: "12345678909", tax_id: "12345678909", TaxID: "12345678909" },
+      list: [{ payer_document: "12345678909" }, { payerDocument: "12345678909" }],
+      extra: { document_number: "12345678909", DocumentNumber: "12345678909" },
+      // Not document keys: left alone.
+      cpfMasked: "***",
+      document_type: "CPF",
+    };
+    const { value, masked } = maskDocumentsDeep(input);
+    const serialized = JSON.stringify(value);
+
+    expect(masked).toBe(9);
+    expect(serialized).not.toContain("12345678909");
+    expect(serialized).not.toContain("123.456.789-09");
+    expect(serialized).not.toContain("12345678000199");
+    expect((value as { cpf: string }).cpf).toBe("***.456.789-**");
+    expect((value as { CNPJ: string }).CNPJ).toBe("**.345.678/****-**");
+    expect((value as { cpfMasked: string }).cpfMasked).toBe("***");
+    expect((value as { document_type: string }).document_type).toBe("CPF");
+  });
+
   it("replaces a non-string document value with null", () => {
     const { value, masked } = maskDocumentsDeep({
       payer: { document: 12345678909 },

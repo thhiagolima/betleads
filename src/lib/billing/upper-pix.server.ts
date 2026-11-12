@@ -3,6 +3,7 @@
 // API key must stay on the server.
 
 import { recordBillingSignal, upperErrorSignal } from "./billing-signals.server";
+import { PixGatewayError } from "./pix-gateway-error";
 
 export type UpperChargeStatus =
   | "PENDING"
@@ -35,20 +36,13 @@ export type CreateUpperChargeInput = {
   metadata: Record<string, string>;
 };
 
-export class UpperError extends Error {
-  status: number;
-  code: string | null;
-  retryable: boolean;
-
+export class UpperError extends PixGatewayError {
   constructor(
     message: string,
     options: { status: number; code: string | null; retryable: boolean; cause?: unknown },
   ) {
-    super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
+    super(message, { ...options, provider: "upper" });
     this.name = "UpperError";
-    this.status = options.status;
-    this.code = options.code;
-    this.retryable = options.retryable;
   }
 }
 

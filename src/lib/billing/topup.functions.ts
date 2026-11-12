@@ -1,9 +1,10 @@
 // Server side of buying Pix credit top-ups (PG2, Task 4). `createCreditTopup`
-// generates a fresh order + charge and asks Upper for a Pix code;
+// generates a fresh order + charge and asks the ACTIVE Pix gateway
+// (`BILLING_PIX_PROVIDER`: Upper or SpacePay) for a Pix code;
 // `getTopupStatus` is a pure read of the charge's current state (through the
 // caller's own client, so RLS hides other houses' charges) — it never calls
-// Upper itself. Crediting the wallet happens elsewhere (the webhook/cron in
-// Task 3, through `confirmChargeFromUpper`/`billing_credit_paid_charge`).
+// a gateway itself. Crediting the wallet happens elsewhere (the webhook/cron
+// in Task 3, through `billing_credit_paid_charge`).
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -18,8 +19,14 @@ import { dbUuid } from "@/lib/zod-helpers";
 
 import { isBillingLockedFor, requireTenantPayer } from "./billing-state.server";
 import { recordChargeSnapshot } from "./payment-charges.server";
+import {
+  activePixGateway,
+  PixGatewayError,
+  pixErrorSummary,
+  type PixCharge,
+} from "./pix-gateway.server";
+import { currentRequestIp } from "./request-ip.server";
 import { resolveTopupAmount, topupDescription } from "./topup";
-import { createUpperCharge, UpperError, type UpperCharge } from "./upper-pix.server";
 
 type ServerContext = {
   // The per-request, user-scoped Supabase client the auth middleware
@@ -28,6 +35,8 @@ type ServerContext = {
   // so RLS (a user reads only their own `user_roles`) applies normally.
   supabase: unknown;
   userId: string;
+  /** End user's IP, forwarded to the gateway (SpacePay uses it). Null outside a request. */
+  requestIp?: string | null;
 };
 
 type DbError = { message: string };
@@ -50,7 +59,7 @@ function looseDb(client: unknown) {
   return client as LooseSupabase;
 }
 
-const GENERIC_UPPER_FAILURE_MESSAGE =
+const GENERIC_PIX_FAILURE_MESSAGE =
   "Não foi possível gerar o Pix agora. Tente de novo em instantes.";
 const GATEWAY_UNAVAILABLE_MESSAGE = "Compra por Pix indisponível no momento.";
 const NOT_ADMIN_MESSAGE = "Só o admin ou o gestor da casa pode comprar créditos.";
@@ -67,16 +76,11 @@ export function isBillingGatewayEnabled(): boolean {
   return process.env.BILLING_GATEWAY_ENABLED === "true";
 }
 
-/** The Upper client can only work with an API key; checked before any row is written. */
-function isUpperConfigured(): boolean {
-  return Boolean(process.env.UPPER_API_KEY?.trim());
-}
-
 /**
  * Per-house cap on Pix charges still payable (PENDING/ACTIVE and not past
  * `expires_at`, or with no expiry recorded yet): each click creates a new
  * order + charge, so without this a double-click loop could pile up
- * charges at Upper.
+ * charges at the gateway.
  */
 async function assertOpenChargesBelowCap(tenantId: string): Promise<void> {
   const { data, error } = await looseDb(supabaseAdmin)
@@ -103,7 +107,7 @@ async function isTenantExempt(tenantId: string): Promise<boolean> {
 /** Logs the real cause server-side and throws only the fixed, user-safe copy. */
 function logAndThrowGeneric(context: string, message: string): never {
   console.error(`[billing/topup] ${context} failed:`, message);
-  throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+  throw new Error(GENERIC_PIX_FAILURE_MESSAGE);
 }
 
 async function getTenantName(tenantId: string): Promise<string> {
@@ -116,13 +120,11 @@ async function getTenantName(tenantId: string): Promise<string> {
   return data?.nome ?? "";
 }
 
-/** Code+status only, never the raw response body (LGPD/secrets concern). */
-function upperErrorSummary(error: UpperError): string {
-  return `${error.code ?? "UNKNOWN"} (${error.status})`;
-}
-
-function isGatewayUnavailableError(error: UpperError): boolean {
-  return error.code === "NOT_CONFIGURED" || error.code === "FEATURE_DISABLED";
+function isGatewayUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof PixGatewayError &&
+    (error.code === "NOT_CONFIGURED" || error.code === "FEATURE_DISABLED")
+  );
 }
 
 const createTopupInput = z
@@ -135,17 +137,18 @@ const createTopupInput = z
 
 /**
  * Body of `createCreditTopup`, exported for tests. Follows the order from
- * the task brief: gateway on (and Upper configured), resolve the house
+ * the task brief: gateway on (and the active Pix gateway configured), resolve the house
  * (`resolveTenantForBilling`: a locked house still reaches this), payer
  * only (admin, owner, gestor or superadmin), not billing-locked, not demo, not exempt, billing open, resolve the amount, under
  * the open-Pix cap, insert order+charge PENDING,
- * ask Upper, snapshot the response, link the charge back onto the order.
+ * ask the active gateway, snapshot the response, link the charge back onto the order.
  */
 export async function createCreditTopupFor(
   ctx: ServerContext,
   data: z.infer<typeof createTopupInput>,
 ) {
-  if (!isBillingGatewayEnabled() || !isUpperConfigured()) {
+  const gateway = activePixGateway();
+  if (!isBillingGatewayEnabled() || !gateway.isConfigured()) {
     throw new Error(GATEWAY_UNAVAILABLE_MESSAGE);
   }
 
@@ -189,7 +192,7 @@ export async function createCreditTopupFor(
     })
     .select("id")
     .single();
-  if (orderError || !orderRow) throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+  if (orderError || !orderRow) throw new Error(GENERIC_PIX_FAILURE_MESSAGE);
 
   const orderId = (orderRow as { id: string }).id;
   const externalId = `bl-top-${orderId}`;
@@ -200,7 +203,7 @@ export async function createCreditTopupFor(
       tenant_id: tenantId,
       kind: "credit_topup",
       ref_id: orderId,
-      provider: "upper",
+      provider: gateway.provider,
       external_id: externalId,
       status: "PENDING",
       amount_cents: amountCents,
@@ -222,18 +225,18 @@ export async function createCreditTopupFor(
 
   const chargeId = (chargeRow as { id: string }).id;
 
-  let upper: UpperCharge;
+  let pix: PixCharge;
   try {
-    upper = await createUpperCharge({
+    pix = await gateway.create({
       amountCents,
       description: topupDescription(tenantName, amountCents),
       externalId,
       expiresIn: 3600,
       metadata: { tenantId, kind: "credit_topup", refId: orderId },
+      requestIp: ctx.requestIp ?? null,
     });
   } catch (error) {
-    const summary =
-      error instanceof UpperError ? upperErrorSummary(error) : "UNKNOWN_ERROR (0)";
+    const summary = pixErrorSummary(error);
 
     const { error: failChargeError } = await looseDb(supabaseAdmin)
       .from("payment_charges")
@@ -247,14 +250,14 @@ export async function createCreditTopupFor(
       .eq("id", orderId);
     if (failOrderError) logAndThrowGeneric("mark order failed", failOrderError.message);
 
-    if (error instanceof UpperError && isGatewayUnavailableError(error)) {
+    if (isGatewayUnavailableError(error)) {
       throw new Error(GATEWAY_UNAVAILABLE_MESSAGE);
     }
-    throw new Error(GENERIC_UPPER_FAILURE_MESSAGE);
+    throw new Error(GENERIC_PIX_FAILURE_MESSAGE);
   }
 
   try {
-    await recordChargeSnapshot(chargeId, upper);
+    await recordChargeSnapshot(chargeId, pix);
   } catch (error) {
     logAndThrowGeneric(
       "recordChargeSnapshot",
@@ -271,19 +274,21 @@ export async function createCreditTopupFor(
   return {
     orderId,
     chargeId,
-    status: upper.status,
+    status: pix.status,
     amountCents,
-    emv: upper.emv,
-    qrCodeImage: upper.qrCodeImage,
-    paymentUrl: upper.paymentUrl,
-    expiresAt: upper.expiresAt,
+    emv: pix.emv,
+    qrCodeImage: pix.qrCodeImage,
+    paymentUrl: pix.paymentUrl,
+    expiresAt: pix.expiresAt,
   };
 }
 
 export const createCreditTopup = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => createTopupInput.parse(data ?? {}))
-  .handler(async ({ data, context }) => createCreditTopupFor(context as ServerContext, data));
+  .handler(async ({ data, context }) =>
+    createCreditTopupFor({ ...(context as ServerContext), requestIp: currentRequestIp() }, data),
+  );
 
 const getTopupStatusInput = z.object({
   chargeId: dbUuid(),
@@ -292,7 +297,7 @@ const getTopupStatusInput = z.object({
 /**
  * Body of `getTopupStatus`, exported for tests. Reads `payment_charges`
  * through the caller's own client (`ctx.supabase`), never `supabaseAdmin`,
- * so RLS hides charges belonging to other houses; it never calls Upper.
+ * so RLS hides charges belonging to other houses; it never calls a gateway.
  */
 export async function getTopupStatusFor(
   ctx: ServerContext,

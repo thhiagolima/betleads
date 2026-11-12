@@ -19,6 +19,14 @@ const BILLING_HEALTH_QUERY_KEY = ["admin", "billing", "health"];
 
 type HealthReport = Awaited<ReturnType<typeof adminBillingHealth>>;
 
+/** Client-side copy of PIX_PROVIDER_LABEL (billing-health.server.ts is server-only). */
+const PROVIDER_LABEL: Record<string, string> = { upper: "Upper", spacepay: "SpacePay" };
+
+function providerLabel(provider: string | null | undefined): string | null {
+  if (!provider) return null;
+  return PROVIDER_LABEL[provider] ?? provider;
+}
+
 const TONE_CLASS = {
   ok: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
   warning: "border-amber-500/40 bg-amber-500/10 text-amber-300",
@@ -55,7 +63,8 @@ export function BillingHealthCard() {
             Saúde da cobrança
           </CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            Webhooks, cobranças pagas sem crédito, carteiras, Upper e crons (últimas 24 h).
+            Webhooks, cobranças pagas sem crédito, carteiras, gateways Pix (Upper e SpacePay) e
+            crons (últimas 24 h).
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -87,6 +96,14 @@ export function BillingHealthCard() {
               <SummaryIcon className="h-4 w-4 shrink-0" />
               {summary.title}
             </div>
+            {data.activeProvider && (
+              <p className="text-sm text-muted-foreground">
+                Gateway Pix ativo para novas cobranças:{" "}
+                <Badge variant="outline" className="align-middle">
+                  {providerLabel(data.activeProvider)}
+                </Badge>
+              </p>
+            )}
             {data.findings.length > 0 && (
               <ul className="space-y-2">
                 {data.findings.map((finding) => (
@@ -100,6 +117,11 @@ export function BillingHealthCard() {
                     >
                       {finding.severity === "critical" ? "Crítico" : "Atenção"}
                     </Badge>
+                    {finding.provider && (
+                      <Badge variant="outline" className="w-fit shrink-0">
+                        {providerLabel(finding.provider)}
+                      </Badge>
+                    )}
                     <div className="min-w-0">
                       <p>{finding.message}</p>
                       <p className="font-mono text-xs text-muted-foreground">{finding.code}</p>

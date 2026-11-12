@@ -32,6 +32,7 @@ import {
   adminSetCustomPriceFor,
   adminSetCycleDayFor,
   adminSetFrozenFor,
+  adminGetPixFeesFor,
   adminSetPixFeeFor,
   adminSetTenantBlockFor,
   adminTenantBillingHistoryFor,
@@ -603,10 +604,71 @@ describe("adminSetPixFeeFor", () => {
     expect(rows[0]).toMatchObject({ provider: "upper", fee_percent: 1.5, fee_fixed_cents: 50, updated_by: SUPER_ADMIN });
   });
 
+  it("inserts the fee for the chosen provider (spacepay)", async () => {
+    await adminSetPixFeeFor(ctxFor(SUPER_ADMIN), {
+      provider: "spacepay",
+      feePercent: 0.99,
+      feeFixedCents: 0,
+      reason: "taxa do SpacePay",
+    });
+    const rows = fake.admin.rows("payment_fee_settings");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: "spacepay", fee_percent: 0.99, fee_fixed_cents: 0 });
+  });
+
+  it("rejects an unknown provider", async () => {
+    await expect(
+      adminSetPixFeeFor(ctxFor(SUPER_ADMIN), {
+        provider: "pagseguro",
+        feePercent: 1,
+        feeFixedCents: 0,
+        reason: "taxa qualquer",
+      }),
+    ).rejects.toThrow();
+    expect(fake.admin.rows("payment_fee_settings")).toHaveLength(0);
+  });
+
   it("refuses a non-super-admin", async () => {
     await expect(
       adminSetPixFeeFor(ctxFor(PLAIN_USER), { feePercent: 1, feeFixedCents: 0, reason: "nova taxa da Upper" }),
     ).rejects.toThrow("Apenas o super admin");
+  });
+});
+
+describe("adminGetPixFeesFor", () => {
+  afterEach(() => {
+    delete process.env.BILLING_PIX_PROVIDER;
+  });
+
+  it("returns the fee in force per provider and the active provider", async () => {
+    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    const past = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    fake.admin.rows("payment_fee_settings").push(
+      { provider: "upper", fee_percent: 1, fee_fixed_cents: 10, valid_from: past(10) },
+      { provider: "upper", fee_percent: "1.5000", fee_fixed_cents: 20, valid_from: past(1) },
+      // Not in force yet: ignored.
+      {
+        provider: "upper",
+        fee_percent: 9,
+        fee_fixed_cents: 99,
+        valid_from: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+    );
+
+    const result = await adminGetPixFeesFor(ctxFor(SUPER_ADMIN));
+
+    expect(result.activeProvider).toBe("spacepay");
+    expect(result.fees.upper).toMatchObject({ feePercent: 1.5, feeFixedCents: 20 });
+    expect(result.fees.spacepay).toBeNull();
+  });
+
+  it("defaults the active provider to upper", async () => {
+    const result = await adminGetPixFeesFor(ctxFor(SUPER_ADMIN));
+    expect(result).toEqual({ activeProvider: "upper", fees: { upper: null, spacepay: null } });
+  });
+
+  it("refuses a non-super-admin", async () => {
+    await expect(adminGetPixFeesFor(ctxFor(PLAIN_USER))).rejects.toThrow("Apenas o super admin");
   });
 });
 

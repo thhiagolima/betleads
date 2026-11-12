@@ -17,12 +17,35 @@ vi.mock("./upper-pix.server", async (importOriginal) => {
   return { ...actual, createUpperCharge, cancelUpperCharge };
 });
 
+const { spaceCreate, spaceCancel, spaceGet, spaceConfigured } = vi.hoisted(() => ({
+  spaceCreate: vi.fn(),
+  spaceCancel: vi.fn(),
+  spaceGet: vi.fn(),
+  spaceConfigured: vi.fn(() => true),
+}));
+vi.mock("./spacepay-pix.server", () => ({
+  spacePayGateway: {
+    provider: "spacepay",
+    isConfigured: spaceConfigured,
+    create: spaceCreate,
+    get: spaceGet,
+    cancel: spaceCancel,
+  },
+}));
+
+const { confirmCharge } = vi.hoisted(() => ({ confirmCharge: vi.fn() }));
+vi.mock("./payment-charges.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./payment-charges.server")>();
+  return { ...actual, confirmCharge };
+});
+
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
   cancelOpenInvoiceCharges,
   createInvoicePayment,
   runBillingCycle,
 } from "./invoices.server";
+import { PixGatewayError } from "./pix-gateway-error";
 import { UpperError, type UpperCharge } from "./upper-pix.server";
 
 const TENANT = "00000000-0000-4000-8000-0000000000aa";
@@ -71,12 +94,28 @@ beforeEach(() => {
   createUpperCharge.mockResolvedValue(upperChargeResult());
   cancelUpperCharge.mockReset();
   cancelUpperCharge.mockResolvedValue(upperChargeResult({ status: "CANCELLED" }));
+  spaceCreate.mockReset();
+  spaceCreate.mockResolvedValue(
+    upperChargeResult({
+      id: "sp-tx-1",
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+    }),
+  );
+  spaceCancel.mockReset();
+  spaceCancel.mockResolvedValue(null);
+  spaceGet.mockReset();
+  spaceGet.mockResolvedValue(upperChargeResult({ id: "sp-tx-1", status: "ACTIVE" }));
+  spaceConfigured.mockReset();
+  spaceConfigured.mockReturnValue(true);
+  confirmCharge.mockReset();
+  confirmCharge.mockResolvedValue({ outcome: "credited" });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.BILLING_INVOICES_ENABLED;
   delete process.env.UPPER_API_KEY;
+  delete process.env.BILLING_PIX_PROVIDER;
 });
 
 describe("runBillingCycle", () => {
@@ -603,6 +642,311 @@ describe("createInvoicePayment", () => {
   });
 });
 
+describe("createInvoicePayment with two gateways", () => {
+  function openCharge(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "charge-1",
+      tenant_id: TENANT,
+      kind: "invoice",
+      ref_id: "invoice-1",
+      provider: "upper",
+      external_id: "bl-inv-invoice-1-1",
+      status: "ACTIVE",
+      amount_cents: 400000,
+      emv: "existing-emv",
+      qr_code_image: "existing-qr",
+      payment_url: "existing-url",
+      expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+      ...overrides,
+    };
+  }
+
+  it("stores the active provider (upper by default) on the new charge", async () => {
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    const result = await createInvoicePayment("invoice-1", ACTOR);
+    const created = fake.admin.rows("payment_charges").find((r) => r.id === result.chargeId)!;
+    expect(created.provider).toBe("upper");
+    expect(spaceCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates on SpacePay when it is active, storing provider spacepay and the request IP", async () => {
+    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+
+    const result = await createInvoicePayment("invoice-1", ACTOR, { requestIp: "198.51.100.4" });
+
+    expect(createUpperCharge).not.toHaveBeenCalled();
+    expect(spaceCreate).toHaveBeenCalledTimes(1);
+    expect(spaceCreate.mock.calls[0][0]).toMatchObject({
+      externalId: "bl-inv-invoice-1-1",
+      amountCents: 400000,
+      requestIp: "198.51.100.4",
+    });
+    const created = fake.admin.rows("payment_charges").find((r) => r.id === result.chargeId)!;
+    expect(created.provider).toBe("spacepay");
+    expect(created.provider_charge_id).toBe("sp-tx-1");
+  });
+
+  it("reuses an open SpacePay charge with more than 60s left", async () => {
+    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    fake.admin.rows("payment_charges").push(
+      openCharge({
+        provider: "spacepay",
+        expires_at: new Date(Date.now() + 3 * 60_000).toISOString(),
+      }),
+    );
+
+    const result = await createInvoicePayment("invoice-1", ACTOR);
+
+    expect(result.chargeId).toBe("charge-1");
+    expect(spaceCreate).not.toHaveBeenCalled();
+    expect(spaceCancel).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse a SpacePay charge with <=60s left: closes it locally and creates attempt n+1", async () => {
+    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    fake.admin.rows("payment_charges").push(
+      openCharge({ provider: "spacepay", expires_at: new Date(Date.now() + 30_000).toISOString() }),
+    );
+
+    const result = await createInvoicePayment("invoice-1", ACTOR);
+
+    expect(spaceCancel).toHaveBeenCalledTimes(1);
+    expect(fake.admin.rows("payment_charges").find((r) => r.id === "charge-1")!.status).toBe(
+      "CANCELLED",
+    );
+    expect(result.chargeId).not.toBe("charge-1");
+    expect(spaceCreate).toHaveBeenCalledTimes(1);
+    expect(spaceCreate.mock.calls[0][0].externalId).toBe("bl-inv-invoice-1-2");
+  });
+
+  it("does not reuse an open charge from the other (no longer active) provider", async () => {
+    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    fake.admin.rows("payment_charges").push(openCharge({ provider: "upper" }));
+
+    const result = await createInvoicePayment("invoice-1", ACTOR);
+
+    // The Upper charge is cancelled at Upper (its own provider), not at SpacePay.
+    expect(cancelUpperCharge).toHaveBeenCalledWith("bl-inv-invoice-1-1");
+    expect(spaceCancel).not.toHaveBeenCalled();
+    expect(result.chargeId).not.toBe("charge-1");
+    const created = fake.admin.rows("payment_charges").find((r) => r.id === result.chargeId)!;
+    expect(created.provider).toBe("spacepay");
+    expect(created.external_id).toBe("bl-inv-invoice-1-2");
+  });
+
+  it("switching to SpacePay with UPPER_API_KEY removed closes the old Upper charge locally and creates n+1", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    delete process.env.UPPER_API_KEY;
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    fake.admin.rows("payment_charges").push(openCharge({ provider: "upper" }));
+
+    const result = await createInvoicePayment("invoice-1", ACTOR);
+
+    expect(cancelUpperCharge).not.toHaveBeenCalled();
+    expect(fake.admin.rows("payment_charges").find((r) => r.id === "charge-1")!.status).toBe(
+      "CANCELLED",
+    );
+    const created = fake.admin.rows("payment_charges").find((r) => r.id === result.chargeId)!;
+    expect(created.provider).toBe("spacepay");
+    expect(created.external_id).toBe("bl-inv-invoice-1-2");
+  });
+
+  it("a SpacePay charge found PAID while being replaced answers 'already paid' and creates no new attempt", async () => {
+    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    fake.admin.rows("payment_charges").push(
+      openCharge({ provider: "spacepay", expires_at: new Date(Date.now() + 30_000).toISOString() }),
+    );
+    spaceGet.mockResolvedValue(
+      upperChargeResult({ id: "sp-tx-1", status: "PAID", paidAmountCents: 400000 }),
+    );
+
+    await expect(createInvoicePayment("invoice-1", ACTOR)).rejects.toThrow(
+      "Esta fatura já está paga.",
+    );
+
+    expect(confirmCharge).toHaveBeenCalledWith("bl-inv-invoice-1-1");
+    expect(spaceCreate).not.toHaveBeenCalled();
+    expect(fake.admin.rows("payment_charges")).toHaveLength(1);
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("PAID");
+  });
+
+  it("an Upper charge with >5min left is still reused while Upper is active", async () => {
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    fake.admin.rows("payment_charges").push(openCharge({ provider: "upper" }));
+    const result = await createInvoicePayment("invoice-1", ACTOR);
+    expect(result.chargeId).toBe("charge-1");
+    expect(createUpperCharge).not.toHaveBeenCalled();
+  });
+
+  it("stores a code-only summary when SpacePay fails", async () => {
+    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    fake.admin.rows("billing_invoices").push(invoiceRow());
+    spaceCreate.mockRejectedValue(
+      new PixGatewayError("SpacePay respondeu 502.", {
+        provider: "spacepay",
+        status: 502,
+        code: null,
+        retryable: true,
+      }),
+    );
+
+    await expect(createInvoicePayment("invoice-1", ACTOR)).rejects.toThrow(
+      "Não foi possível gerar o Pix agora. Tente de novo em instantes.",
+    );
+    const charge = fake.admin.rows("payment_charges")[0];
+    expect(charge.status).toBe("FAILED");
+    expect(charge.last_error).toBe("UNKNOWN (502)");
+  });
+});
+
+describe("cancelOpenInvoiceCharges per provider", () => {
+  it("closes a SpacePay charge locally (gateway has no cancel) and cancels Upper ones at Upper", async () => {
+    fake.admin.rows("payment_charges").push(
+      {
+        id: "charge-sp",
+        tenant_id: TENANT,
+        kind: "invoice",
+        ref_id: "invoice-3",
+        provider: "spacepay",
+        external_id: "bl-inv-invoice-3-1",
+        provider_charge_id: "sp-tx-9",
+        status: "ACTIVE",
+        amount_cents: 400000,
+      },
+      {
+        id: "charge-up",
+        tenant_id: TENANT,
+        kind: "invoice",
+        ref_id: "invoice-3",
+        provider: "upper",
+        external_id: "bl-inv-invoice-3-2",
+        status: "PENDING",
+        amount_cents: 400000,
+      },
+    );
+
+    const result = await cancelOpenInvoiceCharges("invoice-3");
+
+    expect(spaceCancel).toHaveBeenCalledWith({
+      externalId: "bl-inv-invoice-3-1",
+      providerChargeId: "sp-tx-9",
+    });
+    expect(cancelUpperCharge).toHaveBeenCalledTimes(1);
+    expect(cancelUpperCharge).toHaveBeenCalledWith("bl-inv-invoice-3-2");
+    const rows = fake.admin.rows("payment_charges");
+    expect(rows.find((r) => r.id === "charge-sp")!.status).toBe("CANCELLED");
+    expect(rows.find((r) => r.id === "charge-up")!.status).toBe("CANCELLED");
+    expect(result).toEqual({ canceled: 2, failed: [], paid: 0 });
+  });
+
+  function spacePayRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "charge-sp",
+      tenant_id: TENANT,
+      kind: "invoice",
+      ref_id: "invoice-5",
+      provider: "spacepay",
+      external_id: "bl-inv-invoice-5-1",
+      provider_charge_id: "sp-tx-5",
+      status: "ACTIVE",
+      amount_cents: 400000,
+      ...overrides,
+    };
+  }
+
+  it("re-reads a SpacePay charge before closing it: PAID is recorded and confirmed, not closed", async () => {
+    fake.admin.rows("payment_charges").push(spacePayRow());
+    spaceGet.mockResolvedValue(
+      upperChargeResult({
+        id: "sp-tx-5",
+        status: "PAID",
+        paidAmountCents: 400000,
+        paidAt: "2026-11-12T12:00:00Z",
+      }),
+    );
+
+    const result = await cancelOpenInvoiceCharges("invoice-5");
+
+    expect(spaceGet).toHaveBeenCalledWith({
+      externalId: "bl-inv-invoice-5-1",
+      providerChargeId: "sp-tx-5",
+    });
+    expect(confirmCharge).toHaveBeenCalledWith("bl-inv-invoice-5-1");
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("PAID");
+    expect(result).toEqual({ canceled: 0, failed: [], paid: 1 });
+  });
+
+  it("still counts a SpacePay PAID read as paid when confirmCharge fails (the cron credits it)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fake.admin.rows("payment_charges").push(spacePayRow());
+    spaceGet.mockResolvedValue(
+      upperChargeResult({ id: "sp-tx-5", status: "PAID", paidAmountCents: 400000 }),
+    );
+    confirmCharge.mockRejectedValue(new Error("rpc down"));
+
+    const result = await cancelOpenInvoiceCharges("invoice-5");
+
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("PAID");
+    expect(result).toEqual({ canceled: 0, failed: [], paid: 1 });
+  });
+
+  it("closes a SpacePay charge locally when the pre-close read fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fake.admin.rows("payment_charges").push(spacePayRow());
+    spaceGet.mockRejectedValue(new Error("spacepay down"));
+
+    const result = await cancelOpenInvoiceCharges("invoice-5");
+
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("CANCELLED");
+    expect(confirmCharge).not.toHaveBeenCalled();
+    expect(result).toEqual({ canceled: 1, failed: [], paid: 0 });
+  });
+
+  it("closes an Upper charge locally when Upper is no longer configured, without calling Upper", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    delete process.env.UPPER_API_KEY;
+    fake.admin.rows("payment_charges").push(
+      spacePayRow({ id: "charge-up", provider: "upper", provider_charge_id: null }),
+    );
+
+    const result = await cancelOpenInvoiceCharges("invoice-5");
+
+    expect(cancelUpperCharge).not.toHaveBeenCalled();
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("CANCELLED");
+    expect(result).toEqual({ canceled: 1, failed: [], paid: 0 });
+  });
+
+  it("never overwrites a charge that turned PAID before the local close", async () => {
+    fake.admin.rows("payment_charges").push({
+      id: "charge-sp",
+      tenant_id: TENANT,
+      kind: "invoice",
+      ref_id: "invoice-4",
+      provider: "spacepay",
+      external_id: "bl-inv-invoice-4-1",
+      status: "ACTIVE",
+      amount_cents: 400000,
+    });
+    // The payment lands between the open-charge read and the local close.
+    spaceCancel.mockImplementationOnce(async () => {
+      fake.admin.rows("payment_charges").find((r) => r.id === "charge-sp")!.status = "PAID";
+      return null;
+    });
+
+    await cancelOpenInvoiceCharges("invoice-4");
+
+    expect(fake.admin.rows("payment_charges").find((r) => r.id === "charge-sp")!.status).toBe(
+      "PAID",
+    );
+  });
+});
+
 describe("cancelOpenInvoiceCharges", () => {
   it("cancels open charges at Upper and records them CANCELLED", async () => {
     fake.admin.rows("payment_charges").push({
@@ -632,13 +976,14 @@ describe("cancelOpenInvoiceCharges", () => {
     expect(charge.status).toBe("CANCELLED");
     const paidCharge = fake.admin.rows("payment_charges").find((r) => r.id === "charge-paid")!;
     expect(paidCharge.status).toBe("PAID");
-    expect(result).toEqual({ canceled: 1, failed: [] });
+    expect(result).toEqual({ canceled: 1, failed: [], paid: 0 });
   });
 
   it("does nothing when there is no open charge", async () => {
     await expect(cancelOpenInvoiceCharges("invoice-without-charges")).resolves.toEqual({
       canceled: 0,
       failed: [],
+      paid: 0,
     });
     expect(cancelUpperCharge).not.toHaveBeenCalled();
   });
@@ -660,6 +1005,7 @@ describe("cancelOpenInvoiceCharges", () => {
     expect(result).toEqual({
       canceled: 0,
       failed: [{ chargeId: "charge-2", error: "upper rejected cancel" }],
+      paid: 0,
     });
   });
 });

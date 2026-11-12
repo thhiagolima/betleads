@@ -5090,6 +5090,7 @@ export type Database = {
           headers: Json | null;
           outcome: string | null;
           processed_at: string | null;
+          provider: string;
           raw_body: string | null;
           received_at: string;
           signature_valid: boolean | null;
@@ -5102,6 +5103,7 @@ export type Database = {
           headers?: Json | null;
           outcome?: string | null;
           processed_at?: string | null;
+          provider?: string;
           raw_body?: string | null;
           received_at?: string;
           signature_valid?: boolean | null;
@@ -5114,6 +5116,7 @@ export type Database = {
           headers?: Json | null;
           outcome?: string | null;
           processed_at?: string | null;
+          provider?: string;
           raw_body?: string | null;
           received_at?: string;
           signature_valid?: boolean | null;
