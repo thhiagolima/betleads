@@ -5081,6 +5081,54 @@ export type Database = {
         };
         Relationships: [];
       };
+      payment_gateway_accounts: {
+        Row: {
+          created_at: string;
+          credentials_encrypted: string;
+          hints: Json;
+          provider: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          credentials_encrypted: string;
+          hints?: Json;
+          provider: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          credentials_encrypted?: string;
+          hints?: Json;
+          provider?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
+      payment_gateway_settings: {
+        Row: {
+          active_provider: string;
+          id: boolean;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          active_provider: string;
+          id?: boolean;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          active_provider?: string;
+          id?: boolean;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
       payment_webhook_events: {
         Row: {
           delivery_id: string | null;

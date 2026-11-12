@@ -16,6 +16,12 @@ vi.mock("./billing-emails.server", () => ({ sendBillingEmail }));
 
 vi.mock("@/lib/tenant-access.server", () => ({ listDemoTenantIds: vi.fn(async () => [] as string[]) }));
 
+// The active gateway comes from the gateway config loader (DB settings row, env fallback).
+const { getActivePixProvider } = vi.hoisted(() => ({
+  getActivePixProvider: vi.fn(async (): Promise<"upper" | "spacepay"> => "upper"),
+}));
+vi.mock("./payment-gateway-config.server", () => ({ getActivePixProvider }));
+
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { brtDayKey } from "@/lib/tz";
 import {
@@ -637,11 +643,12 @@ describe("adminSetPixFeeFor", () => {
 
 describe("adminGetPixFeesFor", () => {
   afterEach(() => {
-    delete process.env.BILLING_PIX_PROVIDER;
+    getActivePixProvider.mockReset();
+    getActivePixProvider.mockResolvedValue("upper");
   });
 
   it("returns the fee in force per provider and the active provider", async () => {
-    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    getActivePixProvider.mockResolvedValue("spacepay");
     const past = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
     fake.admin.rows("payment_fee_settings").push(
       { provider: "upper", fee_percent: 1, fee_fixed_cents: 10, valid_from: past(10) },
@@ -662,7 +669,7 @@ describe("adminGetPixFeesFor", () => {
     expect(result.fees.spacepay).toBeNull();
   });
 
-  it("defaults the active provider to upper", async () => {
+  it("reports the loader's active provider (upper)", async () => {
     const result = await adminGetPixFeesFor(ctxFor(SUPER_ADMIN));
     expect(result).toEqual({ activeProvider: "upper", fees: { upper: null, spacepay: null } });
   });

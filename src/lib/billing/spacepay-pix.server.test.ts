@@ -5,6 +5,23 @@ const { recordBillingSignal } = vi.hoisted(() => ({
 }));
 vi.mock("./billing-signals.server", () => ({ recordBillingSignal }));
 
+// Tokens, base, callback secret and payer come from the gateway config loader
+// (DB, env fallback); the tests drive it through this mutable config.
+type TestSpacePayConfig = {
+  gatewayToken: string;
+  casinoToken: string | null;
+  callbackSecret: string;
+  apiBase: string | null;
+  payer: { name: string; document: string; email: string; phone: string };
+};
+const gatewayConfig = vi.hoisted(() => ({ spacepay: null as TestSpacePayConfig | null }));
+vi.mock("./payment-gateway-config.server", () => ({
+  getSpacePayConfig: async () => ({
+    source: gatewayConfig.spacepay ? "database" : "none",
+    config: gatewayConfig.spacepay,
+  }),
+}));
+
 import { PixGatewayError, isPixNotFound } from "./pix-gateway-error";
 import { verifySpacePayCallbackToken } from "./spacepay-callback-token";
 import { SpacePayError, spacePayCallbackUrl, spacePayGateway } from "./spacepay-pix.server";
@@ -12,15 +29,30 @@ import { SpacePayError, spacePayCallbackUrl, spacePayGateway } from "./spacepay-
 const ORIGINAL_ENV = { ...process.env };
 
 function setConfigured() {
-  process.env.SPACEPAY_API_BASE = "https://spacepay.test/";
-  process.env.SPACEPAY_GATEWAY_TOKEN = "gw-token";
-  delete process.env.SPACEPAY_CASINO_TOKEN;
-  process.env.SPACEPAY_CALLBACK_SECRET = "cb-secret";
+  gatewayConfig.spacepay = {
+    apiBase: "https://spacepay.test/",
+    gatewayToken: "gw-token",
+    casinoToken: null,
+    callbackSecret: "cb-secret",
+    payer: {
+      name: "Betleads Ltda",
+      document: "12.345.678/0001-90",
+      email: "financeiro@example.com",
+      phone: "11999998888",
+    },
+  };
   process.env.PUBLIC_APP_URL = "https://crm.example.com/";
-  process.env.SPACEPAY_PAYER_NAME = "Betleads Ltda";
-  process.env.SPACEPAY_PAYER_DOCUMENT = "12.345.678/0001-90";
-  process.env.SPACEPAY_PAYER_EMAIL = "financeiro@example.com";
-  process.env.SPACEPAY_PAYER_PHONE = "11999998888";
+}
+
+/** Blanks one config field (dotted path for payer fields). */
+function blankConfigField(field: string) {
+  const config = gatewayConfig.spacepay!;
+  if (field.startsWith("payer.")) {
+    const key = field.slice("payer.".length) as keyof TestSpacePayConfig["payer"];
+    config.payer = { ...config.payer, [key]: "  " };
+  } else {
+    (config as unknown as Record<string, string>)[field] = "  ";
+  }
 }
 
 function json(body: unknown, status = 200) {
@@ -102,37 +134,59 @@ describe("spacepay-pix.server", () => {
   });
 
   describe("isConfigured", () => {
-    it("is true only when every required env var is set", () => {
-      expect(spacePayGateway.isConfigured()).toBe(true);
-      for (const name of [
-        "SPACEPAY_GATEWAY_TOKEN",
-        "SPACEPAY_CALLBACK_SECRET",
-        "PUBLIC_APP_URL",
-        "SPACEPAY_PAYER_NAME",
-        "SPACEPAY_PAYER_DOCUMENT",
-        "SPACEPAY_PAYER_EMAIL",
-        "SPACEPAY_PAYER_PHONE",
+    it("is true only when every required config field and PUBLIC_APP_URL are set", async () => {
+      expect(await spacePayGateway.isConfigured()).toBe(true);
+      for (const field of [
+        "gatewayToken",
+        "callbackSecret",
+        "payer.name",
+        "payer.document",
+        "payer.email",
+        "payer.phone",
       ]) {
         setConfigured();
-        process.env[name] = "  ";
-        expect(spacePayGateway.isConfigured(), name).toBe(false);
+        blankConfigField(field);
+        expect(await spacePayGateway.isConfigured(), field).toBe(false);
       }
+      setConfigured();
+      process.env.PUBLIC_APP_URL = "  ";
+      expect(await spacePayGateway.isConfigured(), "PUBLIC_APP_URL").toBe(false);
     });
 
-    it("does not require the casino token", () => {
-      delete process.env.SPACEPAY_CASINO_TOKEN;
-      expect(spacePayGateway.isConfigured()).toBe(true);
+    it("is false when there is no SpacePay config at all", async () => {
+      gatewayConfig.spacepay = null;
+      expect(await spacePayGateway.isConfigured()).toBe(false);
+    });
+
+    it("does not require the casino token", async () => {
+      gatewayConfig.spacepay!.casinoToken = null;
+      expect(await spacePayGateway.isConfigured()).toBe(true);
     });
   });
 
-  it("callback URL uses PUBLIC_APP_URL without trailing slash and a verifiable token", () => {
-    const url = spacePayCallbackUrl("bl-inv-9");
+  it("callback URL uses PUBLIC_APP_URL without trailing slash and a verifiable token", async () => {
+    const url = await spacePayCallbackUrl("bl-inv-9");
     const prefix = "https://crm.example.com/api/public/spacepay/webhook/";
     expect(url.startsWith(prefix)).toBe(true);
     const token = url.slice(prefix.length);
     expect(verifySpacePayCallbackToken(token, "cb-secret")).toEqual({
       ok: true,
       externalId: "bl-inv-9",
+    });
+  });
+
+  it("callback URL is signed with the CURRENT callback secret", async () => {
+    gatewayConfig.spacepay!.callbackSecret = "rotated-secret";
+    const url = await spacePayCallbackUrl("bl-inv-9");
+    const token = url.split("/").pop()!;
+    expect(verifySpacePayCallbackToken(token, "rotated-secret")).toMatchObject({ ok: true });
+    expect(verifySpacePayCallbackToken(token, "cb-secret")).toMatchObject({ ok: false });
+  });
+
+  it("callback URL throws NOT_CONFIGURED without a SpacePay config", async () => {
+    gatewayConfig.spacepay = null;
+    await expect(spacePayCallbackUrl("bl-inv-9")).rejects.toMatchObject({
+      code: "NOT_CONFIGURED",
     });
   });
 
@@ -153,7 +207,7 @@ describe("spacepay-pix.server", () => {
         email: "financeiro@example.com",
         name: "Betleads Ltda",
         amount: 150.1,
-        webhook: spacePayCallbackUrl("bl-top-abc"),
+        webhook: await spacePayCallbackUrl("bl-top-abc"),
         ip_address: "203.0.113.7",
         idempotency_key: "bl-top-abc",
         phone: "11999998888",
@@ -373,7 +427,7 @@ describe("spacepay-pix.server", () => {
     });
 
     it("throws NOT_CONFIGURED without calling the API when the payer is missing", async () => {
-      delete process.env.SPACEPAY_PAYER_PHONE;
+      gatewayConfig.spacepay!.payer = { ...gatewayConfig.spacepay!.payer, phone: "" };
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
       await expect(spacePayGateway.create(createInput)).rejects.toMatchObject({
@@ -392,7 +446,7 @@ describe("spacepay-pix.server", () => {
 
   describe("get", () => {
     it("by providerChargeId reads /transactions/{id} with the casino token when set", async () => {
-      process.env.SPACEPAY_CASINO_TOKEN = "casino-token";
+      gatewayConfig.spacepay!.casinoToken = "casino-token";
       const body = {
         status: "success",
         data: tx({ status: "paid", paidAt: "2026-11-12T12:02:00Z" }),

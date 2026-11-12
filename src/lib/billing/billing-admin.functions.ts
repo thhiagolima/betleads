@@ -36,7 +36,8 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { loadMonthData } from "./billing-month-data.server";
 import { computeMonthRows } from "./billing-month-report";
 import { cancelOpenInvoiceCharges, type CancelOpenInvoiceChargesFailure } from "./invoices.server";
-import { activePixProvider, type PixProvider } from "./pix-gateway.server";
+import { getActivePixProvider } from "./payment-gateway-config.server";
+import type { PixProvider } from "./pix-gateway-error";
 import { sendBillingEmail, type BillingEmailKind } from "./billing-emails.server";
 import { brtDayKey, parseBrtDayStart } from "../tz";
 
@@ -849,7 +850,7 @@ export type PixFeeSetting = {
 };
 
 export type AdminPixFeesResult = {
-  /** Gateway that NEW charges go to (`BILLING_PIX_PROVIDER`). */
+  /** Gateway that NEW charges go to (gateway config: DB settings row, env `BILLING_PIX_PROVIDER` fallback). */
   activeProvider: PixProvider;
   /** Fee in force right now per gateway (latest `valid_from <= now`), null when none was ever set. */
   fees: Record<PixProvider, PixFeeSetting | null>;
@@ -888,7 +889,7 @@ export async function adminGetPixFeesFor(ctx: ServerContext): Promise<AdminPixFe
       validFrom: row.valid_from,
     };
   }
-  return { activeProvider: activePixProvider(), fees };
+  return { activeProvider: await getActivePixProvider(), fees };
 }
 
 export const adminGetPixFees = createServerFn({ method: "GET" })

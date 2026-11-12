@@ -4,7 +4,9 @@
 // and the callback secret must stay on the server.
 //
 // - Amounts go out in REAIS (the API's unit) and come back as cents.
-// - The payer is a fixed payer of ours (SPACEPAY_PAYER_*), never the house.
+// - Tokens, API base, callback secret and payer come from the gateway config
+//   (DB, env fallback); only PUBLIC_APP_URL is read from env here.
+// - The payer is a fixed payer of ours (config `payer`), never the house.
 // - No cancel endpoint and no expiry parameter on the API.
 // - LGPD: `raw` (stored in payment_charges.last_provider_payload) is an
 //   allow-list of scalar fields, never the response body. The /transactions
@@ -13,6 +15,7 @@
 //   (with the secret callback token); none of that is ever stored.
 
 import { recordBillingSignal } from "./billing-signals.server";
+import { getSpacePayConfig, type SpacePayConfig } from "./payment-gateway-config.server";
 import { PixGatewayError } from "./pix-gateway-error";
 // Type-only: pix-gateway.server imports this module at runtime.
 import type {
@@ -41,36 +44,45 @@ const LOOKUP_WINDOW_MS = 48 * 60 * 60 * 1000;
 const LOOKUP_PER_PAGE = 100;
 const LOOKUP_MAX_PAGES = 20;
 
-function env(name: string): string | null {
-  return process.env[name]?.trim() || null;
+function trimmed(value: string | null | undefined): string | null {
+  return value?.trim() || null;
 }
 
-function baseUrl(): string {
-  return (env("SPACEPAY_API_BASE") ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+function publicAppUrl(): string | null {
+  return trimmed(process.env.PUBLIC_APP_URL);
+}
+
+/** Current SpacePay config from the gateway config (DB, env fallback), or null. */
+async function loadConfig(): Promise<SpacePayConfig | null> {
+  return (await getSpacePayConfig()).config;
+}
+
+function baseUrl(config: SpacePayConfig): string {
+  return (trimmed(config.apiBase) ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
 }
 
 /** Token for POST /create_gateway_cash_in. */
-function gatewayToken(): string | null {
-  return env("SPACEPAY_GATEWAY_TOKEN");
+function gatewayToken(config: SpacePayConfig | null): string | null {
+  return trimmed(config?.gatewayToken);
 }
 
 /** Token for the /transactions reads: the casino token when set, else the gateway token. */
-function readToken(): string | null {
-  return env("SPACEPAY_CASINO_TOKEN") ?? gatewayToken();
+function readToken(config: SpacePayConfig | null): string | null {
+  return trimmed(config?.casinoToken) ?? gatewayToken(config);
 }
 
-const REQUIRED_ENV = [
-  "SPACEPAY_GATEWAY_TOKEN",
-  "SPACEPAY_CALLBACK_SECRET",
-  "PUBLIC_APP_URL",
-  "SPACEPAY_PAYER_NAME",
-  "SPACEPAY_PAYER_DOCUMENT",
-  "SPACEPAY_PAYER_EMAIL",
-  "SPACEPAY_PAYER_PHONE",
-] as const;
-
-function isSpacePayConfigured(): boolean {
-  return REQUIRED_ENV.every((name) => env(name) !== null);
+async function isSpacePayConfigured(): Promise<boolean> {
+  if (!publicAppUrl()) return false;
+  const config = await loadConfig();
+  if (!config) return false;
+  return [
+    config.gatewayToken,
+    config.callbackSecret,
+    config.payer?.name,
+    config.payer?.document,
+    config.payer?.email,
+    config.payer?.phone,
+  ].every((value) => trimmed(value) !== null);
 }
 
 function notConfigured(what: string): SpacePayError {
@@ -89,11 +101,18 @@ function invalidResponse(field: string): SpacePayError {
   });
 }
 
-/** Public callback URL for one charge; the token authenticates the (unsigned) callback. */
-export function spacePayCallbackUrl(externalId: string): string {
-  const appUrl = env("PUBLIC_APP_URL");
-  const secret = env("SPACEPAY_CALLBACK_SECRET");
+/**
+ * Public callback URL for one charge; the token authenticates the (unsigned)
+ * callback. Signed with the CURRENT callbackSecret (gateway config); the
+ * webhook route also accepts older secrets still in spacePayCallbackSecrets().
+ */
+export async function spacePayCallbackUrl(
+  externalId: string,
+  config?: SpacePayConfig | null,
+): Promise<string> {
+  const appUrl = publicAppUrl();
   if (!appUrl) throw notConfigured("PUBLIC_APP_URL");
+  const secret = trimmed((config === undefined ? await loadConfig() : config)?.callbackSecret);
   if (!secret) throw notConfigured("SPACEPAY_CALLBACK_SECRET");
   return `${appUrl.replace(/\/+$/, "")}/api/public/spacepay/webhook/${spacePayCallbackToken(externalId, secret)}`;
 }
@@ -320,19 +339,20 @@ async function parseResponseBody(response: Response): Promise<unknown> {
 }
 
 async function spacePayRequest(
+  config: SpacePayConfig | null,
   method: "GET" | "POST",
   path: string,
   token: string | null,
   body?: unknown,
 ): Promise<unknown> {
-  if (!token) throw notConfigured("SPACEPAY_GATEWAY_TOKEN");
+  if (!config || !token) throw notConfigured("SPACEPAY_GATEWAY_TOKEN");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   let response: Response;
   try {
-    response = await fetch(`${baseUrl()}${path}`, {
+    response = await fetch(`${baseUrl(config)}${path}`, {
       method,
       headers: {
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
@@ -387,7 +407,10 @@ type TransactionListResponse = {
 };
 
 /** Finds a recent cash-in by idempotency key (= our externalId), or null. */
-async function findByIdempotencyKey(externalId: string): Promise<PixCharge | null> {
+async function findByIdempotencyKey(
+  config: SpacePayConfig | null,
+  externalId: string,
+): Promise<PixCharge | null> {
   const from = new Date(Date.now() - LOOKUP_WINDOW_MS).toISOString();
   for (let page = 1; page <= LOOKUP_MAX_PAGES; page += 1) {
     const params = new URLSearchParams({
@@ -398,9 +421,10 @@ async function findByIdempotencyKey(externalId: string): Promise<PixCharge | nul
       perPage: String(LOOKUP_PER_PAGE),
     });
     const body = (await spacePayRequest(
+      config,
       "GET",
       `/transactions?${params.toString()}`,
-      readToken(),
+      readToken(config),
     )) as TransactionListResponse | null;
     const items = Array.isArray(body?.data) ? body.data : null;
     if (!items) throw invalidResponse("data");
@@ -416,10 +440,12 @@ async function findByIdempotencyKey(externalId: string): Promise<PixCharge | nul
 }
 
 async function createSpacePayCharge(input: CreatePixChargeInput): Promise<PixCharge> {
-  const name = env("SPACEPAY_PAYER_NAME");
-  const document = env("SPACEPAY_PAYER_DOCUMENT");
-  const email = env("SPACEPAY_PAYER_EMAIL");
-  const phone = env("SPACEPAY_PAYER_PHONE");
+  const config = await loadConfig();
+  if (!gatewayToken(config)) throw notConfigured("SPACEPAY_GATEWAY_TOKEN");
+  const name = trimmed(config?.payer?.name);
+  const document = trimmed(config?.payer?.document);
+  const email = trimmed(config?.payer?.email);
+  const phone = trimmed(config?.payer?.phone);
   if (!name || !document || !email || !phone) throw notConfigured("SPACEPAY_PAYER_*");
 
   // Strict body: any extra field (description, metadata, expiry) is a 400.
@@ -428,12 +454,13 @@ async function createSpacePayCharge(input: CreatePixChargeInput): Promise<PixCha
     email,
     name,
     amount: centsToReais(input.amountCents),
-    webhook: spacePayCallbackUrl(input.externalId),
+    webhook: await spacePayCallbackUrl(input.externalId, config),
     ip_address: input.requestIp ?? null,
     idempotency_key: input.externalId,
     phone,
   };
-  const post = () => spacePayRequest("POST", "/create_gateway_cash_in", gatewayToken(), payload);
+  const post = () =>
+    spacePayRequest(config, "POST", "/create_gateway_cash_in", gatewayToken(config), payload);
 
   try {
     let body: unknown;
@@ -449,7 +476,7 @@ async function createSpacePayCharge(input: CreatePixChargeInput): Promise<PixCha
     return parseCashIn(body, input);
   } catch (error) {
     if (error instanceof SpacePayError && error.status === 409) {
-      const existing = await findByIdempotencyKey(input.externalId);
+      const existing = await findByIdempotencyKey(config, input.externalId);
       // The list record carries no copy_paste/QR, so this charge can never
       // be shown for payment: stamp it as already expired so the dialog
       // offers "Gerar novo Pix" (a new attempt) instead of an empty screen.
@@ -465,11 +492,13 @@ async function createSpacePayCharge(input: CreatePixChargeInput): Promise<PixCha
 }
 
 async function getSpacePayCharge(ref: PixChargeRef): Promise<PixCharge> {
+  const config = await loadConfig();
   if (ref.providerChargeId) {
     const body = (await spacePayRequest(
+      config,
       "GET",
       `/transactions/${encodeURIComponent(ref.providerChargeId)}`,
-      readToken(),
+      readToken(config),
     )) as { data?: unknown } | null;
     if (!body?.data || typeof body.data !== "object") throw invalidResponse("data");
     const charge = parseTransaction(body.data);
@@ -480,7 +509,7 @@ async function getSpacePayCharge(ref: PixChargeRef): Promise<PixCharge> {
     }
     return charge;
   }
-  const found = await findByIdempotencyKey(ref.externalId);
+  const found = await findByIdempotencyKey(config, ref.externalId);
   if (!found) {
     throw new SpacePayError("Cobrança não encontrada no SpacePay.", {
       status: 404,

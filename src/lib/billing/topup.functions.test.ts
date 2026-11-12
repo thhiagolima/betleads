@@ -20,11 +20,28 @@ vi.mock("./upper-pix.server", async (importOriginal) => {
 vi.mock("./spacepay-pix.server", () => ({
   spacePayGateway: {
     provider: "spacepay",
-    isConfigured: () => spaceConfigured.value,
+    isConfigured: async () => spaceConfigured.value,
     create: spaceCreate,
     get: vi.fn(),
     cancel: vi.fn(async () => null),
   },
+}));
+
+// Gateway credentials and the active provider come from the gateway config
+// loader (DB, env fallback); the tests drive it through this mutable state.
+const gatewayConfig = vi.hoisted(() => ({
+  upperApiKey: null as string | null,
+  active: "upper" as "upper" | "spacepay",
+}));
+vi.mock("./payment-gateway-config.server", () => ({
+  getUpperConfig: async () =>
+    gatewayConfig.upperApiKey?.trim()
+      ? {
+          source: "env",
+          config: { apiKey: gatewayConfig.upperApiKey, webhookSecret: null, apiBase: null },
+        }
+      : { source: "none", config: null },
+  getActivePixProvider: async () => gatewayConfig.active,
 }));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
@@ -72,7 +89,8 @@ function upperChargeResult(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   process.env.BILLING_GATEWAY_ENABLED = "true";
-  process.env.UPPER_API_KEY = "test-upper-key";
+  gatewayConfig.upperApiKey = "test-upper-key";
+  gatewayConfig.active = "upper";
 
   fake.admin.reset();
   __resetDemoTenantCacheForTests();
@@ -109,8 +127,6 @@ afterEach(() => {
   delete process.env.BILLING_ENFORCEMENT_ENABLED;
   delete process.env.BILLING_INVOICES_ENABLED;
   delete process.env.BILLING_GATEWAY_ENABLED;
-  delete process.env.UPPER_API_KEY;
-  delete process.env.BILLING_PIX_PROVIDER;
 });
 
 describe("createCreditTopupFor", () => {
@@ -122,8 +138,8 @@ describe("createCreditTopupFor", () => {
     expect(createUpperCharge).not.toHaveBeenCalled();
   });
 
-  it("refuses with the unavailable message, before writing anything, when UPPER_API_KEY is missing", async () => {
-    process.env.UPPER_API_KEY = "  ";
+  it("refuses with the unavailable message, before writing anything, when the Upper API key is missing", async () => {
+    gatewayConfig.upperApiKey = "  ";
     await expect(
       createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
     ).rejects.toThrow("Compra por Pix indisponível no momento.");
@@ -383,7 +399,7 @@ describe("createCreditTopupFor", () => {
 
 describe("createCreditTopupFor with SpacePay active", () => {
   beforeEach(() => {
-    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    gatewayConfig.active = "spacepay";
   });
 
   it("creates the charge on SpacePay, stores provider spacepay and forwards the request IP", async () => {

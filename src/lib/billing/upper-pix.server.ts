@@ -3,6 +3,7 @@
 // API key must stay on the server.
 
 import { recordBillingSignal, upperErrorSignal } from "./billing-signals.server";
+import { getUpperConfig } from "./payment-gateway-config.server";
 import { PixGatewayError } from "./pix-gateway-error";
 
 export type UpperChargeStatus =
@@ -78,16 +79,13 @@ export function __resetUpperRateLimiterForTests(): void {
   callTimestamps = [];
 }
 
-// Normalizes UPPER_API_BASE so the request path always has exactly one
-// trailing /v1 segment, regardless of whether the configured value already
-// carries it or has a trailing slash.
-function baseUrl(): string {
-  const raw = (process.env.UPPER_API_BASE?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
+// Normalizes the configured API base (gateway config: DB, env UPPER_API_BASE
+// fallback) so the request path always has exactly one trailing /v1 segment,
+// regardless of whether the configured value already carries it or has a
+// trailing slash.
+function baseUrl(apiBase: string | null | undefined): string {
+  const raw = (apiBase?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
   return /\/v1$/i.test(raw) ? raw : `${raw}/v1`;
-}
-
-function apiKey(): string | null {
-  return process.env.UPPER_API_KEY?.trim() || null;
 }
 
 /** Throws UpperError(INVALID_RESPONSE) when `value` doesn't parse to a finite number. */
@@ -187,7 +185,9 @@ async function parseResponseBody(response: Response): Promise<unknown> {
 }
 
 async function upperRequest(method: string, path: string, body?: unknown): Promise<unknown> {
-  const key = apiKey();
+  // Credentials from the gateway config (DB, env fallback).
+  const { config } = await getUpperConfig();
+  const key = config?.apiKey?.trim() || null;
   if (!key) {
     throw new UpperError("Upper não configurado: UPPER_API_KEY ausente.", {
       status: 0,
@@ -203,7 +203,7 @@ async function upperRequest(method: string, path: string, body?: unknown): Promi
 
   let response: Response;
   try {
-    response = await fetch(`${baseUrl()}${path}`, {
+    response = await fetch(`${baseUrl(config?.apiBase)}${path}`, {
       method,
       headers: {
         "Content-Type": "application/json",

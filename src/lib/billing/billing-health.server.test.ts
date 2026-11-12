@@ -22,7 +22,7 @@ vi.mock("@/lib/observability/job-monitor.server", () => ({ pingHeartbeat }));
 
 const pix = vi.hoisted(() => ({ active: "upper" as "upper" | "spacepay" }));
 // Only activePixProvider is read; mocking keeps the gateway clients out of this test.
-vi.mock("./pix-gateway.server", () => ({ activePixProvider: () => pix.active }));
+vi.mock("./pix-gateway.server", () => ({ activePixProvider: async () => pix.active }));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {

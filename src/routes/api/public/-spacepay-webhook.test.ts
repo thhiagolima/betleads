@@ -21,6 +21,12 @@ const { recordBillingSignal } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/billing/billing-signals.server", () => ({ recordBillingSignal }));
 
+// Accepted callback secrets come from the gateway config loader (DB + env).
+const gatewaySecrets = vi.hoisted(() => ({ spacepay: [] as string[] }));
+vi.mock("@/lib/billing/payment-gateway-config.server", () => ({
+  spacePayCallbackSecrets: async () => gatewaySecrets.spacepay,
+}));
+
 // Self-contained stand-in for the token verifier (same contract:
 // `${base64url(externalId)}.${hexHmac}`), so this route test does not depend
 // on the token module's internals.
@@ -82,21 +88,40 @@ beforeEach(() => {
   confirmCharge.mockReset();
   recordBillingSignal.mockClear();
   confirmCharge.mockResolvedValue({ outcome: "credited" });
-  vi.stubEnv("SPACEPAY_CALLBACK_SECRET", SECRET);
+  gatewaySecrets.spacepay = [SECRET];
 });
 
 afterEach(() => {
-  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
 describe("POST /api/public/spacepay/webhook/$token", () => {
-  it("answers 500 when SPACEPAY_CALLBACK_SECRET is not configured, writing nothing", async () => {
-    vi.stubEnv("SPACEPAY_CALLBACK_SECRET", "");
+  it("answers 500 when no callback secret is configured, writing nothing", async () => {
+    gatewaySecrets.spacepay = [];
     const response = await validPost();
     expect(response.status).toBe(500);
     expect(fake.admin.rows("payment_webhook_events")).toHaveLength(0);
     expect(confirmCharge).not.toHaveBeenCalled();
+  });
+
+  it("accepts a token signed with any of the configured secrets (rotation)", async () => {
+    gatewaySecrets.spacepay = ["new-db-secret", SECRET];
+    const oldUrl = await post(tokenFor(EXTERNAL_ID, SECRET), '{"status":"paid"}');
+    expect(oldUrl.status).toBe(200);
+    const newUrl = await post(tokenFor(EXTERNAL_ID, "new-db-secret"), '{"status":"paid","n":2}');
+    expect(newUrl.status).toBe(200);
+    expect(recordBillingSignal).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token signed with none of the configured secrets with 401", async () => {
+    gatewaySecrets.spacepay = ["new-db-secret", SECRET];
+    const response = await post(tokenFor(EXTERNAL_ID, "other-secret"), '{"status":"paid"}');
+    expect(response.status).toBe(401);
+    expect(recordBillingSignal).toHaveBeenCalledWith(
+      "spacepay_webhook_invalid_token",
+      "bad_signature",
+    );
+    expect(fake.admin.rows("payment_webhook_events")).toHaveLength(0);
   });
 
   it("rejects a token signed with another secret with 401, a billing signal and nothing written", async () => {

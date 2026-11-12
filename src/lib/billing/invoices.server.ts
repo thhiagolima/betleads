@@ -562,8 +562,8 @@ export async function createInvoicePayment(
   actorUserId: string,
   options: { requestIp?: string | null } = {},
 ): Promise<CreateInvoicePaymentResult> {
-  const gateway = activePixGateway();
-  if (!isBillingInvoicesEnabled() || !gateway.isConfigured()) {
+  const gateway = await activePixGateway();
+  if (!isBillingInvoicesEnabled() || !(await gateway.isConfigured())) {
     throw new Error(PIX_UNAVAILABLE_MESSAGE);
   }
   // Server-fn callers don't pass it: read it off the current request (null in cron/tests).
@@ -730,7 +730,7 @@ async function settledAsPaidAtGateway(
  * and only while it is still PENDING/ACTIVE (a concurrent PAID is never
  * overwritten) — after one fresh read: a SpacePay charge already PAID is
  * recorded/confirmed instead and counted in `paid`, not `canceled`. A row
- * whose gateway is no longer configured (e.g. UPPER_API_KEY removed after
+ * whose gateway is no longer configured (e.g. Upper credentials removed after
  * switching to SpacePay) is closed locally too, instead of failing. Used by the superadmin discount and cancel actions (Task 8)
  * before changing an invoice that may already have an open Pix out. One
  * charge failing to cancel is logged and never stops the others, but it is
@@ -759,7 +759,7 @@ export async function cancelOpenInvoiceCharges(
       // The column defaults to 'upper'; a missing value means the same.
       const gateway = getPixGateway((row.provider as string | null | undefined) ?? "upper");
       const ref: PixChargeRef = { externalId, providerChargeId };
-      const configured = gateway.isConfigured();
+      const configured = await gateway.isConfigured();
       if (!configured) {
         console.warn("[billing/invoices] gateway not configured; closing charge locally", {
           chargeId,

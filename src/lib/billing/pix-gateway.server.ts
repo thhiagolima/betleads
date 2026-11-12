@@ -2,14 +2,16 @@
 // contract so the charge state machine (top-up, invoice, webhook, reconcile)
 // never imports a gateway client directly.
 //
-// - New charges go to the ACTIVE provider (`BILLING_PIX_PROVIDER`, default
-//   'upper'), one global choice for every house.
+// - New charges go to the ACTIVE provider (from the gateway config: DB
+//   settings row, env `BILLING_PIX_PROVIDER` fallback, default 'upper'), one
+//   global choice for every house.
 // - An existing charge is ALWAYS read/cancelled through the provider stored
 //   on its own `payment_charges.provider` row — switching the active
 //   provider never strands a charge created on the other one.
 // - Every client normalizes its response to `PixCharge` (the original Upper
 //   shape), so `recordChargeSnapshot` and the crediting checks are shared.
 
+import { getActivePixProvider, getUpperConfig } from "./payment-gateway-config.server";
 import { spacePayGateway } from "./spacepay-pix.server";
 import {
   cancelUpperCharge,
@@ -46,8 +48,11 @@ export type PixChargeRef = {
 
 export interface PixGateway {
   provider: PixProvider;
-  /** Credentials present; checked before any payment_charges row is written. */
-  isConfigured(): boolean;
+  /**
+   * Credentials present (gateway config: DB, env fallback); checked before
+   * any payment_charges row is written.
+   */
+  isConfigured(): Promise<boolean>;
   create(input: CreatePixChargeInput): Promise<PixCharge>;
   /** Fresh read from the gateway. Throws PixGatewayError with status 404 when unknown. */
   get(ref: PixChargeRef): Promise<PixCharge>;
@@ -61,7 +66,7 @@ export interface PixGateway {
 
 export const upperGateway: PixGateway = {
   provider: "upper",
-  isConfigured: () => Boolean(process.env.UPPER_API_KEY?.trim()),
+  isConfigured: async () => Boolean((await getUpperConfig()).config?.apiKey?.trim()),
   create: ({ requestIp: _requestIp, ...input }) => createUpperCharge(input),
   get: (ref) => getUpperCharge(ref.externalId),
   cancel: (ref) => cancelUpperCharge(ref.externalId),
@@ -82,12 +87,15 @@ export function getPixGateway(provider: string | null | undefined): PixGateway {
   return GATEWAYS[provider];
 }
 
-/** Provider for NEW charges: `BILLING_PIX_PROVIDER` (upper | spacepay), default upper. */
-export function activePixProvider(): PixProvider {
-  const raw = process.env.BILLING_PIX_PROVIDER?.trim().toLowerCase();
-  return isPixProvider(raw) ? raw : "upper";
+/**
+ * Provider for NEW charges, from the gateway config: DB settings row, else env
+ * `BILLING_PIX_PROVIDER` (upper | spacepay), else upper.
+ */
+export async function activePixProvider(): Promise<PixProvider> {
+  const provider = await getActivePixProvider();
+  return isPixProvider(provider) ? provider : "upper";
 }
 
-export function activePixGateway(): PixGateway {
-  return GATEWAYS[activePixProvider()];
+export async function activePixGateway(): Promise<PixGateway> {
+  return GATEWAYS[await activePixProvider()];
 }

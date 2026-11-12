@@ -25,7 +25,7 @@
 //
 // Gateway findings are per provider (Upper / SpacePay, `PIX_SIGNAL_CHECKS`):
 // each carries `provider` and a message naming it. The report also says which
-// provider takes NEW charges (`activeProvider`, BILLING_PIX_PROVIDER).
+// provider takes NEW charges (`activeProvider`, from the gateway config: DB, env fallback).
 //
 // Findings never carry secrets, payloads, balances or supplier cost: only
 // counts, times and fixed reasons.
@@ -107,7 +107,7 @@ export type BillingHealthReport = {
   windowHours: number;
   findings: BillingHealthFinding[];
   /**
-   * Provider that takes NEW charges (BILLING_PIX_PROVIDER). Optional only so
+   * Provider that takes NEW charges (gateway config: DB, env fallback). Optional only so
    * hand-built reports elsewhere stay valid; checkBillingHealth always sets it.
    */
   activeProvider?: PixProvider;
@@ -377,14 +377,14 @@ export async function checkBillingHealth(
     checkedAt: now.toISOString(),
     windowHours,
     findings,
-    activeProvider: currentPixProvider(),
+    activeProvider: await currentPixProvider(),
   };
 }
 
 /** activePixProvider(), never throwing (a health check must not fail on config). */
-function currentPixProvider(): PixProvider {
+async function currentPixProvider(): Promise<PixProvider> {
   try {
-    return activePixProvider();
+    return await activePixProvider();
   } catch {
     return "upper";
   }

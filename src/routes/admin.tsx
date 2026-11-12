@@ -88,6 +88,7 @@ import {
 } from "@/components/billing/admin/billing-tenant-list";
 import { BillingCsvDownloadCard } from "@/components/billing/admin/billing-csv-download";
 import { PixFeeFormCard } from "@/components/billing/admin/pix-fee-form";
+import { PaymentGatewaysCard } from "@/components/billing/admin/payment-gateways-card";
 import {
   Ban,
   CheckCircle2,
@@ -266,6 +267,7 @@ function BillingTab() {
         <BillingCsvDownloadCard />
         <PixFeeFormCard />
       </div>
+      <PaymentGatewaysCard />
     </div>
   );
 }

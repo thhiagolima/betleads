@@ -4,13 +4,16 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { recordBillingSignal } from "@/lib/billing/billing-signals.server";
 import { maskDocumentsDeep } from "@/lib/billing/payer";
 import { confirmCharge } from "@/lib/billing/payment-charges.server";
+import { upperWebhookSecrets } from "@/lib/billing/payment-gateway-config.server";
 import { verifyUpperSignature } from "@/lib/billing/upper-webhook";
 
 // Signed webhook from the Upper Pix gateway.
 //
 // - The raw body is read with request.text() and checked byte-for-byte
 //   against the X-Upper-Signature header before any JSON parsing — see
-//   verifyUpperSignature. A bad signature answers 400 and writes nothing.
+//   verifyUpperSignature. The signature is accepted under ANY of
+//   upperWebhookSecrets() (gateway config: DB and env fallback); no secret
+//   at all answers 500. A bad signature answers 400 and writes nothing.
 // - Every event with a valid signature is deduplicated by event_id (the
 //   body's `id`, falling back to X-Upper-Delivery) and recorded in
 //   payment_webhook_events BEFORE any processing. If that recording itself
@@ -74,10 +77,10 @@ function headersToStore(request: Request): Record<string, string> {
 }
 
 async function handlePost(request: Request): Promise<Response> {
-  const secret = process.env.UPPER_WEBHOOK_SECRET;
+  const secrets = await upperWebhookSecrets();
   const rawBody = await request.text();
 
-  if (!secret) {
+  if (secrets.length === 0) {
     return Response.json(
       { ok: false, error: "UPPER_WEBHOOK_SECRET not configured" },
       { status: 500 },
@@ -86,7 +89,12 @@ async function handlePost(request: Request): Promise<Response> {
 
   const signatureHeader = request.headers.get("x-upper-signature");
   const nowSec = Math.floor(Date.now() / 1000);
-  const verification = verifyUpperSignature(rawBody, signatureHeader, secret, nowSec);
+  let verification = verifyUpperSignature(rawBody, signatureHeader, secrets[0], nowSec);
+  for (const secret of secrets.slice(1)) {
+    // Only a "mismatch" depends on the secret; missing/malformed/stale are final.
+    if (verification.ok || verification.reason !== "mismatch") break;
+    verification = verifyUpperSignature(rawBody, signatureHeader, secret, nowSec);
+  }
   if (!verification.ok) {
     // PG6-03: nothing is written to payment_webhook_events (an unsigned
     // event_id must never block the real one), but the billing health

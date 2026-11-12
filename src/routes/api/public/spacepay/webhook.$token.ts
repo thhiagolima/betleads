@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { recordBillingSignal } from "@/lib/billing/billing-signals.server";
 import { maskDocumentsDeep } from "@/lib/billing/payer";
 import { confirmCharge } from "@/lib/billing/payment-charges.server";
+import { spacePayCallbackSecrets } from "@/lib/billing/payment-gateway-config.server";
 import { verifySpacePayCallbackToken } from "@/lib/billing/spacepay-callback-token";
 
 // Callback from the SpacePay Pix gateway (cash-in `callbackUrl`).
@@ -13,9 +14,11 @@ import { verifySpacePayCallbackToken } from "@/lib/billing/spacepay-callback-tok
 // - The payload format is UNDOCUMENTED and the callback is UNSIGNED. The only
 //   proof of authenticity is the per-charge token in the URL
 //   (`/api/public/spacepay/webhook/<base64url(externalId)>.<hmac>`, HMAC with
-//   SPACEPAY_CALLBACK_SECRET — see verifySpacePayCallbackToken). The token
-//   also carries OUR externalId, so the body is never needed to find the
-//   charge. Missing secret → 500. Bad token → 401, a
+//   the callback secret — see verifySpacePayCallbackToken). A token is
+//   accepted under ANY of spacePayCallbackSecrets() (gateway config: DB and
+//   env fallback), so URLs signed before a secret rotation keep working. The
+//   token also carries OUR externalId, so the body is never needed to find the
+//   charge. No secret at all → 500. Bad token → 401, a
 //   `spacepay_webhook_invalid_token` billing signal (reason only) and nothing
 //   written.
 // - The body is only a hint: confirmCharge always re-reads the charge from
@@ -145,15 +148,20 @@ async function processEvent(
 }
 
 async function handlePost(request: Request, token: string): Promise<Response> {
-  const secret = process.env.SPACEPAY_CALLBACK_SECRET;
-  if (!secret) {
+  const secrets = await spacePayCallbackSecrets();
+  if (secrets.length === 0) {
     return Response.json(
       { ok: false, error: "SPACEPAY_CALLBACK_SECRET not configured" },
       { status: 500 },
     );
   }
 
-  const verification = verifySpacePayCallbackToken(token, secret);
+  let verification = verifySpacePayCallbackToken(token, secrets[0]);
+  for (const secret of secrets.slice(1)) {
+    // "malformed" doesn't depend on the secret; only a bad signature is retried.
+    if (verification.ok || verification.reason !== "bad_signature") break;
+    verification = verifySpacePayCallbackToken(token, secret);
+  }
   if (!verification.ok) {
     // Nothing written to payment_webhook_events; the billing health monitor
     // counts it. Reason only, never the token or the body.

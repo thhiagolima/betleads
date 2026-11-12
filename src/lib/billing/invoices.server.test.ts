@@ -21,7 +21,7 @@ const { spaceCreate, spaceCancel, spaceGet, spaceConfigured } = vi.hoisted(() =>
   spaceCreate: vi.fn(),
   spaceCancel: vi.fn(),
   spaceGet: vi.fn(),
-  spaceConfigured: vi.fn(() => true),
+  spaceConfigured: vi.fn(async () => true),
 }));
 vi.mock("./spacepay-pix.server", () => ({
   spacePayGateway: {
@@ -38,6 +38,23 @@ vi.mock("./payment-charges.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./payment-charges.server")>();
   return { ...actual, confirmCharge };
 });
+
+// Gateway credentials and the active provider come from the gateway config
+// loader (DB, env fallback); the tests drive it through this mutable state.
+const gatewayConfig = vi.hoisted(() => ({
+  upperApiKey: null as string | null,
+  active: "upper" as "upper" | "spacepay",
+}));
+vi.mock("./payment-gateway-config.server", () => ({
+  getUpperConfig: async () =>
+    gatewayConfig.upperApiKey?.trim()
+      ? {
+          source: "env",
+          config: { apiKey: gatewayConfig.upperApiKey, webhookSecret: null, apiBase: null },
+        }
+      : { source: "none", config: null },
+  getActivePixProvider: async () => gatewayConfig.active,
+}));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
@@ -85,7 +102,8 @@ function invoiceRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   process.env.BILLING_INVOICES_ENABLED = "true";
-  process.env.UPPER_API_KEY = "test-upper-key";
+  gatewayConfig.upperApiKey = "test-upper-key";
+  gatewayConfig.active = "upper";
 
   fake.admin.reset();
   fake.admin.rows("tenants").push({ id: TENANT, nome: "Sorte Alta", plano: "padrao" });
@@ -106,7 +124,7 @@ beforeEach(() => {
   spaceGet.mockReset();
   spaceGet.mockResolvedValue(upperChargeResult({ id: "sp-tx-1", status: "ACTIVE" }));
   spaceConfigured.mockReset();
-  spaceConfigured.mockReturnValue(true);
+  spaceConfigured.mockResolvedValue(true);
   confirmCharge.mockReset();
   confirmCharge.mockResolvedValue({ outcome: "credited" });
 });
@@ -114,8 +132,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.BILLING_INVOICES_ENABLED;
-  delete process.env.UPPER_API_KEY;
-  delete process.env.BILLING_PIX_PROVIDER;
 });
 
 describe("runBillingCycle", () => {
@@ -596,8 +612,8 @@ describe("createInvoicePayment", () => {
     expect(createUpperCharge).not.toHaveBeenCalled();
   });
 
-  it("throws the gateway-unavailable message when UPPER_API_KEY is missing", async () => {
-    process.env.UPPER_API_KEY = "";
+  it("throws the gateway-unavailable message when the Upper API key is missing", async () => {
+    gatewayConfig.upperApiKey = "";
     fake.admin.rows("billing_invoices").push(invoiceRow());
     await expect(createInvoicePayment("invoice-1", ACTOR)).rejects.toThrow(
       "Pagamento por Pix indisponível no momento.",
@@ -670,7 +686,7 @@ describe("createInvoicePayment with two gateways", () => {
   });
 
   it("creates on SpacePay when it is active, storing provider spacepay and the request IP", async () => {
-    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    gatewayConfig.active = "spacepay";
     fake.admin.rows("billing_invoices").push(invoiceRow());
 
     const result = await createInvoicePayment("invoice-1", ACTOR, { requestIp: "198.51.100.4" });
@@ -688,7 +704,7 @@ describe("createInvoicePayment with two gateways", () => {
   });
 
   it("reuses an open SpacePay charge with more than 60s left", async () => {
-    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    gatewayConfig.active = "spacepay";
     fake.admin.rows("billing_invoices").push(invoiceRow());
     fake.admin.rows("payment_charges").push(
       openCharge({
@@ -705,7 +721,7 @@ describe("createInvoicePayment with two gateways", () => {
   });
 
   it("does not reuse a SpacePay charge with <=60s left: closes it locally and creates attempt n+1", async () => {
-    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    gatewayConfig.active = "spacepay";
     fake.admin.rows("billing_invoices").push(invoiceRow());
     fake.admin.rows("payment_charges").push(
       openCharge({ provider: "spacepay", expires_at: new Date(Date.now() + 30_000).toISOString() }),
@@ -723,7 +739,7 @@ describe("createInvoicePayment with two gateways", () => {
   });
 
   it("does not reuse an open charge from the other (no longer active) provider", async () => {
-    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    gatewayConfig.active = "spacepay";
     fake.admin.rows("billing_invoices").push(invoiceRow());
     fake.admin.rows("payment_charges").push(openCharge({ provider: "upper" }));
 
@@ -738,10 +754,10 @@ describe("createInvoicePayment with two gateways", () => {
     expect(created.external_id).toBe("bl-inv-invoice-1-2");
   });
 
-  it("switching to SpacePay with UPPER_API_KEY removed closes the old Upper charge locally and creates n+1", async () => {
+  it("switching to SpacePay with the Upper API key removed closes the old Upper charge locally and creates n+1", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    process.env.BILLING_PIX_PROVIDER = "spacepay";
-    delete process.env.UPPER_API_KEY;
+    gatewayConfig.active = "spacepay";
+    gatewayConfig.upperApiKey = null;
     fake.admin.rows("billing_invoices").push(invoiceRow());
     fake.admin.rows("payment_charges").push(openCharge({ provider: "upper" }));
 
@@ -757,7 +773,7 @@ describe("createInvoicePayment with two gateways", () => {
   });
 
   it("a SpacePay charge found PAID while being replaced answers 'already paid' and creates no new attempt", async () => {
-    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    gatewayConfig.active = "spacepay";
     fake.admin.rows("billing_invoices").push(invoiceRow());
     fake.admin.rows("payment_charges").push(
       openCharge({ provider: "spacepay", expires_at: new Date(Date.now() + 30_000).toISOString() }),
@@ -785,7 +801,7 @@ describe("createInvoicePayment with two gateways", () => {
   });
 
   it("stores a code-only summary when SpacePay fails", async () => {
-    process.env.BILLING_PIX_PROVIDER = "spacepay";
+    gatewayConfig.active = "spacepay";
     fake.admin.rows("billing_invoices").push(invoiceRow());
     spaceCreate.mockRejectedValue(
       new PixGatewayError("SpacePay respondeu 502.", {
@@ -910,7 +926,7 @@ describe("cancelOpenInvoiceCharges per provider", () => {
 
   it("closes an Upper charge locally when Upper is no longer configured, without calling Upper", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    delete process.env.UPPER_API_KEY;
+    gatewayConfig.upperApiKey = null;
     fake.admin.rows("payment_charges").push(
       spacePayRow({ id: "charge-up", provider: "upper", provider_charge_id: null }),
     );

@@ -1,6 +1,6 @@
 // Server side of buying Pix credit top-ups (PG2, Task 4). `createCreditTopup`
 // generates a fresh order + charge and asks the ACTIVE Pix gateway
-// (`BILLING_PIX_PROVIDER`: Upper or SpacePay) for a Pix code;
+// (gateway config: DB, env `BILLING_PIX_PROVIDER` fallback; Upper or SpacePay) for a Pix code;
 // `getTopupStatus` is a pure read of the charge's current state (through the
 // caller's own client, so RLS hides other houses' charges) — it never calls
 // a gateway itself. Crediting the wallet happens elsewhere (the webhook/cron
@@ -147,8 +147,8 @@ export async function createCreditTopupFor(
   ctx: ServerContext,
   data: z.infer<typeof createTopupInput>,
 ) {
-  const gateway = activePixGateway();
-  if (!isBillingGatewayEnabled() || !gateway.isConfigured()) {
+  const gateway = await activePixGateway();
+  if (!isBillingGatewayEnabled() || !(await gateway.isConfigured())) {
     throw new Error(GATEWAY_UNAVAILABLE_MESSAGE);
   }
 

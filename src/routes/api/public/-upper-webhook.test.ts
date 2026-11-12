@@ -21,6 +21,12 @@ const { recordBillingSignal } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/billing/billing-signals.server", () => ({ recordBillingSignal }));
 
+// Accepted webhook secrets come from the gateway config loader (DB + env).
+const gatewaySecrets = vi.hoisted(() => ({ upper: [] as string[] }));
+vi.mock("@/lib/billing/payment-gateway-config.server", () => ({
+  upperWebhookSecrets: async () => gatewaySecrets.upper,
+}));
+
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { Route } from "./upper/webhook";
 
@@ -57,11 +63,10 @@ beforeEach(() => {
   confirmCharge.mockReset();
   recordBillingSignal.mockClear();
   confirmCharge.mockResolvedValue({ outcome: "credited" });
-  vi.stubEnv("UPPER_WEBHOOK_SECRET", SECRET);
+  gatewaySecrets.upper = [SECRET];
 });
 
 afterEach(() => {
-  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -88,10 +93,34 @@ describe("POST /api/public/upper/webhook", () => {
     expect(recordBillingSignal).not.toHaveBeenCalled();
   });
 
-  it("answers 500 when UPPER_WEBHOOK_SECRET is not configured", async () => {
-    vi.stubEnv("UPPER_WEBHOOK_SECRET", "");
+  it("answers 500 when no webhook secret is configured", async () => {
+    gatewaySecrets.upper = [];
     const response = await post(JSON.stringify({ id: "evt-no-secret", event: "charge.paid" }));
     expect(response.status).toBe(500);
+  });
+
+  it("accepts a signature made with any of the configured secrets (rotation)", async () => {
+    gatewaySecrets.upper = ["whsec-new-db-secret", SECRET];
+    const response = await signedPost({ id: "evt-rotated", event: "ping" });
+    expect(response.status).toBe(200);
+
+    const body = JSON.stringify({ id: "evt-rotated-2", event: "ping" });
+    const now = Math.floor(Date.now() / 1000);
+    const second = await post(body, {
+      "x-upper-signature": sign(body, now, "whsec-new-db-secret"),
+    });
+    expect(second.status).toBe(200);
+    expect(recordBillingSignal).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signature made with none of the configured secrets", async () => {
+    gatewaySecrets.upper = ["whsec-new-db-secret", SECRET];
+    const body = JSON.stringify({ id: "evt-unknown-secret", event: "charge.paid" });
+    const now = Math.floor(Date.now() / 1000);
+    const response = await post(body, { "x-upper-signature": sign(body, now, "whsec-other") });
+    expect(response.status).toBe(400);
+    expect(recordBillingSignal).toHaveBeenCalledWith("webhook_invalid_signature", "mismatch");
+    expect(fake.admin.rows("payment_webhook_events")).toHaveLength(0);
   });
 
   it("records and processes a valid charge.paid event, responding 200", async () => {

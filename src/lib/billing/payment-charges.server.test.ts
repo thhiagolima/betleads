@@ -20,7 +20,7 @@ const { spacePayGet } = vi.hoisted(() => ({ spacePayGet: vi.fn() }));
 vi.mock("./spacepay-pix.server", () => ({
   spacePayGateway: {
     provider: "spacepay",
-    isConfigured: () => true,
+    isConfigured: async () => true,
     create: vi.fn(),
     get: spacePayGet,
     cancel: vi.fn(async () => null),
