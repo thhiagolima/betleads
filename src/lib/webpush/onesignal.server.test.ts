@@ -313,6 +313,15 @@ describe("updateOneSignalAppIcon", () => {
     expect(body.chrome_web_default_notification_icon).toBe("https://x.com/icon.png");
   });
 
+  it("throws with OneSignal's errors when the PUT is refused", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse(400, { errors: ["invalid icon"] })) as unknown as typeof fetch;
+
+    const { updateOneSignalAppIcon } = await import("./onesignal.server");
+    await expect(
+      updateOneSignalAppIcon("app-1", "https://x.com/icon.png", ORG_CREDENTIALS),
+    ).rejects.toThrow(/OneSignal recusou o ícone do app \(400\).*invalid icon/);
+  });
+
   it("does nothing (no fetch call) when the credentials have no orgApiKey (manual path)", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;

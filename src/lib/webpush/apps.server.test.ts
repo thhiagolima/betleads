@@ -69,6 +69,7 @@ describe("apps.server", () => {
       expect(onesignal.createOneSignalApp).toHaveBeenCalledWith({
         siteName: "Casa Bravabet",
         origin: "https://bravabet365.com",
+        iconUrl: null,
         credentials: { orgApiKey: "", orgId: "" },
       });
       expect(onesignal.createOneSignalAppKey).toHaveBeenCalledWith("os-app-1", {
@@ -127,6 +128,7 @@ describe("apps.server", () => {
       expect(onesignal.createOneSignalApp).toHaveBeenCalledWith({
         siteName: "Casa Bravabet",
         origin: "https://bravabet365.com",
+        iconUrl: null,
         credentials: { orgApiKey: "own-org-key", orgId: "own-org-id" },
       });
       expect(onesignal.createOneSignalAppKey).toHaveBeenCalledWith("os-app-1", {
