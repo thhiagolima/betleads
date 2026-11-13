@@ -195,8 +195,53 @@ describe("webhook replay (CON-03)", () => {
     const { sb } = fakeSb({ data: rows });
     mocks.getServiceClient.mockReturnValue(sb);
     mocks.processWebhookEvent.mockImplementation(async () => Response.json({ ok: true }));
-    const body = await (await post({ request: request({ limit: 2 }) })).json();
+    const body = await (
+      await post({ request: request({ limit: 2, time_budget_ms: 0 }) })
+    ).json();
     expect(body).toMatchObject({ has_more: true, processed: 2 });
+  });
+
+  it("keeps claiming full batches within the time budget until the queue drains", async () => {
+    const { sb, rpc } = fakeSb({ data: [] });
+    rpc
+      .mockResolvedValueOnce({ data: [row("a"), row("b")], error: null })
+      .mockResolvedValueOnce({ data: [row("c"), row("d")], error: null })
+      .mockResolvedValueOnce({ data: [row("e")], error: null });
+    mocks.getServiceClient.mockReturnValue(sb);
+    mocks.processWebhookEvent.mockImplementation(async () => Response.json({ ok: true }));
+    const body = await (await post({ request: request({ limit: 2 }) })).json();
+    expect(rpc).toHaveBeenCalledTimes(3);
+    expect(body).toMatchObject({ has_more: false, scanned: 5, processed: 5 });
+    expect(mocks.startJobRun).toHaveBeenCalledTimes(1);
+    expect(mocks.run.finish).toHaveBeenCalledWith(
+      expect.objectContaining({ sent: 5, claimed: 5, queue_before: 5, stop_reason: "drained" }),
+    );
+  });
+
+  it("stops after a round of only in-progress rows instead of spinning on leases", async () => {
+    const { sb, rpc } = fakeSb({ data: [row("x", { replay_attempts: 2 })] });
+    mocks.getServiceClient.mockReturnValue(sb);
+    mocks.processWebhookEvent.mockResolvedValue(
+      Response.json({ ok: true, in_progress: true }, { status: 202 }),
+    );
+    const body = await (await post({ request: request({ limit: 1 }) })).json();
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(body).toMatchObject({ has_more: true, deferred: 1 });
+  });
+
+  it("a claim error after the first round keeps the work done and reports has_more", async () => {
+    const { sb, rpc } = fakeSb({ data: [] });
+    rpc
+      .mockResolvedValueOnce({ data: [row("a")], error: null })
+      .mockResolvedValueOnce({ data: null, error: { code: "57014", message: "timeout" } });
+    mocks.getServiceClient.mockReturnValue(sb);
+    mocks.processWebhookEvent.mockImplementation(async () => Response.json({ ok: true }));
+    const res = await post({ request: request({ limit: 1 }) });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ processed: 1, has_more: true });
+    expect(mocks.run.finish).toHaveBeenCalledWith(
+      expect.objectContaining({ sent: 1, last_provider_error: "webhook_logs claim: timeout" }),
+    );
   });
 
   it("dry run lists candidates through the RPC without processing or job rows", async () => {

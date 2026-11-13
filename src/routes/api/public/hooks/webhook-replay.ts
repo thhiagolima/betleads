@@ -6,6 +6,7 @@ import { pingHeartbeat, startJobRun } from "@/lib/observability/job-monitor.serv
 
 const JOB = "webhook_replay";
 const CLAIM_RPC = "claim_webhook_logs_for_replay";
+const DEFAULT_TIME_BUDGET_MS = 40_000;
 
 type ReplayRow = {
   id: string;
@@ -105,19 +106,24 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
           Number.isFinite(perTenantRaw) && perTenantRaw >= 1
             ? Math.min(Math.floor(perTenantRaw), limit)
             : undefined;
+        // One batch of 20 per minute drained ~1,200 events/hour: the 13k
+        // backlog left by the 2026-11-13 webhook storm would have taken 11 h.
+        // A tick now claims batch after batch until this budget runs out
+        // (below nginx's 60 s), and the next tick picks up the rest.
+        const budgetRaw = Number(body.time_budget_ms ?? DEFAULT_TIME_BUDGET_MS);
+        const timeBudgetMs = Math.min(
+          Math.max(Number.isFinite(budgetRaw) ? budgetRaw : DEFAULT_TIME_BUDGET_MS, 0),
+          DEFAULT_TIME_BUDGET_MS,
+        );
+        const startedAt = Date.now();
 
         // The claim RPC leases rows (replay_attempts + next_replay_at backoff),
         // interleaves tenants and dead-letters rows after 8 attempts (~4 h of backoff), so a set
         // of permanently failing events can no longer pin the head of the
         // queue and overlapping cron ticks never process the same row.
-        const selection = await selectBatch(sb, {
-          limit,
-          status,
-          tenantId,
-          evento,
-          perTenant,
-          dryRun,
-        });
+        const claimBatch = () =>
+          selectBatch(sb, { limit, status, tenantId, evento, perTenant, dryRun });
+        const selection = await claimBatch();
         if (selection.error) {
           if (!dryRun) {
             const failedRun = await startJobRun(JOB, {
@@ -170,98 +176,134 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
           });
         }
 
-        const deadLettered = selected.filter((row) => row.action === "dead_lettered");
-        const toReplay = selected.filter((row) => row.action !== "dead_lettered");
-        if (deadLettered.length > 0) {
-          console.warn("[webhook-replay] events moved to dead letter queue", {
-            count: deadLettered.length,
-            ids: deadLettered.map((row) => row.id),
-          });
-        }
-
         const run = await startJobRun(JOB, {
           channel: "webhook",
           kind: "replay",
           tenantId: tenantId ?? null,
         });
-        run.progress({ queue_before: selected.length, claimed: toReplay.length });
+        let scanned = 0;
+        let claimed = 0;
+        let deadLetteredCount = 0;
         let processed = 0;
         let failed = 0;
         let deferred = 0;
         let lastError: string | null = null;
+        let hasMore = false;
         // Keep replay bounded. Five concurrent events are enough to drain a
         // backlog without causing the same database contention that made the
         // report endpoints time out.
         const concurrency = 5;
+        let current: SelectResult = selection;
         try {
-          for (let offset = 0; offset < toReplay.length; offset += concurrency) {
-            const batch = toReplay.slice(offset, offset + concurrency);
-            const results = await Promise.all(
-              batch.map(async (row) => {
-                const response = await processWebhookEvent(
-                  sb,
-                  row.tenant_id,
-                  row.evento,
-                  (row.payload ?? {}) as Record<string, unknown>,
-                  { existingLogId: row.id },
-                );
-                const result = (await response.json().catch(() => ({ ok: false }))) as {
-                  ok?: boolean;
-                  in_progress?: boolean;
-                  error?: unknown;
-                };
-                // in_progress comes with ok:true (HTTP 202), so check it first.
-                if (result.in_progress) {
-                  // Another delivery holds the receipt. processWebhookEvent kept
-                  // the row `recebido` and moved next_replay_at past the lease;
-                  // waiting on a live lease must not consume a replay attempt.
-                  if (selection.mode === "claim" && typeof row.replay_attempts === "number") {
+          for (;;) {
+            const rows = current.rows;
+            const deadLettered = rows.filter((row) => row.action === "dead_lettered");
+            const toReplay = rows.filter((row) => row.action !== "dead_lettered");
+            if (deadLettered.length > 0) {
+              console.warn("[webhook-replay] events moved to dead letter queue", {
+                count: deadLettered.length,
+                ids: deadLettered.map((row) => row.id),
+              });
+            }
+            scanned += rows.length;
+            claimed += toReplay.length;
+            deadLetteredCount += deadLettered.length;
+            run.progress({ queue_before: scanned, claimed });
+            const mode = current.mode;
+            let roundProgress = 0;
+            for (let offset = 0; offset < toReplay.length; offset += concurrency) {
+              const batch = toReplay.slice(offset, offset + concurrency);
+              const results = await Promise.all(
+                batch.map(async (row) => {
+                  const response = await processWebhookEvent(
+                    sb,
+                    row.tenant_id,
+                    row.evento,
+                    (row.payload ?? {}) as Record<string, unknown>,
+                    { existingLogId: row.id },
+                  );
+                  const result = (await response.json().catch(() => ({ ok: false }))) as {
+                    ok?: boolean;
+                    in_progress?: boolean;
+                    error?: unknown;
+                  };
+                  // in_progress comes with ok:true (HTTP 202), so check it first.
+                  if (result.in_progress) {
+                    // Another delivery holds the receipt. processWebhookEvent kept
+                    // the row `recebido` and moved next_replay_at past the lease;
+                    // waiting on a live lease must not consume a replay attempt.
+                    if (mode === "claim" && typeof row.replay_attempts === "number") {
+                      await sb
+                        .from("webhook_logs")
+                        .update({ replay_attempts: Math.max(0, row.replay_attempts - 1) })
+                        .eq("id", row.id);
+                    }
+                    return "deferred" as const;
+                  }
+                  if (result.ok) return "processed" as const;
+                  const message = String(result.error ?? `HTTP ${response.status}`).slice(
+                    0,
+                    1000,
+                  );
+                  lastError = message;
+                  if (mode === "claim") {
                     await sb
                       .from("webhook_logs")
-                      .update({ replay_attempts: Math.max(0, row.replay_attempts - 1) })
+                      .update({ last_replay_error: message })
                       .eq("id", row.id);
                   }
-                  return "deferred" as const;
-                }
-                if (result.ok) return "processed" as const;
-                const message = String(result.error ?? `HTTP ${response.status}`).slice(0, 1000);
-                lastError = message;
-                if (selection.mode === "claim") {
-                  await sb
-                    .from("webhook_logs")
-                    .update({ last_replay_error: message })
-                    .eq("id", row.id);
-                }
-                return "failed" as const;
-              }),
-            );
-            for (const outcome of results) {
-              if (outcome === "processed") processed += 1;
-              else if (outcome === "deferred") deferred += 1;
-              else failed += 1;
+                  return "failed" as const;
+                }),
+              );
+              for (const outcome of results) {
+                if (outcome === "processed") processed += 1;
+                else if (outcome === "deferred") deferred += 1;
+                else failed += 1;
+                if (outcome !== "deferred") roundProgress += 1;
+              }
+              run.progress({ sent: processed, errors: failed, rescheduled: deferred });
             }
-            run.progress({ sent: processed, errors: failed, rescheduled: deferred });
+            // With a per-tenant cap a single tenant backlog returns fewer than `limit`
+            // rows even when more remain, so any claimed row means "call again".
+            hasMore = perTenant ? rows.length > 0 : rows.length === limit;
+            // Only the claim RPC leases rows: the legacy select would hand back
+            // the same rows. A round of only deferred rows would spin on live leases.
+            const keepGoing =
+              hasMore &&
+              mode === "claim" &&
+              (roundProgress > 0 || deadLettered.length > 0) &&
+              Date.now() - startedAt < timeBudgetMs;
+            if (!keepGoing) break;
+            const next = await claimBatch();
+            if (next.error) {
+              // Earlier rounds are done; the next tick claims again.
+              console.warn("[webhook-replay] claim failed mid-tick", { error: next.error });
+              lastError = `webhook_logs claim: ${next.error}`;
+              break;
+            }
+            if (next.rows.length === 0) {
+              hasMore = false;
+              break;
+            }
+            current = next;
           }
         } catch (replayError) {
           await run.fail(replayError, {
-            queue_before: selected.length,
-            claimed: toReplay.length,
+            queue_before: scanned,
+            claimed,
             sent: processed,
-            errors: failed + deadLettered.length,
+            errors: failed + deadLetteredCount,
             rescheduled: deferred,
           });
           throw replayError;
         }
-        // With a per-tenant cap a single tenant backlog returns fewer than `limit`
-        // rows even when more remain, so any claimed row means "call again".
-        const hasMore = perTenant ? selected.length > 0 : selected.length === limit;
         await run.finish({
-          queue_before: selected.length,
-          claimed: toReplay.length,
+          queue_before: scanned,
+          claimed,
           sent: processed,
           // Dead-lettered rows are permanent failures: count them so the run
           // is reported as partial and shows up in alerting.
-          errors: failed + deadLettered.length,
+          errors: failed + deadLetteredCount,
           rescheduled: deferred,
           last_provider_error: lastError,
           stop_reason: hasMore ? "has_more" : "drained",
@@ -272,10 +314,10 @@ export const Route = createFileRoute("/api/public/hooks/webhook-replay")({
           dry_run: false,
           limit,
           has_more: hasMore,
-          scanned: selected.length,
+          scanned,
           processed,
           failed,
-          dead_lettered: deadLettered.length,
+          dead_lettered: deadLetteredCount,
           deferred,
         });
       },

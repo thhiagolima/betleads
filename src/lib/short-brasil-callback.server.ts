@@ -350,6 +350,40 @@ async function updateFromPayload(
   return matched ? "matched" : "unmatched";
 }
 
+const CALLBACK_CONCURRENCY = 10;
+
+function messageKey(payload: CallbackPayload, index: number): string {
+  const id = pickStr(payload, "id", "message_id", "messageId", "sms_id", "smsId");
+  if (id) return `id:${id}`;
+  const key = pickStr(payload, "parceiroId", "idempotency_key", "idempotencyKey");
+  return key ? `key:${key}` : `row:${index}`;
+}
+
+/**
+ * Runs `apply` over the payloads with at most `concurrency` messages in
+ * flight; payloads of the same message run one after another, in order.
+ */
+export async function forEachMessageGroup(
+  payloads: CallbackPayload[],
+  concurrency: number,
+  apply: (payload: CallbackPayload) => Promise<void>,
+): Promise<void> {
+  const groups = new Map<string, CallbackPayload[]>();
+  payloads.forEach((payload, index) => {
+    const key = messageKey(payload, index);
+    const group = groups.get(key);
+    if (group) group.push(payload);
+    else groups.set(key, [payload]);
+  });
+  const queue = [...groups.values()];
+  const worker = async () => {
+    for (let group = queue.shift(); group; group = queue.shift()) {
+      for (const payload of group) await apply(payload);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
+}
+
 /**
  * Stores the request as received (body byte for byte) before any parsing, so
  * the provider's real format can be read from sms_callback_raw. Only our own
@@ -407,6 +441,7 @@ export async function handleShortBrasilCallback(
     const payloads = await parseSmsCallbackPayloads(request, (text) => {
       bodyText = text;
     });
+    const identified: CallbackPayload[] = [];
     for (const payload of payloads) {
       // Without any id there is nothing to match or keep: recording it only
       // created ~180k empty "callback-orphan" rows per day.
@@ -414,11 +449,18 @@ export async function handleShortBrasilCallback(
         unidentified++;
         continue;
       }
-      processed++;
+      identified.push(payload);
+    }
+    processed = identified.length;
+    // A bulk lote carries up to ~1,000 statuses (2026-11-13). One by one, at
+    // 3–5 round trips each, it ran for minutes and nginx cut it at 60 s.
+    // Different messages run in parallel; statuses of the same message stay
+    // in lote order (ENVIADA vs CONFIRMADO, orphan insert).
+    await forEachMessageGroup(identified, CALLBACK_CONCURRENCY, async (payload) => {
       const outcome = await updateFromPayload(payload, filter);
       if (outcome === "matched") matched++;
       else if (outcome === "ignored") ignored++;
-    }
+    });
     if (unidentified > 0) logUnrecognizedShape(request, payloads, bodyText);
   } catch (err) {
     console.error("sms-webhook handler error:", err);
