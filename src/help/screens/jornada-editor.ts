@@ -46,7 +46,7 @@ const screen: HelpScreen = {
         {
           anchor: "jornada.rodape.salvar",
           label: "Salvar",
-          what: 'Grava a jornada. Numa jornada nova mostra "Jornada criada como rascunho. Ela só envia depois de ativada."; numa jornada em rascunho mostra "Rascunho salvo"; numa jornada ativa ou pausada, salvar não altera a versão em uso — cria uma revisão em rascunho e mostra "Alterações salvas numa revisão em rascunho. A versão ativa/pausada continua igual."',
+          what: 'Grava a jornada. Numa jornada nova mostra "Jornada criada como rascunho. Ela só envia depois de ativada."; numa jornada em rascunho mostra "Rascunho salvo"; numa jornada ativa ou pausada, mudanças de texto, esperas e limites são gravadas na própria jornada e valem nos próximos envios, inclusive para quem já está nela ("Alterações salvas na jornada. Os próximos envios já saem com elas."); adicionar, remover ou trocar a ordem das etapas, ou mudar o gatilho, cria uma revisão em rascunho e mostra "Você mudou as etapas ou o gatilho, então as alterações foram para uma revisão em rascunho. A jornada ativa/pausada continua igual até você ativar a revisão."',
           notes:
             "Durante o salvamento o texto muda para \"Salvando…\" e o botão fica desabilitado. Erros de validação (veja Erros ao salvar, nos estados) impedem o salvamento e aparecem como aviso.",
         },
@@ -284,10 +284,10 @@ const screen: HelpScreen = {
         },
         {
           anchor: "jornada.etapas.sms-template",
-          label: "Template de SMS (etapa Enviar SMS)",
-          what: "Escolhe o template de SMS ativo que esta etapa envia. O conteúdo aparece abaixo, só para leitura.",
+          label: "Usar um template / Mensagem (etapa Enviar SMS)",
+          what: "O texto do SMS pode ser escrito direto no campo Mensagem ou vir de um template de SMS ativo escolhido acima. Escolher um template preenche a mensagem; editar o texto depois desliga a etapa do template.",
           notes:
-            'Quando o template sorteia entre várias variações, aparece o aviso "Esta etapa sorteia entre N variações a cada envio; o texto acima é a primeira. Escolher um template substitui todas." Sem domínio do encurtador verificado, aparece o aviso do encurtador padrão (ver estados).',
+            'Quando o template sorteia entre várias variações, aparece o aviso "Esta etapa sorteia entre N variações a cada envio; o texto acima é a primeira. Editar o texto ou escolher um template substitui todas." Sem domínio do encurtador verificado, aparece o aviso do encurtador padrão (ver estados).',
         },
         {
           anchor: "jornada.etapas.sms-dominio",
@@ -447,11 +447,11 @@ const screen: HelpScreen = {
           label: 'Diálogo "Ativar [nome]"',
           what: 'Pergunta "Quem pode entrar nesta jornada?": "Só casos novos, a partir de agora" (ninguém da base atual entra; quem já estava sai na próxima verificação) ou "Incluir a base atual" (jogadores que já cumprem o gatilho entram nos próximos minutos, com uma estimativa de quantos e do custo do 1º envio e da jornada completa). Botões "Cancelar" e "Ativar".',
           notes:
-            'Só aparece para gatilhos que fazem sentido perguntar isso (todos, exceto "Mudou de nível" e "Entrada manual ou API") — os outros ativam direto, sem este diálogo. A estimativa mostra "Calculando o impacto…" enquanto carrega. Ao confirmar, aparece o aviso de sucesso "Jornada ativada".',
+            'Só aparece para gatilhos que fazem sentido perguntar isso (todos, exceto "Mudou de nível" e "Entrada manual ou API") — os outros ativam direto, sem este diálogo. A estimativa mostra "Calculando o impacto…" enquanto carrega. Ao confirmar, aparece o aviso de sucesso "Jornada ativada". Numa revisão em rascunho, ativar aplica a revisão na jornada original (mesmos jogadores, cada um na etapa em que estava), apaga o rascunho, abre a jornada original e mostra "Revisão aplicada: a jornada já segue a nova versão."',
         },
         {
           label: 'Confirmação "Ativar sem as alterações?"',
-          what: 'Aparece ao clicar em Ativar numa jornada ativa ou pausada com alterações não salvas no editor: "As alterações que você fez aqui ainda não foram salvas e não entram na jornada. Para usá-las, salve (isso cria uma revisão em rascunho) e ative a revisão." Botões "Cancelar" e "Ativar versão salva".',
+          what: 'Aparece ao clicar em Ativar numa jornada ativa ou pausada com alterações não salvas no editor: "As alterações que você fez aqui ainda não foram salvas e não entram na jornada. Para usá-las, clique em Salvar antes de ativar." Botões "Cancelar" e "Ativar versão salva".',
         },
       ],
     },
@@ -461,8 +461,14 @@ const screen: HelpScreen = {
     {
       id: "revisao-em-rascunho",
       title:
-        "Esta jornada está ativa/pausada. Salvar cria uma revisão em rascunho; a versão ativa/pausada continua como está até você ativar a revisão.",
-      what: "Aviso fixo no topo do editor, só em jornadas ativas ou pausadas: qualquer alteração feita aqui não afeta a versão em uso até a revisão em rascunho ser ativada.",
+        "Esta jornada está ativa/pausada. Mudar textos, esperas e limites vale assim que você salvar, inclusive para quem já está na jornada. Adicionar, remover ou trocar a ordem das etapas, ou mudar o gatilho, cria uma revisão em rascunho: a jornada continua como está até você ativar a revisão.",
+      what: "Aviso fixo no topo do editor, só em jornadas ativas ou pausadas: explica quais mudanças valem na hora e quais vão para uma revisão em rascunho.",
+    },
+    {
+      id: "revisao-de-outra-jornada",
+      title:
+        "Esta é uma revisão em rascunho de outra jornada. Ao ativar, ela substitui a jornada original: quem já está lá continua na mesma etapa e passa a seguir esta versão.",
+      what: "Aviso no topo de uma revisão em rascunho (criada ao mudar as etapas ou o gatilho de uma jornada ativa ou pausada).",
     },
     {
       id: "alteracoes-nao-salvas",

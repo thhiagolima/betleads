@@ -3,6 +3,7 @@
 
 import { type ReactNode, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { Pause, Play } from "lucide-react";
 import { toast } from "sonner";
@@ -56,6 +57,7 @@ function ChoiceCard({
  */
 export function useJourneyStatusControl() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const changeStatus = useServerFn(setJourneyStatus);
   const estimateFn = useServerFn(getJourneyActivationEstimate);
   const [pauseCandidate, setPauseCandidate] = useState<
@@ -84,8 +86,17 @@ export function useJourneyStatusControl() {
       ]);
       setPauseCandidate(null);
       setActivateCandidate(null);
+      // Activating a draft revision applies it to the original journey and
+      // deletes the draft: open the original.
+      const appliedRevision = Boolean(result.id) && result.id !== variables.id;
+      if (appliedRevision) {
+        await queryClient.invalidateQueries({ queryKey: ["journey", result.id] });
+        navigate({ to: "/jornadas/$journeyId", params: { journeyId: result.id } });
+      }
       toast.success(
-        variables.status === "active"
+        appliedRevision
+          ? "Revisão aplicada: a jornada já segue a nova versão."
+          : variables.status === "active"
           ? "Jornada ativada"
           : result.closed
             ? `Jornada pausada · ${result.closed.toLocaleString("pt-BR")} jogador(es) saíram da jornada`
