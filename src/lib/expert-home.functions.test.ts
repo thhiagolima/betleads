@@ -75,6 +75,8 @@ const HOUSE_ONLY_KEYS = [
   "totalFlows",
   "pausedFlows",
   "smsSent",
+  "smsClicks",
+  "smsCtr",
   "walletBalance",
   "exempt",
 ];
@@ -100,6 +102,15 @@ describe("mapExpertHomeRpc", () => {
     ftd: 4,
     previousFtd: 1,
     withdrawalAmount: "80",
+    previousWithdrawalAmount: "40",
+    withdrawalCount: 3,
+    ftdAmount: "160",
+    previousFtdAmount: "50",
+    ftdCohort: 4,
+    ftdCohortRedeposited: 2,
+    previousFtdCohort: 1,
+    previousFtdCohortRedeposited: 0,
+    pixUnpaidAmount: "75",
     redepositAmount: "120",
     previousRedepositAmount: "60",
     redepositCount: 2,
@@ -137,6 +148,13 @@ describe("mapExpertHomeRpc", () => {
     expect(expert.pixUnpaid).toBe(3);
     expect(expert.pixPayRate).toBe(50);
     expect(expert.recoveredReturning).toBe(20);
+    expect(expert.ftdAmount).toBe(160);
+    expect(expert.ftdTicket).toBe(40);
+    expect(expert.ftdRedepositRate).toBe(50);
+    expect(expert.withdrawalCount).toBe(3);
+    expect(expert.withdrawalGrowth).toBe(100);
+    expect(expert.netAmount).toBe(220);
+    expect(expert.pixUnpaidAmount).toBe(75);
     expect(expert.cashflowChart).toEqual([
       { key: "2026-11-01", label: "01/11", deposits: 300, withdrawals: 80 },
     ]);

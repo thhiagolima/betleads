@@ -2,6 +2,7 @@
 // gerados → leads que clicaram → depositaram por clique dentro da janela, e os
 // contatos registrados. Puramente apresentacional.
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { tourAnchor } from "@/help/anchor";
 import type { ReportBlock } from "@/lib/expert-report.functions";
 import { num } from "@/lib/format";
 
@@ -41,7 +42,7 @@ export function ReportFunnel({
   const clicaramPct = share(current.leadsClicaram, current.leadsComLink);
   const depositaramPct = share(current.leadsDepositaramClique, current.leadsClicaram);
   return (
-    <Card>
+    <Card {...tourAnchor("rendimento.funnel")}>
       <CardHeader>
         <CardTitle>Do contato ao depósito</CardTitle>
       </CardHeader>

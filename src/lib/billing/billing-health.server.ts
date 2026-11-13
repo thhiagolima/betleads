@@ -6,7 +6,7 @@
 //
 //   code                         severity  source
 //   ---------------------------  --------  ------------------------------------------
-//   webhook_invalid_signature    critical  billing_monitor_signals (webhook route)
+//   webhook_invalid_signature    critical  billing_monitor_signals (Upper webhook route)
 //   charge_paid_not_credited     critical  payment_charges PAID, credited_at null > 10 min
 //   charge_needs_review          warning   payment_charges needs_review, not credited
 //   wallet_ledger_mismatch       critical  billing_wallet_integrity()
@@ -14,10 +14,18 @@
 //   upper_unauthorized           critical  billing_monitor_signals (upper-pix client)
 //   upper_unavailable            critical  billing_monitor_signals (upper-pix client): 3+
 //                                          timeouts, network errors or 5xx in the window
+//   spacepay_webhook_invalid_token critical billing_monitor_signals (SpacePay webhook route)
+//   spacepay_unauthorized        critical  billing_monitor_signals (spacepay-pix client)
+//   spacepay_unavailable         critical  billing_monitor_signals (spacepay-pix client): 3+
+//                                          in the window, same rule as upper_unavailable
 //   reconcile_cron_stale         critical  dispatcher_runs job billing-reconcile (5 min)
 //   billing_cycle_cron_stale     critical  dispatcher_runs job billing-cycle (1 h)
 //   billing_health_check_failed  critical  the snapshot itself could not be read
 //   billing_alert_test           critical  synthetic, from the superadmin button
+//
+// Gateway findings are per provider (Upper / SpacePay, `PIX_SIGNAL_CHECKS`):
+// each carries `provider` and a message naming it. The report also says which
+// provider takes NEW charges (`activeProvider`, from the gateway config: DB, env fallback).
 //
 // Findings never carry secrets, payloads, balances or supplier cost: only
 // counts, times and fixed reasons.
@@ -29,13 +37,15 @@
 // `billing-health` Better Stack heartbeat
 // (BETTERSTACK_HEARTBEAT_BILLING_HEALTH) is pinged only when no job/DB-state
 // finding is critical, so a missing ping means the job stopped or billing
-// state is wrong. Signal findings (invalid webhook signature, Upper 401 /
+// state is wrong. Signal findings (invalid webhook signature/token, gateway 401 /
 // FEATURE_DISABLED) alert only on new events and never gate the heartbeat.
 // Without Sentry, each code is logged at most once per hour per process.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { pingHeartbeat } from "@/lib/observability/job-monitor.server";
 import { captureServerMessage, isServerSentryActive } from "@/lib/observability/sentry.server";
+
+import { activePixProvider, type PixProvider } from "./pix-gateway.server";
 
 export type BillingHealthCode =
   | "webhook_invalid_signature"
@@ -45,6 +55,9 @@ export type BillingHealthCode =
   | "upper_feature_disabled"
   | "upper_unauthorized"
   | "upper_unavailable"
+  | "spacepay_webhook_invalid_token"
+  | "spacepay_unauthorized"
+  | "spacepay_unavailable"
   | "reconcile_cron_stale"
   | "billing_cycle_cron_stale"
   | "billing_health_check_failed"
@@ -58,6 +71,8 @@ export type BillingHealthFinding = {
   message: string;
   /** Signal findings only: time of the most recent event (no secret). */
   lastAt?: string | null;
+  /** Gateway findings only: the Pix provider the signal came from. */
+  provider?: PixProvider;
 };
 
 /**
@@ -70,16 +85,32 @@ export const SIGNAL_FINDING_CODES: ReadonlySet<BillingHealthCode> = new Set<Bill
   "upper_feature_disabled",
   "upper_unauthorized",
   "upper_unavailable",
+  "spacepay_webhook_invalid_token",
+  "spacepay_unauthorized",
+  "spacepay_unavailable",
 ]);
 
-/** Upper timeouts/network errors/5xx alert from this many events in the window. */
-export const UPPER_UNAVAILABLE_THRESHOLD = 3;
+/** Gateway timeouts/network errors/5xx alert from this many events in the window (any provider). */
+export const PIX_UNAVAILABLE_THRESHOLD = 3;
+/** @deprecated kept for older imports; same value as PIX_UNAVAILABLE_THRESHOLD. */
+export const UPPER_UNAVAILABLE_THRESHOLD = PIX_UNAVAILABLE_THRESHOLD;
+
+/** Display name of each Pix provider (admin panel and finding messages). */
+export const PIX_PROVIDER_LABEL: Record<PixProvider, string> = {
+  upper: "Upper",
+  spacepay: "SpacePay",
+};
 
 export type BillingHealthReport = {
   ok: boolean;
   checkedAt: string;
   windowHours: number;
   findings: BillingHealthFinding[];
+  /**
+   * Provider that takes NEW charges (gateway config: DB, env fallback). Optional only so
+   * hand-built reports elsewhere stay valid; checkBillingHealth always sets it.
+   */
+  activeProvider?: PixProvider;
 };
 
 type SignalRow = { count: number; last_at: string | null; last_detail: string | null };
@@ -150,6 +181,97 @@ function signalCount(snapshot: BillingHealthSnapshot, code: string): SignalRow |
   return count > 0 ? { ...row, count } : null;
 }
 
+type PixSignalCheck = {
+  code: BillingHealthCode;
+  provider: PixProvider;
+  /** Minimum events in the window to raise the finding. */
+  threshold: number;
+  message: (row: SignalRow, ctx: { name: string; window: string }) => string;
+};
+
+function webhookRejectedMessage(row: SignalRow, name: string, cause: string, window: string) {
+  const reason = row.last_detail ? SIGNATURE_REASON_LABEL[row.last_detail] : undefined;
+  return (
+    `${row.count} ${plural(row.count, `webhook ${name} recusado`, `webhooks ${name} recusados`)} ` +
+    `por ${cause} ${window}` +
+    (reason ? ` (último motivo: ${reason}).` : ".")
+  );
+}
+
+function unavailableMessage(row: SignalRow, subject: string, window: string) {
+  return `${subject} parece fora do ar: ${row.count} falhas (tempo esgotado, rede ou erro 5xx) ${window}. Pix indisponível para as casas.`;
+}
+
+/**
+ * Gateway signal checks, per provider. Each provider's counters are read the
+ * same way; the message names the provider ("Upper" / "SpacePay").
+ */
+export const PIX_SIGNAL_CHECKS: readonly PixSignalCheck[] = [
+  {
+    code: "webhook_invalid_signature",
+    provider: "upper",
+    threshold: 1,
+    message: (row, { window }) =>
+      webhookRejectedMessage(row, "da Upper", "assinatura inválida", window),
+  },
+  {
+    code: "upper_feature_disabled",
+    provider: "upper",
+    threshold: 1,
+    message: (row, { window }) =>
+      `A Upper respondeu FEATURE_DISABLED ${row.count} ${plural(row.count, "vez", "vezes")} ${window}: o Pix está desabilitado na conta.`,
+  },
+  {
+    code: "upper_unauthorized",
+    provider: "upper",
+    threshold: 1,
+    message: (row, { window }) =>
+      `A Upper recusou a chave de API (401) ${row.count} ${plural(row.count, "vez", "vezes")} ${window}.`,
+  },
+  {
+    code: "upper_unavailable",
+    provider: "upper",
+    threshold: PIX_UNAVAILABLE_THRESHOLD,
+    message: (row, { window }) => unavailableMessage(row, "A Upper", window),
+  },
+  {
+    code: "spacepay_webhook_invalid_token",
+    provider: "spacepay",
+    threshold: 1,
+    message: (row, { window }) =>
+      webhookRejectedMessage(row, "do SpacePay", "token inválido na URL", window),
+  },
+  {
+    code: "spacepay_unauthorized",
+    provider: "spacepay",
+    threshold: 1,
+    message: (row, { window }) =>
+      `O SpacePay recusou o token do gateway (401/403) ${row.count} ${plural(row.count, "vez", "vezes")} ${window}.`,
+  },
+  {
+    code: "spacepay_unavailable",
+    provider: "spacepay",
+    threshold: PIX_UNAVAILABLE_THRESHOLD,
+    message: (row, { window }) => unavailableMessage(row, "O SpacePay", window),
+  },
+];
+
+function evaluatePixSignals(snapshot: BillingHealthSnapshot, window: string): BillingHealthFinding[] {
+  const findings: BillingHealthFinding[] = [];
+  for (const check of PIX_SIGNAL_CHECKS) {
+    const row = signalCount(snapshot, check.code);
+    if (!row || row.count < check.threshold) continue;
+    findings.push({
+      code: check.code,
+      severity: "critical",
+      message: check.message(row, { name: PIX_PROVIDER_LABEL[check.provider], window }),
+      lastAt: row.last_at,
+      provider: check.provider,
+    });
+  }
+  return findings;
+}
+
 /** Pure: snapshot -> findings. */
 export function evaluateBillingHealth(
   snapshot: BillingHealthSnapshot,
@@ -158,19 +280,7 @@ export function evaluateBillingHealth(
   const findings: BillingHealthFinding[] = [];
   const window = `nas últimas ${opts.windowHours} h`;
 
-  const invalid = signalCount(snapshot, "webhook_invalid_signature");
-  if (invalid) {
-    const reason = invalid.last_detail ? SIGNATURE_REASON_LABEL[invalid.last_detail] : undefined;
-    findings.push({
-      code: "webhook_invalid_signature",
-      severity: "critical",
-      message:
-        `${invalid.count} ${plural(invalid.count, "webhook da Upper recusado", "webhooks da Upper recusados")} ` +
-        `por assinatura inválida ${window}` +
-        (reason ? ` (último motivo: ${reason}).` : "."),
-      lastAt: invalid.last_at,
-    });
-  }
+  findings.push(...evaluatePixSignals(snapshot, window));
 
   const paidCount = Number(snapshot.paid_uncredited?.count ?? 0);
   if (paidCount > 0) {
@@ -179,7 +289,7 @@ export function evaluateBillingHealth(
       code: "charge_paid_not_credited",
       severity: "critical",
       message:
-        `${paidCount} ${plural(paidCount, "cobrança paga", "cobranças pagas")} na Upper e ` +
+        `${paidCount} ${plural(paidCount, "cobrança paga", "cobranças pagas")} no Pix e ` +
         `${plural(paidCount, "não creditada", "não creditadas")} há mais de 10 min` +
         (oldest ? ` (a mais antiga paga em ${formatBrt(oldest)}).` : "."),
     });
@@ -200,36 +310,6 @@ export function evaluateBillingHealth(
       code: "wallet_ledger_mismatch",
       severity: "critical",
       message: `${walletCount} ${plural(walletCount, "carteira", "carteiras")} com saldo diferente da soma do razão.`,
-    });
-  }
-
-  const featureDisabled = signalCount(snapshot, "upper_feature_disabled");
-  if (featureDisabled) {
-    findings.push({
-      code: "upper_feature_disabled",
-      severity: "critical",
-      message: `A Upper respondeu FEATURE_DISABLED ${featureDisabled.count} ${plural(featureDisabled.count, "vez", "vezes")} ${window}: o Pix está desabilitado na conta.`,
-      lastAt: featureDisabled.last_at,
-    });
-  }
-
-  const unauthorized = signalCount(snapshot, "upper_unauthorized");
-  if (unauthorized) {
-    findings.push({
-      code: "upper_unauthorized",
-      severity: "critical",
-      message: `A Upper recusou a chave de API (401) ${unauthorized.count} ${plural(unauthorized.count, "vez", "vezes")} ${window}.`,
-      lastAt: unauthorized.last_at,
-    });
-  }
-
-  const unavailable = signalCount(snapshot, "upper_unavailable");
-  if (unavailable && unavailable.count >= UPPER_UNAVAILABLE_THRESHOLD) {
-    findings.push({
-      code: "upper_unavailable",
-      severity: "critical",
-      message: `A Upper parece fora do ar: ${unavailable.count} falhas (tempo esgotado, rede ou erro 5xx) ${window}. Pix indisponível para as casas.`,
-      lastAt: unavailable.last_at,
     });
   }
 
@@ -297,7 +377,17 @@ export async function checkBillingHealth(
     checkedAt: now.toISOString(),
     windowHours,
     findings,
+    activeProvider: await currentPixProvider(),
   };
+}
+
+/** activePixProvider(), never throwing (a health check must not fail on config). */
+async function currentPixProvider(): Promise<PixProvider> {
+  try {
+    return await activePixProvider();
+  } catch {
+    return "upper";
+  }
 }
 
 export type BillingAlertChannel = "sentry" | "log" | "none";

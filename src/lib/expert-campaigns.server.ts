@@ -34,7 +34,6 @@ import { conversionFunnelSnapshot } from "@/lib/conversion-funnel";
 import { resolveCampaignRecipients, type CampaignDb } from "@/lib/campaign-recipients.server";
 import {
   isSelectionAudience,
-  MAX_SELECTION_PLAYER_IDS,
   normalizeSmsAudienceCriteria,
   selectionAudienceLabel,
   type SmsAudienceCriteria,
@@ -90,9 +89,8 @@ export const EXPERT_VOICE_SOURCE_UNAVAILABLE = "Roteiro ou áudio da casa indisp
 export const EXPERT_SCHEDULE_TOO_SOON = "O horário agendado precisa estar pelo menos 1 minuto no futuro";
 export const EXPERT_SCHEDULE_INVALID = "Data/hora inválida";
 export const EXPERT_REJECT_REASON_REQUIRED = "Informe o motivo da recusa.";
-/** Voz: mesmo limite da voz em massa da casa. */
-export const EXPERT_VOICE_MAX_RECIPIENTS = 200;
-export const EXPERT_VOICE_TOO_MANY = `Voz aceita até ${EXPERT_VOICE_MAX_RECIPIENTS} destinatários por campanha.`;
+/** Rows per call_queue insert when an expert voice campaign is queued (no list cap). */
+const CALL_QUEUE_INSERT_CHUNK = 500;
 export const EXPERT_CAP_BLOCKED =
   "Seu teto mensal de envios é R$ 0,00: os envios estão bloqueados. Fale com o admin da casa.";
 
@@ -373,8 +371,6 @@ export async function createExpertSelectionAudienceFor(
 ): Promise<{ id: string; name: string; playerCount: number; discarded: number }> {
   const { expert, scope } = await requireExpert(ctx);
   const requested = Array.from(new Set(data.playerIds.map((id) => id.toLowerCase())));
-  if (requested.length > MAX_SELECTION_PLAYER_IDS)
-    throw new Error(`A seleção passa de ${MAX_SELECTION_PLAYER_IDS.toLocaleString("pt-BR")} jogadores.`);
   const visible = await filterPlayerIdsToExpert(scope, requested);
   if (visible.length === 0) throw new Error(EXPERT_AUDIENCE_EMPTY_SELECTION);
   const now = new Date();
@@ -500,8 +496,6 @@ async function prepareAudience(
   const criteria = await buildExpertCampaignCriteria(scope, rawCriteria, playerIds);
   const resolution = await resolveScopedAudience(scope, criteria, channel);
   if (resolution.eligibleTotal === 0) throw new Error(EXPERT_NO_RECIPIENTS);
-  if (channel === "voice" && resolution.eligibleTotal > EXPERT_VOICE_MAX_RECIPIENTS)
-    throw new Error(EXPERT_VOICE_TOO_MANY);
   const estimatedCost = await estimateCampaignCost(scope.tenantId, channel, resolution.eligibleTotal, opts);
   await assertCapAllowsEstimate(scope, estimatedCost);
   return { criteria, resolution, estimatedCost };
@@ -909,7 +903,7 @@ export async function enqueueExpertVoiceCampaign(
 ): Promise<number> {
   const criteria = normalizeSmsAudienceCriteria(campaign.audience_criteria);
   const resolution = await resolveScopedAudience(scope, criteria, "voice");
-  const phones = resolution.eligibleIdentifiers.slice(0, EXPERT_VOICE_MAX_RECIPIENTS);
+  const phones = resolution.eligibleIdentifiers;
   const recipients = await resolveCampaignRecipients(
     supabaseAdmin as unknown as CampaignDb,
     scope.tenantId,
@@ -942,8 +936,10 @@ export async function enqueueExpertVoiceCampaign(
       expert_voice_campaign_id: campaign.id,
     }));
   if (items.length === 0) throw new Error(EXPERT_NO_RECIPIENTS);
-  const { error } = await db().from("call_queue").insert(items);
-  if (error) throw new Error(error.message);
+  for (let i = 0; i < items.length; i += CALL_QUEUE_INSERT_CHUNK) {
+    const { error } = await db().from("call_queue").insert(items.slice(i, i + CALL_QUEUE_INSERT_CHUNK));
+    if (error) throw new Error(error.message);
+  }
   const { error: updateError } = await db()
     .from("expert_voice_campaigns")
     .update({ status: "enfileirada", queued_count: items.length, total_count: items.length, last_error: null })
@@ -1614,7 +1610,6 @@ const draftPlayerIds = (payload: Record<string, unknown>): string[] | undefined 
   Array.isArray(payload.playerIds)
     ? payload.playerIds
         .filter((id): id is string => typeof id === "string")
-        .slice(0, MAX_SELECTION_PLAYER_IDS)
     : undefined;
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 

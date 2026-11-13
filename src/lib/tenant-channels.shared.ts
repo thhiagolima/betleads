@@ -37,11 +37,15 @@ export const STEP_TYPE_CHANNEL: Partial<Record<string, ProviderChannel>> = {
 };
 
 /** Item de cobrança (`src/lib/format.ts` BillingItem) -> canal correspondente. */
-export const BILLING_ITEM_CHANNEL: Record<"sms" | "voice_30s" | "email" | "webpush", ProviderChannel> = {
+export const BILLING_ITEM_CHANNEL: Record<
+  "sms" | "voice_30s" | "email" | "webpush" | "webpush_lead",
+  ProviderChannel
+> = {
   sms: "sms",
   voice_30s: "voice",
   email: "email",
   webpush: "webpush",
+  webpush_lead: "webpush",
 };
 
 /** Formato mínimo de um passo de jornada usado para o diff de canal (Task 7). */

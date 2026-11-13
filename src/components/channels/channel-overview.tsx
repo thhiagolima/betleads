@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { RefreshCw } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type HTMLAttributes, type ReactNode } from "react";
 import type { DateRange } from "react-day-picker";
 import {
   Area,
@@ -280,15 +280,16 @@ export function ChannelBlock({
   action,
   className,
   children,
+  ...rest
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
   className?: string;
   children: ReactNode;
-}) {
+} & Omit<HTMLAttributes<HTMLElement>, "title" | "children">) {
   return (
-    <HomeCard className={className ?? "p-4 sm:p-5"}>
+    <HomeCard className={className ?? "p-4 sm:p-5"} {...rest}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-[15px] font-semibold">{title}</h2>

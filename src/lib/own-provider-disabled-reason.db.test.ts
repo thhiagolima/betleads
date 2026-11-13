@@ -1,5 +1,5 @@
 // PGlite test for
-// supabase/migrations/20261219100400_own_provider_disabled_reason.sql:
+// supabase/migrations/20261231100400_own_provider_disabled_reason.sql:
 // provider_accounts.disabled_reason check and the partial unique index of one
 // owned account per house and channel. Full migrated database.
 import type { PGlite } from "@electric-sql/pglite";

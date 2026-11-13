@@ -22,12 +22,15 @@ export function ShortDomainSelect({
   value,
   onChange,
   disabled,
+  id,
 }: {
   domains: ShortDomainOption[];
   /** `null` = "padrão da casa" (the tenant's default verified domain). */
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean;
+  /** The trigger's id, for a `<Label htmlFor>` next to the select. */
+  id?: string;
 }) {
   const defaultDomain = domains.find((d) => d.isDefault) ?? domains[0];
   const defaultLabel = defaultDomain
@@ -40,7 +43,7 @@ export function ShortDomainSelect({
       onValueChange={(next) => onChange(next === "__default" ? null : next)}
       disabled={disabled}
     >
-      <SelectTrigger aria-label="Domínio do encurtador">
+      <SelectTrigger id={id} aria-label="Domínio do encurtador">
         <SelectValue placeholder={defaultLabel} />
       </SelectTrigger>
       <SelectContent>

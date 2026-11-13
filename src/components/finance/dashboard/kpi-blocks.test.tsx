@@ -51,9 +51,12 @@ function renderBlocks({
 describe("KpiBlocks", () => {
   it("renders the four titled blocks, one column under sm", () => {
     const html = renderBlocks({});
-    for (const title of ["Movimentação", "Aquisição", "GGR", "Envios e CRM"]) {
+    for (const title of ["Movimentação", "Aquisição", "Envios e CRM"]) {
       expect(html).toContain(`>${title}<`);
     }
+    // "GGR" is a <Term>: the title is followed by the glossary's (i) button,
+    // not closed straight away like the other three.
+    expect(html).toContain(">GGR <button");
     expect(html).toContain("grid-cols-1");
     expect(html).toContain("sm:grid-cols-2");
   });

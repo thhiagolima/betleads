@@ -11,6 +11,7 @@ import { ptBR } from "react-day-picker/locale";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { tourAnchor } from "@/help/anchor";
 import type { DateRange } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
@@ -192,7 +193,11 @@ function PeriodPicker({
     <>
       <Popover open={popoverOpen} onOpenChange={onPopoverOpenChange}>
         <PopoverTrigger asChild>
-          <button type="button" className={fieldButtonClass()}>
+          <button
+            type="button"
+            className={fieldButtonClass()}
+            {...tourAnchor("financeiro.painel.periodo")}
+          >
             <FieldText name={label.name} dates={label.dates} />
           </button>
         </PopoverTrigger>
@@ -310,7 +315,11 @@ function ComparePicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className={fieldButtonClass()}>
+        <button
+          type="button"
+          className={fieldButtonClass()}
+          {...tourAnchor("financeiro.painel.comparar")}
+        >
           <FieldText name={current.label} dates={current.dates} />
         </button>
       </PopoverTrigger>
@@ -359,7 +368,7 @@ export function GroupPeriodBar({
         </Field>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {QUICK_SHORTCUTS.map((chip) => {
+        {QUICK_SHORTCUTS.map((chip, index) => {
           const active = value.shortcut === chip.shortcut;
           return (
             <button
@@ -373,6 +382,7 @@ export function GroupPeriodBar({
                   : "border-border text-muted-foreground hover:text-foreground",
               )}
               onClick={() => onChange(periodFromShortcut(chip.shortcut, value.compare, today))}
+              {...(index === 0 ? tourAnchor("financeiro.painel.periodo-atalhos") : {})}
             >
               {chip.label}
             </button>

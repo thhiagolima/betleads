@@ -10,9 +10,13 @@
 // Relies on a TooltipProvider above it (the dashboard root). Os valores em
 // dinheiro da casa vêm na moeda dela (`currency`); os envios, em BRL.
 
+import type { ReactNode } from "react";
+
 import { FINANCE_TERMS, type TermKey } from "@/components/finance/definitions";
 import { formatCount, formatInt, formatMoneyIn, formatPct } from "@/components/finance/format";
 import { TermTooltip } from "@/components/finance/term-tooltip";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 import type { TenantCurrency } from "@/lib/currency";
 import type { FinanceKpis, PeriodSummary, SendLine } from "@/lib/finance/types";
 
@@ -28,7 +32,7 @@ type Format = "money" | "int" | "pct" | "decimal";
 
 type KpiRow = {
   key: string;
-  label: string;
+  label: ReactNode;
   term?: TermKey;
   format: Format;
   current: number | null;
@@ -241,7 +245,7 @@ export function KpiBlocks({
       ? [
           {
             key: "ctr",
-            label: "CTR",
+            label: <Term id="ctr">CTR</Term>,
             format: "pct",
             current: k.ctr,
             previous: pk.ctr,
@@ -321,6 +325,7 @@ export function KpiBlocks({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <KpiBlock
         id="movement"
+        anchorAttrs={tourAnchor("financeiro.painel.kpi-movimentacao")}
         title="Movimentação"
         description="Dinheiro que entrou e saiu da casa."
       >
@@ -328,12 +333,22 @@ export function KpiBlocks({
         <KpiSubheading>Comportamento</KpiSubheading>
         {rows(behavior)}
       </KpiBlock>
-      <KpiBlock id="acquisition" title="Aquisição" description="Quanto custou trazer jogadores.">
+      <KpiBlock
+        id="acquisition"
+        anchorAttrs={tourAnchor("financeiro.painel.kpi-aquisicao")}
+        title="Aquisição"
+        description="Quanto custou trazer jogadores."
+      >
         {rows(acquisition)}
         <KpiSubheading>Custo por jogador</KpiSubheading>
         {rows(costPerPlayer)}
       </KpiBlock>
-      <KpiBlock id="ggr" title="GGR" description="Perdas na casa e a taxa cobrada sobre elas.">
+      <KpiBlock
+        id="ggr"
+        anchorAttrs={tourAnchor("financeiro.painel.kpi-ggr")}
+        title={<Term id="ggr">GGR</Term>}
+        description="Perdas na casa e a taxa cobrada sobre elas."
+      >
         {rows(ggr)}
         {s.ggrEstimated && (
           <KpiFooter>
@@ -343,6 +358,7 @@ export function KpiBlocks({
       </KpiBlock>
       <KpiBlock
         id="sends"
+        anchorAttrs={tourAnchor("financeiro.painel.kpi-envios")}
         title="Envios e CRM"
         description="Custo dos envios e o que eles trouxeram de volta."
       >

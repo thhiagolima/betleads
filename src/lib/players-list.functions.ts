@@ -50,6 +50,7 @@ type Input = {
     | "total_depositado"
     | "total_sacado"
     | "ultimo_deposito"
+    | "created_at"
     | "saldo"
     | "lucro"
     | "status"
@@ -477,11 +478,13 @@ export const getPlayersPage = createServerFn({ method: "POST" })
                 ? "total_sacado"
                 : sortKey === "ultimo_deposito"
                   ? "ultimo_deposito"
-                  : sortKey === "status"
-                    ? "status"
-                    : sortKey === "origem"
-                      ? "origem"
-                      : "ultimo_login";
+                  : sortKey === "created_at"
+                    ? "created_at"
+                    : sortKey === "status"
+                      ? "status"
+                      : sortKey === "origem"
+                        ? "origem"
+                        : "ultimo_login";
       const ascending = sortDir === "asc";
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
@@ -854,13 +857,9 @@ export const getPlayersFilteredExternalIds = createServerFn({ method: "POST" })
     },
   );
 
-/** Teto da seleção "filtro atual" enviada para campanha (mesmo do público de seleção). */
-export const PLAYERS_SELECTION_LIMIT = 50_000;
-
 /**
  * Ids internos dos jogadores do filtro atual, para virar público de seleção.
- * Corta nos 50 mil primeiros por data de cadastro (mais antigos primeiro) e
- * avisa (`truncated`).
+ * Todos, sem teto (`truncated` fica sempre false; mantido para o cliente).
  */
 export const getPlayersFilteredPlayerIds = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -876,14 +875,13 @@ export const getPlayersFilteredPlayerIds = createServerFn({ method: "POST" })
       const PAGE = 1000;
       const seen = new Set<string>();
       let total = 0;
-      for (let from = 0; from < PLAYERS_SELECTION_LIMIT; from += PAGE) {
-        const to = Math.min(from + PAGE, PLAYERS_SELECTION_LIMIT) - 1;
-        const { data: chunk, count, error } = await q.range(from, to);
+      for (let from = 0; ; from += PAGE) {
+        const { data: chunk, count, error } = await q.range(from, from + PAGE - 1);
         if (error) throw new Error(error.message);
         const batch = (chunk ?? []) as Array<{ id: string }>;
         for (const row of batch) if (row.id) seen.add(row.id);
         if (count != null) total = count;
-        if (batch.length < to - from + 1) break;
+        if (batch.length < PAGE) break;
       }
       const ids = Array.from(seen);
       total = Math.max(total, ids.length);
@@ -903,6 +901,7 @@ const EXPORT_SORT_COLUMNS = new Set([
   "total_depositado",
   "total_sacado",
   "ultimo_deposito",
+  "created_at",
   "status",
   "origem",
 ]);

@@ -1,5 +1,9 @@
 // Início do expert — SQL tests for
-// supabase/migrations/20261216100000_expert_home_summary.sql
+// supabase/migrations/20261216100000_expert_home_summary.sql (with the
+// "Ao vivo" playerId from 20261221100100_expert_home_live_player_id.sql and
+// the payment time / pending-PIX-only feed from
+// 20261223100000_ao_vivo_hora_do_pagamento.sql, and the Início KPIs from
+// 20261225100000_inicio_kpis_reorg.sql, the current definition)
 //
 // Runs the migration inside an in-memory Postgres (PGlite) over a minimal
 // schema with only the columns expert_home_summary reads (players,
@@ -21,6 +25,21 @@ const MIGRATION = readFileSync(
   resolve(root, "supabase/migrations/20261216100000_expert_home_summary.sql"),
   "utf8",
 );
+const LIVE_PLAYER_ID_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261221100100_expert_home_live_player_id.sql"),
+  "utf8",
+);
+// Also redefines dashboard_summary_v2, which this schema doesn't have: run
+// only the expert_home_summary part.
+const PAYMENT_TIME_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261223100000_ao_vivo_hora_do_pagamento.sql"),
+  "utf8",
+).split("create or replace function public.expert_home_summary")[1];
+// The latest definition (same split: skip its dashboard_summary_v2 half).
+const KPIS_MIGRATION = readFileSync(
+  resolve(root, "supabase/migrations/20261225100000_inicio_kpis_reorg.sql"),
+  "utf8",
+).split("create or replace function public.expert_home_summary")[1];
 
 const SCHEMA = `
 create role anon nologin;
@@ -41,7 +60,8 @@ create table public.deposits (
   player_id uuid,
   valor numeric not null default 0,
   status text not null default 'pendente',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
 );
 create table public.withdrawals (
   id uuid primary key default gen_random_uuid(),
@@ -49,7 +69,8 @@ create table public.withdrawals (
   player_id uuid,
   valor numeric not null default 0,
   status text not null default 'pendente',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
 );
 create table public.events (
   id uuid primary key default gen_random_uuid(),
@@ -154,14 +175,20 @@ async function activity(tenant: string, playerId: string, base: number) {
     [tenant, playerId],
   );
   await db.query(
-    `insert into public.events (tenant_id, player_id, tipo, valor, created_at) values ($1, $2, 'pix_generated', 999, $3)`,
+    `insert into public.events (tenant_id, player_id, tipo, valor, created_at) values ($1, $2, 'deposito-pendente', 999, $3)`,
     [tenant, playerId, CUR],
   );
 }
 
 type Summary = Record<string, unknown> & {
   cashflowChart: Array<{ key: string; deposits: number; withdrawals: number }>;
-  liveEvents: Array<{ player: string; tone: string }>;
+  liveEvents: Array<{
+    player: string;
+    tone: string;
+    playerId: string | null;
+    action: string;
+    at: string;
+  }>;
 };
 
 async function summary(affiliates: string[] | null, tenant = T, resetAt?: string) {
@@ -176,6 +203,9 @@ beforeAll(async () => {
   db = new PGlite();
   await db.exec(SCHEMA);
   await db.exec(MIGRATION);
+  await db.exec(LIVE_PLAYER_ID_MIGRATION);
+  await db.exec(`create or replace function public.expert_home_summary${PAYMENT_TIME_MIGRATION}`);
+  await db.exec(`create or replace function public.expert_home_summary${KPIS_MIGRATION}`);
 
   // Mine (affiliate A): 2 players, one registered + FTD in the period.
   const ana = await player(T, "Ana", "A", "2026-11-02T10:00:00Z", "2026-11-02T12:00:00Z");
@@ -230,6 +260,12 @@ describe("expert_home_summary — restrito", () => {
     expect(s.liveEvents.length).toBeGreaterThan(0);
     expect(s.liveEvents.length).toBeLessThanOrEqual(8);
     for (const e of s.liveEvents) expect(["Ana", "Bia"]).toContain(e.player);
+    // Cada evento aponta para a ficha do lead (o nome vira link no "Ao vivo").
+    const ids = await db.query<{ id: string; nome: string }>(
+      `select id, nome from public.players where nome in ('Ana', 'Bia')`,
+    );
+    const idByName = new Map(ids.rows.map((r) => [r.nome, r.id]));
+    for (const e of s.liveEvents) expect(e.playerId).toBe(idByName.get(e.player));
     expect(new Set(s.liveEvents.map((e) => e.tone))).toEqual(
       new Set(["blue", "green", "purple", "orange"]),
     );
@@ -277,6 +313,125 @@ describe("expert_home_summary — total (null affiliate ids)", () => {
     // Exact-instant metrics (depositors) drop what happened before reset_at.
     expect(s.depositors).toBe(0);
     expect(s.cashflowChart[0].key).toBe("2026-11-03");
+  });
+});
+
+describe("expert_home_summary — ordem do Ao vivo", () => {
+  // Cadastro, PIX gerado 25 s depois e pago 43 s depois do PIX: a linha de
+  // deposits nasce pendente (created_at = hora do PIX) e ganha completed_at
+  // no pagamento; o webhook também grava o evento 'deposito-aprovado'.
+  const LIVE_T = "00000000-0000-4000-8000-00000000000c";
+
+  beforeAll(async () => {
+    const id = await player(LIVE_T, "Thiago", "Z", "2026-11-10T23:55:25Z");
+    await db.query(
+      `insert into public.deposits (tenant_id, player_id, valor, status, created_at, completed_at)
+       values ($1, $2, 30, 'aprovado', '2026-11-10T23:55:50Z', '2026-11-10T23:56:33Z')`,
+      [LIVE_T, id],
+    );
+    await db.query(
+      `insert into public.events (tenant_id, player_id, tipo, valor, created_at) values
+         ($1, $2, 'cadastro', null, '2026-11-10T23:55:25Z'),
+         ($1, $2, 'deposito-pendente', 30, '2026-11-10T23:55:50Z'),
+         ($1, $2, 'deposito-aprovado', 30, '2026-11-10T23:56:33Z')`,
+      [LIVE_T, id],
+    );
+  });
+
+  it.each([
+    ["total", null],
+    ["restrito", ["Z"]],
+  ])("shows the payment after the PIX it paid, once (%s)", async (_label, affiliates) => {
+    const s = await summary(affiliates, LIVE_T);
+    expect(s.liveEvents.map((e) => e.action)).toEqual(["depositou", "gerou um PIX", "criou conta"]);
+    expect(new Date(s.liveEvents[0].at).toISOString()).toBe("2026-11-10T23:56:33.000Z");
+  });
+});
+
+describe("expert_home_summary — KPIs da reorganização do Início", () => {
+  // Casa própria, para os números não se misturarem com os de cima.
+  const KPI_T = "00000000-0000-4000-8000-00000000000d";
+
+  async function kpis(affiliates: string[] | null, from = FROM, to = TO) {
+    const { rows } = await db.query<{ v: Summary }>(
+      `select public.expert_home_summary($1, $2, $3, $4, $5, $6) v`,
+      [KPI_T, affiliates, from, to, PREV_FROM, PREV_TO],
+    );
+    return rows[0].v;
+  }
+
+  beforeAll(async () => {
+    // FTD no período: PIX de 100 gerado 2 min antes do ftd_em (o primeiro
+    // depósito), outro de 30 menos de 1 min depois (nem FTD nem redepósito),
+    // redepósito de 60 dias depois; um PIX de 70 não pago; dois saques.
+    const p1 = await player(KPI_T, "P1", "K", "2026-11-03T10:00:00Z", "2026-11-03T15:00:00Z");
+    await deposit(KPI_T, p1, 100, "2026-11-03T14:58:00Z");
+    await deposit(KPI_T, p1, 30, "2026-11-03T15:00:30Z");
+    await deposit(KPI_T, p1, 60, "2026-11-05T12:00:00Z");
+    await deposit(KPI_T, p1, 70, "2026-11-03T16:00:00Z", "pendente");
+    // 'falhou' conta como PIX gerado, mas não entra no valor não pago.
+    await deposit(KPI_T, p1, 5_000_000, "2026-11-03T16:30:00Z", "falhou");
+    await withdrawal(KPI_T, p1, 20, "2026-11-03T17:00:00Z");
+    await withdrawal(KPI_T, p1, 10, "2026-11-05T17:00:00Z");
+    // FTD no período sem nenhum depósito que case: entra com 0.
+    await player(KPI_T, "P2", "K", "2026-11-04T10:00:00Z", "2026-11-04T12:00:00Z");
+    // FTD no período anterior; o redepósito cai fora dele (no atual).
+    const p3 = await player(KPI_T, "P3", "K", "2026-10-27T10:00:00Z", "2026-10-27T12:00:00Z");
+    await deposit(KPI_T, p3, 40, "2026-10-27T12:00:00Z");
+    await deposit(KPI_T, p3, 25, "2026-11-02T12:00:00Z");
+    await withdrawal(KPI_T, p3, 15, "2026-10-28T12:00:00Z");
+    // Lead de outro afiliado.
+    const p4 = await player(KPI_T, "P4", "OUTRO", "2026-11-03T10:00:00Z", "2026-11-03T11:00:00Z");
+    await deposit(KPI_T, p4, 500, "2026-11-03T11:00:00Z");
+  });
+
+  it("FTD amount = first approved deposit of each FTD of the period (restrito)", async () => {
+    const s = await kpis(["K"]);
+    expect(s.ftd).toBe(2);
+    expect(s.ftdCohort).toBe(2);
+    expect(Number(s.ftdAmount)).toBe(100);
+    expect(s.ftdCohortRedeposited).toBe(1);
+    expect(s.previousFtdCohort).toBe(1);
+    expect(Number(s.previousFtdAmount)).toBe(40);
+    expect(s.previousFtdCohortRedeposited).toBe(0);
+  });
+
+  it("withdrawals count, previous amount and the unpaid PIX amount", async () => {
+    const s = await kpis(["K"]);
+    expect(s.withdrawalCount).toBe(2);
+    expect(Number(s.withdrawalAmount)).toBe(30);
+    expect(Number(s.previousWithdrawalAmount)).toBe(15);
+    expect(Number(s.pixUnpaidAmount)).toBe(70);
+    // A contagem segue pixGenerated - depositCount (pendente + falhou).
+    expect(Number(s.pixGenerated) - Number(s.depositCount)).toBe(2);
+  });
+
+  it("total (null affiliate ids) counts every lead of the house", async () => {
+    const s = await kpis(null);
+    expect(s.ftdCohort).toBe(3);
+    expect(Number(s.ftdAmount)).toBe(600);
+  });
+
+  it("an empty affiliate list zeroes the new numbers", async () => {
+    const s = await kpis([]);
+    expect(s.ftdCohort).toBe(0);
+    expect(Number(s.ftdAmount)).toBe(0);
+    expect(s.withdrawalCount).toBe(0);
+    expect(Number(s.previousWithdrawalAmount)).toBe(0);
+    expect(Number(s.pixUnpaidAmount)).toBe(0);
+  });
+
+  it("a single-day period charts 24 hours (Brasília) instead of days", async () => {
+    const s = await kpis(["K"], "2026-11-03T03:00:00.000Z", "2026-11-04T02:59:59.999Z");
+    expect(s.cashflowChart).toHaveLength(24);
+    expect(s.cashflowChart[0]).toMatchObject({ key: "00", label: "00h" });
+    const byKey = Object.fromEntries(s.cashflowChart.map((r) => [r.key, r]));
+    expect(byKey["11"]).toMatchObject({ deposits: 100, withdrawals: 0 }); // 14:58Z
+    expect(byKey["12"]).toMatchObject({ deposits: 30, withdrawals: 0 }); // 15:00:30Z
+    expect(byKey["13"]).toMatchObject({ deposits: 0 }); // only the unpaid PIX
+    expect(byKey["14"]).toMatchObject({ deposits: 0, withdrawals: 20 });
+    const total = s.cashflowChart.reduce((acc, r) => acc + Number(r.deposits), 0);
+    expect(total).toBe(Number(s.depositAmount));
   });
 });
 

@@ -17,6 +17,7 @@ import { defaultGroupPeriod, type GroupPeriod } from "@/components/group/period-
 import { GroupScoreboard } from "@/components/group/group-scoreboard";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { tourAnchor } from "@/help/anchor";
 import {
   getFinanceDashboard,
   type DashboardScope,
@@ -46,14 +47,18 @@ import { WaterfallChart } from "./waterfall-chart";
 function Section({
   title,
   aside,
+  anchorAttrs,
   children,
 }: {
   title?: string;
   aside?: ReactNode;
+  /** tourAnchor built at the call site (financeiro.painel.*) so the literal
+   * string stays visible to the coverage scanner (anchor.ts). */
+  anchorAttrs?: { "data-tour": string };
   children: ReactNode;
 }) {
   return (
-    <Card className="min-w-0 rounded-[14px] p-5 sm:p-6">
+    <Card className="min-w-0 rounded-[14px] p-5 sm:p-6" {...anchorAttrs}>
       {title && (
         <div className="mb-3.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 className="text-lg font-semibold leading-tight">{title}</h2>
@@ -130,6 +135,7 @@ function DashboardBody({
         <Section
           title={multi ? "Do depósito ao lucro (somado)" : "Do depósito ao lucro"}
           aside={periodLabel(dashboard.range)}
+          anchorAttrs={tourAnchor("financeiro.painel.cascata")}
         >
           <WaterfallChart
             steps={dashboard.waterfall}
@@ -145,7 +151,7 @@ function DashboardBody({
           betleadsNote={sendsBetleadsNote(dashboard.range.from, dashboard.betleadsSince)}
           currency={currency}
         />
-        <Section>
+        <Section anchorAttrs={tourAnchor("financeiro.painel.grafico-12-meses")}>
           <ProfitTrendChart
             title={trendChartTitle(multi, shownTrendMetric)}
             months={dashboard.months}

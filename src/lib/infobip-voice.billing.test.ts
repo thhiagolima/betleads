@@ -214,3 +214,39 @@ describe("callInfobipVoice wallet reservation", () => {
     expect(wallet.ledger()).toHaveLength(0);
   });
 });
+
+describe("callInfobipVoice create request (V1-02 machine detection)", () => {
+  const sentBody = () => {
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    return { url, body: JSON.parse(String(init.body)) as Record<string, unknown> };
+  };
+
+  it("asks Infobip for synchronous answering-machine detection", async () => {
+    vi.stubEnv("INFOBIP_VOICE_MACHINE_DETECTION", "on");
+    await callInfobipVoice("+5511999999999", content, {
+      tenantId: NORMAL,
+      idempotencyKey: "journey-amd-1",
+    });
+    const { url, body } = sentBody();
+    expect(url).toBe("https://infobip.example/markuplanguage/1/create");
+    expect(body).toMatchObject({
+      endpoint: { type: "PHONE", phoneNumber: "5511999999999" },
+      from: "551130000000",
+      customData: "journey-amd-1",
+      machineDetection: { mode: { type: "SYNC" } },
+    });
+    expect(body.callback).toMatchObject({ method: "POST" });
+    expect(String((body.callback as { url: string }).url)).toContain(
+      "/api/public/infobip/voice/cml",
+    );
+  });
+
+  it.each([undefined, "", "off", "false", "0", "lixo"])(
+    "leaves machine detection out when INFOBIP_VOICE_MACHINE_DETECTION=%s",
+    async (flag) => {
+      if (flag !== undefined) vi.stubEnv("INFOBIP_VOICE_MACHINE_DETECTION", flag);
+      await callInfobipVoice("+5511999999999", content, { tenantId: NORMAL });
+      expect(sentBody().body).not.toHaveProperty("machineDetection");
+    },
+  );
+});

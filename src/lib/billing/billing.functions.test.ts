@@ -12,6 +12,7 @@ import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
   adminClearTenantPriceFor,
   adminSetTenantPriceFor,
+  adminSetTenantWebpushBillingModeFor,
   getInvoiceReceiptFor,
   getPlanOverviewFor,
   getTenantEffectivePriceFor,
@@ -203,6 +204,81 @@ describe("getTenantEffectivePriceFor", () => {
       item: "sms",
     });
     expect(result).toEqual({ unitPrice: 0.08, hasOverride: false });
+  });
+});
+
+describe("adminSetTenantWebpushBillingModeFor", () => {
+  /** In-memory effective prices: overrides written by the user-scoped RPCs. */
+  function trackPrices(catalog: Record<string, number>, overrides: Record<string, number | null>) {
+    fake.admin.onRpc("billing_effective_price", (args) => {
+      const item = args._item as string;
+      const value = overrides[item];
+      return {
+        data:
+          value != null
+            ? { item, unit_price: value, source: "override" }
+            : { item, unit_price: catalog[item], source: "default" },
+        error: null,
+      };
+    });
+    userDb.onRpc("admin_set_tenant_price", (args) => {
+      overrides[args._item as string] = args._unit_price as number;
+      return { data: null, error: null };
+    });
+    userDb.onRpc("admin_clear_tenant_price", (args) => {
+      // A null override row: billing_effective_price falls back to the catalog.
+      delete overrides[args._item as string];
+      return { data: null, error: null };
+    });
+    return overrides;
+  }
+
+  it("rejects a caller who is not super admin", async () => {
+    await expect(
+      adminSetTenantWebpushBillingModeFor(ctxFor(HOUSE_ADMIN), { tenantId: TENANT, mode: "lead" }),
+    ).rejects.toThrow(/super admin/i);
+  });
+
+  it("'lead' from catalog prices zeroes the send item only", async () => {
+    const overrides = trackPrices({ webpush: 0.01, webpush_lead: 0.01 }, {});
+    const result = await adminSetTenantWebpushBillingModeFor(ctxFor(SUPER_ADMIN), {
+      tenantId: TENANT,
+      mode: "lead",
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "lead",
+      steps: [{ item: "webpush", action: "set_zero" }],
+      unchargedItems: [],
+    });
+    expect(overrides).toEqual({ webpush: 0 });
+    expect(fake.admin.rows("tenant_audit_logs")).toHaveLength(1);
+  });
+
+  it("'ambos' clears zero overrides and keeps a custom non-zero one", async () => {
+    const overrides = trackPrices(
+      { webpush: 0.01, webpush_lead: 0.01 },
+      { webpush: 0.02, webpush_lead: 0 },
+    );
+    const result = await adminSetTenantWebpushBillingModeFor(ctxFor(SUPER_ADMIN), {
+      tenantId: TENANT,
+      mode: "ambos",
+    });
+    expect(result).toMatchObject({
+      mode: "ambos",
+      steps: [{ item: "webpush_lead", action: "clear" }],
+    });
+    expect(overrides).toEqual({ webpush: 0.02 });
+  });
+
+  it("reports an item the mode wants on that still costs R$ 0 (catalog at 0)", async () => {
+    trackPrices({ webpush: 0.01, webpush_lead: 0 }, { webpush_lead: 0 });
+    const result = await adminSetTenantWebpushBillingModeFor(ctxFor(SUPER_ADMIN), {
+      tenantId: TENANT,
+      mode: "ambos",
+    });
+    expect(result.unchargedItems).toEqual(["webpush_lead"]);
+    expect(result.mode).toBe("envio");
   });
 });
 

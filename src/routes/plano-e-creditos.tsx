@@ -47,6 +47,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { tourAnchor } from "@/help/anchor";
 
 export const Route = createFileRoute("/plano-e-creditos")({
   component: PlanoECreditosPage,
@@ -146,6 +147,9 @@ function PlanoECreditosPage() {
   );
   const [buyOpen, setBuyOpen] = useState(false);
   const [payCharge, setPayCharge] = useState<PixChargePayload | null>(null);
+  // Invoice behind `payCharge`, so "Gerar novo Pix" can call payInvoice again
+  // (the server opens a new attempt when the current one is expired/near expiry).
+  const [payInvoiceId, setPayInvoiceId] = useState<string | null>(null);
   const [paySuccessText, setPaySuccessText] = useState("Mensalidade paga.");
   const [receiptInvoiceId, setReceiptInvoiceId] = useState<string | null>(null);
 
@@ -169,7 +173,10 @@ function PlanoECreditosPage() {
 
   const payMutation = useMutation({
     mutationFn: (invoiceId: string) => payInvoiceFn({ data: { tenantId, invoiceId } }),
-    onSuccess: (result) => setPayCharge(result as PixChargePayload),
+    onSuccess: (result, invoiceId) => {
+      setPayInvoiceId(invoiceId);
+      setPayCharge(result as PixChargePayload);
+    },
     onError: (error: Error) => toast.error(error.message),
   });
 
@@ -256,7 +263,7 @@ function PlanoECreditosPage() {
       </div>
 
       {/* Bloco 1: Mensalidade */}
-      <Card className="border-primary/30 bg-card/80">
+      <Card className="border-primary/30 bg-card/80" {...tourAnchor("creditos.mensalidade.card")}>
         <CardHeader className="pb-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <Wallet className="h-4 w-4 text-primary" />
@@ -294,6 +301,7 @@ function PlanoECreditosPage() {
                   size="sm"
                   disabled={payMutation.isPending}
                   onClick={() => overview.openInvoice && payMutation.mutate(overview.openInvoice.id)}
+                  {...tourAnchor("creditos.mensalidade.pagar")}
                 >
                   {payMutation.isPending ? (
                     <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -320,6 +328,7 @@ function PlanoECreditosPage() {
         }}
         charge={payCharge}
         onReset={() => setPayCharge(null)}
+        onRegenerate={payInvoiceId ? () => payMutation.mutateAsync(payInvoiceId) : undefined}
         getStatus={(chargeId) => getStatusFn({ data: { chargeId } })}
         statusQueryKey={["billing", "invoice-status", payCharge?.chargeId]}
         onPaid={handleInvoicePaid}
@@ -338,7 +347,7 @@ function PlanoECreditosPage() {
 
       <BuyCreditsDialog open={buyOpen} onOpenChange={setBuyOpen} tenantId={tenantId} />
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-3" {...tourAnchor("creditos.saldo.cartoes")}>
         <Card className="border-primary/30 bg-card/80">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -357,6 +366,7 @@ function PlanoECreditosPage() {
                 size="sm"
                 className="mt-3"
                 onClick={() => setBuyOpen(true)}
+                {...tourAnchor("creditos.saldo.comprar")}
               >
                 <CreditCard className="mr-2 h-3.5 w-3.5" />
                 Comprar créditos (Pix)
@@ -407,7 +417,7 @@ function PlanoECreditosPage() {
 
       {/* Bloco 3: Faturas (ruling 6 — escondido quando não há nenhuma) */}
       {overview.invoices.length > 0 && (
-        <Card>
+        <Card {...tourAnchor("creditos.faturas.tabela")}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />
@@ -426,7 +436,7 @@ function PlanoECreditosPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {overview.invoices.map((invoice) => (
+                {overview.invoices.map((invoice, i) => (
                   <TableRow key={invoice.id}>
                     <TableCell>
                       {fmtDay(invoice.periodStart)} a {fmtDay(invoice.periodEnd)}
@@ -467,6 +477,7 @@ function PlanoECreditosPage() {
                           size="sm"
                           variant="outline"
                           onClick={() => setReceiptInvoiceId(invoice.id)}
+                          {...(i === 0 ? tourAnchor("creditos.faturas.comprovante") : {})}
                         >
                           Comprovante
                         </Button>
@@ -544,7 +555,7 @@ function PlanoECreditosPage() {
 
       <CurrentPricesCard prices={prices} visibleItems={visibleBillingItems} />
 
-      <Card>
+      <Card {...tourAnchor("creditos.extrato.tabela")}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <History className="h-5 w-5 text-primary" />

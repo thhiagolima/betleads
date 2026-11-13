@@ -8,21 +8,40 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   return { supabaseAdmin: fake.admin.client };
 });
 
-const { createUpperCharge } = vi.hoisted(() => ({ createUpperCharge: vi.fn() }));
-vi.mock("./upper-pix.server", () => ({
-  createUpperCharge,
-  UpperError: class UpperError extends Error {
-    status: number;
-    code: string | null;
-    retryable: boolean;
-    constructor(message: string, options: { status: number; code: string | null; retryable: boolean }) {
-      super(message);
-      this.name = "UpperError";
-      this.status = options.status;
-      this.code = options.code;
-      this.retryable = options.retryable;
-    }
+const { createUpperCharge, spaceCreate, spaceConfigured } = vi.hoisted(() => ({
+  createUpperCharge: vi.fn(),
+  spaceCreate: vi.fn(),
+  spaceConfigured: { value: true },
+}));
+vi.mock("./upper-pix.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./upper-pix.server")>();
+  return { ...actual, createUpperCharge };
+});
+vi.mock("./spacepay-pix.server", () => ({
+  spacePayGateway: {
+    provider: "spacepay",
+    isConfigured: async () => spaceConfigured.value,
+    create: spaceCreate,
+    get: vi.fn(),
+    cancel: vi.fn(async () => null),
   },
+}));
+
+// Gateway credentials and the active provider come from the gateway config
+// loader (DB, env fallback); the tests drive it through this mutable state.
+const gatewayConfig = vi.hoisted(() => ({
+  upperApiKey: null as string | null,
+  active: "upper" as "upper" | "spacepay",
+}));
+vi.mock("./payment-gateway-config.server", () => ({
+  getUpperConfig: async () =>
+    gatewayConfig.upperApiKey?.trim()
+      ? {
+          source: "env",
+          config: { apiKey: gatewayConfig.upperApiKey, webhookSecret: null, apiBase: null },
+        }
+      : { source: "none", config: null },
+  getActivePixProvider: async () => gatewayConfig.active,
 }));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
@@ -33,6 +52,7 @@ import {
   createCreditTopupFor,
   getTopupStatusFor,
 } from "./topup.functions";
+import { PixGatewayError } from "./pix-gateway-error";
 import { UpperError } from "./upper-pix.server";
 
 const TENANT = "00000000-0000-4000-8000-0000000000aa";
@@ -69,7 +89,8 @@ function upperChargeResult(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   process.env.BILLING_GATEWAY_ENABLED = "true";
-  process.env.UPPER_API_KEY = "test-upper-key";
+  gatewayConfig.upperApiKey = "test-upper-key";
+  gatewayConfig.active = "upper";
 
   fake.admin.reset();
   __resetDemoTenantCacheForTests();
@@ -94,6 +115,11 @@ beforeEach(() => {
 
   createUpperCharge.mockReset();
   createUpperCharge.mockResolvedValue(upperChargeResult());
+  spaceCreate.mockReset();
+  spaceCreate.mockResolvedValue(
+    upperChargeResult({ id: "sp-tx-1", expiresAt: "2026-10-22T12:05:00Z" }),
+  );
+  spaceConfigured.value = true;
 });
 
 afterEach(() => {
@@ -101,7 +127,6 @@ afterEach(() => {
   delete process.env.BILLING_ENFORCEMENT_ENABLED;
   delete process.env.BILLING_INVOICES_ENABLED;
   delete process.env.BILLING_GATEWAY_ENABLED;
-  delete process.env.UPPER_API_KEY;
 });
 
 describe("createCreditTopupFor", () => {
@@ -113,8 +138,8 @@ describe("createCreditTopupFor", () => {
     expect(createUpperCharge).not.toHaveBeenCalled();
   });
 
-  it("refuses with the unavailable message, before writing anything, when UPPER_API_KEY is missing", async () => {
-    process.env.UPPER_API_KEY = "  ";
+  it("refuses with the unavailable message, before writing anything, when the Upper API key is missing", async () => {
+    gatewayConfig.upperApiKey = "  ";
     await expect(
       createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
     ).rejects.toThrow("Compra por Pix indisponível no momento.");
@@ -208,6 +233,7 @@ describe("createCreditTopupFor", () => {
     const charge = fake.admin.rows("payment_charges")[0];
 
     expect(charge.kind).toBe("credit_topup");
+    expect(charge.provider).toBe("upper");
     expect(charge.ref_id).toBe(order.id);
     expect(charge.external_id).toBe(`bl-top-${order.id}`);
     expect(String(charge.external_id).length).toBeLessThanOrEqual(64);
@@ -368,6 +394,62 @@ describe("createCreditTopupFor", () => {
     await expect(
       createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
     ).rejects.toThrow("Compra por Pix indisponível no momento.");
+  });
+});
+
+describe("createCreditTopupFor with SpacePay active", () => {
+  beforeEach(() => {
+    gatewayConfig.active = "spacepay";
+  });
+
+  it("creates the charge on SpacePay, stores provider spacepay and forwards the request IP", async () => {
+    const result = await createCreditTopupFor(
+      { ...ctxFor(ADMIN_USER), requestIp: "203.0.113.9" },
+      { tenantId: TENANT, packageCode: "p1000" },
+    );
+
+    expect(createUpperCharge).not.toHaveBeenCalled();
+    expect(spaceCreate).toHaveBeenCalledTimes(1);
+    const order = fake.admin.rows("credit_topup_orders")[0];
+    const callArgs = spaceCreate.mock.calls[0][0];
+    expect(callArgs.externalId).toBe(`bl-top-${order.id}`);
+    expect(callArgs.requestIp).toBe("203.0.113.9");
+
+    const charge = fake.admin.rows("payment_charges")[0];
+    expect(charge.provider).toBe("spacepay");
+    expect(charge.provider_charge_id).toBe("sp-tx-1");
+    expect(result.expiresAt).toBe("2026-10-22T12:05:00Z");
+  });
+
+  it("passes requestIp null when there is no request IP", async () => {
+    await createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" });
+    expect(spaceCreate.mock.calls[0][0].requestIp).toBeNull();
+  });
+
+  it("refuses with the unavailable message when SpacePay is not configured, writing nothing", async () => {
+    spaceConfigured.value = false;
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Compra por Pix indisponível no momento.");
+    expect(fake.admin.rows("payment_charges")).toHaveLength(0);
+    expect(spaceCreate).not.toHaveBeenCalled();
+  });
+
+  it("maps a SpacePay NOT_CONFIGURED error to the unavailable message and stores a code-only summary", async () => {
+    spaceCreate.mockRejectedValue(
+      new PixGatewayError("SpacePay não configurado.", {
+        provider: "spacepay",
+        status: 0,
+        code: "NOT_CONFIGURED",
+        retryable: false,
+      }),
+    );
+    await expect(
+      createCreditTopupFor(ctxFor(ADMIN_USER), { tenantId: TENANT, packageCode: "p1000" }),
+    ).rejects.toThrow("Compra por Pix indisponível no momento.");
+    const charge = fake.admin.rows("payment_charges")[0];
+    expect(charge.status).toBe("FAILED");
+    expect(charge.last_error).toBe("NOT_CONFIGURED (0)");
   });
 });
 

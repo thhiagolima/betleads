@@ -12,7 +12,7 @@
 export type JourneyEditorRole = "admin" | "gestor" | "member" | "super_admin";
 
 export const EXPRESS_JOURNEY_HINT =
-  "Fura fila: ignora o intervalo entre jornadas e os limites globais de contato; envia assim que o lead entra (respeitando consentimento e janela de envio).";
+  "Fura fila: ignora o intervalo entre jornadas e os limites globais de contato; envia assim que o lead entra (respeitando consentimento).";
 
 /** Same rule as editing journeys: admin, gestor or super admin. */
 export function canToggleJourneyExpress(role: JourneyEditorRole | null | undefined): boolean {

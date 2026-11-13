@@ -15,6 +15,21 @@ const OUT_OF_SCOPE_CML = { actions: [{ action: "hangup" }] };
 
 const HISTORY_COLUMNS = "id, call_queue_id, provider_response, provider_account_id";
 
+/**
+ * Who answered, from the SYNC machine-detection result Infobip sends to the
+ * CML callback (`machineDetectionResult`: HUMAN, MACHINE, MACHINE_EOM_BEEP,
+ * MACHINE_EOM_SILENCE, MACHINE_EOM_TIMEOUT). Absent or unknown is null, and
+ * the message is played: a human call is never dropped on a doubtful signal.
+ */
+export function answeredByOf(payload: Record<string, unknown>): "human" | "machine" | null {
+  const value = payload.machineDetectionResult;
+  if (typeof value !== "string") return null;
+  const result = value.trim().toUpperCase();
+  if (result === "HUMAN") return "human";
+  if (result === "MACHINE" || result.startsWith("MACHINE_")) return "machine";
+  return null;
+}
+
 export const Route = createFileRoute("/api/public/infobip/voice/cml")({
   server: {
     handlers: {
@@ -43,6 +58,7 @@ export const Route = createFileRoute("/api/public/infobip/voice/cml")({
           // O CML continua válido mesmo se o provedor não enviar um corpo JSON.
         }
         const callId = typeof payload.callId === "string" ? payload.callId : null;
+        const answeredBy = answeredByOf(payload);
         let history = null;
         if (callId) {
           const { data } = await supabaseAdmin
@@ -83,7 +99,8 @@ export const Route = createFileRoute("/api/public/infobip/voice/cml")({
         const tts = previous.cml as
           { type?: unknown; text?: unknown; language?: unknown } | undefined;
         const ttsText = typeof tts?.text === "string" ? tts.text : null;
-        if (isTts && (tts?.type !== "say" || !ttsText?.trim())) {
+        // A machine is hung up without playing anything, so it needs no content.
+        if (answeredBy !== "machine" && isTts && (tts?.type !== "say" || !ttsText?.trim())) {
           return Response.json({ error: "tts content not found" }, { status: 409 });
         }
         if (history) {
@@ -115,7 +132,22 @@ export const Route = createFileRoute("/api/public/infobip/voice/cml")({
               .in("status", ["waiting_provider", "calling"]);
             if (queueUpdateError) throw queueUpdateError;
           }
+
+          // Separate from the status update above: it is recorded even when
+          // that one matched no pending row, and a failure here (e.g. the
+          // column not migrated yet) must never keep the call from playing.
+          if (answeredBy) {
+            const { error: answeredByError } = await supabaseAdmin
+              .from("call_history")
+              .update({ answered_by: answeredBy } as never)
+              .eq("id", history.id);
+            if (answeredByError)
+              console.error("[infobip voice cml] answered_by update failed", answeredByError.message);
+          }
         }
+        // Answering machine / voicemail: hang up instead of playing. The call
+        // was answered, so it settles like any other on the final event.
+        if (answeredBy === "machine") return Response.json({ actions: [{ action: "hangup" }] });
         return Response.json({
           actions: [
             isTts

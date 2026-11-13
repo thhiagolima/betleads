@@ -27,6 +27,8 @@ vi.mock("@/components/system-dialog-host", () => ({
   requestTextInput: vi.fn(async () => null),
 }));
 vi.mock("@/lib/provider-accounts.functions", () => ({
+  adminAddTenantSmsAccountOption: vi.fn(),
+  adminRemoveTenantSmsAccountOption: vi.fn(),
   adminListProviderAccounts: vi.fn(),
   adminSaveProviderAccount: vi.fn(),
   adminSetProviderAccountStatus: vi.fn(),
@@ -42,6 +44,19 @@ vi.mock("@/lib/own-provider.functions", () => ({
   adminSetOwnProviderGrant: vi.fn(),
   adminResolveRevokedOwnProvider: vi.fn(),
 }));
+// Dialog content is portaled too: render it inline only while open.
+vi.mock("@/components/ui/dialog", () => {
+  const Pass = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
+  return {
+    Dialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
+      open ? <div role="dialog">{children}</div> : null,
+    DialogContent: Pass,
+    DialogDescription: Pass,
+    DialogFooter: Pass,
+    DialogHeader: Pass,
+    DialogTitle: Pass,
+  };
+});
 // Select/Dropdown content is rendered inside a Radix Portal that only mounts
 // when open; pass through so static markup exposes the options/disabled state.
 vi.mock("@/components/ui/select", () => {
@@ -64,6 +79,7 @@ vi.mock("@/components/ui/select", () => {
 import {
   AccountsCard,
   ProviderAccountsPanel,
+  TenantSmsOptionsDialog,
   TenantProvidersCard,
   createOwnProviderSaveFeeHandler,
   createOwnProviderToggleHandler,
@@ -370,6 +386,115 @@ describe("ProviderAccountsPanel", () => {
     const emptyHtml = renderToStaticMarkup(<ProviderAccountsPanel />);
     expect(emptyHtml).toContain("Nenhuma casa encontrada");
     expect(emptyHtml).toMatch(/colSpan="5"|colspan="5"/);
+  });
+
+  it("shows 'Contas extras (N)' only in each house's SMS cell", () => {
+    queryState.data = {
+      accounts: [],
+      tenants: [
+        {
+          id: "00000000-0000-4000-8000-000000000001",
+          nome: "Casa Um",
+          accounts: { sms: null, email: null, voice: null, webpush: null },
+          channels: channels(),
+          smsOptions: [
+            { accountId: "11111111-1111-4111-8111-111111111111", displayName: "Rota principal" },
+          ],
+        },
+        {
+          id: "00000000-0000-4000-8000-000000000002",
+          nome: "Casa Dois",
+          accounts: { sms: null, email: null, voice: null, webpush: null },
+          channels: channels(),
+        },
+      ],
+      defaults: {
+        sms: "00000000-0000-4000-a000-00000000a001",
+        email: "00000000-0000-4000-a000-00000000a002",
+        voice: "00000000-0000-4000-a000-00000000a002",
+        webpush: "00000000-0000-4000-a000-00000000a003",
+      },
+      verifiedEmailDomainsOnDefault: 0,
+    };
+
+    const html = renderToStaticMarkup(<ProviderAccountsPanel />);
+
+    expect(html.match(/Contas extras \(\d+\)/g)).toEqual([
+      "Contas extras (1)",
+      "Contas extras (0)",
+    ]);
+    // Closed until clicked.
+    expect(html).not.toContain("Nome que a casa vê");
+  });
+});
+
+describe("TenantSmsOptionsDialog", () => {
+  const account = (id: string, label: string, provider = "infobip") => ({
+    id,
+    provider,
+    label,
+    channels: ["sms"],
+    status: "active",
+    envAccount: false,
+    defaultFor: [],
+    configured: true,
+    config: {},
+    credentialHints: {},
+    houses: houses(),
+  });
+  const DEFAULT = "00000000-0000-4000-a000-00000000a001";
+  const LINKED = "11111111-1111-4111-8111-111111111111";
+  const FREE = "22222222-2222-4222-8222-222222222222";
+  const accounts = [
+    account(DEFAULT, "Short Brasil (padrão)", "short_brasil"),
+    account(LINKED, "Infobip Rota A"),
+    account(FREE, "Infobip Rota B"),
+  ] as never[];
+
+  it("lists the house name and internal label; offers only accounts not already in use", () => {
+    const html = renderToStaticMarkup(
+      <TenantSmsOptionsDialog
+        tenant={{
+          id: "00000000-0000-4000-8000-000000000001",
+          nome: "Casa Um",
+          accounts: { sms: null, email: null, voice: null, webpush: null },
+          channels: channels(),
+          smsOptions: [{ accountId: LINKED, displayName: "Rota principal" }],
+        }}
+        accounts={accounts}
+        smsAccounts={accounts}
+        defaultAccountId={DEFAULT}
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Contas extras de SMS · Casa Um");
+    // Linked option: name the house sees + internal label (super admin only).
+    expect(html).toContain("Rota principal");
+    expect(html).toContain("Infobip Rota A");
+    expect(html).toContain('aria-label="Remover Rota principal"');
+    // Add select: neither the house default nor an already linked account.
+    const options = html.match(/<div role="option">[^<]*<\/div>/g) ?? [];
+    expect(options).toEqual(['<div role="option">Infobip Rota B</div>']);
+    expect(html).toContain("Nome que a casa vê");
+  });
+
+  it("empty list", () => {
+    const html = renderToStaticMarkup(
+      <TenantSmsOptionsDialog
+        tenant={{
+          id: "00000000-0000-4000-8000-000000000001",
+          nome: "Casa Um",
+          accounts: { sms: null, email: null, voice: null, webpush: null },
+          channels: channels(),
+        }}
+        accounts={accounts}
+        smsAccounts={accounts}
+        defaultAccountId={DEFAULT}
+        onClose={() => undefined}
+      />,
+    );
+    expect(html).toContain("Nenhuma conta extra.");
   });
 });
 

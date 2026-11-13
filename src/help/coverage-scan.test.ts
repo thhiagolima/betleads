@@ -3,6 +3,10 @@ import {
   countRawDataTourUsages,
   extractTermIds,
   extractTourAnchorCalls,
+  countTermNextToInfoTip,
+  findAnchorWrappedPeriodPicker,
+  findTermInsideChipLabel,
+  findTermInsideLabelWithoutFor,
   isTestFile,
 } from "./coverage-scan";
 
@@ -30,5 +34,70 @@ describe("coverage-scan", () => {
     expect(isTestFile("resolve.test.ts")).toBe(true);
     expect(isTestFile("-coverage.test.ts")).toBe(true);
     expect(isTestFile("resolve.ts")).toBe(false);
+  });
+  it("findAnchorWrappedPeriodPicker acha a âncora numa div em volta do seletor de período", () => {
+    const wrapped = `<div {...tourAnchor("rendimento.header.periodo")}>
+              <CentralPeriodPicker value={period} onChange={setPeriod} />
+            </div>`;
+    expect(findAnchorWrappedPeriodPicker(wrapped)).toEqual(["rendimento.header.periodo"]);
+    const direct = `<CentralPeriodPicker value={period} {...tourAnchor("equipe.periodo")} />`;
+    expect(findAnchorWrappedPeriodPicker(direct)).toEqual([]);
+  });
+
+  it("findTermInsideLabelWithoutFor acha <Term> em <label>/<Label> sem htmlFor", () => {
+    const bad = `
+      <label className="space-y-1">
+        <span><Term id="ggr">GGR do mês</Term></span>
+        <Input value={v} />
+      </label>
+      <Label>
+        <Term id="id-de-afiliado">IDs de afiliado</Term>
+      </Label>`;
+    expect(findTermInsideLabelWithoutFor(bad)).toEqual(["label@2", "Label@6"]);
+    const ok = `
+      <label htmlFor={ids.ggr} className="space-y-1">
+        <Term id="ggr">GGR do mês</Term>
+      </label>
+      <Label htmlFor="x" onClick={() => a > b}><Term id="teto">Teto</Term></Label>
+      <Label>Nome</Label>
+      <Label />
+      <Term id="ftd">FTD</Term>`;
+    expect(findTermInsideLabelWithoutFor(ok)).toEqual([]);
+  });
+
+  it("countTermNextToInfoTip acha <Term> colado a um <InfoTip>", () => {
+    const bad = `<CardTitle>
+          <Term id="recuperado-pelo-crm">Recuperado pelo CRM</Term>
+          <InfoTip text={TITLE_INFO} />
+        </CardTitle>
+        <p><InfoTip text="x" /> <Term id="ftd">FTD</Term></p>`;
+    expect(countTermNextToInfoTip(bad)).toBe(2);
+    const ok = `<CardTitle>Recuperado pelo CRM<InfoTip text={TITLE_INFO} /></CardTitle>
+        <p><Term id="ftd">FTD</Term></p>`;
+    expect(countTermNextToInfoTip(ok)).toBe(0);
+  });
+
+  it("findTermInsideChipLabel acha <Term> dentro do label={…} de um *Chip", () => {
+    const src = `
+      <RuleChip
+        label={
+          <>
+            Gerou <Term id="pix-gerado-pago">PIX</Term> e não pagou
+          </>
+        }
+        onClick={() => setActivity("pixUnpaid", true)}
+      />
+      <FilterChip label={<Term id="ftd">FTD</Term>} active />`;
+    expect(findTermInsideChipLabel(src)).toEqual(["RuleChip", "FilterChip"]);
+  });
+
+  it("findTermInsideChipLabel ignora label de texto, Term fora do chip e outros componentes", () => {
+    const src = `
+      <RuleGroup title="Pendências" help={<><Term id="pix-gerado-pago">PIX</Term> em aberto</>}>
+        <RuleChip label="Gerou PIX e não pagou" onClick={() => go({ a: 1 })} />
+        <RuleChip label={count > 1 ? "Vários" : "Um"} count={count} />
+      </RuleGroup>
+      <Field label={<Term id="ggr">GGR</Term>} />`;
+    expect(findTermInsideChipLabel(src)).toEqual([]);
   });
 });

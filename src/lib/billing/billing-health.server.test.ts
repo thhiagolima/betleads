@@ -20,6 +20,10 @@ vi.mock("@/lib/observability/sentry.server", () => ({
 const { pingHeartbeat } = vi.hoisted(() => ({ pingHeartbeat: vi.fn(async () => undefined) }));
 vi.mock("@/lib/observability/job-monitor.server", () => ({ pingHeartbeat }));
 
+const pix = vi.hoisted(() => ({ active: "upper" as "upper" | "spacepay" }));
+// Only activePixProvider is read; mocking keeps the gateway clients out of this test.
+vi.mock("./pix-gateway.server", () => ({ activePixProvider: async () => pix.active }));
+
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
   __resetBillingHealthStateForTests,
@@ -66,6 +70,7 @@ beforeEach(() => {
   sentry.active = false;
   sentry.captureServerMessage.mockClear();
   pingHeartbeat.mockClear();
+  pix.active = "upper";
   __resetBillingHealthStateForTests();
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -147,6 +152,49 @@ describe("evaluateBillingHealth", () => {
     expect(findings[0].lastAt).toBe("2026-10-23T11:58:00Z");
   });
 
+  it("counts SpacePay signals the same way as Upper ones, labelled with the provider", () => {
+    const findings = evaluateBillingHealth(
+      healthySnapshot({
+        signals: {
+          spacepay_webhook_invalid_token: {
+            count: 2,
+            last_at: "2026-10-23T11:50:00Z",
+            last_detail: null,
+          },
+          spacepay_unauthorized: { count: 1, last_at: "2026-10-23T11:51:00Z", last_detail: "401" },
+          spacepay_unavailable: { count: 2, last_at: "2026-10-23T11:52:00Z", last_detail: "503" },
+          upper_unavailable: { count: 4, last_at: "2026-10-23T11:53:00Z", last_detail: "TIMEOUT" },
+        },
+      }),
+      { now: NOW, windowHours: 1 },
+    );
+    // spacepay_unavailable stays below the 3-event threshold, like Upper's.
+    expect(codes(findings)).toEqual([
+      "spacepay_unauthorized",
+      "spacepay_webhook_invalid_token",
+      "upper_unavailable",
+    ]);
+    const byCode = Object.fromEntries(findings.map((f) => [f.code, f]));
+    expect(byCode.spacepay_unauthorized.provider).toBe("spacepay");
+    expect(byCode.spacepay_unauthorized.message).toMatch(/SpacePay/);
+    expect(byCode.spacepay_unauthorized.lastAt).toBe("2026-10-23T11:51:00Z");
+    expect(byCode.spacepay_webhook_invalid_token.message).toMatch(/2 webhooks do SpacePay/);
+    expect(byCode.upper_unavailable.provider).toBe("upper");
+    expect(byCode.upper_unavailable.message).toMatch(/Upper/);
+    expect(findings.every((f) => f.severity === "critical")).toBe(true);
+
+    const down = evaluateBillingHealth(
+      healthySnapshot({
+        signals: {
+          spacepay_unavailable: { count: 3, last_at: "2026-10-23T11:52:00Z", last_detail: "503" },
+        },
+      }),
+      { now: NOW, windowHours: 1 },
+    );
+    expect(codes(down)).toEqual(["spacepay_unavailable"]);
+    expect(down[0].message).toMatch(/O SpacePay parece fora do ar/);
+  });
+
   it("flags billing jobs whose last OK run is older than 3x their interval, or that never ran", () => {
     const fresh = evaluateBillingHealth(
       healthySnapshot({
@@ -186,6 +234,15 @@ describe("checkBillingHealth", () => {
     expect(report.ok).toBe(false);
     expect(codes(report.findings)).toEqual(["wallet_ledger_mismatch"]);
     expect(report.windowHours).toBe(24);
+    expect(report.activeProvider).toBe("upper");
+  });
+
+  it("reports which provider takes new charges", async () => {
+    pix.active = "spacepay";
+    fake.admin.onRpc("billing_health_snapshot", () => ({ data: healthySnapshot(), error: null }));
+    expect((await checkBillingHealth({ now: NOW })).activeProvider).toBe("spacepay");
+    fake.admin.onRpc("billing_health_snapshot", () => ({ data: null, error: { message: "x" } }));
+    expect((await checkBillingHealth({ now: NOW })).activeProvider).toBe("spacepay");
   });
 
   it("is ok with only warnings", async () => {
@@ -317,6 +374,30 @@ describe("runBillingHealthStage", () => {
     expect(lines).toContain("webhook_invalid_signature");
     expect(lines).toContain("upper_unauthorized");
     expect(lines).toContain("upper_feature_disabled");
+  });
+
+  it("SpacePay signal findings never suppress the heartbeat either", async () => {
+    fake.admin.onRpc("billing_health_snapshot", () => ({
+      data: healthySnapshot({
+        signals: {
+          spacepay_unauthorized: { count: 1, last_at: "2026-10-23T11:59:00Z", last_detail: "401" },
+          spacepay_unavailable: { count: 3, last_at: "2026-10-23T11:59:10Z", last_detail: "503" },
+          spacepay_webhook_invalid_token: {
+            count: 1,
+            last_at: "2026-10-23T11:59:20Z",
+            last_detail: null,
+          },
+        },
+      }),
+      error: null,
+    }));
+    const report = await runBillingHealthStage({ now: NOW });
+    expect(report?.ok).toBe(false);
+    expect(pingHeartbeat).toHaveBeenCalledWith("billing-health", true);
+    const lines = errorSpy.mock.calls.map((c: unknown[]) => String(c[0])).join(" | ");
+    expect(lines).toContain("spacepay_unauthorized");
+    expect(lines).toContain("spacepay_unavailable");
+    expect(lines).toContain("spacepay_webhook_invalid_token");
   });
 
   it("upper_unavailable alerts but never suppresses the heartbeat", async () => {

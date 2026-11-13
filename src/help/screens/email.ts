@@ -5,8 +5,7 @@
 // src/components/email/template-editor-dialog.tsx (+ template-presets.ts),
 // src/components/history/history-shell.tsx (prefixo neutro "historico.",
 // reaproveitado por telas futuras), src/components/providers-paused-banner.tsx,
-// src/components/billing/{active-tenant-wallet-notice,wallet-balance-notice}.tsx
-// e src/components/send-window-card.tsx.
+// e src/components/billing/{active-tenant-wallet-notice,wallet-balance-notice}.tsx.
 import type { HelpScreen } from "../types";
 
 const screen: HelpScreen = {
@@ -16,7 +15,7 @@ const screen: HelpScreen = {
   title: "Email",
   purpose:
     "Visão geral dos envios de e-mail, os templates usados em campanhas e jornadas (com dois jeitos de criar: Editor Rápido e Editor Avançado) e o histórico completo de envios.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["cta", "preheader", "hero", "alt-text", "remetente"],
   sections: [
     // ---------------------------------------------------------------
@@ -26,7 +25,7 @@ const screen: HelpScreen = {
       id: "canal",
       title: "Barra superior (aparece nas 3 abas)",
       intro:
-        "Esta faixa é a mesma em /email, /sms e /ligações: o botão de nova campanha, o aviso de disparos pausados, o aviso de saldo e a janela de envio. Fica acima das abas e não muda quando você troca de aba.",
+        "Esta faixa é a mesma em /email, /sms e /ligações: o botão de nova campanha, o aviso de disparos pausados e o aviso de saldo. Fica acima das abas e não muda quando você troca de aba.",
       items: [
         {
           anchor: "canal.header.nova-campanha",
@@ -54,13 +53,6 @@ const screen: HelpScreen = {
           anchor: "canal.carteira.aviso",
           label: 'Aviso de saldo ("Seu saldo acabou" / "Saldo baixo")',
           what: 'Aparece só para casas que pagam por SMS/voz (não isentas) com saldo zerado ou abaixo do limite de aviso da casa. O texto explica que SMS e voz ficam bloqueados sem saldo, mas o e-mail continua dentro da franquia mensal. Quando a casa pode comprar por Pix, o texto traz um link "Saldo e consumo" (para /plano-e-creditos); senão, pede para falar com o suporte.',
-        },
-        {
-          anchor: "canal.janela.card",
-          label: "Janela de envio",
-          what: 'Faixa curta mostrando se o envio está "Dentro da janela de envio" ou "Fora da janela de envio — envios aguardando", com o horário permitido e, fora da janela, quando os envios retomam e quantos estão esperando.',
-          notes:
-            "A janela vale para todos os canais automáticos (SMS, e-mail e ligações) e é configurada em /configurações.",
         },
       ],
     },
@@ -389,7 +381,7 @@ const screen: HelpScreen = {
         },
         {
           label: "Gaveta de detalhe",
-          what: 'Abre ao clicar numa linha da tabela: canal e status no topo, data completa, e os campos Jogador, Contato, Jornada, Dia da jornada, Template/assunto e Mensagem. Quando o envio falhou, mostra "Falha no envio" com o erro; quando o jogador depositou depois, mostra o aviso de conversão (72h).',
+          what: 'Abre ao clicar numa linha da tabela: canal e status no topo, data completa, e os campos Jogador, Contato, Jornada, Dia da jornada, "Template / assunto" e Mensagem. Quando o envio falhou, mostra "Falha no envio" com o erro; quando o jogador depositou depois, mostra o aviso de conversão (72h).',
           notes:
             'Os botões "Ver jogador" (abre a ficha do jogador numa aba nova), "Copiar mensagem" e "Copiar erro" (quando há erro) ficam na parte de baixo da gaveta.',
         },
@@ -409,6 +401,12 @@ const screen: HelpScreen = {
       title: '"Seu saldo acabou" / "Saldo baixo"',
       what: "Aviso mostrado só para casas que pagam por SMS/voz (não isentas) com saldo zerado ou perto do limite de aviso. Não afeta o envio de e-mail, que continua dentro da franquia mensal.",
       action: 'Compre créditos por Pix em "Saldo e consumo" (quando disponível) ou fale com o suporte.',
+    },
+    {
+      id: "canal-desabilitado",
+      title: "Canal E-mail desabilitado",
+      what: 'Tela cheia mostrada no lugar de toda a página (sem abas, sem "Nova campanha") quando o super admin desligou o canal E-mail desta casa e alguém chega em /email por um link, favorito ou automação antiga. A mensagem exata é "O canal E-mail está desabilitado para esta casa."',
+      action: "Fale com o suporte para reativar o canal, se precisar dele de volta.",
     },
     {
       id: "templates-vazio",

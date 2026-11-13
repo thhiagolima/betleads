@@ -16,6 +16,7 @@ import {
   parseSmsCallbackPayloads,
   type CallbackPayload,
 } from "@/lib/sms-callback-parse";
+import { applyRouteProbeCallback } from "@/lib/sms-route-probe.server";
 
 // Callback Short Brasil SMS (rotas /api/public/sms-webhook e
 // /api/public/sms-webhook/$token).
@@ -159,6 +160,10 @@ function parseShortBrasilDate(raw: string | null): string | null {
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
+const FINAL_DELIVERY_STATUSES = ["delivered", "failed"];
+// `not.in` alone skips rows whose delivery_status is still null.
+const NOT_FINAL_FILTER = "delivery_status.is.null,delivery_status.not.in.(delivered,failed)";
+
 function deliveredAtFor(status: string, payload: CallbackPayload): string | null {
   if (status !== "delivered" && status !== "replied") return null;
   return (
@@ -237,6 +242,15 @@ async function updateFromPayload(
   if (deliveredAt) patch.delivered_at = deliveredAt;
   if (errorMsg) patch.error = errorMsg;
 
+  // Short Brasil sends the carrier's ENVIADA alongside CONFIRMADO/NAO_ENTREGUE,
+  // often after it in the same batch (2026-11-08). A non-final status must
+  // never overwrite a final one, or delivered/failed sends fall back to "sent".
+  const isFinal = FINAL_DELIVERY_STATUSES.includes(patch.delivery_status);
+  const updateLog = () => {
+    const query = supabaseAdmin.from("sms_send_logs").update(patch);
+    return isFinal ? query : query.or(NOT_FINAL_FILTER);
+  };
+
   let matched = false;
   // Delivery keys of the rows actually updated: the only keys that may reach
   // link_dispatches (never the payload's own key once a row matched).
@@ -251,15 +265,10 @@ async function updateFromPayload(
     const allowedIds = allowedRows.map((row) => row.id);
     if (found.length > 0 && allowedIds.length === 0) return "ignored";
     if (allowedIds.length > 0) {
-      const { data } = await supabaseAdmin
-        .from("sms_send_logs")
-        .update(patch)
-        .in("id", allowedIds)
-        .select("id");
-      matched = !!data && data.length > 0;
-      if (matched) {
-        for (const row of allowedRows) if (row.idempotency_key) matchedKeys.add(row.idempotency_key);
-      }
+      // A row already final is still this send (matched, never an orphan).
+      await updateLog().in("id", allowedIds);
+      matched = true;
+      for (const row of allowedRows) if (row.idempotency_key) matchedKeys.add(row.idempotency_key);
     }
   }
   if (!matched && idempotencyKey) {
@@ -275,17 +284,29 @@ async function updateFromPayload(
     const target = (candidates?.[0] ?? null) as SendLogRef | null;
     if (target && !allowed(filter, target)) return "ignored";
     if (target) {
-      const { data } = await supabaseAdmin
-        .from("sms_send_logs")
-        .update(patch)
-        .eq("id", target.id)
-        .select("id");
-      matched = !!data && data.length > 0;
-      if (matched && target.idempotency_key) matchedKeys.add(target.idempotency_key);
+      await updateLog().eq("id", target.id);
+      matched = true;
+      if (target.idempotency_key) matchedKeys.add(target.idempotency_key);
     }
   }
   // An account token only ever acts on its own send.
   if (!matched && filter.scope.kind === "account") return "ignored";
+
+  // SMS de controle da sonda da rota (não fica em sms_send_logs; sai sempre
+  // pela conta da plataforma, nunca por conta própria de casa).
+  if (
+    !matched &&
+    (await applyRouteProbeCallback({
+      providerMessageId,
+      idempotencyKey,
+      deliveryStatus: patch.delivery_status,
+      deliveredAt: deliveredAt ?? null,
+      error: errorMsg,
+      payload,
+    }))
+  ) {
+    return "matched";
+  }
 
   // A dispatch uses `${sms_log.idempotency_key}:position`; this carries the
   // provider's confirmed delivery back to the conversion report without ever

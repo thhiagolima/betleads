@@ -13,6 +13,7 @@ Isso vale para qualquer controle interativo novo, inclusive dentro de diálogos 
 
 - **`types.ts`** — os tipos do conteúdo: `HelpScreen` (um artigo), `HelpSection`, `HelpItem`, `HelpState`, `TourStep`, `GlossaryTerm`. Dados puros, sem MDX, para o teste de cobertura conseguir percorrer tudo.
 - **`screens/*.ts`** — um arquivo por artigo, cada um exportando um `HelpScreen` default (ex.: `screens/webhooks.ts`, `screens/shell.ts`). Cada artigo tem `sections` (os controles, agrupados), `states` (vazio/erro/bloqueio) e `tours` (um `TourStep[]` por aba, chave `"default"` quando a tela não tem abas). Tela com abas cujos tours são todos por aba (sem `"default"`) declara `defaultTab`: a aba que a rota mostra quando a URL não tem `#` (ex.: `"casa"` em `/configuracoes/casa`). Sem isso, a URL de entrada não acharia tour nenhum; com isso, `/configuracoes/casa` e `/configuracoes/casa#casa` usam o mesmo tour e a mesma chave de progresso (`effectiveTab`, em `resolve.ts`).
+- **Abas na query string (`tabSearchParam`).** Por padrão a aba é o hash (`/configuracoes/casa#email`). Tela cuja rota guarda a aba num parâmetro de busca declara `tabSearchParam` com o nome do parâmetro — hoje `/resultados` (`"aba"`, `?aba=origens`), `/financeiro` (`"tab"`, `?tab=lancamentos`) e `/rendimento/equipe/$expertId` (`"aba"`, `?aba=campanhas`). O mesmo valor vai em `HELP_TAB_SEARCH_PARAMS` (`registry.ts`), porque `resolveHelpScreen` precisa dele antes de o artigo carregar; o teste de cobertura confere que os dois batem. Nessas telas: a aba vem só da query (o hash é ignorado); as chaves de `tours`, os `section.tab` e o `defaultTab` são valores que a rota aceita de fato (a lista da própria rota — `TABS` em `crm-results/search.ts`, `FINANCE_TABS` em `lib/finance/search.ts` — ou, sem lista exportada, a documentada no cabeçalho do artigo, como em `rendimento-pessoa.ts`); a chave de progresso continua `tour:<rota>#<aba>`, no mesmo formato; a busca e os guias navegam para `?param=aba` (`helpTabLocation`, em `resolve.ts`), não `#aba`; e trocar a query reavalia o tour como trocar o hash (a supressão do início automático e a visita — `claimAutoStart`/`autoStartVisitId` — seguem valendo, porque `location.key` muda com a query). Tela nova com abas na query: declare `tabSearchParam`, acrescente a rota em `HELP_TAB_SEARCH_PARAMS` e a lista de abas aceitas em `-coverage.test.ts`.
 - **`guides.ts`** — os "Guias passo a passo" do painel (ex.: "Configurar o encurtador de links"). Cada `GuideStep` aponta para uma rota/aba/âncora e um `signal` (um booleano vindo do banco) que diz se o passo já foi concluído.
 - **`glossary.ts`** — o `GLOSSARY`: um registro por termo/sigla (`id`, `term`, `short`, `long?`), usado pelo componente `<Term id="...">` (`src/components/help/term.tsx`) e por `screen.terms`.
 - **`registry.ts`** — `HELP_SCREEN_LOADERS`: um `import()` por artigo, chaveado pela rota exata de `ROUTE_META` (`src/lib/navigation.ts`) ou por um id de `VIRTUAL_SCREENS`. É o único lugar que registra um artigo — sem entrada aqui, a tela não tem artigo nenhum, mesmo que o arquivo em `screens/` exista. O artigo carregado precisa ter `route` igual à chave (o painel só mostra o artigo quando `screen.route` bate com a rota resolvida): um mesmo artigo em duas rotas exporta uma cópia com a outra `route` (ex.: `editScreen` em `screens/jornada-editor.ts`, para `/jornadas/$journeyId`), com o mesmo `id` — a busca indexa cada `id` uma vez só — e `tourRoute` apontando para a rota original, para as duas rotas dividirem a mesma chave de progresso do tour (`screenTourKey`, em `tour-logic.ts`; sem `tourRoute`, a chave continua `tourKey(route, aba)`).
@@ -28,7 +29,7 @@ Isso vale para qualquer controle interativo novo, inclusive dentro de diálogos 
 
 - Formato: `"<tela>.<secao>.<elemento>"`, tudo minúsculo, hífen dentro de cada parte (ex.: `"casa.email.dns-table"`).
 - Sempre pelo helper `tourAnchor("...")`, nunca `data-tour` escrito na mão.
-- Em controle que se repete por linha (lista, tabela), a âncora vai só no primeiro item/linha — não em cada repetição.
+- Em controle que se repete por linha (lista, tabela), a âncora vai só no primeiro item/linha **que tem o controle** — não em cada repetição, e não cegamente na linha 0 quando o controle depende da linha (uma jornada que não expande, um expert sem acesso para remover). Calcule o índice uma vez, fora do `map`, com `firstIndexWhere(linhas, temOControle)` (`anchor.ts`).
 - O id precisa ser um **literal de string** na chamada (`tourAnchor("tela.secao.item")`), porque o scanner (`coverage-scan.ts`, regex `tourAnchor\("([^"]+)"\)`) lê o código-fonte como texto, não executa nada. Uma âncora montada com variável/template string não é detectada e o teste de cobertura vai achar uma âncora "fantasma" citada no artigo sem `tourAnchor()` correspondente.
 
 ## Como adicionar uma tela nova
@@ -53,6 +54,7 @@ Isso vale para qualquer controle interativo novo, inclusive dentro de diálogos 
 9. Toda entrada de `EXCLUDED_ROUTES`/`PENDING_ROUTES` é uma rota real de `ROUTE_META` (não uma rota inventada ou já removida).
 10. Todo artigo de `HELP_SCREEN_LOADERS` tem `route` igual à sua chave.
 11. Tela (não virtual) cujos tours são todos por aba declara `defaultTab`; e todo `defaultTab` é a aba de alguma seção do artigo ou está pendente como `"/rota#aba"` em `PENDING_ROUTES` (ex.: `/webhooks`, `defaultTab: "plataforma"`, sem tour ainda — o botão do tour some nessa aba).
+12. Tela com `tabSearchParam` tem o mesmo valor em `HELP_TAB_SEARCH_PARAMS` (e vice-versa), e cada chave de tour (fora `"default"`), cada `section.tab` e o `defaultTab` são valores que a rota aceita naquele parâmetro.
 
 ## Como rodar o teste
 
@@ -69,6 +71,12 @@ npx vitest run src/help src/components/help
 ## `<Term>` nunca dentro das strings do artigo
 
 `<Term id="...">texto</Term>` é um componente React, usado dentro de JSX de telas reais (`.tsx`). As strings dos artigos (`label`, `what`, `when`, `notes` em `HelpItem`) são texto puro, renderizado como texto — colocar `<Term id="...">` ali não vira um componente, aparece literalmente como `<Term...>` na tela. Para explicar uma sigla/termo num artigo, escreva o texto direto (a convenção do projeto já é explicar toda sigla na primeira aparição) ou cite o termo em `screen.terms` para ele aparecer no glossário do painel.
+
+## Um "i" por rótulo
+
+Um rótulo que já tem um tooltip de explicação ("i") — o `InfoTip` dos Resultados, o "Como calculamos" do Financeiro — não ganha `<Term>`: seriam dois "i" lado a lado explicando a mesma coisa. Nesse caso o id do termo fica só em `screen.terms` (aparece no glossário do painel). O teste de cobertura falha quando um `<Term>` aparece colado a um `<InfoTip>`.
+
+Também não ponha `<Term>` dentro de um `<label>`/`<Label>` sem `htmlFor`: o `<Term>` é um botão e tomaria o rótulo do campo. Dê um `id` ao campo e `htmlFor` ao rótulo (o teste de cobertura também confere isso), e não ponha a âncora do seletor de período numa `div` em volta — passe `{...tourAnchor(...)}` ao próprio `CentralPeriodPicker`.
 
 ## Como testar um tour manualmente
 

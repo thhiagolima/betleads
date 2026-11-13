@@ -13,6 +13,8 @@ import { createCreditTopup, getTopupStatus } from "@/lib/billing/topup.functions
 import { MAX_TOPUP_CENTS, MIN_TOPUP_CENTS, TOPUP_PACKAGES } from "@/lib/billing/topup";
 import { PixPaymentDialog, type PixChargePayload } from "./pix-payment-dialog";
 
+type TopupInput = { packageCode?: string; amountCents?: number };
+
 /**
  * Buy-credits dialog for "Plano e créditos" (brief, Task 6/7): package/free
  * amount selection (this file), then the generic Pix QR/copy-paste/poll
@@ -34,16 +36,21 @@ export function BuyCreditsDialog({
 
   const [freeAmount, setFreeAmount] = useState("");
   const [charge, setCharge] = useState<PixChargePayload | null>(null);
+  // Last request that created `charge`, replayed by "Gerar novo Pix".
+  const [lastInput, setLastInput] = useState<TopupInput | null>(null);
 
   const reset = () => {
     setFreeAmount("");
     setCharge(null);
+    setLastInput(null);
   };
 
   const create = useMutation({
-    mutationFn: (input: { packageCode?: string; amountCents?: number }) =>
-      createTopupFn({ data: { tenantId, ...input } }),
-    onSuccess: (result) => setCharge(result as PixChargePayload),
+    mutationFn: (input: TopupInput) => createTopupFn({ data: { tenantId, ...input } }),
+    onSuccess: (result, input) => {
+      setLastInput(input);
+      setCharge(result as PixChargePayload);
+    },
     onError: (error: Error) => toast.error(error.message),
   });
 
@@ -70,6 +77,9 @@ export function BuyCreditsDialog({
       onOpenChange={onOpenChange}
       charge={charge}
       onReset={reset}
+      onRegenerate={() =>
+        create.mutateAsync(lastInput ?? { amountCents: charge?.amountCents ?? undefined })
+      }
       getStatus={(chargeId) => getStatusFn({ data: { chargeId } })}
       statusQueryKey={["sms-credits", "topup-status", charge?.chargeId]}
       onPaid={() => qc.invalidateQueries({ queryKey: ["sms-credits"] })}

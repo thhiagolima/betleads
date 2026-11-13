@@ -11,7 +11,9 @@ import { assertTenantNotDemoForSend, listDemoTenantIds } from "./tenant-access.s
 import { isChannelEnabled } from "./tenant-channels.server";
 import { isDemoBlockedError } from "./demo-tenant";
 import { ExpertVoiceGate, loadExpertQueueOwners } from "./expert-voice.server";
+import { runBoundedPool } from "./rate-limit/pool";
 import { loadHouseLinks } from "./house-links.server";
+import { normalizeBrazilianPhone } from "./phone-normalization";
 import { DEFAULT_CURRENCY, formatMoney, type TenantCurrency } from "./currency";
 
 // ============================================================
@@ -281,6 +283,30 @@ function positiveSeconds(value: unknown): number | null {
 }
 
 /**
+ * The tenant player behind a queued phone (`players.telefone` is stored
+ * canonical), the most recently updated one on duplicates. Null when the
+ * number is not a player or the lookup fails: the script then renders with
+ * neutral fallbacks instead of failing the call.
+ */
+async function findPlayerByPhone(tenantId: string, phone: string): Promise<LeadLike | null> {
+  const telefone = normalizeBrazilianPhone(phone);
+  if (!telefone) return null;
+  const { data, error } = await supabaseAdmin
+    .from("players")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("telefone", telefone)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("[voice-queue] player lookup by phone failed", { error: error.message });
+    return null;
+  }
+  return data as LeadLike | null;
+}
+
+/**
  * Duration of a queued call's generated audio (call_queue.audio_generation_id),
  * used as the reservation's maxSeconds. Null when unknown; never throws (the
  * env default is a safe cap).
@@ -369,10 +395,47 @@ export function classifyVoiceDispatchResult(result: {
   return "failed";
 }
 
+/** Items dialed in parallel per dispatcher run (VOICE_DISPATCH_CONCURRENCY). */
+export const VOICE_DISPATCH_CONCURRENCY_LIMITS = { default: 10, min: 1, max: 50 } as const;
+
+/** VOICE_DISPATCH_CONCURRENCY as an integer clamped to 1..50 (default 10). */
+export function resolveVoiceDispatchConcurrency(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const { default: fallback, min, max } = VOICE_DISPATCH_CONCURRENCY_LIMITS;
+  const raw = env.VOICE_DISPATCH_CONCURRENCY;
+  const parsed = raw == null || raw.trim() === "" ? NaN : Number(raw);
+  const value = Number.isFinite(parsed) ? Math.floor(parsed) : fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Runs `fn` after every earlier call with the same key has settled (one at a
+ * time per key, keys independent). Errors reach the caller, not the next one.
+ */
+function createKeyedSerializer() {
+  const tails = new Map<string, Promise<void>>();
+  return async <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = tails.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const done = new Promise<void>((resolve) => (release = resolve));
+    const tail = previous.then(() => done);
+    tails.set(key, tail);
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (tails.get(key) === tail) tails.delete(key);
+    }
+  };
+}
+
 /**
  * Dispatches due items created by voice campaigns. Call flows use their own
  * sequential runner; this worker covers the regular call_queue, including
  * scheduled campaigns that previously stayed at audio_ready indefinitely.
+ * Up to VOICE_DISPATCH_CONCURRENCY items are in flight at once.
  */
 export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string) {
   const now = new Date().toISOString();
@@ -408,10 +471,30 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
   let expertCapped = 0;
   let notClaimed = 0;
   let channelDisabled = 0;
-  for (const item of queue ?? []) {
+
+  // Items run in a bounded pool (VOICE_DISPATCH_CONCURRENCY). Guards:
+  // - Per house, the tick's first item runs alone (a probe) and the house's
+  //   other items start only after it settles, so a broke house is refused
+  //   once instead of once per free slot. After a refusal no new item of the
+  //   house is claimed; items already past the claim may still finish.
+  // - Items of the same expert run one at a time. ExpertVoiceGate keeps
+  //   per-tick memory (scope cache, `capped`) that only learns of the cap
+  //   from a dial result, so concurrent items of one expert could all pass
+  //   `admit` before the refusal is seen. Serializing per expert keeps the
+  //   gate's serial semantics; the DB reservation stays the hard cap.
+  // - Any thrown error (e.g. a demo block) stops new items; the pool lets
+  //   every in-flight item settle (each releases its own claim) and only
+  //   then rethrows.
+  type QueueItem = NonNullable<typeof queue>[number];
+  const tenantProbes = new Map<string, Promise<void>>();
+  const runPerExpert = createKeyedSerializer();
+  let abort: { error: unknown } | null = null;
+
+  const dispatchItem = async (item: QueueItem): Promise<void> => {
+    if (abort) return;
     if (noBalanceTenants.has(item.tenant_id)) {
       skippedNoBalance++;
-      continue;
+      return;
     }
     // Voice turned off for the house (tenant_channels): the item is
     // cancelled before any claim, dial or reservation; re-enabling the
@@ -428,7 +511,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           error: cancelError.message,
         });
       channelDisabled++;
-      continue;
+      return;
     }
     const expertOwner = expertOwners.get(item.id);
     if (expertOwner) {
@@ -437,8 +520,15 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
       const admission = await expertGate.admit(item, expertOwner);
       if (admission !== "dial") {
         deferred++;
-        continue;
+        return;
       }
+    }
+    // Re-checked after the awaits above: a refusal (or abort) recorded by a
+    // concurrent item meanwhile stops this one before the claim.
+    if (abort) return;
+    if (noBalanceTenants.has(item.tenant_id)) {
+      skippedNoBalance++;
+      return;
     }
     // Atomic claim: only the worker whose conditional update moves the row
     // out of audio_ready dials it. The cron and "Disparar agora"
@@ -453,11 +543,11 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
       .select("id");
     if (claimError) {
       console.error("[voice-queue] claim failed", { id: item.id, error: claimError.message });
-      continue;
+      return;
     }
     if (!claimedRows || claimedRows.length === 0) {
       notClaimed++;
-      continue;
+      return;
     }
     try {
       let phone = item.phone_number ?? "";
@@ -471,6 +561,10 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           .maybeSingle();
         player = data as LeadLike | null;
         if (!phone) phone = player?.telefone ?? "";
+      } else if (phone && item.script_id) {
+        // Campaign items carry only the phone: the script is rendered for the
+        // player behind it (never the FAKE_LEAD preview data).
+        player = await findPlayerByPhone(item.tenant_id, phone);
       }
       if (!phone) throw new Error("Telefone do destinatário ausente.");
       const to = normalizeE164BR(phone);
@@ -486,7 +580,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           } as never)
           .eq("id", item.id);
         deferred++;
-        continue;
+        return;
       }
 
       // Fixed-library assets receive a fresh signed URL at dispatch time, so a
@@ -530,7 +624,8 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           .maybeSingle();
         if (!script?.content) throw new Error("Script de voz não encontrado.");
         const { currency } = await loadHouseLinks(item.tenant_id);
-        renderedText = renderCallScript(script.content, player ?? FAKE_LEAD, currency);
+        // No player (external number): neutral fallbacks ("amigo"), not FAKE_LEAD.
+        renderedText = renderCallScript(script.content, player ?? {}, currency);
         content = { type: "tts", text: renderedText, language: "pt" };
       } else {
         if (!audioUrl) throw new Error("Áudio da ligação não está pronto.");
@@ -575,7 +670,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
             id: item.id,
             error: releaseError.message,
           });
-        continue;
+        return;
       }
       if (outcome === "channel_disabled") {
         // Turned off between the check above and the dial: never dialed.
@@ -585,7 +680,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           .update({ status: "cancelled", provider_status: "channel_disabled" } as never)
           .eq("id", item.id)
           .eq("status", VOICE_QUEUE_CLAIMED_STATUS);
-        continue;
+        return;
       }
       if (outcome === "insufficient_balance") {
         // No call was placed and nothing was reserved. Never failed for lack
@@ -621,7 +716,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
             error: pushError.message,
           });
         }
-        continue;
+        return;
       }
       if (outcome === "owned_account_busy") {
         // Never dialed nor reserved, no history row: back to the queue shortly.
@@ -635,7 +730,7 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           .eq("id", item.id)
           .eq("status", VOICE_QUEUE_CLAIMED_STATUS);
         deferred++;
-        continue;
+        return;
       }
       if (outcome === "transient") {
         await supabaseAdmin
@@ -649,12 +744,12 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
           } as never)
           .eq("id", item.id);
         deferred++;
-        continue;
+        return;
       }
 
       const { error: historyInsertError } = await supabaseAdmin.from("call_history").insert({
         tenant_id: item.tenant_id,
-        lead_id: item.lead_id,
+        lead_id: item.lead_id ?? player?.id ?? null,
         script_id: item.script_id,
         call_queue_id: item.id,
         audio_url: audioUrl,
@@ -715,7 +810,43 @@ export async function runVoiceQueueDispatcher(limit = 200, callQueueId?: string)
         } as never)
         .eq("id", item.id);
     }
-  }
+  };
+
+  const runItem = async (item: QueueItem): Promise<void> => {
+    const owner = expertOwners.get(item.id);
+    const run = () =>
+      owner ? runPerExpert(owner.expertId, () => dispatchItem(item)) : dispatchItem(item);
+    const probe = tenantProbes.get(item.tenant_id);
+    if (probe) {
+      await probe;
+      return run();
+    }
+    let settle!: () => void;
+    tenantProbes.set(item.tenant_id, new Promise<void>((resolve) => (settle = resolve)));
+    try {
+      await run();
+    } finally {
+      settle();
+    }
+  };
+
+  const items = queue ?? [];
+  let nextIndex = 0;
+  await runBoundedPool<QueueItem>({
+    concurrency: resolveVoiceDispatchConcurrency(),
+    next: async () => (abort || nextIndex >= items.length ? null : items[nextIndex++]),
+    handle: async (item) => {
+      try {
+        await runItem(item);
+      } catch (error) {
+        abort ??= { error };
+      }
+    },
+  });
+  // Every started item has settled here (claims released), so no row is
+  // left in the claimed status by the abort.
+  if (abort) throw (abort as { error: unknown }).error;
+
   return {
     due: queue?.length ?? 0,
     dispatched,

@@ -77,10 +77,13 @@ import { captureServerException } from "@/lib/observability/sentry.server";
 import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
 import { externalListBlockedVariables, externalListVariablesError } from "./campaign-external-list";
 import {
+  assertSmsSendChoice,
   channelConfiguredFor,
   channelUsesOwnAccountFor,
+  listSmsSendChoices,
   ProviderAccountUnavailableError,
   resolveSmsAccount,
+  smsSendChoiceNames,
   type ShortBrasilAccount,
   type SmsAccount,
 } from "./provider-accounts.server";
@@ -110,11 +113,40 @@ const campaignDb = () => supabaseAdmin as unknown as CampaignDb;
  * `CHANNEL_DISABLED_MESSAGE("sms")` before any campaign row or recipient
  * resolution.
  */
-export async function assertBulkSmsCanSend(tenantId: string): Promise<void> {
+export async function assertBulkSmsCanSend(
+  tenantId: string,
+  providerAccountId?: string | null,
+): Promise<void> {
   await assertTenantCanOperate(tenantId);
   // Demo guard once, before the campaign row, stats or any per-recipient send.
   await assertTenantNotDemoForSend(tenantId);
   await assertChannelEnabled(tenantId, "sms");
+  // Conta escolhida na campanha: precisa ser uma opção da casa e estar
+  // disponível (null = padrão da casa, sem checagem extra).
+  await assertSmsSendChoice(tenantId, providerAccountId);
+}
+
+/**
+ * Guard of `sendTestSms` (extracted for the same reason as
+ * `assertBulkSmsCanSend`): SMS channel on, and the chosen account (if any)
+ * is an available option of the house.
+ */
+export async function assertTestSmsCanSend(
+  tenantId: string,
+  providerAccountId?: string | null,
+): Promise<void> {
+  await assertChannelEnabled(tenantId, "sms");
+  await assertSmsSendChoice(tenantId, providerAccountId);
+}
+
+/**
+ * Coluna provider_account_id da campanha: só gravada quando a casa escolheu
+ * uma conta (null/ausente = padrão da casa, linha igual à de antes).
+ */
+export function smsCampaignAccountColumn(
+  providerAccountId: string | null | undefined,
+): { provider_account_id?: string } {
+  return providerAccountId ? { provider_account_id: providerAccountId } : {};
 }
 
 /**
@@ -170,16 +202,18 @@ function campaignUnresolvedSummary(resolution: RecipientResolution) {
 /**
  * Conta SMS da casa (provider-accounts.server.ts). Uma conta da casa
  * indispon\u00EDvel vira falha `misconfigured`: nada \u00E9 enviado e n\u00E3o h\u00E1 fallback
- * para a conta padr\u00E3o.
+ * para a conta padr\u00E3o. `accountId`: conta escolhida na campanha (vazio =
+ * padr\u00E3o da casa).
  */
 async function smsAccountFor(
   tenantId: string | null,
+  accountId?: string | null,
 ): Promise<{ account: SmsAccount } | { account: null; error: string }> {
   try {
-    return { account: await resolveSmsAccount(tenantId) };
+    return { account: await resolveSmsAccount(tenantId, accountId) };
   } catch (error) {
     if (!(error instanceof ProviderAccountUnavailableError)) throw error;
-    console.error("SMS provider account unavailable", { tenantId, error: error.message });
+    console.error("SMS provider account unavailable", { tenantId, accountId, error: error.message });
     return { account: null, error: error.message };
   }
 }
@@ -873,6 +907,8 @@ export async function sendSmsInternal(args: {
   expertId?: string | null;
   /** Campaign worker sends: recorded on sms_send_logs instead of the by-name guess. */
   campaignId?: string | null;
+  /** Conta escolhida (opção da casa) na campanha/envio de teste; vazio = padrão da casa. */
+  providerAccountId?: string | null;
 }) {
   // Demo guard first: before the phone check, billing, link tracking or any
   // sms_send_logs / sms_credit_ledger / link_dispatches write. Fail-closed: a
@@ -968,7 +1004,7 @@ export async function sendSmsInternal(args: {
   // off) mid-campaign can never reserve on one account and send on another.
   // An unavailable house account reserves nothing and fails as misconfigured
   // (no fallback to the platform account).
-  const resolvedAccount = await smsAccountFor(billingTenantId);
+  const resolvedAccount = await smsAccountFor(billingTenantId, args.providerAccountId);
   // Conta própria (Task 9): at most OWNED_ACCOUNT_MAX_INFLIGHT requests in
   // flight per house-owned account. Over the limit nothing is prepared,
   // reserved, logged nor sent: the 429 item backoff hands it back to the queue
@@ -1229,12 +1265,14 @@ export const sendTestSms = createServerFn({ method: "POST" })
         content: z.string().min(1).max(480),
         playerId: dbUuid().optional(),
         trackLinks: z.boolean().optional().default(true),
+        /** Conta escolhida (opção da casa); null/ausente = padrão da casa. */
+        providerAccountId: dbUuid().nullable().optional(),
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
-    await assertChannelEnabled(tenantId, "sms");
+    await assertTestSmsCanSend(tenantId, data.providerAccountId);
     const house = await loadHouseLinks(tenantId);
     let variables: Record<string, string> | null = null;
     if (data.playerId) {
@@ -1259,6 +1297,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
       tenantId,
       linkTrackingEnabled: data.trackLinks,
       house,
+      providerAccountId: data.providerAccountId ?? null,
     });
   });
 
@@ -1343,7 +1382,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
-        phones: z.array(z.string().min(8).max(20)).min(0).max(20000).optional().default([]),
+        phones: z.array(z.string().min(8).max(20)).min(0).optional().default([]),
         recipients: z
           .array(
             z.object({
@@ -1351,7 +1390,6 @@ export const sendBulkSms = createServerFn({ method: "POST" })
               playerId: dbUuid().optional(),
             }),
           )
-          .max(20000)
           .optional()
           .default([]),
         content: z.string().min(1).max(480),
@@ -1368,13 +1406,16 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         shortDomainId: dbUuid().nullable().optional(),
         /** 'external_list': `phones` are numbers that are not players (never saved as players). */
         recipientSource: recipientSourceSchema,
+        /** Conta escolhida (opção da casa); null/ausente = padrão da casa. */
+        providerAccountId: dbUuid().nullable().optional(),
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
     const tenantId = await resolveCurrentTenantId(context.supabase);
 
-    await assertBulkSmsCanSend(tenantId);
+    await assertBulkSmsCanSend(tenantId, data.providerAccountId);
+    const providerAccountColumn = smsCampaignAccountColumn(data.providerAccountId);
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)
@@ -1431,6 +1472,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           created_by: context.userId,
           recipient_source: "external_list",
           ...shortDomainColumn,
+          ...providerAccountColumn,
         })
         .select("id")
         .single();
@@ -1485,6 +1527,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
           ),
           created_by: context.userId,
           ...shortDomainColumn,
+          ...providerAccountColumn,
         })
         .select("id")
         .single();
@@ -1552,6 +1595,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
         ),
         created_by: context.userId,
         ...shortDomainColumn,
+        ...providerAccountColumn,
       })
       .select("id")
       .single();
@@ -1580,7 +1624,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
     // SMS circuit breaker of the house's account: while the provider refuses
     // it, nothing is sent here; recipients stay pending for the campaign
     // worker (same key).
-    const breakerKey = await smsBreakerKeyForTenant(tenantId);
+    const breakerKey = await smsBreakerKeyForTenant(tenantId, data.providerAccountId);
     const breaker =
       breakerKey === null
         ? null
@@ -1618,6 +1662,7 @@ export const sendBulkSms = createServerFn({ method: "POST" })
             // Mesma chave que o worker usaria: uma nova tentativa deste
             // destinatário nunca chega de novo ao provedor nem à cobrança.
             deliveryKey: await campaignDeliveryKey(immediateCampaign.id, t.playerId),
+            providerAccountId: data.providerAccountId ?? null,
           });
           if (!r.ok && (r as { errorKind?: unknown }).errorKind === "provider_account") {
             providerSuspended = smsSuspendedMessage(cachedSmsBreaker(breakerKey ?? undefined));
@@ -2325,9 +2370,24 @@ export const resendFailedSms = createServerFn({ method: "POST" })
 // Campanhas de SMS agendadas (envio em massa com horário programado)
 // ============================================================
 
+/**
+ * Contas pelas quais a casa pode enviar a campanha de SMS ("Enviar por"):
+ * "Padrão da casa" (id null) e as opções vinculadas pelo super admin. Só o
+ * nome definido no vínculo — nunca o label interno nem o fornecedor.
+ */
+export const listSmsSendAccounts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const tenantId = await resolveCurrentTenantId(context.supabase);
+    const choices = await listSmsSendChoices(tenantId);
+    return {
+      choices: choices.map((c) => ({ id: c.id, name: c.name, available: c.available })),
+    };
+  });
+
 /** Exportado para testes. */
 export const ScheduleBulkSchema = z.object({
-  phones: z.array(z.string().min(8).max(20)).min(0).max(20000).optional().default([]),
+  phones: z.array(z.string().min(8).max(20)).min(0).optional().default([]),
   recipients: z
     .array(
       z.object({
@@ -2335,7 +2395,6 @@ export const ScheduleBulkSchema = z.object({
         playerId: dbUuid().optional(),
       }),
     )
-    .max(20000)
     .optional()
     .default([]),
   content: z.string().min(1).max(480),
@@ -2353,6 +2412,8 @@ export const ScheduleBulkSchema = z.object({
   shortDomainId: dbUuid().nullable().optional(),
   /** 'external_list': `phones` are numbers that are not players (never saved as players). */
   recipientSource: recipientSourceSchema,
+  /** Conta escolhida (opção da casa); null/ausente = padrão da casa. */
+  providerAccountId: dbUuid().nullable().optional(),
 });
 
 /**
@@ -2365,10 +2426,9 @@ export const previewSmsCampaignRecipients = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
-        phones: z.array(z.string().min(1).max(40)).max(20000).optional().default([]),
+        phones: z.array(z.string().min(1).max(40)).optional().default([]),
         recipients: z
           .array(z.object({ phone: z.string().min(1).max(40), playerId: dbUuid().optional() }))
-          .max(20000)
           .optional()
           .default([]),
         recipientSource: recipientSourceSchema,
@@ -2412,7 +2472,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
 
     const tenantId = await resolveCurrentTenantId(context.supabase);
 
-    await assertBulkSmsCanSend(tenantId);
+    await assertBulkSmsCanSend(tenantId, data.providerAccountId);
     let templateSnapshot: Json | null = null;
     if (data.templateId) {
       const { data: template, error } = await (context.supabase as any)
@@ -2469,6 +2529,7 @@ export const scheduleBulkSms = createServerFn({ method: "POST" })
       created_by: context.userId,
       ...(external ? { recipient_source: "external_list" } : {}),
       ...shortDomainColumn,
+      ...smsCampaignAccountColumn(data.providerAccountId),
     };
     const insertCampaign = (row: Record<string, unknown>) =>
       (context.supabase as any)
@@ -2519,7 +2580,12 @@ export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
     // it is applied the list keeps working without the badge. `expert_id`
     // (Área do Expert, 20261126100000): expert campaigns are listed with the
     // owner's name (they are sent/approved only through the expert screens).
-    let { data, error } = await list(`${baseColumns}, unresolved_count, expert_id, approval_status`);
+    // provider_account_id (20261224100000): conta escolhida na campanha.
+    let { data, error } = await list(
+      `${baseColumns}, unresolved_count, expert_id, approval_status, provider_account_id`,
+    );
+    if (error && isMissingColumnError(error))
+      ({ data, error } = await list(`${baseColumns}, unresolved_count, expert_id, approval_status`));
     if (error && isMissingColumnError(error))
       ({ data, error } = await list(`${baseColumns}, unresolved_count`));
     if (error && isMissingColumnError(error)) ({ data, error } = await list(baseColumns));
@@ -2529,6 +2595,7 @@ export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
       tenantId,
       rows.map((row) => (row.expert_id as string | null | undefined) ?? null),
     );
+    const sendAccountName = await smsSendChoiceNames(tenantId);
     return {
       campaigns: rows.map((row) => ({
         id: String(row.id),
@@ -2546,6 +2613,10 @@ export const listScheduledSmsCampaigns = createServerFn({ method: "GET" })
         expertId: (row.expert_id as string | null | undefined) ?? null,
         expertNome: row.expert_id ? (expertNames.get(String(row.expert_id)) ?? "") : null,
         approvalStatus: (row.approval_status as string | null | undefined) ?? null,
+        /** Nome da conta de envio visto pela casa ("Padrão da casa" quando null). */
+        send_account_name: sendAccountName(
+          (row.provider_account_id as string | null | undefined) ?? null,
+        ),
       })),
     };
   });

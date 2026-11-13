@@ -28,6 +28,7 @@ vi.mock("@/integrations/supabase/client.server", () => {
     provider_accounts: () => [],
     tenant_channel_providers: () => [],
     platform_channel_defaults: () => [],
+    tenant_channel_account_options: () => [],
   };
   function from(table: string) {
     const filters: Filter[] = [];

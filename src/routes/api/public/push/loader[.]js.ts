@@ -7,6 +7,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { publicAppBaseUrl } from "@/lib/click-tracking.server";
+import { popupsEnabledForTenant } from "@/lib/popups/feature.server";
 import { buildLoaderScript } from "@/lib/webpush/loader-script";
 
 const JS_HEADERS = {
@@ -58,7 +59,26 @@ async function buildLoaderResponse(token: string): Promise<Response> {
     return new Response(INACTIVE_SCRIPT, { status: 200, headers: NO_STORE_HEADERS });
   }
   const apps = (appsData ?? []) as Array<{ origin: string; onesignal_app_id: string }>;
-  if (apps.length === 0) return new Response(INACTIVE_SCRIPT, { status: 200, headers: JS_HEADERS });
+
+  // Popups ride on the same script: embed the popup runtime only while the
+  // house has an active popup, so a house without one adds no request.
+  let popups = false;
+  if (await popupsEnabledForTenant(settings.tenant_id)) {
+    const { data: popupData, error: popupErr } = await supabaseAdmin
+      .from("site_popups")
+      .select("id")
+      .eq("tenant_id", settings.tenant_id)
+      .eq("status", "ativo")
+      .or(`ends_at.is.null,ends_at.gt.${new Date().toISOString()}`)
+      .limit(1);
+    if (popupErr) {
+      console.error("[webpush loader] site_popups lookup failed:", popupErr.message);
+      return new Response(INACTIVE_SCRIPT, { status: 200, headers: NO_STORE_HEADERS });
+    }
+    popups = (popupData ?? []).length > 0;
+  }
+
+  if (apps.length === 0 && !popups) return new Response(INACTIVE_SCRIPT, { status: 200, headers: JS_HEADERS });
 
   const script = buildLoaderScript({
     token,
@@ -70,6 +90,7 @@ async function buildLoaderResponse(token: string): Promise<Response> {
       cancelLabel: settings.cancel_label,
       iconUrl: settings.icon_url,
     },
+    popups,
   });
   return new Response(script, { status: 200, headers: JS_HEADERS });
 }

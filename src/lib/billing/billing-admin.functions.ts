@@ -17,11 +17,12 @@
 //
 // Repricing a house with an open Pix out (continuous discount, custom price,
 // freezing) and the one-off discount/manual settle/cancel actions must cancel that Pix at
-// Upper first (`cancelOpenInvoiceCharges`, Task 3) so the next GET/webhook
+// its gateway first (`cancelOpenInvoiceCharges`, Task 3; SpacePay has no
+// cancel, so its charge is only closed locally) so the next GET/webhook
 // never confirms a charge for an amount that no longer matches the invoice.
-// That cancel is best-effort: a failure at Upper is logged in the audit
+// That cancel is best-effort: a gateway failure is logged in the audit
 // metadata but never blocks the SQL action (the invoice row is the source of
-// truth; a stuck Pix at Upper just expires unused).
+// truth; a stuck Pix at the gateway just expires unused).
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -35,6 +36,8 @@ import { dbUuid } from "@/lib/zod-helpers";
 import { loadMonthData } from "./billing-month-data.server";
 import { computeMonthRows } from "./billing-month-report";
 import { cancelOpenInvoiceCharges, type CancelOpenInvoiceChargesFailure } from "./invoices.server";
+import { getActivePixProvider } from "./payment-gateway-config.server";
+import type { PixProvider } from "./pix-gateway-error";
 import { sendBillingEmail, type BillingEmailKind } from "./billing-emails.server";
 import { brtDayKey, parseBrtDayStart } from "../tz";
 
@@ -793,7 +796,11 @@ export const adminResendBillingEmail = createServerFn({ method: "POST" })
 // Taxa do Pix
 // ===========================================================================
 
+const PIX_FEE_PROVIDERS = ["upper", "spacepay"] as const satisfies readonly PixProvider[];
+
 export const adminSetPixFeeInput = z.object({
+  /** Fees are per gateway (`payment_fee_settings.provider`); omitted = Upper (old clients). */
+  provider: z.enum(PIX_FEE_PROVIDERS).default("upper"),
   feePercent: z.number().min(0).max(10),
   feeFixedCents: z.number().int().min(0).max(1000),
   reason: reasonSchema,
@@ -811,7 +818,7 @@ export async function adminSetPixFeeFor(ctx: ServerContext, data: unknown) {
   await assertSuperAdmin(ctx.userId);
 
   const { error } = await supabaseAdmin.from("payment_fee_settings").insert({
-    provider: "upper",
+    provider: input.provider,
     fee_percent: input.feePercent,
     fee_fixed_cents: input.feeFixedCents,
     valid_from: new Date().toISOString(),
@@ -835,6 +842,59 @@ export const adminSetPixFee = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => adminSetPixFeeInput.parse(data))
   .handler(async ({ data, context }) => adminSetPixFeeFor(context as ServerContext, data));
+
+export type PixFeeSetting = {
+  feePercent: number;
+  feeFixedCents: number;
+  validFrom: string;
+};
+
+export type AdminPixFeesResult = {
+  /** Gateway that NEW charges go to (gateway config: DB settings row, env `BILLING_PIX_PROVIDER` fallback). */
+  activeProvider: PixProvider;
+  /** Fee in force right now per gateway (latest `valid_from <= now`), null when none was ever set. */
+  fees: Record<PixProvider, PixFeeSetting | null>;
+};
+
+/** Current Pix fee of each gateway, plus which gateway is active — super admin only. */
+export async function adminGetPixFeesFor(ctx: ServerContext): Promise<AdminPixFeesResult> {
+  await assertSuperAdmin(ctx.userId);
+
+  const { data, error } = await looseDb(supabaseAdmin)
+    .from<
+      Array<{
+        provider: string;
+        fee_percent: number | string;
+        fee_fixed_cents: number | string;
+        valid_from: string;
+      }>
+    >("payment_fee_settings")
+    .select("provider, fee_percent, fee_fixed_cents, valid_from")
+    .in("provider", [...PIX_FEE_PROVIDERS])
+    .order("valid_from", { ascending: false })
+    .limit(500);
+  if (error) throw new Error(error.message);
+
+  const nowMs = Date.now();
+  const fees: Record<PixProvider, PixFeeSetting | null> = { upper: null, spacepay: null };
+  // Same rule as `billing_credit_paid_charge`: latest row already in force.
+  for (const row of data ?? []) {
+    if (row.provider !== "upper" && row.provider !== "spacepay") continue;
+    if (new Date(row.valid_from).getTime() > nowMs) continue;
+    const current = fees[row.provider];
+    if (current && current.validFrom >= row.valid_from) continue;
+    fees[row.provider] = {
+      feePercent: Number(row.fee_percent),
+      feeFixedCents: Number(row.fee_fixed_cents),
+      validFrom: row.valid_from,
+    };
+  }
+  return { activeProvider: await getActivePixProvider(), fees };
+}
+
+export const adminGetPixFees = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => adminGetPixFeesFor(context as ServerContext));
 
 // ===========================================================================
 // Painel (adminBillingDashboard)

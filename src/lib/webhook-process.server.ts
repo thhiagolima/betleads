@@ -16,10 +16,13 @@ export function getServiceClient(): SupabaseClient | null {
 }
 
 const PLAYER_CURRENT_COLUMNS =
-  "id, utm_source, utm_campaign, utm_content, utm_id, affiliate_id, expert, cpf";
+  "id, nome, email, telefone, utm_source, utm_campaign, utm_content, utm_id, affiliate_id, expert, cpf";
 
 type PlayerCurrent = {
   id: string;
+  nome?: string | null;
+  email?: string | null;
+  telefone?: string | null;
   utm_source: string | null;
   utm_campaign: string | null;
   utm_content: string | null;
@@ -157,20 +160,26 @@ export async function processWebhookEvent(
       data.amount ?? data.valor ?? envelopeTx.amount ?? payload.amount ?? payload.valor;
     const valor = rawValor != null ? Math.abs(Number(rawValor)) || null : null;
 
-    const nome =
-      firstString(
-        data.fullName,
-        data.full_name,
-        data.nome,
-        data.name,
-        joinName(data.first_name ?? data.firstName, data.last_name ?? data.lastName),
-        asRecord(data.profile).name,
-        asRecord(data.user).name,
-        asRecord(data.player).name,
-      ) ?? "Novo player";
+    // A PixReals manda nome, e-mail e telefone em `data.userContact`, em
+    // todos os eventos.
+    const userContact = asRecord(data.userContact);
+    const receivedName = firstString(
+      data.fullName,
+      data.full_name,
+      data.nome,
+      data.name,
+      joinName(data.first_name ?? data.firstName, data.last_name ?? data.lastName),
+      userContact.fullName,
+      joinName(userContact.firstName, userContact.lastName),
+      asRecord(data.profile).name,
+      asRecord(data.user).name,
+      asRecord(data.player).name,
+    );
+    const nome = receivedName ?? "Novo player";
     const email =
       firstString(
         data.email,
+        userContact.email,
         asRecord(data.profile).email,
         asRecord(data.user).email,
         asRecord(data.player).email,
@@ -183,6 +192,7 @@ export async function processWebhookEvent(
         data.telefone,
         data.mobile,
         data.whatsapp,
+        userContact.phone,
         asRecord(data.profile).phone,
         asRecord(data.user).phone,
         asRecord(data.player).phone,
@@ -348,6 +358,9 @@ export async function processWebhookEvent(
         if (playerId) {
           current = {
             id: playerId,
+            nome,
+            email,
+            telefone,
             utm_source: utm.utm_source ?? null,
             utm_campaign: utm.utm_campaign ?? null,
             utm_content: utm.utm_content ?? null,
@@ -403,6 +416,17 @@ export async function processWebhookEvent(
         }
       }
       if (origem) updates.origem = origem;
+
+      // Depósito ou login que chega antes do cadastro cria o player como
+      // "Novo player" sem contato: o primeiro evento que trouxer os dados
+      // completa só o que está vazio.
+      if (current) {
+        if (receivedName && (!current.nome || current.nome === "Novo player")) {
+          updates.nome = receivedName;
+        }
+        if (email && !current.email) updates.email = email;
+        if (telefone && !current.telefone) updates.telefone = telefone;
+      }
 
       if (affiliateId) {
         if (!current?.affiliate_id) updates.affiliate_id = affiliateId;

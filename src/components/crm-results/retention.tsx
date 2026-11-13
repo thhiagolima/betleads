@@ -16,6 +16,8 @@ import { getCrmRetention } from "@/lib/crm-results.functions";
 import { PLAYER_STATE_LABELS, RECOVERABLE_STATES } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 import {
   CHART_COLORS,
   chartAxisProps,
@@ -67,7 +69,11 @@ export function RetentionPanel() {
   });
   return (
     <div className="space-y-4">
-      <CentralPeriodPicker value={period.key} onChange={setPeriodKey} />
+      <CentralPeriodPicker
+        value={period.key}
+        onChange={setPeriodKey}
+        {...tourAnchor("midia.retencao.periodo")}
+      />
       {query.isLoading ? (
         <Skeleton className="h-64 rounded-xl" />
       ) : query.isError || !query.data ? (
@@ -120,7 +126,7 @@ export function SpendByState({ data }: { data: Data }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-1.5">
           Para quem vai o dinheiro
-          <InfoTip text="Situação do jogador no momento em que recebeu a mensagem. Envios a jogadores ativos são relacionamento, não reativação." />
+          <InfoTip text="Situação do jogador no momento em que recebeu a mensagem. SMS enviados a quem já estava jogando são relacionamento, não reativação." />
         </CardTitle>
         <CardDescription>
           Custo em SMS e recuperado pelo CRM pela situação do jogador no envio.
@@ -133,10 +139,14 @@ export function SpendByState({ data }: { data: Data }) {
               <TableHead>Situação no envio</TableHead>
               <TableHead className="min-w-40">Parte do custo</TableHead>
               <TableHead className="text-right">Jogadores</TableHead>
-              <TableHead className="text-right">Convertidos</TableHead>
-              <TableHead className="text-right">Custo / convertido</TableHead>
-              <TableHead className="text-right">Retorno</TableHead>
-              <TableHead className="text-right">Recuperados (visão ampla)</TableHead>
+              <TableHead className="text-right">Voltaram pelo link</TableHead>
+              <TableHead className="text-right">
+                <Term id="custo-por-jogador-convertido">Custo por jogador que voltou</Term>
+              </TableHead>
+              <TableHead className="text-right">R$ por R$ 1 em SMS</TableHead>
+              <TableHead className="text-right">
+                <Term id="recuperados-visao-ampla">Reativações após SMS</Term>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -199,7 +209,7 @@ function Lifecycle({ retention }: { retention: Retention }) {
   );
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-      <Card>
+      <Card {...tourAnchor("midia.retencao.base-agora")}>
         <CardHeader>
           <CardTitle>
             Onde a base está agora
@@ -218,7 +228,7 @@ function Lifecycle({ retention }: { retention: Retention }) {
         </CardContent>
       </Card>
       {retention.lifecycleDaily.length > 1 ? (
-        <Card>
+        <Card {...tourAnchor("midia.retencao.evolucao-base")}>
           <CardHeader>
             <CardTitle>Evolução da base</CardTitle>
             <CardDescription>
@@ -284,7 +294,7 @@ function Cohorts({ retention }: { retention: Retention }) {
     ...cohorts.flatMap((row) => [row.second7d ?? 0, row.second14d ?? 0, row.second30d ?? 0]),
   );
   return (
-    <Card>
+    <Card {...tourAnchor("midia.retencao.cohort")}>
       <CardHeader>
         <CardTitle>
           Retenção dos novos depositantes
@@ -370,7 +380,7 @@ function Acquisition({
     : null;
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-      <Card>
+      <Card {...tourAnchor("midia.retencao.funil")}>
         <CardHeader>
           <CardTitle>Funil dos cadastros</CardTitle>
           <CardDescription>
@@ -390,10 +400,12 @@ function Acquisition({
           />
         </CardContent>
       </Card>
-      <Card>
+      <Card {...tourAnchor("midia.retencao.origem")}>
         <CardHeader>
           <CardTitle>Por origem do cadastro</CardTitle>
-          <CardDescription>Origem informada no cadastro (utm_source).</CardDescription>
+          <CardDescription>
+            Origem informada no cadastro (<Term id="utm">utm_source</Term>).
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
           <Table>

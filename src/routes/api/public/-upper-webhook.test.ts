@@ -13,13 +13,19 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   return { supabaseAdmin: fake.admin.client };
 });
 
-const { confirmChargeFromUpper } = vi.hoisted(() => ({ confirmChargeFromUpper: vi.fn() }));
-vi.mock("@/lib/billing/payment-charges.server", () => ({ confirmChargeFromUpper }));
+const { confirmCharge } = vi.hoisted(() => ({ confirmCharge: vi.fn() }));
+vi.mock("@/lib/billing/payment-charges.server", () => ({ confirmCharge }));
 
 const { recordBillingSignal } = vi.hoisted(() => ({
   recordBillingSignal: vi.fn(async () => undefined),
 }));
 vi.mock("@/lib/billing/billing-signals.server", () => ({ recordBillingSignal }));
+
+// Accepted webhook secrets come from the gateway config loader (DB + env).
+const gatewaySecrets = vi.hoisted(() => ({ upper: [] as string[] }));
+vi.mock("@/lib/billing/payment-gateway-config.server", () => ({
+  upperWebhookSecrets: async () => gatewaySecrets.upper,
+}));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import { Route } from "./upper/webhook";
@@ -54,14 +60,13 @@ function signedPost(bodyObj: unknown, extraHeaders: Record<string, string> = {})
 
 beforeEach(() => {
   fake.admin.reset();
-  confirmChargeFromUpper.mockReset();
+  confirmCharge.mockReset();
   recordBillingSignal.mockClear();
-  confirmChargeFromUpper.mockResolvedValue({ outcome: "credited" });
-  vi.stubEnv("UPPER_WEBHOOK_SECRET", SECRET);
+  confirmCharge.mockResolvedValue({ outcome: "credited" });
+  gatewaySecrets.upper = [SECRET];
 });
 
 afterEach(() => {
-  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -71,7 +76,7 @@ describe("POST /api/public/upper/webhook", () => {
     const response = await post(body, { "x-upper-signature": "t=1,v1=" + "0".repeat(64) });
     expect(response.status).toBe(400);
     expect(fake.admin.rows("payment_webhook_events")).toHaveLength(0);
-    expect(confirmChargeFromUpper).not.toHaveBeenCalled();
+    expect(confirmCharge).not.toHaveBeenCalled();
   });
 
   it("records an invalid-signature billing signal (reason only) on a bad or missing signature", async () => {
@@ -88,10 +93,34 @@ describe("POST /api/public/upper/webhook", () => {
     expect(recordBillingSignal).not.toHaveBeenCalled();
   });
 
-  it("answers 500 when UPPER_WEBHOOK_SECRET is not configured", async () => {
-    vi.stubEnv("UPPER_WEBHOOK_SECRET", "");
+  it("answers 500 when no webhook secret is configured", async () => {
+    gatewaySecrets.upper = [];
     const response = await post(JSON.stringify({ id: "evt-no-secret", event: "charge.paid" }));
     expect(response.status).toBe(500);
+  });
+
+  it("accepts a signature made with any of the configured secrets (rotation)", async () => {
+    gatewaySecrets.upper = ["whsec-new-db-secret", SECRET];
+    const response = await signedPost({ id: "evt-rotated", event: "ping" });
+    expect(response.status).toBe(200);
+
+    const body = JSON.stringify({ id: "evt-rotated-2", event: "ping" });
+    const now = Math.floor(Date.now() / 1000);
+    const second = await post(body, {
+      "x-upper-signature": sign(body, now, "whsec-new-db-secret"),
+    });
+    expect(second.status).toBe(200);
+    expect(recordBillingSignal).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signature made with none of the configured secrets", async () => {
+    gatewaySecrets.upper = ["whsec-new-db-secret", SECRET];
+    const body = JSON.stringify({ id: "evt-unknown-secret", event: "charge.paid" });
+    const now = Math.floor(Date.now() / 1000);
+    const response = await post(body, { "x-upper-signature": sign(body, now, "whsec-other") });
+    expect(response.status).toBe(400);
+    expect(recordBillingSignal).toHaveBeenCalledWith("webhook_invalid_signature", "mismatch");
+    expect(fake.admin.rows("payment_webhook_events")).toHaveLength(0);
   });
 
   it("records and processes a valid charge.paid event, responding 200", async () => {
@@ -102,7 +131,7 @@ describe("POST /api/public/upper/webhook", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(confirmChargeFromUpper).toHaveBeenCalledWith("bl-top-order-1");
+    expect(confirmCharge).toHaveBeenCalledWith("bl-top-order-1");
     const rows = fake.admin.rows("payment_webhook_events");
     expect(rows).toHaveLength(1);
     expect(rows[0].processed_at).not.toBeNull();
@@ -110,7 +139,7 @@ describe("POST /api/public/upper/webhook", () => {
     expect(rows[0].outcome).toBe("credited");
   });
 
-  it("answers 503 and calls confirmChargeFromUpper zero times when the event cannot be recorded", async () => {
+  it("answers 503 and calls confirmCharge zero times when the event cannot be recorded", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     fake.admin.failNext("payment_webhook_events", "upsert", "db down");
     const response = await signedPost({
@@ -119,13 +148,13 @@ describe("POST /api/public/upper/webhook", () => {
       data: { externalId: "bl-top-order-1" },
     });
     expect(response.status).toBe(503);
-    expect(confirmChargeFromUpper).not.toHaveBeenCalled();
+    expect(confirmCharge).not.toHaveBeenCalled();
   });
 
-  it("records payment.* events as ignored without calling confirmChargeFromUpper", async () => {
+  it("records payment.* events as ignored without calling confirmCharge", async () => {
     const response = await signedPost({ id: "evt-payment-created", event: "payment.created" });
     expect(response.status).toBe(200);
-    expect(confirmChargeFromUpper).not.toHaveBeenCalled();
+    expect(confirmCharge).not.toHaveBeenCalled();
     const rows = fake.admin.rows("payment_webhook_events");
     expect(rows[0].outcome).toBe("ignored");
   });
@@ -177,14 +206,14 @@ describe("POST /api/public/upper/webhook", () => {
       data: { externalId: "bl-top-order-1" },
     };
     vi.spyOn(console, "error").mockImplementation(() => {});
-    confirmChargeFromUpper.mockRejectedValueOnce(new Error("temporary failure"));
+    confirmCharge.mockRejectedValueOnce(new Error("temporary failure"));
     const first = await signedPost(eventBody);
     expect(first.status).toBe(503);
     let row = fake.admin.rows("payment_webhook_events")[0];
     expect(row.error).toContain("temporary failure");
     expect(row.processed_at).toBeFalsy();
 
-    confirmChargeFromUpper.mockResolvedValueOnce({ outcome: "credited" });
+    confirmCharge.mockResolvedValueOnce({ outcome: "credited" });
     const second = await signedPost(eventBody);
     expect(second.status).toBe(200);
     row = fake.admin.rows("payment_webhook_events")[0];
@@ -209,32 +238,32 @@ describe("POST /api/public/upper/webhook", () => {
       data: { externalId: "bl-top-order-1" },
     };
     await signedPost(eventBody);
-    expect(confirmChargeFromUpper).toHaveBeenCalledTimes(1);
+    expect(confirmCharge).toHaveBeenCalledTimes(1);
 
     const response = await signedPost(eventBody);
     expect(response.status).toBe(200);
-    expect(confirmChargeFromUpper).toHaveBeenCalledTimes(1);
+    expect(confirmCharge).toHaveBeenCalledTimes(1);
     expect(fake.admin.rows("payment_webhook_events")).toHaveLength(1);
   });
 
   it("answers 200 for ping without processing a charge", async () => {
     const response = await signedPost({ id: "evt-ping", event: "ping" });
     expect(response.status).toBe(200);
-    expect(confirmChargeFromUpper).not.toHaveBeenCalled();
+    expect(confirmCharge).not.toHaveBeenCalled();
     const rows = fake.admin.rows("payment_webhook_events");
     expect(rows).toHaveLength(1);
     expect(rows[0].outcome).toBe("ping");
   });
 
   it("records an unknown externalId (another account) and still answers 200", async () => {
-    confirmChargeFromUpper.mockResolvedValue({ outcome: "unknown_charge" });
+    confirmCharge.mockResolvedValue({ outcome: "unknown_charge" });
     const response = await signedPost({
       id: "evt-unknown",
       event: "charge.paid",
       data: { externalId: "bl-top-other-account" },
     });
     expect(response.status).toBe(200);
-    expect(confirmChargeFromUpper).toHaveBeenCalledWith("bl-top-other-account");
+    expect(confirmCharge).toHaveBeenCalledWith("bl-top-other-account");
     const rows = fake.admin.rows("payment_webhook_events");
     expect(rows).toHaveLength(1);
     expect(rows[0].processed_at).not.toBeNull();
@@ -264,7 +293,7 @@ describe("POST /api/public/upper/webhook", () => {
 
   it("records the error, leaves processed_at null and answers 503 when processing throws, so Upper redelivers", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    confirmChargeFromUpper.mockRejectedValue(new Error("upper unreachable"));
+    confirmCharge.mockRejectedValue(new Error("upper unreachable"));
     const response = await signedPost({
       id: "evt-error",
       event: "charge.paid",
@@ -284,9 +313,9 @@ describe("POST /api/public/upper/webhook", () => {
       data: { externalId: "bl-top-order-1" },
     };
     expect((await signedPost(eventBody)).status).toBe(200);
-    confirmChargeFromUpper.mockRejectedValue(new Error("must not be called again"));
+    confirmCharge.mockRejectedValue(new Error("must not be called again"));
     expect((await signedPost(eventBody)).status).toBe(200);
-    expect(confirmChargeFromUpper).toHaveBeenCalledTimes(1);
+    expect(confirmCharge).toHaveBeenCalledTimes(1);
   });
 
   it("masks a payer document nested anywhere in the stored raw_body (arrays, any key case)", async () => {

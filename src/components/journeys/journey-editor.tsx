@@ -265,6 +265,17 @@ function OptionSelect({
   );
 }
 
+/** entry_rules without the retired send-window keys (window_start/window_end/weekdays). */
+function withoutSendWindow(rules: Record<string, unknown> | null | undefined) {
+  const {
+    window_start: _windowStart,
+    window_end: _windowEnd,
+    weekdays: _weekdays,
+    ...rest
+  } = rules ?? {};
+  return rest;
+}
+
 function initialStep(s: SavedStep): Step[] {
   if (s.step_type === "wait") {
     return [{ kind: "wait", ...splitWaitSeconds(Number(s.config.delay_seconds ?? 3600)) }];
@@ -400,10 +411,6 @@ export function JourneyEditor({
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>(
     initial?.conflict_policy ?? "coexist",
   );
-  const [windowStart, setWindowStart] = useState(
-    String(initial?.entry_rules?.window_start ?? "08:00"),
-  );
-  const [windowEnd, setWindowEnd] = useState(String(initial?.entry_rules?.window_end ?? "22:00"));
   const [audience, setAudience] = useState(
     String(initial?.entry_rules?.audience ?? initialAudience ?? "all_active"),
   );
@@ -444,8 +451,6 @@ export function JourneyEditor({
     conflictFamily,
     journeyPriority,
     conflictPolicy,
-    windowStart,
-    windowEnd,
     audience,
     reentry,
     exitRules,
@@ -566,11 +571,9 @@ export function JourneyEditor({
             trigger_config: triggerConfig,
             exit_rules: exitRules,
             entry_rules: {
-              ...(initial?.entry_rules ?? {}),
+              // Sends are 24h: drop the old per-journey send window on re-save.
+              ...withoutSendWindow(initial?.entry_rules),
               audience,
-              window_start: windowStart,
-              window_end: windowEnd,
-              weekdays: [1, 2, 3, 4, 5, 6, 0],
               reentry,
               reentry_cooldown_hours: cooldownHours,
               max_attempts: 3,
@@ -1322,34 +1325,6 @@ export function JourneyEditor({
             jornada do novo nível a partir da primeira etapa.
           </p>
         )}
-      </EditorSection>
-
-      <EditorSection
-        title="Janela de envio"
-        help="Mensagens fora deste horário aguardam a próxima abertura, no horário de Brasília."
-      >
-        <div className="grid max-w-sm grid-cols-2 gap-3">
-          <Field id="window-start" label="De">
-            <Input
-              id="window-start"
-              className="h-10"
-              type="time"
-              value={windowStart}
-              onChange={(e) => setWindowStart(e.target.value)}
-              {...tourAnchor("jornada.janela.inicio")}
-            />
-          </Field>
-          <Field id="window-end" label="Até">
-            <Input
-              id="window-end"
-              className="h-10"
-              type="time"
-              value={windowEnd}
-              onChange={(e) => setWindowEnd(e.target.value)}
-              {...tourAnchor("jornada.janela.fim")}
-            />
-          </Field>
-        </div>
       </EditorSection>
 
       <EditorSection

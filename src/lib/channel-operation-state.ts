@@ -224,7 +224,9 @@ export function getChannelOperationState(
           : "Revise os limites do canal antes de retomar.",
       actionLabel: channel === "sms" || channel === "webpush" ? "Ver saldo" : "Ver configurações",
       actionTo:
-        channel === "sms" || channel === "webpush" ? "/plano-e-creditos" : SETTINGS_DESTINATION[channel],
+        channel === "sms" || channel === "webpush"
+          ? "/plano-e-creditos"
+          : SETTINGS_DESTINATION[channel],
       tone: "border-warning/30 bg-warning/10 text-warning",
     };
   }
@@ -310,6 +312,8 @@ export type VoiceQueueItem = {
   trigger_name?: string | null;
   script_id?: string | null;
   voice_asset_id?: string | null;
+  /** Campaign entity (`voice_campaigns`); null for items created before it existed. */
+  voice_campaign_id?: string | null;
 };
 
 export type VoiceCampaignGroup = {
@@ -342,14 +346,27 @@ const VOICE_FAILED = ["failed", "error"];
 const VOICE_CANCELLED = ["cancelled", "canceled"];
 const VOICE_PAUSED = ["paused", "paused_limit"];
 
-function voiceItemStatus(item: VoiceQueueItem, now: number): string {
-  const status = item.status ?? "pending_audio";
-  if (status !== "audio_ready") return status;
+/**
+ * Display status of a queue item from its stored status, provider status and
+ * whether its time (scheduled_at, else created_at) is still ahead. Shared by
+ * the row-based and the count-based summaries so both label alike.
+ */
+function voiceDisplayStatus(
+  status: string | null | undefined,
+  providerStatus: string | null | undefined,
+  isFuture: boolean,
+): string {
+  const value = status ?? "pending_audio";
+  if (value !== "audio_ready") return value;
   // `audio_ready` means the audio is prepared; it may only be waiting for the
   // chosen time or for the contact policy, not for the provider.
-  if (["rolling_24h_limit", "cooldown"].includes(item.provider_status ?? "")) return "paused_limit";
+  if (["rolling_24h_limit", "cooldown"].includes(providerStatus ?? "")) return "paused_limit";
+  return isFuture ? "agendada" : value;
+}
+
+function voiceItemStatus(item: VoiceQueueItem, now: number): string {
   const at = new Date(item.scheduled_at ?? item.created_at ?? 0).getTime();
-  return at > now ? "agendada" : status;
+  return voiceDisplayStatus(item.status, item.provider_status, at > now);
 }
 
 function voiceItemTime(item: VoiceQueueItem): number {
@@ -370,7 +387,7 @@ export function groupVoiceQueueItems(
   const sorted = [...items].sort((a, b) => voiceItemTime(a) - voiceItemTime(b));
   const open = new Map<string, { group: VoiceCampaignGroup; lastAt: number }>();
   const groups: VoiceCampaignGroup[] = [];
-  const statuses = new Map<VoiceCampaignGroup, string[]>();
+  const statuses = new Map<VoiceCampaignGroup, Map<string, number>>();
 
   for (const item of sorted) {
     const at = voiceItemTime(item);
@@ -385,63 +402,208 @@ export function groupVoiceQueueItems(
     if (current && at - current.lastAt <= VOICE_BATCH_GAP_MS) {
       group = current.group;
     } else {
-      group = {
-        id: item.id,
-        itemIds: [],
-        name: item.trigger_name?.trim() || "",
-        scheduledAt: new Date(at).toISOString(),
-        status: "",
-        total: 0,
-        sent: 0,
-        completed: 0,
-        failed: 0,
-        cancelled: 0,
-        finished: 0,
-      };
+      group = emptyVoiceGroup(item.id, item.trigger_name?.trim() || "", new Date(at).toISOString());
       groups.push(group);
-      statuses.set(group, []);
+      statuses.set(group, new Map());
     }
     open.set(key, { group, lastAt: at });
-
-    const status = voiceItemStatus(item, now);
-    group.itemIds.push(item.id);
-    group.total += 1;
-    if (VOICE_SENT.includes(status)) group.sent += 1;
-    if (VOICE_COMPLETED.includes(status)) group.completed += 1;
-    if (VOICE_FAILED.includes(status)) group.failed += 1;
-    if (VOICE_CANCELLED.includes(status)) group.cancelled += 1;
-    statuses.get(group)!.push(status);
+    addVoiceItem(group, statuses.get(group)!, item, now);
   }
 
-  for (const group of groups) {
-    const list = statuses.get(group) ?? [];
-    group.finished = group.completed + group.failed + group.cancelled;
-    if (!group.name) group.name = group.total > 1 ? "Campanha de voz" : "Ligação por voz";
-    const pending = list.filter(
-      (status) => ![...VOICE_COMPLETED, ...VOICE_FAILED, ...VOICE_CANCELLED].includes(status),
-    );
-    const active = pending.filter(
-      (status) => status !== "agendada" && !VOICE_PAUSED.includes(status),
-    );
-    if (active.length > 0) {
-      // Prepared calls that are past their time wait for the provider.
-      group.status = active.every((status) => status === "audio_ready")
-        ? "audio_ready"
-        : "enviando";
-    } else if (pending.some((status) => VOICE_PAUSED.includes(status))) {
-      group.status = "paused_limit";
-    } else if (pending.length > 0) {
-      group.status = "agendada";
-    } else if (group.completed > 0) {
-      group.status = "concluida";
-    } else if (group.failed > 0) {
-      group.status = "falhou";
-    } else {
-      group.status = "cancelada";
-    }
-  }
+  for (const group of groups) finishVoiceGroup(group, statuses.get(group) ?? new Map());
 
   return groups;
+}
+
+function emptyVoiceGroup(id: string, name: string, scheduledAt: string): VoiceCampaignGroup {
+  return {
+    id,
+    itemIds: [],
+    name,
+    scheduledAt,
+    status: "",
+    total: 0,
+    sent: 0,
+    completed: 0,
+    failed: 0,
+    cancelled: 0,
+    finished: 0,
+  };
+}
+
+/** Adds `count` items of one display status to a group's counters. */
+function addVoiceStatusCount(
+  group: VoiceCampaignGroup,
+  statuses: Map<string, number>,
+  status: string,
+  count: number,
+) {
+  group.total += count;
+  if (VOICE_SENT.includes(status)) group.sent += count;
+  if (VOICE_COMPLETED.includes(status)) group.completed += count;
+  if (VOICE_FAILED.includes(status)) group.failed += count;
+  if (VOICE_CANCELLED.includes(status)) group.cancelled += count;
+  statuses.set(status, (statuses.get(status) ?? 0) + count);
+}
+
+function addVoiceItem(
+  group: VoiceCampaignGroup,
+  statuses: Map<string, number>,
+  item: VoiceQueueItem,
+  now: number,
+) {
+  group.itemIds.push(item.id);
+  addVoiceStatusCount(group, statuses, voiceItemStatus(item, now), 1);
+}
+
+/** Fills the derived fields (finished, fallback name, status) of a group. */
+function finishVoiceGroup(group: VoiceCampaignGroup, statuses: Map<string, number>) {
+  group.finished = group.completed + group.failed + group.cancelled;
+  if (!group.name) group.name = group.total > 1 ? "Campanha de voz" : "Ligação por voz";
+  const present = [...statuses.entries()]
+    .filter(([, count]) => count > 0)
+    .map(([status]) => status);
+  const pending = present.filter(
+    (status) => ![...VOICE_COMPLETED, ...VOICE_FAILED, ...VOICE_CANCELLED].includes(status),
+  );
+  const active = pending.filter(
+    (status) => status !== "agendada" && !VOICE_PAUSED.includes(status),
+  );
+  if (active.length > 0) {
+    // Prepared calls that are past their time wait for the provider.
+    group.status = active.every((status) => status === "audio_ready") ? "audio_ready" : "enviando";
+  } else if (pending.some((status) => VOICE_PAUSED.includes(status))) {
+    group.status = "paused_limit";
+  } else if (pending.length > 0) {
+    group.status = "agendada";
+  } else if (group.completed > 0) {
+    group.status = "concluida";
+  } else if (group.failed > 0) {
+    group.status = "falhou";
+  } else {
+    group.status = "cancelada";
+  }
+}
+
+/** One `voice_campaigns` row, as the campaigns hub needs it. */
+export type VoiceCampaignRecord = {
+  id: string;
+  name: string | null;
+  status: string | null;
+  scheduled_at: string | null;
+  created_at: string | null;
+  recipient_count?: number | null;
+};
+
+/** Status label of a `voice_campaigns` row with no queue item listed (same labels as a group). */
+const VOICE_CAMPAIGN_STATUS_LABEL: Record<string, string> = {
+  draft: "agendada",
+  scheduled: "agendada",
+  sending: "enviando",
+  paused: "paused_limit",
+  cancelled: "cancelada",
+  finished: "concluida",
+};
+
+/**
+ * A `sending` campaign with no queue item after this long is a "Disparar
+ * agora" that inserted nothing (the request died or every insert failed): the
+ * hub shows it cancelled instead of "enviando" forever.
+ */
+export const VOICE_EMPTY_SENDING_STALE_MS = 10 * 60_000;
+
+/**
+ * One row of `public.voice_campaign_item_counts`: the queue items of a
+ * campaign grouped by (status, provider_status, time still ahead).
+ * `sample_item_id` is the item id when the group has exactly one item.
+ */
+export type VoiceItemCount = {
+  voice_campaign_id?: string | null;
+  status: string | null;
+  provider_status: string | null;
+  is_future: boolean | null;
+  item_count: number | string;
+  sample_item_id?: string | null;
+};
+
+type VoiceCampaignSummary = VoiceCampaignGroup & { campaignStatus: string; isCampaign: true };
+
+function emptyCampaignGroup(campaign: VoiceCampaignRecord): VoiceCampaignGroup {
+  const at = campaign.scheduled_at ?? campaign.created_at ?? new Date(0).toISOString();
+  return emptyVoiceGroup(campaign.id, campaign.name?.trim() || "", new Date(at).toISOString());
+}
+
+/** Derived fields shared by the row-based and the count-based summaries. */
+function finishVoiceCampaign(
+  campaign: VoiceCampaignRecord,
+  group: VoiceCampaignGroup,
+  statuses: Map<string, number>,
+  now: number,
+): VoiceCampaignSummary {
+  finishVoiceGroup(group, statuses);
+  let stored = campaign.status ?? "scheduled";
+  if (group.total === 0) {
+    const createdAt = new Date(campaign.created_at ?? "").getTime();
+    if (
+      stored === "sending" &&
+      Number.isFinite(createdAt) &&
+      now - createdAt > VOICE_EMPTY_SENDING_STALE_MS
+    ) {
+      stored = "cancelled";
+    }
+    group.status = VOICE_CAMPAIGN_STATUS_LABEL[stored] ?? "agendada";
+    if (!campaign.name?.trim()) {
+      group.name =
+        Number(campaign.recipient_count ?? 0) > 1 ? "Campanha de voz" : "Ligação por voz";
+    }
+  }
+  const pending = group.total - group.finished;
+  const campaignStatus =
+    stored !== "cancelled" && group.total > 0 && pending === 0 ? "finished" : stored;
+  return { ...group, campaignStatus, isCampaign: true };
+}
+
+/**
+ * Summarizes a campaign entity from its queue items. Counts and status come from
+ * the items exactly like a grouped (legacy) campaign, so both look the same in
+ * the hub; the campaign row only supplies id, name, time and, with no item, the
+ * status. `campaignStatus` is the entity status with `finished` derived when no
+ * item is pending any more (a cancelled campaign stays cancelled).
+ */
+export function summarizeVoiceCampaign(
+  campaign: VoiceCampaignRecord,
+  items: VoiceQueueItem[],
+  now: number = Date.now(),
+): VoiceCampaignSummary {
+  const group = emptyCampaignGroup(campaign);
+  const statuses = new Map<string, number>();
+  for (const item of items) addVoiceItem(group, statuses, item, now);
+  return finishVoiceCampaign(campaign, group, statuses, now);
+}
+
+/**
+ * Same summary as `summarizeVoiceCampaign`, from the grouped counts the
+ * database aggregates (`voice_campaign_item_counts`) instead of every item.
+ * `itemIds` holds the only item of a one-call campaign (its report link) and
+ * is empty otherwise.
+ */
+export function summarizeVoiceCampaignCounts(
+  campaign: VoiceCampaignRecord,
+  counts: VoiceItemCount[],
+  now: number = Date.now(),
+): VoiceCampaignSummary {
+  const group = emptyCampaignGroup(campaign);
+  const statuses = new Map<string, number>();
+  const samples: string[] = [];
+  for (const row of counts) {
+    const count = Number(row.item_count);
+    if (!Number.isFinite(count) || count <= 0) continue;
+    const status = voiceDisplayStatus(row.status, row.provider_status, row.is_future === true);
+    addVoiceStatusCount(group, statuses, status, count);
+    if (count === 1 && row.sample_item_id) samples.push(String(row.sample_item_id));
+  }
+  group.itemIds = group.total === 1 ? samples.slice(0, 1) : [];
+  return finishVoiceCampaign(campaign, group, statuses, now);
 }
 
 /**

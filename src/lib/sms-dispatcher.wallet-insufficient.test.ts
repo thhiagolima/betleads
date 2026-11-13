@@ -48,7 +48,6 @@ vi.mock("@/integrations/supabase/client.server", () => {
   return { supabaseAdmin: { from, rpc: state.rpc } };
 });
 
-vi.mock("./send-window.server", () => ({ deferIfOutsideWindow: vi.fn(async () => null) }));
 vi.mock("./dispatch-rate.server", () => ({
   consumeBudget: vi.fn(async (_c: string, n: number) => n),
   countQueuePending: vi.fn(async () => 0),

@@ -18,6 +18,7 @@ import { HomeCard } from "@/components/home/home-cards";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { normalizeBrazilianPhone } from "@/lib/phone-normalization";
 import { generateTeamTrackedLink, getMyTeamExpertProfile } from "@/lib/team-expert.functions";
+import { tourAnchor } from "@/help/anchor";
 
 type GeneratedLink = { id: string; sentUrl: string; shortened: boolean };
 
@@ -98,7 +99,7 @@ function TeamTrackedLinkForm({
   const fieldClass = "h-11 sm:h-9";
 
   return (
-    <HomeCard className="space-y-3 p-4 sm:p-5">
+    <HomeCard className="space-y-3 p-4 sm:p-5" {...tourAnchor("jogador.link-equipe.card")}>
       <div>
         <h2 className="text-section">Link rastreado (seu rendimento)</h2>
         <p className="mt-0.5 text-label text-muted-foreground">
@@ -110,6 +111,7 @@ function TeamTrackedLinkForm({
           <Label htmlFor="team-offer-url">URL da oferta</Label>
           <Input
             id="team-offer-url"
+            {...tourAnchor("jogador.link-equipe.url")}
             type="url"
             inputMode="url"
             placeholder="https://..."
@@ -132,6 +134,7 @@ function TeamTrackedLinkForm({
         </div>
       </div>
       <Button
+        {...tourAnchor("jogador.link-equipe.gerar")}
         className={`${fieldClass} w-full sm:w-auto`}
         disabled={generate.isPending || !offerUrl.trim() || !oferta.trim()}
         onClick={() => generate.mutate()}
@@ -150,6 +153,7 @@ function TeamTrackedLinkForm({
             />
             <div className="flex gap-2">
               <Button
+                {...tourAnchor("jogador.link-equipe.copiar")}
                 variant="outline"
                 className={`${fieldClass} flex-1 gap-1.5`}
                 onClick={() => void copyLink()}
@@ -158,6 +162,7 @@ function TeamTrackedLinkForm({
                 Copiar
               </Button>
               <Button
+                {...tourAnchor("jogador.link-equipe.whatsapp")}
                 className={`${fieldClass} flex-1 gap-1.5`}
                 disabled={!waNumber}
                 onClick={openWhatsApp}

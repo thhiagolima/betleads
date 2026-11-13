@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Search } from "lucide-re
 import type { CrmMetricsWithRatios, CrmSource } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
+import { firstIndexWhere, tourAnchor } from "@/help/anchor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,25 +32,25 @@ type SortKey =
   | "influencedPlayers";
 
 const COLUMNS: Array<{ key: SortKey; label: string; info?: string; align?: "left" }> = [
-  { key: "sent", label: "Envios" },
+  { key: "sent", label: "SMS enviados" },
   { key: "cost", label: "Custo em SMS" },
-  { key: "clickRate", label: "Cliques", info: "SMS clicados e a taxa sobre os enviados." },
+  { key: "clickRate", label: "Cliques", info: "Cliques no link e a taxa sobre os SMS enviados." },
   {
     key: "directRevenue",
     label: "Recuperado pelo CRM",
-    info: "Jogadores que clicaram e depositaram em até 7 dias, e o valor. A barra compara com a origem que mais converteu.",
+    info: "Jogadores que voltaram pelo link (clicaram e depositaram em até 7 dias), e o valor. A barra compara com a origem que mais recuperou.",
     align: "left",
   },
-  { key: "costPerConversion", label: "Custo / convertido" },
+  { key: "costPerConversion", label: "Custo por jogador que voltou" },
   {
     key: "clickRoi",
-    label: "Retorno",
-    info: "Recuperado pelo CRM ÷ custo. Verde paga o envio (1x ou mais), vermelho não paga. Menos de 5 convertidos: amostra pequena.",
+    label: "R$ por R$ 1 em SMS",
+    info: "Quanto cada R$ 1 em SMS trouxe (Recuperado pelo CRM ÷ custo). Verde paga o envio (R$ 1 ou mais), vermelho não paga. Menos de 5 jogadores que voltaram pelo link: amostra pequena.",
   },
   {
     key: "influencedPlayers",
-    label: "Recuperados (visão ampla)",
-    info: "Parados há 2+ dias (ou cadastrados há 2+ dias sem depositar) que depositaram até 3 dias após um SMS, com ou sem clique. Não some com o Recuperado pelo CRM.",
+    label: "Reativações após SMS",
+    info: "Jogadores que estavam há 2 dias ou mais sem depositar (ou que nunca depositaram), receberam um SMS e voltaram a depositar em até 3 dias, mesmo sem clicar no link. O valor é tudo o que depositaram nesses 3 dias. Já inclui o Recuperado pelo CRM (quem clicou), por isso é sempre igual ou maior: não some os dois.",
   },
 ];
 
@@ -64,6 +65,14 @@ const value = (source: CrmSource, key: SortKey): number | string => {
   const raw = source[key];
   return raw == null ? -Infinity : raw;
 };
+
+/** The journey steps a row lists when expanded. */
+const visibleSteps = (source: CrmSource) =>
+  source.steps.filter((step) => step.position >= 0 || step.sent > 0);
+
+/** Only a journey with more than one listed step has the expand button. */
+const isExpandableSource = (source: CrmSource): boolean =>
+  source.type === "journey" && visibleSteps(source).length > 1;
 
 export function Origins({
   data,
@@ -96,6 +105,8 @@ export function Origins({
         );
       });
   }, [data.sources, search, sort, type]);
+  // The "Ver mensagens" anchor goes on the first row that can expand.
+  const firstExpandable = firstIndexWhere(rows, isExpandableSource);
 
   if (data.sources.length === 0)
     return <EmptyCard>Nenhuma jornada ou campanha com envio neste período.</EmptyCard>;
@@ -121,6 +132,7 @@ export function Origins({
             className="inline-flex rounded-lg bg-muted p-1 text-sm"
             role="group"
             aria-label="Tipo"
+            {...tourAnchor("resultados.origens.tipo")}
           >
             {TYPE_FILTERS.map((filter) => (
               <button
@@ -149,6 +161,7 @@ export function Origins({
               onChange={(event) => onSearch(event.target.value)}
               placeholder="Buscar origem..."
               aria-label="Buscar origem"
+              {...tourAnchor("resultados.origens.busca")}
             />
           </label>
         </div>
@@ -160,6 +173,7 @@ export function Origins({
               <TableHead
                 className="sticky left-0 z-10 min-w-56 bg-card"
                 aria-sort={sort.key === "name" ? (sort.desc ? "descending" : "ascending") : "none"}
+                {...tourAnchor("resultados.origens.ordenar")}
               >
                 <SortButton
                   label="Origem"
@@ -200,10 +214,10 @@ export function Origins({
                 </TableCell>
               </TableRow>
             )}
-            {rows.map((source) => {
+            {rows.map((source, index) => {
               const id = `${source.type}:${source.key}`;
-              const steps = source.steps.filter((step) => step.position >= 0 || step.sent > 0);
-              const expandable = source.type === "journey" && steps.length > 1;
+              const steps = visibleSteps(source);
+              const expandable = isExpandableSource(source);
               const expanded = open === id;
               const names = (source.sourceId && data.stepNames[source.sourceId]) || {};
               return (
@@ -219,6 +233,7 @@ export function Origins({
                             aria-expanded={expanded}
                             aria-label={`${expanded ? "Fechar" : "Ver"} mensagens de ${source.name}`}
                             onClick={() => setOpen(expanded ? null : id)}
+                            {...(index === firstExpandable ? tourAnchor("resultados.origens.expandir") : {})}
                           >
                             {expanded ? (
                               <ChevronDown className="h-4 w-4" />
@@ -317,7 +332,7 @@ function SourceName({ source }: { source: CrmSource }) {
             variant="outline"
             className="border-warning/40 bg-warning/10 text-meta text-warning"
           >
-            gasta sem converter
+            gasta sem trazer ninguém
           </Badge>
         )}
       </div>

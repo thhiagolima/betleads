@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataCard } from "@/components/ui-premium/data-card";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { MetaConnectionView } from "./meta/meta-connection-view";
@@ -93,7 +95,7 @@ export function MetaConnectionPanel(_props: { meta?: MarketingIntegration }) {
         description="Copie os parâmetros para os anúncios do Facebook e Instagram."
         icon={<Link2 className="h-4 w-4" />}
       >
-        <div className="space-y-2">
+        <div className="space-y-2" {...tourAnchor("webhooks.meta.marcacao")}>
           <Label htmlFor="house-url">Link da casa</Label>
           <Input
             id="house-url"
@@ -103,8 +105,11 @@ export function MetaConnectionPanel(_props: { meta?: MarketingIntegration }) {
             onChange={(e) => setHouseUrl(e.target.value)}
           />
           <p className="text-meta text-muted-foreground">
-            O <code>utm_id</code> leva o ID do anúncio. É ele que liga cada cadastro ao anúncio
-            certo, mesmo quando dois anúncios têm o mesmo nome.
+            O <code>
+              <Term id="utm">utm_id</Term>
+            </code>{" "}
+            leva o ID do anúncio. É ele que liga cada cadastro ao anúncio certo, mesmo quando dois
+            anúncios têm o mesmo nome.
           </p>
         </div>
         <div className="mt-5 space-y-4">

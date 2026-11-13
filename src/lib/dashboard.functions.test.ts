@@ -68,3 +68,78 @@ describe("mapDashboardRpc", () => {
     expect(result.messageRoi).toBe(20);
   });
 });
+
+// Reorganização do Início (20261225100000_inicio_kpis_reorg.sql): os campos
+// novos do RPC e as contas derivadas que a tela usa.
+describe("mapDashboardRpc — KPIs da reorganização do Início", () => {
+  const raw = {
+    depositAmount: "1000",
+    previousDepositAmount: "800",
+    depositCount: 20,
+    depositors: 8,
+    ftd: 4,
+    ftdAmount: "200",
+    previousFtdAmount: "100",
+    ftdCohort: 4,
+    ftdCohortRedeposited: 1,
+    previousFtdCohort: 5,
+    previousFtdCohortRedeposited: 2,
+    withdrawalAmount: "400",
+    previousWithdrawalAmount: "500",
+    withdrawalCount: 6,
+    pixGenerated: 25,
+    pixUnpaidAmount: "321.5",
+    smsSent: 200,
+    smsClicks: 9,
+  };
+
+  it("maps FTD amount, ticket and the cohort redeposit rate (growth in p.p.)", () => {
+    const r = mapDashboardRpc(raw, 7);
+    expect(r.depositsPerDepositor).toBe(2.5);
+    expect(r.ftdAmount).toBe(200);
+    expect(r.ftdAmountGrowth).toBe(100);
+    expect(r.ftdTicket).toBe(50);
+    expect(r.ftdCohort).toBe(4);
+    expect(r.ftdCohortRedeposited).toBe(1);
+    expect(r.ftdRedepositRate).toBe(25);
+    expect(r.ftdRedepositRateGrowth).toBeCloseTo(25 - 40);
+  });
+
+  it("maps withdrawals, net and the unpaid PIX amount", () => {
+    const r = mapDashboardRpc(raw, 7);
+    expect(r.withdrawalCount).toBe(6);
+    expect(r.withdrawalGrowth).toBe(-20);
+    expect(r.netAmount).toBe(600);
+    expect(r.netGrowth).toBe(100); // 600 vs 300
+    expect(r.pixUnpaid).toBe(5);
+    expect(r.pixUnpaidAmount).toBe(321.5);
+  });
+
+  it("maps SMS clicks and CTR over sends", () => {
+    const r = mapDashboardRpc(raw, 7);
+    expect(r.smsClicks).toBe(9);
+    expect(r.smsCtr).toBe(4.5);
+  });
+
+  it("netGrowth is null when the previous net isn't positive", () => {
+    expect(mapDashboardRpc({ ...raw, previousWithdrawalAmount: "800" }, 7).netGrowth).toBeNull();
+    expect(mapDashboardRpc({ ...raw, previousWithdrawalAmount: "900" }, 7).netGrowth).toBeNull();
+  });
+
+  it("is all zeros (no division by zero) on an empty payload", () => {
+    const r = mapDashboardRpc({}, 7);
+    expect(r.depositsPerDepositor).toBe(0);
+    expect(r.ftdAmount).toBe(0);
+    expect(r.ftdAmountGrowth).toBe(0);
+    expect(r.ftdTicket).toBe(0);
+    expect(r.ftdRedepositRate).toBe(0);
+    expect(r.ftdRedepositRateGrowth).toBeNull();
+    expect(r.withdrawalCount).toBe(0);
+    expect(r.withdrawalGrowth).toBe(0);
+    expect(r.netAmount).toBe(0);
+    expect(r.netGrowth).toBeNull();
+    expect(r.pixUnpaidAmount).toBe(0);
+    expect(r.smsClicks).toBe(0);
+    expect(r.smsCtr).toBe(0);
+  });
+});

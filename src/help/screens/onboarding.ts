@@ -35,6 +35,8 @@ const screen: HelpScreen = {
         {
           label: "Marcadores de passo (1. Casa, 2. Encurtador, 3. E-mail, 4. Pronto)",
           what: 'Mostram em qual dos quatro passos você está — o marcador do passo atual aparece destacado. Não são clicáveis: não dá para saltar direto para um passo clicando neles, só avançando pelo assistente.',
+          notes:
+            'O passo "E-mail" some dos marcadores (e do assistente) quando o canal E-mail está desligado para a casa; nesse caso, "Avançar" no passo Encurtador segue direto para "Pronto".',
         },
         {
           anchor: "onboarding.header.skip",
@@ -159,7 +161,7 @@ const screen: HelpScreen = {
       {
         anchor: "onboarding.footer.primary",
         title: "Avançar",
-        body: "Segue para o passo de e-mail — nada precisa estar verificado ainda para avançar.",
+        body: "Segue para o passo de e-mail (ou direto para o resumo, se o canal E-mail estiver desligado) — nada precisa estar verificado ainda para avançar.",
         articleSection: "navegacao",
       },
     ],

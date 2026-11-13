@@ -10,6 +10,7 @@ import { HomeCard } from "@/components/home/home-cards";
 import { HOUSE_SETUP_STATUS_QUERY_KEY } from "@/components/house-config/house-config-query";
 import { getHouseSetupStatus } from "@/lib/house-config.functions";
 import type { SetupItemState } from "@/lib/house-config";
+import { tourAnchor } from "@/help/anchor";
 import { cn } from "@/lib/utils";
 
 export type ChecklistItemId = "house" | "shortener" | "email";
@@ -83,6 +84,7 @@ export function HouseSetupChecklistView({ checklist }: { checklist: SetupCheckli
       <a
         href="/configuracoes/casa"
         className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        {...tourAnchor("inicio.checklist.continuar")}
       >
         Continuar configuração
         <ChevronRight className="size-3.5" aria-hidden="true" />

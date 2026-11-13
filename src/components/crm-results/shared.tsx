@@ -1,11 +1,9 @@
 import { Info } from "lucide-react";
 
+import { MIN_CONVERSIONS } from "@/lib/crm-results";
 import { cn } from "@/lib/utils";
-import { crossCurrencyNote, isCrossCurrency, ratio } from "./format";
+import { crossCurrencyNote, deltaView, isCrossCurrency, perReal } from "./format";
 import { PERIODS, type PeriodKey } from "./search";
-
-const decimal = (value: number, digits: number) =>
-  value.toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -31,30 +29,31 @@ export function InfoTip({ text }: { text: string }) {
 }
 
 /**
- * Variation against the previous period of the same length, green when it
- * moves the good way (`better`), red otherwise.
+ * Variation against the previous period (rules in `deltaView`), followed by
+ * what it compares with: "▲ 12% vs sáb 01/11".
  */
-export function Delta({
-  current,
-  previous,
-  better = "high",
-}: {
-  current: number | null;
-  previous: number | null | undefined;
-  better?: "high" | "low";
-}) {
-  if (current == null || previous == null || previous === 0) return null;
-  const change = (current - previous) / Math.abs(previous);
-  if (!Number.isFinite(change)) return null;
-  const good = better === "high" ? change >= 0 : change <= 0;
+export function Delta({ versus, ...input }: Parameters<typeof deltaView>[0] & { versus?: string }) {
+  const view = deltaView(input);
+  if (!view) return null;
   return (
-    <span
-      className={`text-xs font-medium ${
-        Math.abs(change) < 0.005 ? "text-muted-foreground" : good ? "text-success" : "text-danger"
-      }`}
-    >
-      {change >= 0 ? "▲" : "▼"} {decimal(Math.abs(change) * 100, 0)}%
-      <span className="sr-only"> em relação ao período anterior</span>
+    <span className="text-xs">
+      <span
+        className={cn(
+          "font-medium",
+          view.tone === "success"
+            ? "text-success"
+            : view.tone === "danger"
+              ? "text-danger"
+              : "text-muted-foreground",
+        )}
+      >
+        {view.text}
+      </span>
+      {versus ? (
+        <span className="text-muted-foreground"> vs {versus}</span>
+      ) : (
+        <span className="sr-only"> em relação ao período anterior</span>
+      )}
     </span>
   );
 }
@@ -66,7 +65,7 @@ export function Kpi({
   info,
   delta,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   detail?: string;
   info?: string;
@@ -118,13 +117,18 @@ export function RoiValue({
   if (roi == null || roi === 0) return <span className="text-muted-foreground">—</span>;
   if (smallSample)
     return (
-      <span className="text-muted-foreground" title="Menos de 5 jogadores convertidos">
-        {ratio(roi)}
+      <span
+        className="text-muted-foreground"
+        title={`Menos de ${MIN_CONVERSIONS} jogadores voltaram pelo link`}
+      >
+        {perReal(roi)}
         <span className="block text-meta">amostra pequena</span>
       </span>
     );
   return (
-    <span className={`font-medium ${roi >= 1 ? "text-success" : "text-danger"}`}>{ratio(roi)}</span>
+    <span className={`font-medium ${roi >= 1 ? "text-success" : "text-danger"}`}>
+      {perReal(roi)}
+    </span>
   );
 }
 
@@ -141,15 +145,21 @@ export function CentralPeriodPicker<K extends string = PeriodKey>({
   value,
   onChange,
   periods,
+  ...rest
 }: {
   value: K;
   onChange: (value: K) => void;
   /** Presets; default `PERIODS` da Central (as telas do expert somam meses). */
   periods?: readonly { key: K; label: string }[];
+  /** Passthrough for `tourAnchor(...)` (data-tour): anchoring the picker
+   * itself instead of a wrapper div keeps it shrinkable (and scrolling
+   * inside itself) as a flex item on narrow screens. */
+  "data-tour"?: string;
 }) {
   const items = (periods ?? PERIODS) as readonly { key: K; label: string }[];
   return (
     <div
+      {...rest}
       role="group"
       aria-label="Período"
       className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"

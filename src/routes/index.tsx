@@ -4,8 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useMemo } from "react";
 
 import {
-  CashflowChart,
-  CrmCard,
+  CashflowCrmRow,
   DashboardError,
   DashboardSkeleton,
   HomeHeader,
@@ -16,6 +15,7 @@ import {
 import { PeriodPicker } from "@/components/home/period-picker";
 import { DomainVerifiedNotice } from "@/components/onboarding/domain-verified-notice";
 import { HouseSetupChecklist } from "@/components/onboarding/house-setup-checklist";
+import { tourAnchor } from "@/help/anchor";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { brtDayKeyLocal, useHomePeriod } from "@/hooks/use-home-period";
 import { POLL_INTERVALS, useUpdatedAgo } from "@/hooks/use-updated-ago";
@@ -96,7 +96,9 @@ function Dashboard() {
         updatedAgo={updatedAgo}
         includesToday={includesToday}
         picker={
-          <PeriodPicker preset={period.preset} range={period.range} onChange={period.onChange} />
+          <div {...tourAnchor("inicio.periodo")}>
+            <PeriodPicker preset={period.preset} range={period.range} onChange={period.onChange} />
+          </div>
         }
       />
 
@@ -105,23 +107,16 @@ function Dashboard() {
 
       <HomeKpiCards data={data} sparkline={sparkline} />
 
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="order-2 min-w-0 lg:order-1">
-          <CashflowChart data={data} />
-        </div>
-        <div className="order-1 lg:order-2">
-          <CrmCard data={data} house={data} />
-        </div>
-      </div>
+      <CashflowCrmRow data={data} house={data} />
 
       <SecondaryMetrics data={data} />
 
       <LiveFeed events={data.liveEvents} showAllEventsLink />
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Recuperado pelo CRM considera depósitos feitos em até 7 dias depois de um clique humano em
-        link de campanha ou jornada, sem quem já estava ativo; gasto em SMS é o preço por segmento
-        vezes os segmentos enviados. Datas no fuso de Brasília.
+        Recuperado pelo CRM considera depósitos feitos em até 7 dias depois de um clique no link de
+        campanha ou jornada, sem quem já estava jogando; custo em SMS é o preço por segmento vezes
+        os segmentos enviados. Datas no fuso de Brasília.
       </p>
     </div>
   );

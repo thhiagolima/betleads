@@ -14,15 +14,31 @@ vi.mock("./upper-pix.server", async (importOriginal) => {
   return { ...actual, getUpperCharge };
 });
 
+// SpacePay client is mocked as a whole: only `get` matters here, and the
+// confirm/reconcile path must reach it through getPixGateway('spacepay').
+const { spacePayGet } = vi.hoisted(() => ({ spacePayGet: vi.fn() }));
+vi.mock("./spacepay-pix.server", () => ({
+  spacePayGateway: {
+    provider: "spacepay",
+    isConfigured: async () => true,
+    create: vi.fn(),
+    get: spacePayGet,
+    cancel: vi.fn(async () => null),
+  },
+  SpacePayError: class SpacePayError extends Error {},
+}));
+
 const { sendBillingEmail } = vi.hoisted(() => ({ sendBillingEmail: vi.fn() }));
 vi.mock("./billing-emails.server", () => ({ sendBillingEmail }));
 
 import { createFakeDb } from "@/lib/sms-bulk.test-support";
 import {
+  confirmCharge,
   confirmChargeFromUpper,
   reconcilePendingCharges,
   recordChargeSnapshot,
 } from "./payment-charges.server";
+import { PixGatewayError } from "./pix-gateway-error";
 import { UpperError, type UpperCharge } from "./upper-pix.server";
 import {
   __resetDemoTenantCacheForTests,
@@ -38,6 +54,8 @@ function chargeRow(overrides: Record<string, unknown> = {}) {
     kind: "credit_topup",
     ref_id: "order-1",
     external_id: "bl-top-order-1",
+    provider: "upper",
+    provider_charge_id: null,
     amount_cents: 50000,
     status: "ACTIVE",
     needs_review: false,
@@ -115,6 +133,7 @@ function racePaidBeforeUpdate(chargeId: string, whenStatus: string) {
 beforeEach(() => {
   fake.admin.reset();
   getUpperCharge.mockReset();
+  spacePayGet.mockReset();
   sendBillingEmail.mockReset();
   sendBillingEmail.mockResolvedValue({ sent: true, recipients: 1 });
 });
@@ -373,7 +392,7 @@ describe("recordChargeSnapshot", () => {
   });
 });
 
-describe("confirmChargeFromUpper", () => {
+describe("confirmCharge", () => {
   beforeEach(() => {
     fake.admin.onRpc("billing_credit_paid_charge", (args) => ({
       data: { ok: true, charge_id: args._charge_id },
@@ -387,9 +406,105 @@ describe("confirmChargeFromUpper", () => {
       upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
     );
 
-    const result = await confirmChargeFromUpper("bl-top-order-1");
+    const result = await confirmCharge("bl-top-order-1");
     expect(result).toEqual({ outcome: "credited" });
     expect(fake.admin.rows("payment_charges")[0].status).toBe("PAID");
+  });
+
+  it("keeps confirmChargeFromUpper as an alias of confirmCharge", () => {
+    expect(confirmChargeFromUpper).toBe(confirmCharge);
+  });
+
+  it("reads a SpacePay charge through the SpacePay gateway (row provider), never Upper", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        external_id: "bl-top-sp-1",
+        provider: "spacepay",
+        provider_charge_id: "sp-tx-1",
+      }),
+    );
+    spacePayGet.mockResolvedValue(
+      upperCharge({
+        id: "sp-tx-1",
+        externalId: "bl-top-sp-1",
+        status: "PAID",
+        paidAmountCents: 50000,
+        paidAt: new Date().toISOString(),
+      }),
+    );
+
+    const result = await confirmCharge("bl-top-sp-1");
+
+    expect(result).toEqual({ outcome: "credited" });
+    expect(spacePayGet).toHaveBeenCalledWith({
+      externalId: "bl-top-sp-1",
+      providerChargeId: "sp-tx-1",
+    });
+    expect(getUpperCharge).not.toHaveBeenCalled();
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("PAID");
+  });
+
+  it("flags a credited SpacePay charge needs_review when SpacePay reports it refunded", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        external_id: "bl-top-sp-2",
+        provider: "spacepay",
+        provider_charge_id: "sp-tx-2",
+        status: "PAID",
+        paid_amount_cents: 50000,
+        credited_at: "2026-11-12T12:00:00Z",
+      }),
+    );
+    spacePayGet.mockResolvedValue(
+      upperCharge({
+        id: "sp-tx-2",
+        externalId: "bl-top-sp-2",
+        status: "FAILED",
+        raw: { id: "sp-tx-2", status: "refunded", endToEndId: null },
+      }),
+    );
+
+    expect(await confirmCharge("bl-top-sp-2")).toEqual({ outcome: "not_paid" });
+
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("PAID");
+    expect(row.needs_review).toBe(true);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("refunded"),
+      expect.objectContaining({ chargeId: "charge-1" }),
+    );
+  });
+
+  it("does not flag a SpacePay refund of a charge that was never paid locally", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({ external_id: "bl-top-sp-3", provider: "spacepay", provider_charge_id: "sp-3" }),
+    );
+    spacePayGet.mockResolvedValue(
+      upperCharge({ id: "sp-3", status: "FAILED", raw: { status: "refunded" } }),
+    );
+
+    await confirmCharge("bl-top-sp-3");
+
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("FAILED");
+    expect(row.needs_review).toBe(false);
+  });
+
+  it("passes the stored provider_charge_id (null when unknown) to the Upper gateway too", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow());
+    getUpperCharge.mockResolvedValue(upperCharge({ status: "ACTIVE" }));
+
+    expect(await confirmCharge("bl-top-order-1")).toEqual({ outcome: "not_paid" });
+    expect(getUpperCharge).toHaveBeenCalledWith("bl-top-order-1");
+    expect(spacePayGet).not.toHaveBeenCalled();
+  });
+
+  it("throws on an unknown provider value instead of falling back to a gateway", async () => {
+    fake.admin.rows("payment_charges").push(chargeRow({ provider: "bogus" }));
+    await expect(confirmCharge("bl-top-order-1")).rejects.toThrow("unknown_pix_provider");
+    expect(getUpperCharge).not.toHaveBeenCalled();
+    expect(spacePayGet).not.toHaveBeenCalled();
   });
 
   describe("tenant-status cache after an invoice settle", () => {
@@ -420,7 +535,7 @@ describe("confirmChargeFromUpper", () => {
       getUpperCharge.mockResolvedValue(
         upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
       );
-      expect(await confirmChargeFromUpper("bl-inv-inv-1-1")).toEqual({ outcome: "credited" });
+      expect(await confirmCharge("bl-inv-inv-1-1")).toEqual({ outcome: "credited" });
     }
 
     it("a credited invoice drops the house from the cache: it unlocks at once", async () => {
@@ -443,7 +558,7 @@ describe("confirmChargeFromUpper", () => {
         upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
       );
 
-      const result = await confirmChargeFromUpper("bl-inv-inv-1-1");
+      const result = await confirmCharge("bl-inv-inv-1-1");
 
       expect(result).toEqual({ outcome: "credited" });
       expect(sendBillingEmail).toHaveBeenCalledWith("inv-1", "paid");
@@ -468,7 +583,7 @@ describe("confirmChargeFromUpper", () => {
     }));
     fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
 
-    const result = await confirmChargeFromUpper("bl-top-order-1");
+    const result = await confirmCharge("bl-top-order-1");
     expect(result).toEqual({ outcome: "needs_review" });
     expect(rpcSpy).not.toHaveBeenCalled();
     expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
@@ -487,7 +602,7 @@ describe("confirmChargeFromUpper", () => {
     const rpcSpy = vi.fn(() => ({ data: { ok: true }, error: null }));
     fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
 
-    const result = await confirmChargeFromUpper("bl-top-order-1");
+    const result = await confirmCharge("bl-top-order-1");
     expect(result).toEqual({ outcome: "needs_review" });
     expect(rpcSpy).not.toHaveBeenCalled();
     expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
@@ -501,7 +616,7 @@ describe("confirmChargeFromUpper", () => {
     const rpcSpy = vi.fn(() => ({ data: { ok: true }, error: null }));
     fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
 
-    const result = await confirmChargeFromUpper("bl-top-order-1");
+    const result = await confirmCharge("bl-top-order-1");
     expect(result).toEqual({ outcome: "needs_review" });
     expect(rpcSpy).not.toHaveBeenCalled();
     expect(fake.admin.rows("payment_charges")[0].needs_review).toBe(true);
@@ -526,7 +641,7 @@ describe("confirmChargeFromUpper", () => {
       const rpcSpy = vi.fn(() => ({ data: { ok: false, reason }, error: null }));
       fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
 
-      const result = await confirmChargeFromUpper("bl-inv-invoice-1-1");
+      const result = await confirmCharge("bl-inv-invoice-1-1");
       expect(rpcSpy).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ outcome: "needs_review" });
     },
@@ -538,13 +653,13 @@ describe("confirmChargeFromUpper", () => {
     const rpcSpy = vi.fn(() => ({ data: { ok: true }, error: null }));
     fake.admin.onRpc("billing_credit_paid_charge", rpcSpy);
 
-    const result = await confirmChargeFromUpper("bl-top-order-1");
+    const result = await confirmCharge("bl-top-order-1");
     expect(result).toEqual({ outcome: "not_paid" });
     expect(rpcSpy).not.toHaveBeenCalled();
   });
 
   it("returns unknown_charge for an externalId with no matching row, never calling Upper", async () => {
-    const result = await confirmChargeFromUpper("bl-top-does-not-exist");
+    const result = await confirmCharge("bl-top-does-not-exist");
     expect(result).toEqual({ outcome: "unknown_charge" });
     expect(getUpperCharge).not.toHaveBeenCalled();
   });
@@ -556,7 +671,7 @@ describe("confirmChargeFromUpper", () => {
       .push({ id: "order-1", tenant_id: TENANT, status: "pending" });
     getUpperCharge.mockResolvedValue(upperCharge({ status: "EXPIRED" }));
 
-    const result = await confirmChargeFromUpper("bl-top-order-1");
+    const result = await confirmCharge("bl-top-order-1");
     expect(result).toEqual({ outcome: "not_paid" });
     expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("expired");
   });
@@ -571,7 +686,7 @@ describe("confirmChargeFromUpper", () => {
       upperCharge({ status: "PAID", paidAmountCents: 50000, paidAt: new Date().toISOString() }),
     );
 
-    const result = await confirmChargeFromUpper("bl-top-order-1");
+    const result = await confirmCharge("bl-top-order-1");
 
     expect(result).toEqual({ outcome: "credited" });
     expect(rpc).toHaveBeenCalledTimes(1);
@@ -590,7 +705,7 @@ describe("confirmChargeFromUpper", () => {
       error: null,
     }));
 
-    const result = await confirmChargeFromUpper("bl-top-order-1");
+    const result = await confirmCharge("bl-top-order-1");
     expect(result).toEqual({ outcome: "already_credited" });
   });
 });
@@ -757,6 +872,131 @@ describe("reconcilePendingCharges", () => {
     expect(row.status).toBe("FAILED");
     expect(row.last_error).toBe("upper_not_found");
     expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("failed");
+  });
+
+  it("marks a SpacePay charge FAILED with last_error 'spacepay_not_found' on a 404 older than 15 minutes", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        provider: "spacepay",
+        status: "ACTIVE",
+        created_at: "2026-10-22T11:50:00Z", // 20 min before NOW
+      }),
+    );
+    fake.admin
+      .rows("credit_topup_orders")
+      .push({ id: "order-1", tenant_id: TENANT, status: "pending" });
+    spacePayGet.mockRejectedValue(
+      new PixGatewayError("not found", {
+        provider: "spacepay",
+        status: 404,
+        code: "NOT_FOUND",
+        retryable: false,
+      }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result).toEqual({ checked: 1, credited: 0, expired: 0, errors: 1 });
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("FAILED");
+    expect(row.last_error).toBe("spacepay_not_found");
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("failed");
+    expect(getUpperCharge).not.toHaveBeenCalled();
+    // The log carries the provider, never a body.
+    expect(console.error).toHaveBeenCalledWith(
+      "[billing-reconcile] error reconciling charge",
+      expect.objectContaining({ provider: "spacepay", status: 404, externalId: "bl-top-c1" }),
+    );
+  });
+
+  it("never marks a SpacePay charge FAILED on a 404 PLATFORM_NOT_FOUND (bad X-Platform-Id, not a missing charge)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        provider: "spacepay",
+        status: "ACTIVE",
+        created_at: "2026-10-22T11:50:00Z", // 20 min before NOW
+      }),
+    );
+    fake.admin
+      .rows("credit_topup_orders")
+      .push({ id: "order-1", tenant_id: TENANT, status: "pending" });
+    spacePayGet.mockRejectedValue(
+      new PixGatewayError("Cassino não encontrado para o platformId informado", {
+        provider: "spacepay",
+        status: 404,
+        code: "PLATFORM_NOT_FOUND",
+        retryable: false,
+      }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result).toEqual({ checked: 1, credited: 0, expired: 0, errors: 1 });
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("ACTIVE");
+    expect(row.last_error ?? null).toBeNull();
+    expect(fake.admin.rows("credit_topup_orders")[0].status).toBe("pending");
+  });
+
+  it("reconciles Upper and SpacePay charges in the same pass, each through its own gateway", async () => {
+    fake.admin
+      .rows("payment_charges")
+      .push(
+        chargeRow({ id: "c1", external_id: "bl-top-c1", status: "ACTIVE", created_at: OLD_ENOUGH }),
+        chargeRow({
+          id: "c2",
+          external_id: "bl-top-c2",
+          provider: "spacepay",
+          provider_charge_id: "sp-tx-2",
+          status: "ACTIVE",
+          created_at: OLD_ENOUGH,
+        }),
+      );
+    getUpperCharge.mockImplementation(async (externalId: string) =>
+      upperCharge({ externalId, status: "ACTIVE" }),
+    );
+    spacePayGet.mockImplementation(async ({ externalId }: { externalId: string }) =>
+      upperCharge({
+        id: "sp-tx-2",
+        externalId,
+        status: "PAID",
+        paidAmountCents: 50000,
+        paidAt: NOW.toISOString(),
+      }),
+    );
+
+    const result = await reconcilePendingCharges({ now: NOW });
+
+    expect(result).toEqual({ checked: 2, credited: 1, expired: 0, errors: 0 });
+    expect(getUpperCharge).toHaveBeenCalledTimes(1);
+    expect(getUpperCharge).toHaveBeenCalledWith("bl-top-c1");
+    expect(spacePayGet).toHaveBeenCalledTimes(1);
+    expect(spacePayGet).toHaveBeenCalledWith({
+      externalId: "bl-top-c2",
+      providerChargeId: "sp-tx-2",
+    });
+  });
+
+  it("expires a SpacePay charge still ACTIVE long past its short QR expiry, like Upper", async () => {
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        id: "c1",
+        external_id: "bl-top-c1",
+        provider: "spacepay",
+        status: "ACTIVE",
+        created_at: OLD_ENOUGH,
+        expires_at: "2026-10-22T11:55:00Z", // 5-min QR, now 15 min past it
+      }),
+    );
+    spacePayGet.mockResolvedValue(upperCharge({ externalId: "bl-top-c1", status: "ACTIVE" }));
+
+    const result = await reconcilePendingCharges({ now: NOW });
+    expect(result).toEqual({ checked: 1, credited: 0, expired: 1, errors: 0 });
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("EXPIRED");
   });
 
   it("only counts a 404 as an error (no status change) when the charge is younger than 15 minutes", async () => {

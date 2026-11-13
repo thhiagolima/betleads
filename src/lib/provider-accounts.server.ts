@@ -130,6 +130,11 @@ export function cleanCredential(raw: string | undefined): string {
     .trim();
 }
 
+/** API key da Infobip sem o prefixo "App " (colado junto do valor, viraria "App App …"). */
+export function cleanInfobipApiKey(raw: string | undefined): string {
+  return cleanCredential(raw).replace(/^App\s+/i, "");
+}
+
 function trimBaseUrl(raw: string | undefined): string {
   return (raw ?? "").trim().replace(/\/$/, "");
 }
@@ -204,7 +209,7 @@ type AccountRow = {
   config: Record<string, unknown> | null;
   status: string;
   owner_tenant_id: string | null;
-  /** 20261219100400: 'platform' | 'revoked' | null (why a disabled account is off). */
+  /** 20261231100400: 'platform' | 'revoked' | null (why a disabled account is off). */
   disabled_reason?: string | null;
 };
 
@@ -212,12 +217,22 @@ type OverrideRow = { tenant_id: string; channel: string; provider_account_id: st
 
 type DefaultRow = { channel: string; provider_account_id: string };
 
+type OptionRow = {
+  tenant_id: string;
+  channel: string;
+  provider_account_id: string;
+  display_name: string;
+};
+
 type Snapshot = {
   accounts: Map<string, AccountRow>;
   /** `${tenantId}:${channel}` -> provider_account_id */
   overrides: Map<string, string>;
   /** channel -> provider_account_id (public.platform_channel_defaults). */
   defaults: Map<ProviderChannel, string>;
+  /** `${tenantId}:${channel}` -> contas extras que a casa pode escolher
+   * (public.tenant_channel_account_options), em ordem de nome. */
+  options: Map<string, OptionRow[]>;
   loadedAt: number;
 };
 
@@ -241,8 +256,18 @@ export const __resetProviderAccountsCacheForTests = invalidateProviderAccountsCa
 
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+/** Tabela ainda não criada (app novo antes da migração): sem opções extras. */
+function isMissingRelationError(error: { code?: string; message?: string } | null | undefined) {
+  if (!error) return false;
+  return (
+    error.code === "42P01" ||
+    error.code === "PGRST205" ||
+    /does not exist|could not find the table/i.test(error.message ?? "")
+  );
+}
+
 async function loadSnapshot(): Promise<Snapshot> {
-  const [accounts, overrides, defaults] = await Promise.all([
+  const [accounts, overrides, defaults, options] = await Promise.all([
     db()
       .from("provider_accounts")
       .select(
@@ -250,14 +275,21 @@ async function loadSnapshot(): Promise<Snapshot> {
       ),
     db().from("tenant_channel_providers").select("tenant_id, channel, provider_account_id"),
     db().from("platform_channel_defaults").select("channel, provider_account_id"),
+    db()
+      .from("tenant_channel_account_options")
+      .select("tenant_id, channel, provider_account_id, display_name"),
   ]);
   if (accounts?.error) throw new Error(accounts.error.message);
   if (overrides?.error) throw new Error(overrides.error.message);
   if (defaults?.error) throw new Error(defaults.error.message);
+  if (options?.error && !isMissingRelationError(options.error)) {
+    throw new Error(options.error.message);
+  }
   const next: Snapshot = {
     accounts: new Map(),
     overrides: new Map(),
     defaults: new Map(),
+    options: new Map(),
     loadedAt: Date.now(),
   };
   for (const row of (accounts?.data ?? []) as AccountRow[]) next.accounts.set(row.id, row);
@@ -266,6 +298,13 @@ async function loadSnapshot(): Promise<Snapshot> {
   }
   for (const row of (defaults?.data ?? []) as DefaultRow[]) {
     next.defaults.set(row.channel as ProviderChannel, row.provider_account_id);
+  }
+  const optionRows = options?.error ? [] : ((options?.data ?? []) as OptionRow[]);
+  for (const row of [...optionRows].sort((a, b) =>
+    a.display_name.localeCompare(b.display_name, "pt-BR"),
+  )) {
+    const key = `${row.tenant_id}:${row.channel}`;
+    next.options.set(key, [...(next.options.get(key) ?? []), row]);
   }
   return next;
 }
@@ -349,7 +388,7 @@ async function buildDbAccount(row: AccountRow): Promise<AnyProviderAccount> {
       label: row.label,
       ownerTenantId,
       baseUrl: trimBaseUrl(configString(config, "base_url")),
-      apiKey: creds.api_key?.trim() ?? "",
+      apiKey: cleanInfobipApiKey(creds.api_key),
       voiceFrom: configString(config, "voice_from")?.replace(/\D/g, "") ?? "",
       smsFrom: configString(config, "sms_from") ?? "",
     };
@@ -673,9 +712,160 @@ export async function channelUsesOwnAccountFor(
   return Boolean(row?.owner_tenant_id);
 }
 
-/** Conta de SMS da casa (Short Brasil ou Infobip). */
-export async function resolveSmsAccount(tenantId: string | null | undefined): Promise<SmsAccount> {
-  return resolveChannelAccount(tenantId, "sms");
+/** Mensagem (vista pela casa) quando a conta escolhida não pode mais ser usada. */
+export const SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE =
+  "A conta de envio escolhida não está mais disponível para a casa.";
+
+/** Nome da opção "padrão da casa" na escolha da conta de envio. */
+export const SMS_DEFAULT_CHOICE_NAME = "Padrão da casa";
+
+/** Nome mostrado para uma campanha cuja conta escolhida deixou de ser opção da casa. */
+export const SMS_REMOVED_CHOICE_NAME = "Conta removida";
+
+/** Id da conta que a padrão da casa resolve hoje (override ou padrão da plataforma). */
+function houseDefaultAccountId(snap: Snapshot, tenantId: string, channel: ProviderChannel): string {
+  return (
+    snap.overrides.get(`${tenantId}:${channel}`) ??
+    snap.defaults.get(channel) ??
+    envDefaultAccountId(channel)
+  );
+}
+
+/**
+ * Conta de SMS da casa (Short Brasil ou Infobip). `accountId` vazio = a
+ * padrão da casa (comportamento de sempre). Com `accountId` (conta escolhida
+ * na campanha), a conta precisa ser uma das opções da casa para SMS
+ * (tenant_channel_account_options) ou exatamente a conta que a padrão da
+ * casa resolve hoje; senão ProviderAccountUnavailableError com
+ * SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE — sem fallback para a padrão. A
+ * mensagem nunca traz o label interno nem o fornecedor (a casa a vê no
+ * last_error da campanha). Sem snapshot nenhum (falha ao ler as tabelas e
+ * nada carregado antes) não dá para conferir a escolha: erro comum (não é
+ * falha da conta), o envio é tentado de novo depois.
+ */
+export async function resolveSmsAccount(
+  tenantId: string | null | undefined,
+  accountId?: string | null,
+): Promise<SmsAccount> {
+  if (!accountId) return resolveChannelAccount(tenantId, "sms");
+  if (!tenantId) throw new ProviderAccountUnavailableError(SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE);
+  const snap = await currentSnapshot();
+  if (!snap) throw new Error("Não foi possível carregar as contas de envio. Tente de novo.");
+  if (accountId === houseDefaultAccountId(snap, tenantId, "sms")) {
+    return resolveChannelAccount(tenantId, "sms");
+  }
+  const isOption = (snap.options.get(`${tenantId}:sms`) ?? []).some(
+    (option) => option.provider_account_id === accountId,
+  );
+  const candidate = isOption ? snap.accounts.get(accountId) : undefined;
+  // A conta própria de outra casa nunca serve de opção de envio desta.
+  const row = candidate?.owner_tenant_id && candidate.owner_tenant_id !== tenantId ? undefined : candidate;
+  if (!row) throw new ProviderAccountUnavailableError(SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE);
+  try {
+    // channel "sms": the account is always Short Brasil or Infobip.
+    return (await accountFromRow(row, "sms")) as SmsAccount;
+  } catch (error) {
+    if (!(error instanceof ProviderAccountUnavailableError)) throw error;
+    console.error("[provider-accounts] conta de envio escolhida indisponível", {
+      tenantId,
+      accountId,
+      error: error.message,
+    });
+    throw new ProviderAccountUnavailableError(SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE);
+  }
+}
+
+function smsAccountConfigured(account: SmsAccount): boolean {
+  return account.provider === "short_brasil"
+    ? shortBrasilConfigured(account)
+    : infobipConfigured(account);
+}
+
+export type SmsSendChoice = { id: string | null; name: string; available: boolean };
+
+/**
+ * Contas pelas quais a casa pode enviar uma campanha de SMS: primeiro a
+ * "Padrão da casa" (id null; nunca bloqueada aqui — é o envio de sempre),
+ * depois as opções vinculadas pelo super admin, em ordem de nome. available =
+ * conta ativa, atendendo SMS e com credenciais. Só o nome definido no vínculo
+ * sai daqui: nunca o label interno nem o fornecedor.
+ */
+export async function listSmsSendChoices(
+  tenantId: string | null | undefined,
+): Promise<SmsSendChoice[]> {
+  const choices: SmsSendChoice[] = [{ id: null, name: SMS_DEFAULT_CHOICE_NAME, available: true }];
+  if (!tenantId) return choices;
+  const snap = await currentSnapshot();
+  for (const option of snap?.options.get(`${tenantId}:sms`) ?? []) {
+    const row = snap!.accounts.get(option.provider_account_id);
+    let available = false;
+    if (row && (!row.owner_tenant_id || row.owner_tenant_id === tenantId)) {
+      try {
+        available = smsAccountConfigured((await accountFromRow(row, "sms")) as SmsAccount);
+      } catch (error) {
+        if (!(error instanceof ProviderAccountUnavailableError)) throw error;
+      }
+    }
+    choices.push({ id: option.provider_account_id, name: option.display_name, available });
+  }
+  return choices;
+}
+
+/**
+ * Motivo (para a casa) de a conta escolhida não poder enviar agora, ou null
+ * quando pode. accountId vazio (padrão da casa) = sempre null: a padrão
+ * segue o caminho de sempre.
+ */
+export async function smsSendChoiceProblem(
+  tenantId: string | null | undefined,
+  accountId: string | null | undefined,
+): Promise<string | null> {
+  if (!accountId) return null;
+  try {
+    const account = await resolveSmsAccount(tenantId, accountId);
+    return smsAccountConfigured(account) ? null : SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE;
+  } catch (error) {
+    if (error instanceof ProviderAccountUnavailableError) return error.message;
+    throw error;
+  }
+}
+
+/**
+ * Validação ao criar uma campanha (ou envio de teste) com conta escolhida:
+ * a opção existe para a casa e está disponível. null/vazio = padrão da casa.
+ */
+export async function assertSmsSendChoice(
+  tenantId: string,
+  accountId: string | null | undefined,
+): Promise<void> {
+  if (!accountId) return;
+  const choice = (await listSmsSendChoices(tenantId)).find((c) => c.id === accountId);
+  if (!choice) {
+    throw new Error(
+      "A conta de envio escolhida não existe para esta casa. Atualize a página e escolha de novo.",
+    );
+  }
+  if (!choice.available || (await smsSendChoiceProblem(tenantId, accountId))) {
+    throw new Error(
+      `A conta de envio "${choice.name}" está indisponível no momento. Escolha outra ou use a padrão da casa.`,
+    );
+  }
+}
+
+/**
+ * Nome visto pela casa da conta gravada numa campanha: "Padrão da casa"
+ * (null), o nome da opção, ou "Conta removida" quando a opção não existe
+ * mais.
+ */
+export async function smsSendChoiceNames(
+  tenantId: string,
+): Promise<(accountId: string | null | undefined) => string> {
+  const snap = await currentSnapshot();
+  const names = new Map(
+    (snap?.options.get(`${tenantId}:sms`) ?? []).map((o) => [o.provider_account_id, o.display_name]),
+  );
+  return (accountId) =>
+    !accountId ? SMS_DEFAULT_CHOICE_NAME : (names.get(accountId) ?? SMS_REMOVED_CHOICE_NAME);
 }
 
 /** Conta Infobip de e-mail ou voz da casa. */

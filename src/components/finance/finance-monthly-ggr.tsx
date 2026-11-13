@@ -3,7 +3,11 @@
 // the day it is valid through. The server spreads it over the month's days
 // (allocateMonthlyGgr); while it exists the daily GGR column is read-only.
 // Clearing the value removes the total and the month goes back to daily GGR.
+import { useId } from "react";
+
 import { formatMoneyIn } from "@/components/finance/format";
+import { Term } from "@/components/help/term";
+import { tourAnchor } from "@/help/anchor";
 import type { TenantCurrency } from "@/lib/currency";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,6 +116,9 @@ export function MonthlyGgrFields({
   onChange: (value: MonthlyGgrFormValue) => void;
   onSave: () => void;
 }) {
+  // The label carries a <Term> (a button): htmlFor keeps the label on the
+  // input instead of the Term.
+  const ggrId = useId();
   const { first, last } = monthBounds(month);
   const max = last < today ? last : today;
   const error = monthlyGgrFormError({ ...value, month }, today);
@@ -121,12 +128,18 @@ export function MonthlyGgrFields({
       : parseGgrInput(value.ggr) === current.ggr && value.validThrough === current.validThrough;
 
   return (
-    <div className="space-y-2 rounded-lg border border-border/40 bg-primary/5 p-3 text-sm">
+    <div
+      className="space-y-2 rounded-lg border border-border/40 bg-primary/5 p-3 text-sm"
+      {...tourAnchor("financeiro.lancamentos.ggr-mes")}
+    >
       {canEdit ? (
         <div className="flex flex-wrap items-end gap-3">
-          <label className="space-y-1">
-            <span className="block text-xs text-muted-foreground">{MONTHLY_GGR_LABEL}</span>
+          <label htmlFor={ggrId} className="space-y-1">
+            <span className="block text-xs text-muted-foreground">
+              <Term id="ggr">{MONTHLY_GGR_LABEL}</Term>
+            </span>
             <Input
+              id={ggrId}
               type="text"
               inputMode="decimal"
               value={value.ggr}
@@ -158,7 +171,9 @@ export function MonthlyGgrFields({
           </Button>
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">{MONTHLY_GGR_LABEL}</p>
+        <p className="text-xs text-muted-foreground">
+          <Term id="ggr">{MONTHLY_GGR_LABEL}</Term>
+        </p>
       )}
       <p className="text-xs text-muted-foreground">{monthlyGgrStatus(current, currency)}</p>
       {canEdit && error && <p className="text-xs text-destructive">{error}</p>}

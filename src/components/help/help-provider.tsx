@@ -24,7 +24,7 @@ import { useAuthSession } from "@/components/auth-gate";
 import { useShellNav } from "@/components/shell/use-shell-nav";
 import { GUIDES, type GuideStep } from "@/help/guides";
 import { HELP_SCREEN_LOADERS } from "@/help/registry";
-import { effectiveTab, resolveHelpScreen } from "@/help/resolve";
+import { effectiveTab, helpTabLocation, resolveHelpScreen } from "@/help/resolve";
 import type { SearchEntry } from "@/help/search";
 import {
   autoStartDecision,
@@ -37,6 +37,7 @@ import {
   pickHelpTarget,
   releaseAutoStart,
   screenTourKey,
+  shellOverrideResetKey,
   startAutoStartSuppression,
   nextFirstVisibleClock,
   nextReadinessClock,
@@ -162,8 +163,10 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   });
   const guideSignals = guideSignalsQuery.isError ? null : (guideSignalsQuery.data?.signals ?? null);
 
-  // --- Location: pathname + hash (tabs live in the hash; PageTabs navigate
-  // through the router, but a plain `hashchange` is also honoured). ---
+  // --- Location: pathname + hash + query (tabs live in the hash — PageTabs
+  // navigate through the router, but a plain `hashchange` is also honoured —
+  // or, for a screen with `tabSearchParam`, in the query string, which only
+  // changes through the router). ---
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const locationKey = useRouterState({
     select: (s) => s.location.state.__TSR_key ?? s.location.state.key ?? null,
@@ -171,6 +174,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const userId = useAuthSession()?.user.id ?? null;
   const visitId = autoStartVisitId({ userId, locationKey, pathname });
   const routerHash = useRouterState({ select: (s) => s.location.hash });
+  const search = useRouterState({ select: (s) => s.location.searchStr });
   const [hash, setHash] = useState("");
   useEffect(() => {
     setHash(window.location.hash);
@@ -181,9 +185,15 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  // Memoized on the resolved route/tab, not the raw query: a screen
+  // rewriting its own filters/period in the query keeps the same target
+  // object, so nothing keyed on it (auto-start, suppression) re-runs.
+  const resolved = resolveHelpScreen(pathname, hash, search);
+  const resolvedRoute = resolved?.route ?? null;
+  const resolvedTab = resolved?.tab ?? null;
   const urlTarget: Target | null = useMemo(
-    () => resolveHelpScreen(pathname, hash),
-    [pathname, hash],
+    () => (resolvedRoute === null ? null : { route: resolvedRoute, tab: resolvedTab }),
+    [resolvedRoute, resolvedTab],
   );
   // The onboarding wizard's override (`setScreenOverride`), which it clears
   // itself based on wizard state...
@@ -199,10 +209,12 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   // "Sobre o CRM" overrides the screen without navigating anywhere, so
   // nothing else would drop it: it goes away when the panel closes or the
   // location (path or tab) changes, and the help is back on the page's own
-  // article (or the wizard's).
+  // article (or the wizard's). Other query changes (filters, period, paging)
+  // keep it — see `shellOverrideResetKey`.
+  const shellResetKey = shellOverrideResetKey(pathname, urlTarget);
   useEffect(() => {
     setShellOverride(null);
-  }, [pathname, hash]);
+  }, [shellResetKey]);
   useEffect(() => {
     if (!panelOpen) setShellOverride(null);
   }, [panelOpen]);
@@ -476,8 +488,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       if (!entry.route.startsWith("/")) {
         setShellOverride({ route: entry.route, tab: entry.tab ?? null });
       } else {
-        const href = entry.tab ? `${entry.route}#${entry.tab}` : entry.route;
-        void navigate({ href });
+        void navigate({ href: helpTabLocation(entry.route, entry.tab).href });
       }
       setFocus({ target: entry.sectionId, nonce: Date.now(), route: entry.route });
     },
@@ -513,9 +524,13 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const goToGuideStep = useCallback(
     (step: GuideStep) => {
       setPanelOpen(false);
-      const stepHash = step.tab ? `#${step.tab}` : "";
-      if (step.anchor) suppressAutoStartAt(resolveHelpScreen(step.route, stepHash));
-      const href = `${step.route}${stepHash}`;
+      const stepLocation = helpTabLocation(step.route, step.tab);
+      if (step.anchor) {
+        suppressAutoStartAt(
+          resolveHelpScreen(step.route, stepLocation.hash, stepLocation.search),
+        );
+      }
+      const href = stepLocation.href;
       void navigate({ href }).then(() => {
         if (!step.anchor) return;
         window.setTimeout(() => {

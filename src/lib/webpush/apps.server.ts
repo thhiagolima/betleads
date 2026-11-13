@@ -123,9 +123,18 @@ export async function activateWebpushOrigin(
     const account = await resolveOneSignalAccount(input.tenantId);
     providerAccountId = account.id;
     const siteName = await fetchTenantName(db, input.tenantId);
+    // The prompt icon may already be saved: a new app must start with it, or
+    // the slidedown shows OneSignal's default bell until the next icon change.
+    const { data: settingsData, error: settingsErr } = await db
+      .from("tenant_webpush_settings")
+      .select("icon_url")
+      .eq("tenant_id", input.tenantId)
+      .maybeSingle();
+    if (settingsErr) throw new Error(settingsErr.message);
     const created = await createOneSignalApp({
       siteName,
       origin,
+      iconUrl: (settingsData as { icon_url: string | null } | null)?.icon_url ?? null,
       credentials: { orgApiKey: account.orgApiKey, orgId: account.orgId },
     });
     onesignalAppId = created.appId;
@@ -287,7 +296,7 @@ async function fetchSubscriptionCounts(
 
 /** `${PUBLIC_APP_URL}/api/public/push/loader.js?t=${publicToken}`, matching
  * the base-url pattern used elsewhere (e.g. `invite-email.server.ts`). */
-function buildLoaderSnippet(publicToken: string): string {
+export function buildLoaderSnippet(publicToken: string): string {
   const base = (process.env.PUBLIC_APP_URL ?? "https://betleads.io").replace(/\/$/, "");
   return `<script src="${base}/api/public/push/loader.js?t=${publicToken}" async></script>`;
 }
@@ -300,6 +309,9 @@ export type WebpushIntegrationApp = WebpushAppRow & {
 
 export type WebpushIntegrationState = {
   enabled: boolean;
+  /** The house's public loader token ("" before settings exist) — shown on
+   * its own for houses whose platform already ships the integration. */
+  publicToken: string;
   loaderSnippet: string;
   playerSnippet: string;
   prompt: PromptConfig;
@@ -351,6 +363,7 @@ export async function getWebpushIntegrationState(
 
   return {
     enabled: current !== null,
+    publicToken: settings?.publicToken ?? "",
     loaderSnippet: settings ? buildLoaderSnippet(settings.publicToken) : "",
     playerSnippet: WEBPUSH_PLAYER_SNIPPET,
     prompt: settings?.prompt ?? DEFAULT_PROMPT,
@@ -390,24 +403,19 @@ export async function verifyWebpushWorker(
 }
 
 /**
- * Validates and saves the house's push prompt copy. When the icon actually
- * changes, pushes the new icon to every OneSignal app created via "api"
- * that's still `instalando`/`ativo` (a "manual" app was set up by hand at
- * OneSignal's dashboard — its icon isn't ours to touch).
+ * Validates and saves the house's push prompt copy. Whenever an icon is set,
+ * (re)pushes it to every OneSignal app created via "api" that's still
+ * `instalando`/`ativo` — on every save, not only when the url changes, so a
+ * save retries an earlier push that failed (a "manual" app was set up by hand
+ * at OneSignal's dashboard — its icon isn't ours to touch). The copy is saved
+ * even when OneSignal refuses the icon; the refusal is then thrown so the
+ * house sees it instead of a silent "saved".
  */
 export async function saveWebpushPrompt(
   db: WebpushAppDb,
   input: { tenantId: string } & Parameters<typeof validatePromptConfig>[0],
 ): Promise<PromptConfig> {
   const validated = validatePromptConfig(input);
-
-  const { data: before, error: beforeErr } = await db
-    .from("tenant_webpush_settings")
-    .select("icon_url")
-    .eq("tenant_id", input.tenantId)
-    .maybeSingle();
-  if (beforeErr) throw new Error(beforeErr.message);
-  const previousIconUrl = (before as { icon_url: string | null } | null)?.icon_url ?? null;
 
   const { error } = await db.from("tenant_webpush_settings").upsert(
     {
@@ -422,7 +430,7 @@ export async function saveWebpushPrompt(
   );
   if (error) throw new Error(error.message);
 
-  if (validated.iconUrl && validated.iconUrl !== previousIconUrl) {
+  if (validated.iconUrl) {
     const { data: appRows, error: appsErr } = await db
       .from("tenant_webpush_apps")
       .select("id,onesignal_app_id,status,created_via,provider_account_id")
@@ -430,6 +438,7 @@ export async function saveWebpushPrompt(
       .eq("created_via", "api")
       .in("status", ["instalando", "ativo"]);
     if (appsErr) throw new Error(appsErr.message);
+    const iconErrors: string[] = [];
     for (const row of (appRows ?? []) as Array<{
       onesignal_app_id: string;
       provider_account_id: string | null;
@@ -449,10 +458,17 @@ export async function saveWebpushPrompt(
         });
         continue;
       }
-      await updateOneSignalAppIcon(row.onesignal_app_id, validated.iconUrl, {
-        orgApiKey: account.orgApiKey,
-        orgId: account.orgId,
-      });
+      try {
+        await updateOneSignalAppIcon(row.onesignal_app_id, validated.iconUrl, {
+          orgApiKey: account.orgApiKey,
+          orgId: account.orgId,
+        });
+      } catch (error) {
+        iconErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (iconErrors.length > 0) {
+      throw new Error(`Convite salvo, mas o ícone não foi atualizado no OneSignal: ${iconErrors.join("; ")}`);
     }
   }
 

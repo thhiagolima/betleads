@@ -9,7 +9,7 @@ import { ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, type ButtonProps } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { formatBrtDate } from "@/components/expert/sheet-format";
+import { tourAnchor } from "@/help/anchor";
 import { downloadCsv } from "@/components/rendimento/download-csv";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { CONTATO_LABEL, type ContatoResultado } from "@/lib/expert-lead-labels";
@@ -83,7 +84,7 @@ export function TopLeadsCard({
 }) {
   const { money } = useMoney();
   return (
-    <Card>
+    <Card {...tourAnchor("rendimento.topleads")}>
       <CardHeader>
         <CardTitle>Leads que mais depositaram</CardTitle>
       </CardHeader>
@@ -122,11 +123,12 @@ function FilterToggle({
   pressed,
   onToggle,
   children,
+  ...rest
 }: {
   pressed: boolean;
   onToggle: () => void;
   children: string;
-}) {
+} & Omit<ButtonProps, "pressed" | "onToggle" | "children" | "type" | "size" | "variant">) {
   return (
     <Button
       type="button"
@@ -134,6 +136,7 @@ function FilterToggle({
       variant={pressed ? "secondary" : "outline"}
       aria-pressed={pressed}
       onClick={onToggle}
+      {...rest}
     >
       {children}
     </Button>
@@ -226,13 +229,14 @@ export function PortfolioTable({
   }, [loadedTotal, page, filtersKey]);
 
   return (
-    <Card>
+    <Card {...tourAnchor("rendimento.portfolio")}>
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
         <CardTitle>Leads do período</CardTitle>
         <Button
           variant="outline"
           onClick={() => exportMutation.mutate()}
           disabled={exportMutation.isPending}
+          {...tourAnchor("rendimento.portfolio.csv")}
         >
           <Download className="mr-2 h-4 w-4" />
           {exportMutation.isPending ? "Exportando…" : "Exportar CSV"}
@@ -249,13 +253,22 @@ export function PortfolioTable({
               aria-label="Buscar por nome ou telefone"
               maxLength={SEARCH_MAX_LENGTH}
               className="pl-9"
+              {...tourAnchor("rendimento.portfolio.busca")}
             />
           </div>
           <div className="flex gap-2">
-            <FilterToggle pressed={onlyFtd} onToggle={() => setOnlyFtd((v) => !v)}>
+            <FilterToggle
+              pressed={onlyFtd}
+              onToggle={() => setOnlyFtd((v) => !v)}
+              {...tourAnchor("rendimento.portfolio.so-ftd")}
+            >
               Só FTD
             </FilterToggle>
-            <FilterToggle pressed={onlyReativados} onToggle={() => setOnlyReativados((v) => !v)}>
+            <FilterToggle
+              pressed={onlyReativados}
+              onToggle={() => setOnlyReativados((v) => !v)}
+              {...tourAnchor("rendimento.portfolio.so-reativados")}
+            >
               Só reativados
             </FilterToggle>
           </div>

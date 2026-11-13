@@ -60,8 +60,6 @@ vi.mock("./whatsapp-external.server", () => ({
 }));
 vi.mock("./antiban.server", () => ({
   getAntibanSettings: async () => ({ smart_suppression_enabled: false, auto_pause_enabled: false }),
-  isWithinOperationalWindow: () => true,
-  nextWindowStart: () => new Date(),
   applyAntibanCaps: () => ({ dailyLimit: 1000, hourlyLimit: 1000, delayMin: 1, delayMax: 1 }),
 }));
 vi.mock("./whatsapp-send.server", () => ({

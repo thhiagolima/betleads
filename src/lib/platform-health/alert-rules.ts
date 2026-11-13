@@ -90,6 +90,7 @@ export const JOB_EXPECTED_PERIOD_S: Record<string, number> = {
   platform_alerts: 300,
   recovery: 60,
   shortio_sync: 300,
+  sms_route_probe: 1800,
   sms_tick: 60,
   tenant_domains_verify: 600,
   webhook_replay: 300,
@@ -98,6 +99,7 @@ export const JOB_EXPECTED_PERIOD_S: Record<string, number> = {
 /** Readable labels for jobs where a plain name would read poorly in pt-BR. */
 const JOB_LABELS: Record<string, string> = {
   sms_tick: "Disparo de SMS",
+  sms_route_probe: "Teste da rota SMS",
   email_tick: "Disparo de e-mail",
 };
 

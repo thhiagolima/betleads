@@ -10,7 +10,7 @@ export type PeriodKey = (typeof PERIODS)[number]["key"];
 export const TABS = [
   { key: "visao", label: "Visão geral" },
   { key: "origens", label: "Origens" },
-  { key: "controle", label: "Teste de controle" },
+  { key: "controle", label: "Prova e método" },
 ] as const;
 export type TabKey = (typeof TABS)[number]["key"];
 

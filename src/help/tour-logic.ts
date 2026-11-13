@@ -309,3 +309,13 @@ export function isAutoStartSuppressed(
 ): boolean {
   return !!suppression && sameHelpTarget(suppression, urlTarget);
 }
+
+/** What resets the "Sobre o CRM" override (ruling R4) when it changes: the
+ * path, or the help target the URL resolves to (route + tab). Not the raw
+ * query string — a screen rewriting its own filters/period/page in the query
+ * must not close the article; a query-tab screen still resets when its tab
+ * (the `tabSearchParam`) actually changes, and a hash screen when its hash
+ * does. */
+export function shellOverrideResetKey(pathname: string, urlTarget: HelpTarget | null): string {
+  return `${pathname}|${urlTarget?.route ?? ""}|${urlTarget?.tab ?? ""}`;
+}

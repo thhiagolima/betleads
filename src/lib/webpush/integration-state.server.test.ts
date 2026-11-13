@@ -132,6 +132,7 @@ describe("Task 7: web push integration state", () => {
 
       const state = await getWebpushIntegrationState(db.client, TENANT);
 
+      expect(state.publicToken).toBe("tok123");
       expect(state.loaderSnippet).toBe(
         '<script src="https://app.example.test/api/public/push/loader.js?t=tok123" async></script>',
       );
@@ -471,7 +472,7 @@ describe("Task 7: web push integration state", () => {
       );
     });
 
-    it("does not call updateOneSignalAppIcon when the icon is unchanged", async () => {
+    it("re-pushes the icon even when the url is unchanged (retries an earlier failed push)", async () => {
       pushApp({ id: "app-api-1", created_via: "api", status: "ativo", onesignal_app_id: "os-1" });
       db.rows("tenant_webpush_settings").push({
         tenant_id: TENANT,
@@ -490,7 +491,25 @@ describe("Task 7: web push integration state", () => {
         iconUrl: "https://cdn.example.test/icon.png",
       });
 
-      expect(onesignal.updateOneSignalAppIcon).not.toHaveBeenCalled();
+      expect(onesignal.updateOneSignalAppIcon).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the saved copy but throws when OneSignal refuses the icon", async () => {
+      pushApp({ id: "app-api-1", created_via: "api", status: "ativo", onesignal_app_id: "os-1" });
+      onesignal.updateOneSignalAppIcon.mockRejectedValueOnce(new Error("OneSignal recusou o ícone do app (400)"));
+
+      await expect(
+        saveWebpushPrompt(db.client, {
+          tenantId: TENANT,
+          promptText: "Quer receber promoções?",
+          acceptLabel: "Sim",
+          cancelLabel: "Não",
+          iconUrl: "https://cdn.example.test/icon.png",
+        }),
+      ).rejects.toThrow(/Convite salvo, mas o ícone não foi atualizado.*400/);
+
+      const stored = db.rows("tenant_webpush_settings").find((r) => r.tenant_id === TENANT)!;
+      expect(stored.icon_url).toBe("https://cdn.example.test/icon.png");
     });
   });
 

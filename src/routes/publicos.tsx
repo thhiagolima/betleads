@@ -31,6 +31,8 @@ import {
   type SmsAudienceCriteria,
 } from "@/lib/sms-audience-criteria";
 import { useEnabledChannels } from "@/hooks/use-enabled-channels";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 
 export const Route = createFileRoute("/publicos")({ component: PublicosPage });
 
@@ -234,6 +236,7 @@ function PublicosPage() {
               value={name}
               onChange={(event) => setName(event.target.value)}
               className="h-10"
+              {...tourAnchor("publicos.editor.nome")}
             />
           </div>
           <div className="space-y-1.5">
@@ -246,6 +249,7 @@ function PublicosPage() {
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               className="min-h-16"
+              {...tourAnchor("publicos.editor.descricao")}
             />
           </div>
 
@@ -271,6 +275,7 @@ function PublicosPage() {
                       loading={calculating}
                       active={criteria.activity.deposit === "yes"}
                       onClick={() => setActivity("deposit", "yes")}
+                      tourProps={tourAnchor("publicos.editor.deposito-sim")}
                     />
                     <RuleChip
                       label="Nunca depositou"
@@ -279,9 +284,19 @@ function PublicosPage() {
                       loading={calculating}
                       active={criteria.activity.deposit === "never"}
                       onClick={() => setActivity("deposit", "never")}
+                      tourProps={tourAnchor("publicos.editor.deposito-nunca")}
                     />
                   </RuleGroup>
-                  <RuleGroup title="Pendências" dot={FILTER_GROUP_DOT.pending}>
+                  <RuleGroup
+                    title="Pendências"
+                    dot={FILTER_GROUP_DOT.pending}
+                    help={
+                      <>
+                        <Term id="pix-gerado-pago">PIX</Term> gerado e não pago, ou saque ainda em
+                        aberto.
+                      </>
+                    }
+                  >
                     <RuleChip
                       label="Gerou PIX e não pagou"
                       dot={FILTER_GROUP_DOT.pending}
@@ -289,6 +304,7 @@ function PublicosPage() {
                       loading={calculating}
                       active={criteria.activity.pixUnpaid}
                       onClick={() => setActivity("pixUnpaid", true)}
+                      tourProps={tourAnchor("publicos.editor.pix-nao-pago")}
                     />
                     <RuleChip
                       label="Saque pendente"
@@ -297,6 +313,7 @@ function PublicosPage() {
                       loading={calculating}
                       active={criteria.activity.withdrawalPending}
                       onClick={() => setActivity("withdrawalPending", true)}
+                      tourProps={tourAnchor("publicos.editor.saque-pendente")}
                     />
                   </RuleGroup>
                   <RuleGroup title="Saques" dot={FILTER_GROUP_DOT.withdrawal}>
@@ -307,6 +324,7 @@ function PublicosPage() {
                       loading={calculating}
                       active={criteria.activity.withdrawal === "yes"}
                       onClick={() => setActivity("withdrawal", "yes")}
+                      tourProps={tourAnchor("publicos.editor.saque-sim")}
                     />
                     <RuleChip
                       label="Nunca sacou"
@@ -315,6 +333,7 @@ function PublicosPage() {
                       loading={calculating}
                       active={criteria.activity.withdrawal === "never"}
                       onClick={() => setActivity("withdrawal", "never")}
+                      tourProps={tourAnchor("publicos.editor.saque-nunca")}
                     />
                   </RuleGroup>
                   <RuleGroup title="Bônus" dot={FILTER_GROUP_DOT.bonus}>
@@ -325,6 +344,7 @@ function PublicosPage() {
                       loading={calculating}
                       active={criteria.activity.cashback}
                       onClick={() => setActivity("cashback", true)}
+                      tourProps={tourAnchor("publicos.editor.cashback")}
                     />
                   </RuleGroup>
                 </div>
@@ -332,7 +352,7 @@ function PublicosPage() {
 
               {!neverDeposited && (
                 <RuleGroup title="Nível" help="Pode ser combinado com o tempo sem depositar.">
-                  {LEVEL_RULES.map((rule) => (
+                  {LEVEL_RULES.map((rule, index) => (
                     <RuleChip
                       key={rule.value}
                       label={rule.label}
@@ -346,6 +366,7 @@ function PublicosPage() {
                           level: current.level === rule.value ? null : rule.value,
                         }))
                       }
+                      tourProps={index === 0 ? tourAnchor("publicos.editor.nivel") : undefined}
                     />
                   ))}
                 </RuleGroup>
@@ -357,7 +378,7 @@ function PublicosPage() {
                   help="Escolha uma faixa ou informe os dias. Quanto mais escura a bolinha, mais tempo parado."
                   dot={FILTER_GROUP_DOT.inactivity}
                 >
-                  {TIMING_RULES.map((rule) => (
+                  {TIMING_RULES.map((rule, index) => (
                     <RuleChip
                       key={rule.value}
                       label={rule.label}
@@ -370,6 +391,9 @@ function PublicosPage() {
                           ...current,
                           timing: current.timing === rule.value ? "any" : rule.value,
                         }))
+                      }
+                      tourProps={
+                        index === 0 ? tourAnchor("publicos.editor.tempo-sem-depositar") : undefined
                       }
                     />
                   ))}
@@ -394,6 +418,7 @@ function PublicosPage() {
                               },
                         );
                       }}
+                      {...tourAnchor("publicos.editor.dias-personalizado")}
                     />
                     {criteria.timing === "custom" ? (
                       <Button
@@ -401,6 +426,7 @@ function PublicosPage() {
                         variant="ghost"
                         className="h-10 px-2 text-meta sm:h-8"
                         onClick={() => setCriteria((current) => ({ ...current, timing: "any" }))}
+                        {...tourAnchor("publicos.editor.limpar-dias")}
                       >
                         <X className="size-3.5" aria-hidden="true" />
                         Limpar
@@ -420,6 +446,7 @@ function PublicosPage() {
                   onChange={(value) =>
                     setCriteria((current) => ({ ...current, daysWithoutLogin: value }))
                   }
+                  tourProps={tourAnchor("publicos.editor.dias-sem-entrar")}
                 />
                 <NumberRule
                   id="days-since-registration"
@@ -428,6 +455,7 @@ function PublicosPage() {
                   onChange={(value) =>
                     setCriteria((current) => ({ ...current, daysSinceRegistration: value }))
                   }
+                  tourProps={tourAnchor("publicos.editor.dias-desde-cadastro")}
                 />
               </div>
             </>
@@ -436,6 +464,7 @@ function PublicosPage() {
           <div
             className="relative overflow-hidden rounded-xl border border-border bg-secondary/40 p-3.5"
             aria-live="polite"
+            {...tourAnchor("publicos.editor.previa")}
           >
             <div className="flex items-center gap-2 text-body font-medium">
               {calculating ? (
@@ -493,11 +522,17 @@ function PublicosPage() {
               className="h-10 sm:h-9"
               disabled={!name.trim() || save.isPending || calculating}
               onClick={() => save.mutate()}
+              {...tourAnchor("publicos.editor.salvar")}
             >
               {editingId ? "Salvar alterações" : "Criar público"}
             </Button>
             {editingId && (
-              <Button variant="ghost" className="h-10 sm:h-9" onClick={reset}>
+              <Button
+                variant="ghost"
+                className="h-10 sm:h-9"
+                onClick={reset}
+                {...tourAnchor("publicos.editor.cancelar")}
+              >
                 Cancelar
               </Button>
             )}
@@ -556,7 +591,7 @@ function PublicosPage() {
                 </p>
               ))}
             <div className="space-y-2">
-              {savedAudiences.map((audience) => {
+              {savedAudiences.map((audience, index) => {
                 const audienceCriteria = normalizeSmsAudienceCriteria(audience.criteria);
                 const selection = isSelectionAudience(audienceCriteria);
                 return (
@@ -566,6 +601,11 @@ function PublicosPage() {
                     name={audience.name}
                     description={audience.description}
                     labels={criteriaLabels(audienceCriteria)}
+                    cardAnchor={index === 0 ? tourAnchor("publicos.lista.cartao") : undefined}
+                    actionAnchor={
+                      index === 0 ? tourAnchor("publicos.lista.usar-campanha") : undefined
+                    }
+                    menuAnchor={index === 0 ? tourAnchor("publicos.lista.menu") : undefined}
                     menu={[
                       {
                         label: selection ? "Renomear" : "Editar",
@@ -663,13 +703,15 @@ function PublicosPage() {
               </p>
             </div>
             <div className="grid gap-2 xl:grid-cols-2">
-              {SYSTEM_SMS_AUDIENCES.map((audience) => (
+              {SYSTEM_SMS_AUDIENCES.map((audience, index) => (
                 <AudienceCard
                   key={audience.id}
                   audienceId={audience.id}
                   name={audience.name}
                   description={audience.description}
                   badge={isExpert ? "dos seus leads" : undefined}
+                  cardAnchor={index === 0 ? tourAnchor("publicos.automaticos.cartao") : undefined}
+                  menuAnchor={index === 0 ? tourAnchor("publicos.automaticos.menu") : undefined}
                   menu={
                     // Jornadas are a house page: no "Usar em jornada" for the expert.
                     !isExpert && audience.id === "system:all-leads"
@@ -698,11 +740,14 @@ function NumberRule({
   label,
   value,
   onChange,
+  tourProps,
 }: {
   id: string;
   label: string;
   value: number | null;
   onChange: (value: number | null) => void;
+  /** `tourAnchor(...)` do chamador. */
+  tourProps?: Record<string, string>;
 }) {
   return (
     <div className="space-y-1.5">
@@ -718,6 +763,7 @@ function NumberRule({
         onChange={(event) =>
           onChange(event.target.value ? Math.max(1, Number(event.target.value)) : null)
         }
+        {...tourProps}
       />
     </div>
   );

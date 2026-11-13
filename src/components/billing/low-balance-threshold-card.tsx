@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { setLowBalanceThreshold } from "@/lib/billing/billing.functions";
 import { effectiveLowBalanceThreshold, parseThresholdInput } from "@/lib/billing/wallet-notice";
 import { brl } from "@/lib/format";
+import { tourAnchor } from "@/help/anchor";
 
 function thresholdInputText(value: number): string {
   return value.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -54,7 +55,7 @@ export function LowBalanceThresholdCard({
   });
 
   return (
-    <Card>
+    <Card {...tourAnchor("creditos.alerta.card")}>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm text-muted-foreground">
           <BellRing className="h-4 w-4 text-primary" />

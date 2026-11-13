@@ -6,6 +6,7 @@ import {
   Home,
   Mail,
   Megaphone,
+  PanelTop,
   Menu,
   MessageSquare,
   Network,
@@ -104,6 +105,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     items: [
       link("Campanhas", "/campanhas", Megaphone),
       link("Automações", "/automacoes", Workflow, { alsoActiveOn: ["/jornadas"] }),
+      link("Popups no site", "/popups", PanelTop),
     ],
   },
   {
@@ -271,6 +273,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/campanhas": { section: "Ações", title: "Campanhas" },
   "/campanhas/$campaignId/relatorio": { section: "Campanhas", title: "Relatório da campanha" },
   "/automacoes": { section: "Ações", title: "Automações" },
+  "/popups": { section: "Ações", title: "Popups no site" },
   "/automacoes/sms": { section: "Automações", title: "Automações de SMS" },
   "/automacoes/email": { section: "Automações", title: "Automações de email" },
   "/automacoes/ligacoes": { section: "Automações", title: "Automações de voz" },

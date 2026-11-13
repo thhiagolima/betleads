@@ -5,6 +5,7 @@ import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { tourAnchor } from "@/help/anchor";
 import {
   META_TEXTS,
   filterRows,
@@ -77,7 +78,11 @@ export function AccountSelection({
   };
 
   return (
-    <section aria-labelledby="meta-accounts-title" className="space-y-4">
+    <section
+      aria-labelledby="meta-accounts-title"
+      className="space-y-4"
+      {...tourAnchor("webhooks.meta.contas")}
+    >
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h3 id="meta-accounts-title" className="font-semibold">
@@ -156,6 +161,7 @@ export function AccountSelection({
           role="region"
           aria-label="Alterações não salvas"
           className="sticky bottom-[calc(60px+env(safe-area-inset-bottom))] z-30 md:bottom-0 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-card/95 px-4 py-3 backdrop-blur sm:-mx-5 sm:px-5"
+          {...tourAnchor("webhooks.meta.alteracoes")}
         >
           <span className="mr-auto text-sm font-medium">
             {plural(changes, "alteração não salva", "alterações não salvas")}

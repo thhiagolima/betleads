@@ -15,7 +15,7 @@ const screen: HelpScreen = {
   title: "Configuração da casa",
   purpose:
     "Endereço do site da casa, atalhos usados em campanhas e jornadas, os domínios próprios do encurtador de links e de e-mail (com o DNS de cada um) e os remetentes que enviam os e-mails.",
-  roles: ["admin", "gestor", "member", "expert"],
+  roles: ["admin", "gestor", "member"],
   terms: ["dns", "subdominio", "registro-dns", "remetente", "encurtador"],
   sections: [
     // ---------------------------------------------------------------
@@ -211,7 +211,7 @@ const screen: HelpScreen = {
       title: "E-mail",
       tab: "email",
       intro:
-        "Domínio próprio de e-mail (para enviar com @suacasa.bet.br em vez de um domínio genérico) e os remetentes que de fato mandam as campanhas e jornadas por e-mail.",
+        "Domínio próprio de e-mail (para enviar com @suacasa.bet.br em vez de um domínio genérico) e os remetentes que de fato mandam as campanhas e jornadas por e-mail. Esta aba só aparece quando o canal E-mail está ligado para a casa; com o canal desligado, ela desaparece do seletor de abas.",
       items: [
         {
           anchor: "casa.email.hostname",

@@ -1188,20 +1188,24 @@ export type Database = {
       };
       call_history: {
         Row: {
+          answered_by: string | null;
           audio_url: string | null;
           billed_amount: number | null;
           billed_blocks: number | null;
           billing_reference_id: string | null;
           provider_account_id: string | null;
           billing_settled_at: string | null;
+          bulk_id: string | null;
           call_queue_id: string | null;
           created_at: string;
+          dtmf_codes: string | null;
           duration_seconds: number | null;
           error_message: string | null;
           id: string;
           lead_id: string | null;
           provider: string | null;
           provider_call_id: string | null;
+          provider_message_id: string | null;
           provider_response: Json;
           provider_status_code: number | null;
           recording_url: string | null;
@@ -1213,20 +1217,24 @@ export type Database = {
           to_phone: string | null;
         };
         Insert: {
+          answered_by?: string | null;
           audio_url?: string | null;
           billed_amount?: number | null;
           billed_blocks?: number | null;
           billing_reference_id?: string | null;
           provider_account_id?: string | null;
           billing_settled_at?: string | null;
+          bulk_id?: string | null;
           call_queue_id?: string | null;
           created_at?: string;
+          dtmf_codes?: string | null;
           duration_seconds?: number | null;
           error_message?: string | null;
           id?: string;
           lead_id?: string | null;
           provider?: string | null;
           provider_call_id?: string | null;
+          provider_message_id?: string | null;
           provider_response?: Json;
           provider_status_code?: number | null;
           recording_url?: string | null;
@@ -1238,20 +1246,24 @@ export type Database = {
           to_phone?: string | null;
         };
         Update: {
+          answered_by?: string | null;
           audio_url?: string | null;
           billed_amount?: number | null;
           billed_blocks?: number | null;
           billing_reference_id?: string | null;
           provider_account_id?: string | null;
           billing_settled_at?: string | null;
+          bulk_id?: string | null;
           call_queue_id?: string | null;
           created_at?: string;
+          dtmf_codes?: string | null;
           duration_seconds?: number | null;
           error_message?: string | null;
           id?: string;
           lead_id?: string | null;
           provider?: string | null;
           provider_call_id?: string | null;
+          provider_message_id?: string | null;
           provider_response?: Json;
           provider_status_code?: number | null;
           recording_url?: string | null;
@@ -1365,12 +1377,15 @@ export type Database = {
           attempts: number;
           audio_generation_id: string | null;
           audio_url: string | null;
+          batch_id: string | null;
           created_at: string;
+          dispatch_mode: string | null;
           id: string;
           lead_id: string | null;
           max_attempts: number;
           phone_number: string | null;
           priority: number;
+          provider_message_id: string | null;
           provider_request_id: string | null;
           provider_response: Json | null;
           provider_status: string | null;
@@ -1381,17 +1396,21 @@ export type Database = {
           trigger_name: string | null;
           updated_at: string;
           voice_asset_id: string | null;
+          voice_campaign_id: string | null;
         };
         Insert: {
           attempts?: number;
           audio_generation_id?: string | null;
           audio_url?: string | null;
+          batch_id?: string | null;
           created_at?: string;
+          dispatch_mode?: string | null;
           id?: string;
           lead_id?: string | null;
           max_attempts?: number;
           phone_number?: string | null;
           priority?: number;
+          provider_message_id?: string | null;
           provider_request_id?: string | null;
           provider_response?: Json | null;
           provider_status?: string | null;
@@ -1402,17 +1421,21 @@ export type Database = {
           trigger_name?: string | null;
           updated_at?: string;
           voice_asset_id?: string | null;
+          voice_campaign_id?: string | null;
         };
         Update: {
           attempts?: number;
           audio_generation_id?: string | null;
           audio_url?: string | null;
+          batch_id?: string | null;
           created_at?: string;
+          dispatch_mode?: string | null;
           id?: string;
           lead_id?: string | null;
           max_attempts?: number;
           phone_number?: string | null;
           priority?: number;
+          provider_message_id?: string | null;
           provider_request_id?: string | null;
           provider_response?: Json | null;
           provider_status?: string | null;
@@ -1423,6 +1446,7 @@ export type Database = {
           trigger_name?: string | null;
           updated_at?: string;
           voice_asset_id?: string | null;
+          voice_campaign_id?: string | null;
         };
         Relationships: [
           {
@@ -1452,6 +1476,20 @@ export type Database = {
             isOneToOne: false;
             referencedRelation: "journey_voice_assets";
             referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "call_queue_batch_id_fkey";
+            columns: ["tenant_id", "batch_id"];
+            isOneToOne: false;
+            referencedRelation: "voice_campaign_batches";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "call_queue_voice_campaign_id_fkey";
+            columns: ["tenant_id", "voice_campaign_id"];
+            isOneToOne: false;
+            referencedRelation: "voice_campaigns";
+            referencedColumns: ["tenant_id", "id"];
           },
         ];
       };
@@ -5043,6 +5081,54 @@ export type Database = {
         };
         Relationships: [];
       };
+      payment_gateway_accounts: {
+        Row: {
+          created_at: string;
+          credentials_encrypted: string;
+          hints: Json;
+          provider: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          credentials_encrypted: string;
+          hints?: Json;
+          provider: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          credentials_encrypted?: string;
+          hints?: Json;
+          provider?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
+      payment_gateway_settings: {
+        Row: {
+          active_provider: string;
+          id: boolean;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          active_provider: string;
+          id?: boolean;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          active_provider?: string;
+          id?: boolean;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
       payment_webhook_events: {
         Row: {
           delivery_id: string | null;
@@ -5052,6 +5138,7 @@ export type Database = {
           headers: Json | null;
           outcome: string | null;
           processed_at: string | null;
+          provider: string;
           raw_body: string | null;
           received_at: string;
           signature_valid: boolean | null;
@@ -5064,6 +5151,7 @@ export type Database = {
           headers?: Json | null;
           outcome?: string | null;
           processed_at?: string | null;
+          provider?: string;
           raw_body?: string | null;
           received_at?: string;
           signature_valid?: boolean | null;
@@ -5076,6 +5164,7 @@ export type Database = {
           headers?: Json | null;
           outcome?: string | null;
           processed_at?: string | null;
+          provider?: string;
           raw_body?: string | null;
           received_at?: string;
           signature_valid?: boolean | null;
@@ -5781,6 +5870,172 @@ export type Database = {
           },
         ];
       };
+      site_popup_audience_members: {
+        Row: {
+          generation: number;
+          player_id: string;
+          popup_id: string;
+        };
+        Insert: {
+          generation: number;
+          player_id: string;
+          popup_id: string;
+        };
+        Update: {
+          generation?: number;
+          player_id?: string;
+          popup_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "site_popup_audience_members_popup_id_fkey";
+            columns: ["popup_id"];
+            isOneToOne: false;
+            referencedRelation: "site_popups";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      site_popup_daily_stats: {
+        Row: {
+          cliques: number;
+          dia: string;
+          exibicoes: number;
+          fechamentos: number;
+          popup_id: string;
+          tenant_id: string;
+        };
+        Insert: {
+          cliques?: number;
+          dia: string;
+          exibicoes?: number;
+          fechamentos?: number;
+          popup_id: string;
+          tenant_id: string;
+        };
+        Update: {
+          cliques?: number;
+          dia?: string;
+          exibicoes?: number;
+          fechamentos?: number;
+          popup_id?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "site_popup_daily_stats_popup_id_fkey";
+            columns: ["popup_id"];
+            isOneToOne: false;
+            referencedRelation: "site_popups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "site_popup_daily_stats_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      site_popups: {
+        Row: {
+          atraso_segundos: number;
+          audience_count: number | null;
+          audience_criteria: Json | null;
+          audience_generation: number;
+          audience_kind: string;
+          audience_label: string | null;
+          audience_refreshed_at: string | null;
+          botao_label: string | null;
+          botao_url: string | null;
+          created_at: string;
+          created_by: string | null;
+          ends_at: string | null;
+          formato: string;
+          frequencia: string;
+          frequencia_dias: number | null;
+          id: string;
+          image_url: string | null;
+          nome: string;
+          paginas: string[];
+          paginas_modo: string;
+          prioridade: number;
+          starts_at: string | null;
+          status: string;
+          tenant_id: string;
+          texto: string | null;
+          titulo: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          atraso_segundos?: number;
+          audience_count?: number | null;
+          audience_criteria?: Json | null;
+          audience_generation?: number;
+          audience_kind?: string;
+          audience_label?: string | null;
+          audience_refreshed_at?: string | null;
+          botao_label?: string | null;
+          botao_url?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          ends_at?: string | null;
+          formato?: string;
+          frequencia?: string;
+          frequencia_dias?: number | null;
+          id?: string;
+          image_url?: string | null;
+          nome: string;
+          paginas?: string[];
+          paginas_modo?: string;
+          prioridade?: number;
+          starts_at?: string | null;
+          status?: string;
+          tenant_id: string;
+          texto?: string | null;
+          titulo?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          atraso_segundos?: number;
+          audience_count?: number | null;
+          audience_criteria?: Json | null;
+          audience_generation?: number;
+          audience_kind?: string;
+          audience_label?: string | null;
+          audience_refreshed_at?: string | null;
+          botao_label?: string | null;
+          botao_url?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          ends_at?: string | null;
+          formato?: string;
+          frequencia?: string;
+          frequencia_dias?: number | null;
+          id?: string;
+          image_url?: string | null;
+          nome?: string;
+          paginas?: string[];
+          paginas_modo?: string;
+          prioridade?: number;
+          starts_at?: string | null;
+          status?: string;
+          tenant_id?: string;
+          texto?: string | null;
+          titulo?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "site_popups_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       sms_audiences: {
         Row: {
           created_at: string;
@@ -5831,6 +6086,7 @@ export type Database = {
           locked_at: string | null;
           locked_by: string | null;
           name: string;
+          provider_account_id: string | null;
           rate_per_minute: number;
           recipients: Json;
           route: string;
@@ -5857,6 +6113,7 @@ export type Database = {
           locked_at?: string | null;
           locked_by?: string | null;
           name: string;
+          provider_account_id?: string | null;
           rate_per_minute?: number;
           recipients?: Json;
           route?: string;
@@ -5883,6 +6140,7 @@ export type Database = {
           locked_at?: string | null;
           locked_by?: string | null;
           name?: string;
+          provider_account_id?: string | null;
           rate_per_minute?: number;
           recipients?: Json;
           route?: string;
@@ -6781,6 +7039,41 @@ export type Database = {
           },
         ];
       };
+      tenant_channel_account_options: {
+        Row: {
+          channel: string;
+          created_at: string;
+          created_by: string | null;
+          display_name: string;
+          provider_account_id: string;
+          tenant_id: string;
+        };
+        Insert: {
+          channel: string;
+          created_at?: string;
+          created_by?: string | null;
+          display_name: string;
+          provider_account_id: string;
+          tenant_id: string;
+        };
+        Update: {
+          channel?: string;
+          created_at?: string;
+          created_by?: string | null;
+          display_name?: string;
+          provider_account_id?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "tenant_channel_account_options_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       tenant_channel_notice_acks: {
         Row: {
           acked_at: string;
@@ -7319,6 +7612,145 @@ export type Database = {
           },
         ];
       };
+      voice_campaign_batches: {
+        Row: {
+          bulk_id: string;
+          campaign_id: string;
+          created_at: string;
+          destination_count: number;
+          id: string;
+          message_count: number;
+          provider_response: Json | null;
+          sent_at: string | null;
+          seq: number;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          bulk_id: string;
+          campaign_id: string;
+          created_at?: string;
+          destination_count?: number;
+          id?: string;
+          message_count?: number;
+          provider_response?: Json | null;
+          sent_at?: string | null;
+          seq: number;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          bulk_id?: string;
+          campaign_id?: string;
+          created_at?: string;
+          destination_count?: number;
+          id?: string;
+          message_count?: number;
+          provider_response?: Json | null;
+          sent_at?: string | null;
+          seq?: number;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "voice_campaign_batches_campaign_id_fkey";
+            columns: ["tenant_id", "campaign_id"];
+            isOneToOne: false;
+            referencedRelation: "voice_campaigns";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "voice_campaign_batches_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      voice_campaigns: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          dispatch_mode: string;
+          dtmf_enabled: boolean;
+          dtmf_max_digits: number;
+          dtmf_timeout_s: number;
+          id: string;
+          name: string;
+          recipient_count: number;
+          repeat_digit: string | null;
+          scheduled_at: string | null;
+          script_id: string | null;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+          voice_asset_id: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          dispatch_mode?: string;
+          dtmf_enabled?: boolean;
+          dtmf_max_digits?: number;
+          dtmf_timeout_s?: number;
+          id?: string;
+          name: string;
+          recipient_count?: number;
+          repeat_digit?: string | null;
+          scheduled_at?: string | null;
+          script_id?: string | null;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+          voice_asset_id?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          dispatch_mode?: string;
+          dtmf_enabled?: boolean;
+          dtmf_max_digits?: number;
+          dtmf_timeout_s?: number;
+          id?: string;
+          name?: string;
+          recipient_count?: number;
+          repeat_digit?: string | null;
+          scheduled_at?: string | null;
+          script_id?: string | null;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+          voice_asset_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "voice_campaigns_script_id_fkey";
+            columns: ["script_id"];
+            isOneToOne: false;
+            referencedRelation: "call_scripts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "voice_campaigns_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "voice_campaigns_voice_asset_id_fkey";
+            columns: ["voice_asset_id"];
+            isOneToOne: false;
+            referencedRelation: "journey_voice_assets";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       voice_contact_policies: {
         Row: {
           cooldown_hours: number;
@@ -7349,6 +7781,191 @@ export type Database = {
             foreignKeyName: "voice_contact_policies_tenant_id_fkey";
             columns: ["tenant_id"];
             isOneToOne: true;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      voice_dtmf_action_runs: {
+        Row: {
+          action_type: string;
+          attempts: number;
+          created_at: string;
+          error: string | null;
+          id: string;
+          next_attempt_at: string;
+          option_id: string | null;
+          response_id: string;
+          result: Json | null;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          action_type: string;
+          attempts?: number;
+          created_at?: string;
+          error?: string | null;
+          id?: string;
+          next_attempt_at?: string;
+          option_id?: string | null;
+          response_id: string;
+          result?: Json | null;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          action_type?: string;
+          attempts?: number;
+          created_at?: string;
+          error?: string | null;
+          id?: string;
+          next_attempt_at?: string;
+          option_id?: string | null;
+          response_id?: string;
+          result?: Json | null;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "voice_dtmf_action_runs_option_id_fkey";
+            columns: ["option_id"];
+            isOneToOne: false;
+            referencedRelation: "voice_dtmf_options";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "voice_dtmf_action_runs_response_id_fkey";
+            columns: ["response_id"];
+            isOneToOne: false;
+            referencedRelation: "voice_dtmf_responses";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "voice_dtmf_action_runs_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      voice_dtmf_options: {
+        Row: {
+          action_config: Json;
+          action_type: string;
+          created_at: string;
+          digit: string;
+          id: string;
+          label: string;
+          owner_id: string;
+          owner_type: string;
+          position: number;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          action_config?: Json;
+          action_type: string;
+          created_at?: string;
+          digit: string;
+          id?: string;
+          label?: string;
+          owner_id: string;
+          owner_type: string;
+          position?: number;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          action_config?: Json;
+          action_type?: string;
+          created_at?: string;
+          digit?: string;
+          id?: string;
+          label?: string;
+          owner_id?: string;
+          owner_type?: string;
+          position?: number;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "voice_dtmf_options_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      voice_dtmf_responses: {
+        Row: {
+          call_history_id: string | null;
+          call_queue_id: string | null;
+          digits: string | null;
+          id: string;
+          matched_option_id: string | null;
+          phone: string;
+          player_id: string | null;
+          received_at: string;
+          received_via: string;
+          tenant_id: string;
+        };
+        Insert: {
+          call_history_id?: string | null;
+          call_queue_id?: string | null;
+          digits?: string | null;
+          id?: string;
+          matched_option_id?: string | null;
+          phone: string;
+          player_id?: string | null;
+          received_at?: string;
+          received_via: string;
+          tenant_id: string;
+        };
+        Update: {
+          call_history_id?: string | null;
+          call_queue_id?: string | null;
+          digits?: string | null;
+          id?: string;
+          matched_option_id?: string | null;
+          phone?: string;
+          player_id?: string | null;
+          received_at?: string;
+          received_via?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "voice_dtmf_responses_call_history_id_fkey";
+            columns: ["call_history_id"];
+            isOneToOne: false;
+            referencedRelation: "call_history";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "voice_dtmf_responses_call_queue_id_fkey";
+            columns: ["call_queue_id"];
+            isOneToOne: false;
+            referencedRelation: "call_queue";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "voice_dtmf_responses_matched_option_id_fkey";
+            columns: ["matched_option_id"];
+            isOneToOne: false;
+            referencedRelation: "voice_dtmf_options";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "voice_dtmf_responses_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
             referencedRelation: "tenants";
             referencedColumns: ["id"];
           },
@@ -7440,6 +8057,7 @@ export type Database = {
           accept_label: string;
           cancel_label: string;
           icon_url: string | null;
+          popup_player_seen_at: string | null;
           prompt_text: string;
           public_token: string;
           tenant_id: string;
@@ -7449,6 +8067,7 @@ export type Database = {
           accept_label?: string;
           cancel_label?: string;
           icon_url?: string | null;
+          popup_player_seen_at?: string | null;
           prompt_text?: string;
           public_token?: string;
           tenant_id: string;
@@ -7458,6 +8077,7 @@ export type Database = {
           accept_label?: string;
           cancel_label?: string;
           icon_url?: string | null;
+          popup_player_seen_at?: string | null;
           prompt_text?: string;
           public_token?: string;
           tenant_id?: string;
@@ -7536,6 +8156,8 @@ export type Database = {
           first_seen_at: string | null;
           id: string;
           last_seen_at: string | null;
+          lead_billed_at: string | null;
+          lead_billing_ledger_id: string | null;
           linked_at: string | null;
           player_id: string | null;
           status: string;
@@ -7549,6 +8171,8 @@ export type Database = {
           first_seen_at?: string | null;
           id?: string;
           last_seen_at?: string | null;
+          lead_billed_at?: string | null;
+          lead_billing_ledger_id?: string | null;
           linked_at?: string | null;
           player_id?: string | null;
           status?: string;
@@ -7562,6 +8186,8 @@ export type Database = {
           first_seen_at?: string | null;
           id?: string;
           last_seen_at?: string | null;
+          lead_billed_at?: string | null;
+          lead_billing_ledger_id?: string | null;
           linked_at?: string | null;
           player_id?: string | null;
           status?: string;
@@ -7575,6 +8201,13 @@ export type Database = {
             columns: ["app_id"];
             isOneToOne: false;
             referencedRelation: "tenant_webpush_apps";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "push_subscriptions_lead_billing_ledger_id_fkey";
+            columns: ["lead_billing_ledger_id"];
+            isOneToOne: false;
+            referencedRelation: "wallet_ledger";
             referencedColumns: ["id"];
           },
           {
@@ -9252,6 +9885,17 @@ export type Database = {
         Args: { p_tenant_id?: string };
         Returns: number;
       };
+      voice_campaign_item_counts: {
+        Args: { p_campaign_ids: string[]; p_now?: string };
+        Returns: {
+          is_future: boolean;
+          item_count: number;
+          provider_status: string | null;
+          sample_item_id: string | null;
+          status: string;
+          voice_campaign_id: string;
+        }[];
+      };
       wallet_mutation: {
         Args: {
           _amount: number;
@@ -9365,9 +10009,25 @@ export type Database = {
         Args: { p_app: string };
         Returns: number;
       };
+      site_popup_record_event: {
+        Args: { p_kind: string; p_popup_id: string };
+        Returns: boolean;
+      };
+      site_popup_set_audience_generation: {
+        Args: { p_count: number; p_generation: number; p_popup_id: string };
+        Returns: undefined;
+      };
       webpush_app_active_count: {
         Args: { p_app: string };
         Returns: number;
+      };
+      webpush_lead_billing_tenants: {
+        Args: { _limit?: number };
+        Returns: string[];
+      };
+      webpush_lead_bill_tenant: {
+        Args: { _limit?: number; _tenant: string };
+        Returns: Json;
       };
     };
     Enums: {

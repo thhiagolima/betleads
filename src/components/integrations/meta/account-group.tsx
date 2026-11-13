@@ -4,6 +4,7 @@ import { AlertTriangle, Check, Minus } from "lucide-react";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Term } from "@/components/help/term";
 import {
   META_TEXTS,
   type AccountRow,
@@ -164,7 +165,9 @@ export function AccountGroup({
           />
         </DemoDisabledTooltip>
         <h3 id={headingId} className="min-w-0 text-sm font-semibold">
-          <span className="break-words">BM {group.name}</span>{" "}
+          <span className="break-words">
+            <Term id="bm">BM</Term> {group.name}
+          </span>{" "}
           <span className="font-normal text-muted-foreground">
             ({group.selectedCount} de {group.rows.length}{" "}
             {filtered ? "visíveis marcadas" : "marcadas"})

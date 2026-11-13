@@ -1,4 +1,5 @@
 import { brl, num } from "@/lib/format";
+import { tourAnchor } from "@/help/anchor";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -35,7 +36,12 @@ export function HealthIndicator({ data }: { data: Data }) {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button size="sm" variant="ghost" className="gap-2 text-muted-foreground">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="gap-2 text-muted-foreground"
+          {...tourAnchor("resultados.saude.indicador")}
+        >
           <span
             className={`h-2 w-2 rounded-full ${ok ? "bg-success" : "bg-warning"}`}
             aria-hidden="true"
@@ -83,7 +89,7 @@ function HealthDetails({ data }: { data: Data }) {
       />
       <HealthLine
         ok={diff != null && diff <= 0.01}
-        label="Envios conferidos com o registro de SMS"
+        label="SMS enviados conferidos com o registro de SMS"
         value={
           health.rawSent == null
             ? "não disponível"
@@ -125,9 +131,9 @@ function HealthLine({ ok, label, value }: { ok: boolean; label: string; value: s
 }
 
 const CHECK_LABELS: Record<string, string> = {
-  sends: "Envios conferem com o registro de SMS",
+  sends: "SMS enviados conferem com o registro de SMS",
   cost: "Custo confere com o preço por segmento cobrado",
-  direct: "Conversões por clique conferem com as atribuições",
+  direct: "Voltas pelo link conferem com as atribuições",
 };
 
 function ConsistencyChecks({ checks }: { checks: Data["health"]["checks"] }) {

@@ -22,6 +22,11 @@ import {
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 import { logCallHistoryInsertError } from "./voice-history-log";
 import { bulkDispatchCallsFor } from "./calls-bulk.server";
+import {
+  cancelVoiceCampaignFor,
+  listVoiceCampaignsFor,
+  syncVoiceCampaignAfterItemCancel,
+} from "./voice-campaigns.server";
 import { evaluateVoiceContactPolicy } from "./consent.server";
 import { assertChannelEnabled } from "./tenant-channels.server";
 import { CHANNEL_DISABLED_MESSAGE } from "./tenant-channels.shared";
@@ -656,6 +661,7 @@ export const cancelCallQueueItem = createServerFn({ method: "POST" })
       .update({ status: "cancelled" })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
+    await syncVoiceCampaignAfterItemCancel(context.supabase, data.id);
     return { ok: true };
   });
 
@@ -685,6 +691,9 @@ export const updateCallQueueStatus = createServerFn({ method: "POST" })
       .update({ status: data.status })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
+    if (data.status === "cancelled") {
+      await syncVoiceCampaignAfterItemCancel(context.supabase, data.id);
+    }
     return { ok: true };
   });
 
@@ -912,8 +921,7 @@ const bulkDispatchCallsInput = z
           phone_number: z.string().max(40).nullable().optional(),
         }),
       )
-      .min(1)
-      .max(200),
+      .min(1),
   })
   .refine((value) => Boolean(value.script_id) !== Boolean(value.asset_id), {
     message: "Selecione um script TTS ou um áudio fixo da biblioteca.",
@@ -924,7 +932,25 @@ export type BulkDispatchCallsInput = z.infer<typeof bulkDispatchCallsInput>;
 export const bulkDispatchCalls = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => bulkDispatchCallsInput.parse(input))
-  .handler(async ({ data, context }) => bulkDispatchCallsFor(context.supabase, data));
+  .handler(async ({ data, context }) =>
+    bulkDispatchCallsFor(context.supabase, data, { userId: context.userId }),
+  );
+
+// ============================================================
+// CAMPANHAS DE VOZ (voice_campaigns)
+// ============================================================
+/**
+ * Voice campaigns for the campaigns hub: `voice_campaigns` rows plus the queue
+ * items created before the entity (grouped by trigger_name, as before).
+ */
+export const listVoiceCampaigns = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => listVoiceCampaignsFor(context.supabase));
+
+export const cancelVoiceCampaign = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ id: dbUuid() }).parse(input))
+  .handler(async ({ data, context }) => cancelVoiceCampaignFor(context.supabase, data.id));
 
 // ============================================================
 // DASHBOARD

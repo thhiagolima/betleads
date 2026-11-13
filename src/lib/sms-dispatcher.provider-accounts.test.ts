@@ -49,7 +49,6 @@ vi.mock("@/integrations/supabase/client.server", () => {
   return { supabaseAdmin: { from, rpc: state.rpc } };
 });
 
-vi.mock("./send-window.server", () => ({ deferIfOutsideWindow: vi.fn(async () => null) }));
 vi.mock("./dispatch-rate.server", () => ({
   consumeBudget: vi.fn(async (_c: string, n: number) => n),
   countQueuePending: vi.fn(async () => 0),
@@ -96,20 +95,29 @@ vi.mock("./dispatch-pause-insufficient.server", async (importOriginal) => ({
 const OWN_ACCOUNT = "55555555-5555-4555-8555-555555555555";
 const TENANT_A = "00000000-0000-4000-8000-00000000000a"; // platform account
 const TENANT_B = "00000000-0000-4000-8000-00000000000b"; // own account
+const CHOSEN_ACCOUNT = "66666666-6666-4666-8666-666666666666"; // a house option
+const GONE_ACCOUNT = "77777777-7777-4777-8777-777777777777"; // option removed
 
 vi.mock("./provider-accounts.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./provider-accounts.server")>();
   return {
     ...actual,
-    resolveSmsAccount: vi.fn(async (tenantId: string | null) =>
-      tenantId === TENANT_B
-        ? { ...actual.envShortBrasilAccount(), id: OWN_ACCOUNT }
-        : actual.envShortBrasilAccount(),
+    resolveSmsAccount: vi.fn(async (tenantId: string | null, accountId?: string | null) =>
+      accountId
+        ? { ...actual.envShortBrasilAccount(), id: accountId }
+        : tenantId === TENANT_B
+          ? { ...actual.envShortBrasilAccount(), id: OWN_ACCOUNT }
+          : actual.envShortBrasilAccount(),
+    ),
+    smsSendChoiceProblem: vi.fn(async (_tenantId: string, accountId: string | null) =>
+      accountId === GONE_ACCOUNT ? actual.SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE : null,
     ),
   };
 });
 
-import { runSmsDispatcher } from "./sms-dispatcher.server";
+import { campaignProviderGate, runSmsDispatcher } from "./sms-dispatcher.server";
+import { SmsAccountGates } from "./sms-account-gates.server";
+import { SMS_CAMPAIGN_ACCOUNT_UNAVAILABLE_MESSAGE } from "./sms-campaign-dispatch.server";
 import { sendSmsInternal } from "./sms.functions";
 import { pauseChannelForInsufficientFunds } from "./dispatch-pause-insufficient.server";
 import { registerThrottle } from "./dispatch-rate.server";
@@ -240,5 +248,38 @@ describe("SMS flow dispatcher — breaker per provider account", () => {
     await runSmsDispatcher({ limit: 10 });
 
     expect(registerThrottle).toHaveBeenCalledWith("sms", 60, expect.any(String));
+  });
+});
+
+describe("campaignProviderGate — account chosen for the campaign", () => {
+  const campaignOf = (provider_account_id: string | null) => ({
+    id: "88888888-8888-4888-8888-888888888888",
+    tenant_id: TENANT_A,
+    provider_account_id,
+  });
+
+  it("no chosen account: the house default gate (same as before)", async () => {
+    const gates = new SmsAccountGates("run-campaign");
+    expect(await campaignProviderGate(gates, campaignOf(null))).toEqual({ mode: "closed" });
+  });
+
+  it("chosen option removed/disabled: open + accountUnavailable (the tick pauses the campaign)", async () => {
+    const gates = new SmsAccountGates("run-campaign");
+    expect(await campaignProviderGate(gates, campaignOf(GONE_ACCOUNT))).toEqual({
+      mode: "open",
+      message: SMS_CAMPAIGN_ACCOUNT_UNAVAILABLE_MESSAGE,
+      accountUnavailable: true,
+    });
+  });
+
+  it("the breaker of the CHOSEN account decides, not the house default", async () => {
+    state.breakers.set(`sms:${CHOSEN_ACCOUNT}`, "open");
+    const gates = new SmsAccountGates("run-campaign");
+    const decision = await campaignProviderGate(gates, campaignOf(CHOSEN_ACCOUNT));
+    expect(decision.mode).toBe("open");
+    expect(decision).not.toHaveProperty("accountUnavailable");
+    expect(
+      await campaignProviderGate(new SmsAccountGates("run-other"), campaignOf(null)),
+    ).toEqual({ mode: "closed" });
   });
 });

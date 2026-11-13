@@ -128,7 +128,7 @@ const screen: HelpScreen = {
           label: "Lista de áreas",
           what: 'Administrador vê tudo: Início; Resultados (Resultados do CRM, Aquisição e LTV, e também Rendimento da equipe e Financeiro quando a casa tem esses recursos); Jogadores (Jogadores, Públicos, Níveis e fidelização, Experts); Ações (Campanhas, Automações); Canais (SMS, Email, Voz, Consentimentos, e o grupo "Templates e áudios" com Templates de SMS/Templates de email/Áudios e scripts); IA (Assistente IA, Configurar IA); Configurações (Plano e créditos, Integrações, Configuração da casa, Configurações). Gestor e membro veem a mesma lista, menos "Rendimento da equipe", "Experts" e a seção "IA" inteira — essas são só do administrador; "Financeiro" só aparece para quem tem acesso liberado ao financeiro, e "Meu rendimento" só para quem tem um perfil de equipe cadastrado na casa.',
           notes:
-            'O grupo "Templates e áudios" abre uma lista com um clique (no menu recolhido, abre ao lado, num balão). Quando a conexão com o Claude está disponível para você, um item extra "Conectar ao Claude" aparece no fim da lista. A seção "Administração" (só para super admin) não é descrita aqui.',
+            'O grupo "Templates e áudios" abre uma lista com um clique (no menu recolhido, abre ao lado, num balão). Quando a conexão com o Claude está disponível para você, um item extra "Conectar ao Claude" aparece no fim da lista. A seção "Administração" (só para super admin) não é descrita aqui. SMS, Email e Voz (e o respectivo item em "Templates e áudios") somem do menu quando o super admin desliga aquele canal para a casa — o menu fica só com os canais ligados, e um grupo que perder todos os seus itens some junto.',
         },
         {
           label: "Papel: expert",
@@ -194,6 +194,12 @@ const screen: HelpScreen = {
       id: "tempo-real-em-espera",
       title: "Em espera",
       what: "Bolinha cinza: nenhuma tela aberta no momento está pedindo atualização em tempo real.",
+    },
+    {
+      id: "canal-desabilitado-aviso",
+      title: "Aviso de canal desabilitado",
+      what: 'Tela cheia que aparece por cima de tudo, uma única vez, quando o super admin desliga um canal (SMS, E-mail, Voz ou Web Push) desta casa: "O canal [nome do canal] foi desabilitado para a sua casa pela BetLeads. Ele não aparece mais no painel, e os passos desse canal nas jornadas serão pulados." O super admin nunca vê este aviso.',
+      action: 'Clique em "Ciente" para fechar — o aviso não volta a aparecer para o mesmo canal depois disso (a não ser que ele seja desligado de novo mais tarde). Se mais de um canal foi desligado, os avisos aparecem um de cada vez.',
     },
     {
       id: "demo-acao-bloqueada",

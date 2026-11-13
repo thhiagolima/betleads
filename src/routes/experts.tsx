@@ -44,6 +44,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { firstIndexWhere, tourAnchor } from "@/help/anchor";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
@@ -115,6 +116,13 @@ function ExpertsPage() {
   const pendingTotal = (usageQuery.data?.items ?? []).reduce((sum, u) => sum + u.pendentes, 0);
 
   const experts = expertsQuery.data ?? [];
+  // Per-row action anchors go on the first row that shows that action.
+  const firstSemAcesso = firstIndexWhere(experts, (e) => e.acesso === "sem_acesso");
+  const firstEquipe = firstIndexWhere(experts, (e) => e.acesso === "equipe");
+  const firstComAcesso = firstIndexWhere(
+    experts,
+    (e) => e.acesso !== "sem_acesso" && e.acesso !== "equipe",
+  );
   const unassigned = unassignedQuery.data ?? [];
   // null até carregar: o diálogo não salva um padrão por cima da janela real.
   const janelaHoras = clickWindowQuery.data?.janelaHoras ?? null;
@@ -176,12 +184,22 @@ function ExpertsPage() {
         subtitle="Cadastre quem acompanha os leads da casa, por ID de afiliado ou com acesso total."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" className="gap-2" onClick={() => setSettingsOpen(true)}>
+            <Button
+              variant="outline"
+              className="gap-2"
+              {...tourAnchor("experts.header.regras-credito")}
+              onClick={() => setSettingsOpen(true)}
+            >
               <Settings className="h-4 w-4" />
               Regras de crédito
             </Button>
             <DemoDisabledTooltip active={isDemo}>
-              <Button className="gap-2" disabled={isDemo} onClick={() => openCreate()}>
+              <Button
+                className="gap-2"
+                disabled={isDemo}
+                {...tourAnchor("experts.header.novo")}
+                onClick={() => openCreate()}
+              >
                 <Plus className="h-4 w-4" />
                 Novo expert
               </Button>
@@ -191,7 +209,7 @@ function ExpertsPage() {
       />
 
       {pendingTotal > 0 && (
-        <Card id="aprovacoes">
+        <Card id="aprovacoes" {...tourAnchor("experts.aprovacoes.card")}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               Aprovações pendentes
@@ -209,7 +227,7 @@ function ExpertsPage() {
         </Card>
       )}
 
-      <Card>
+      <Card {...tourAnchor("experts.tabela.card")}>
         <CardHeader>
           <CardTitle>Experts ({experts.length})</CardTitle>
         </CardHeader>
@@ -229,7 +247,7 @@ function ExpertsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {experts.map((expert) => (
+              {experts.map((expert, index) => (
                 <TableRow key={expert.id}>
                   <TableCell className="font-medium">
                     <Link
@@ -288,6 +306,7 @@ function ExpertsPage() {
                           size="sm"
                           variant="outline"
                           disabled={isDemo}
+                          {...(index === 0 ? tourAnchor("experts.linha.editar") : {})}
                           onClick={() => openEdit(expert)}
                         >
                           Editar
@@ -300,6 +319,7 @@ function ExpertsPage() {
                             size="sm"
                             variant="outline"
                             disabled={isDemo}
+                            {...(index === firstSemAcesso ? tourAnchor("experts.linha.convidar") : {})}
                             onClick={() => setInviteExpertRow(expert)}
                           >
                             Convidar
@@ -313,6 +333,7 @@ function ExpertsPage() {
                             size="sm"
                             variant="outline"
                             disabled={isDemo}
+                            {...(index === firstSemAcesso ? tourAnchor("experts.linha.vincular") : {})}
                             onClick={() => setTeamLinkExpertRow(expert)}
                           >
                             Vincular a alguém da equipe
@@ -326,6 +347,7 @@ function ExpertsPage() {
                             size="sm"
                             variant="outline"
                             disabled={isDemo || removeAccess.isPending}
+                            {...(index === firstEquipe ? tourAnchor("experts.linha.desvincular") : {})}
                             onClick={async () => {
                               const confirmed = await requestConfirmation({
                                 title: `Desvincular o perfil ${expert.nome}?`,
@@ -349,6 +371,7 @@ function ExpertsPage() {
                             size="sm"
                             variant="outline"
                             disabled={isDemo || removeAccess.isPending}
+                            {...(index === firstComAcesso ? tourAnchor("experts.linha.remover-acesso") : {})}
                             onClick={async () => {
                               const confirmed = await requestConfirmation({
                                 title: `Remover o acesso de ${expert.nome}?`,
@@ -371,6 +394,7 @@ function ExpertsPage() {
                           size="sm"
                           variant="outline"
                           disabled={isDemo || toggleActive.isPending}
+                          {...(index === 0 ? tourAnchor("experts.linha.ativar") : {})}
                           onClick={() =>
                             toggleActive.mutate({ expertId: expert.id, ativo: !expert.ativo })
                           }
@@ -386,6 +410,7 @@ function ExpertsPage() {
                             variant="ghost"
                             className="text-destructive hover:text-destructive"
                             disabled={isDemo || remove.isPending}
+                            {...(index === firstSemAcesso ? tourAnchor("experts.linha.excluir") : {})}
                             onClick={async () => {
                               const confirmed = await requestConfirmation({
                                 title: `Excluir o expert ${expert.nome}?`,
@@ -417,13 +442,13 @@ function ExpertsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card {...tourAnchor("experts.sem-expert.card")}>
         <CardHeader>
           <CardTitle>IDs de afiliado sem expert</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
-            {unassigned.map((row) => (
+            {unassigned.map((row, index) => (
               <div
                 key={row.affiliateId}
                 className="flex items-center justify-between gap-3 rounded-md border border-border/60 p-3"
@@ -438,6 +463,7 @@ function ExpertsPage() {
                     variant="outline"
                     className="gap-1.5"
                     disabled={isDemo}
+                    {...(index === 0 ? tourAnchor("experts.sem-expert.criar") : {})}
                     onClick={() => openCreate(row.affiliateId)}
                   >
                     <UserPlus className="h-3.5 w-3.5" />

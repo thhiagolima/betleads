@@ -8,6 +8,7 @@ import { tourAnchor } from "@/help/anchor";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { SmsTemplateDialog } from "@/components/sms/sms-template-dialog";
+import { SmsSendAccountSelect, useSmsSendAccounts } from "@/components/sms/sms-send-account-select";
 import { ScriptFormDialog } from "@/components/ligacoes/script-form-dialog";
 import { VoiceAssetUploadDialog } from "@/components/ligacoes/voice-asset-upload-dialog";
 import {
@@ -64,6 +65,8 @@ function renderMessage(message: string, name: string, phone: string) {
     .replaceAll("{telefone}", phone);
 }
 
+const SMS_ACCOUNT_FIELD_ID = "individual-sms-conta";
+
 export function IndividualSmsDialog({
   open,
   onOpenChange,
@@ -115,6 +118,9 @@ export function IndividualSmsDialog({
   const [voiceScriptDialogOpen, setVoiceScriptDialogOpen] = useState(false);
   const [voiceUploadDialogOpen, setVoiceUploadDialogOpen] = useState(false);
   const [trackLinks, setTrackLinks] = useState(true);
+  // Account the test goes out through; null = "Padrão da casa".
+  const [smsAccountId, setSmsAccountId] = useState<string | null>(null);
+  const smsAccount = useSmsSendAccounts(smsAccountId, open && channel === "sms");
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const digits = phone.replace(/\D/g, "");
   const previewContent = previewTrackedText(message, trackLinks);
@@ -214,8 +220,14 @@ export function IndividualSmsDialog({
       }
       // Avulso: não passa pela resolução de campanha, então não exige que o
       // número pertença a um jogador cadastrado.
+      if (smsAccount.error) throw new Error(smsAccount.error);
       const result = await sendSms({
-        data: { to: digits, content: renderMessage(message, name, digits), trackLinks },
+        data: {
+          to: digits,
+          content: renderMessage(message, name, digits),
+          trackLinks,
+          providerAccountId: smsAccount.providerAccountId,
+        },
       });
       if (!result.ok) throw new Error(result.error ?? "Não foi possível enviar o SMS.");
       return result;
@@ -255,7 +267,7 @@ export function IndividualSmsDialog({
       : digits.length >= 10 &&
         (channel === "voice"
           ? Boolean(voiceMode === "script" ? scriptId : voiceAssetId)
-          : Boolean(message.trim())));
+          : Boolean(message.trim()) && !smsAccount.error));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -318,6 +330,20 @@ export function IndividualSmsDialog({
               />
             </div>
           </div>
+          {channel === "sms" && smsAccount.showChoice && (
+            <div>
+              <SmsSendAccountSelect
+                id={SMS_ACCOUNT_FIELD_ID}
+                choices={smsAccount.choices}
+                value={smsAccountId}
+                onChange={setSmsAccountId}
+                invalid={Boolean(smsAccount.error)}
+              />
+              {smsAccount.error ? (
+                <p className="mt-1 text-xs text-destructive">{smsAccount.error}</p>
+              ) : null}
+            </div>
+          )}
           {channel === "email" && (
             <div className="space-y-3 rounded-xl border bg-muted/20 p-3">
               <div className="space-y-1.5">

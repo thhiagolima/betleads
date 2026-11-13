@@ -20,6 +20,7 @@ import {
   dispatchCallQueueItem,
 } from "@/lib/calls.functions";
 import { QUEUE_STATUS_LABEL } from "./shared";
+import { tourAnchor } from "@/help/anchor";
 
 export function QueueTab() {
   const qc = useQueryClient();
@@ -105,6 +106,7 @@ export function QueueTab() {
             onClick={() => retryAllMut.mutate()}
             disabled={retryAllMut.isPending}
             className="gap-2"
+            {...tourAnchor("ligacoes.fila.retentar")}
           >
             {retryAllMut.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -132,8 +134,8 @@ export function QueueTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((it: any) => (
-                <TableRow key={it.id}>
+              {items.map((it: any, i: number) => (
+                <TableRow key={it.id} {...(i === 0 ? tourAnchor("ligacoes.fila.tabela") : {})}>
                   <TableCell>
                     <Badge variant="outline">{QUEUE_STATUS_LABEL[it.status] ?? it.status}</Badge>
                   </TableCell>

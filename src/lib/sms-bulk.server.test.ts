@@ -507,6 +507,60 @@ describe("sendSmsBatch (ENV-10, Short Brasil bulk)", () => {
       expect(logFor(key(2))[0].provider_account_id).toBe(OWN_ACCOUNT);
     });
 
+    it("items of a campaign with a chosen account (house option) go out through that account", async () => {
+      settings("block");
+      vi.stubEnv("PROVIDER_CREDENTIALS_ENCRYPTION_KEY", "k".repeat(40));
+      fake.db.rows("provider_accounts").push({
+        id: OWN_ACCOUNT,
+        provider: "short_brasil",
+        label: "Rota extra",
+        channels: ["sms"],
+        credentials_source: "db",
+        credentials_encrypted: await encryptProviderCredentials({ usuario: "own-user", chave: "own-key" }),
+        config: { bulk_url: "https://own.example.test/bot/bulk-sms.php" },
+        status: "active",
+      });
+      const tenantId = item(1).tenantId;
+      fake.db.rows("tenant_channel_account_options").push({
+        tenant_id: tenantId,
+        channel: "sms",
+        provider_account_id: OWN_ACCOUNT,
+        display_name: "Rota principal",
+      });
+      __resetProviderAccountsCacheForTests();
+      const chosen = { providerAccountId: OWN_ACCOUNT };
+      const r = await sendSmsBatch([item(1), item(2, chosen), item(3, chosen)]);
+
+      expect(r.outcomes.map((o) => o.status)).toEqual(["accepted", "accepted", "accepted"]);
+      expect(bulkRequests()).toEqual([
+        {
+          url: "http://lp01-short.painelsms.com/bot/bulk-sms.php",
+          usuario: "user",
+          parceiroIds: [key(1)],
+        },
+        {
+          url: "https://own.example.test/bot/bulk-sms.php",
+          usuario: "own-user",
+          parceiroIds: [key(2), key(3)],
+        },
+      ]);
+      expect(logFor(key(2))[0].provider_account_id).toBe(OWN_ACCOUNT);
+    });
+
+    it("a chosen account that is not an option of the house fails retryable, nothing sent", async () => {
+      settings("block");
+      await giveOtherHouseOwnAccount();
+      // OWN_ACCOUNT belongs to OTHER (override), not an option of item()'s house.
+      const r = await sendSmsBatch([item(1, { providerAccountId: OWN_ACCOUNT })]);
+      expect(r.outcomes[0]).toMatchObject({
+        status: "failed",
+        retryable: true,
+        errorKind: "misconfigured",
+      });
+      expect(bulkRequests()).toEqual([]);
+      expect(credits.charged()).toBe(0);
+    });
+
     it("a house whose own account is disabled fails retryable, never via the platform account", async () => {
       settings("block");
       await giveOtherHouseOwnAccount("disabled");

@@ -10,8 +10,6 @@ import { pickHighestPriority, priorityRank } from "./priorities";
 import {
   getAntibanSettings,
   applyAntibanCaps,
-  isWithinOperationalWindow,
-  nextWindowStart,
   type AntibanSettings,
 } from "./antiban.server";
 import {
@@ -469,34 +467,14 @@ async function shouldExit(
 // DISPATCH — envia próximo bloco dos flow_leads prontos
 // ---------------------------------------------------------------
 export async function runDispatcher(
-  opts: { limit?: number; bypassWindow?: boolean; onlyLeadId?: string; tenantId?: string } = {},
+  opts: { limit?: number; onlyLeadId?: string; tenantId?: string } = {},
 ) {
   const limit = opts.limit ?? 30;
   const nowIso = new Date().toISOString();
   const antiban = await getAntibanSettings();
-  const now = new Date();
-  // Demo tenants' flow_leads are never postponed nor picked up.
+  // Demo tenants' flow_leads are never picked up.
   const demoTenantIds = await listDemoTenantIds();
   const demoTenantList = `(${demoTenantIds.join(",")})`;
-
-  // Janela operacional: fora dela, reagenda todos os leads prontos para o próximo
-  // início da janela MAS sem mudar o status — mudar para "cooldown" impedia
-  // que esses leads voltassem à fila quando a janela reabrisse (o dispatcher
-  // só lia pending/running). Agora apenas empurramos o next_run_at.
-  if (!opts.bypassWindow && !isWithinOperationalWindow(now, antiban)) {
-    const nextStart = nextWindowStart(now, antiban).toISOString();
-    let postponeQuery = supabaseAdmin
-      .from("flow_leads")
-      .update({ next_run_at: nextStart })
-      .in("status", ["pending", "running", "cooldown"])
-      .lte("next_run_at", nowIso);
-    if (opts.tenantId) postponeQuery = postponeQuery.eq("tenant_id", opts.tenantId);
-    if (demoTenantIds.length > 0) {
-      postponeQuery = postponeQuery.not("tenant_id", "in", demoTenantList);
-    }
-    await postponeQuery;
-    return { processed: 0, sent: 0, skipped: "out-of-window" };
-  }
 
   let dueQuery = supabaseAdmin
     .from("flow_leads")

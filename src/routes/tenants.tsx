@@ -74,6 +74,7 @@ import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { CURRENCY_LABEL, TENANT_CURRENCIES, toTenantCurrency } from "@/lib/currency";
+import { tourAnchor } from "@/help/anchor";
 
 export const Route = createFileRoute("/tenants")({
   component: TenantsPage,
@@ -370,6 +371,7 @@ function TenantsPage() {
             <Button
               variant="outline"
               onClick={() => qc.invalidateQueries({ queryKey: ["tenants-console"] })}
+              {...tourAnchor("conta.header.atualizar")}
             >
               Atualizar
             </Button>
@@ -471,7 +473,10 @@ function TenantWorkspace({
   // Summary numbers live only in this row; the tabs below don't repeat them.
   return (
     <div className="min-w-0 space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        {...tourAnchor("conta.resumo.cartoes")}
+      >
         <MetricCard
           label="Equipe"
           value={num(detail.users.length)}
@@ -490,7 +495,14 @@ function TenantWorkspace({
         <MetricCard label="Comprado" value={brl(purchased)} hint="total desde o início" />
       </div>
 
-      <PageTabs value={tab} onValueChange={setTab} items={WORKSPACE_TABS} label="Seções da conta" />
+      <div {...tourAnchor("conta.abas")}>
+        <PageTabs
+          value={tab}
+          onValueChange={setTab}
+          items={WORKSPACE_TABS}
+          label="Seções da conta"
+        />
+      </div>
 
       <div role="tabpanel" aria-labelledby={`tab-${tab}`}>
         {tab === "overview" && <OverviewTab detail={detail} isSuperAdmin={isSuperAdmin} />}
@@ -514,7 +526,11 @@ function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)]">
-      <DataCard title="Dados da casa" bodyClassName="grid gap-4 sm:grid-cols-2">
+      <DataCard
+        {...tourAnchor("conta.visao.dados")}
+        title="Dados da casa"
+        bodyClassName="grid gap-4 sm:grid-cols-2"
+      >
         <Info label="Nome" value={tenant.nome} />
         <Info label="Status" value={statusBadge(tenant.status)} />
         <Info label="Plano" value={labelFrom(PLANO_LABEL, tenant.plano)} />
@@ -525,7 +541,11 @@ function OverviewTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
         <Info label="Criada em" value={fmtDate(tenant.created_at)} />
       </DataCard>
 
-      <DataCard title="Saúde operacional" bodyClassName="space-y-3">
+      <DataCard
+        {...tourAnchor("conta.visao.saude")}
+        title="Saúde operacional"
+        bodyClassName="space-y-3"
+      >
         <HealthLine label="Saldo disponível" ok={Number(detail.sms.summary.balance ?? 0) > 0} />
         <HealthLine
           label="Administrador na equipe"
@@ -604,7 +624,7 @@ function UsersTab({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {detail.users.map((user) => (
+          {detail.users.map((user, i) => (
             <TableRow key={user.id}>
               <TableCell className="font-medium">{user.email ?? "Sem e-mail cadastrado"}</TableCell>
               <TableCell>
@@ -613,6 +633,7 @@ function UsersTab({
                   user={user}
                   isSuperAdmin={isSuperAdmin}
                   canManage={canManage}
+                  isFirstRow={i === 0}
                 />
               </TableCell>
               <TableCell className="whitespace-nowrap">{fmtDate(user.last_sign_in_at)}</TableCell>
@@ -624,7 +645,9 @@ function UsersTab({
                 )}
               </TableCell>
               <TableCell className="text-right">
-                {canManage && <RemoveUserButton tenantId={detail.tenant.id} user={user} />}
+                {canManage && (
+                  <RemoveUserButton tenantId={detail.tenant.id} user={user} isFirstRow={i === 0} />
+                )}
               </TableCell>
             </TableRow>
           ))}
@@ -673,7 +696,7 @@ function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAd
     <Dialog open={open} onOpenChange={setOpen}>
       <DemoDisabledTooltip active={isDemo}>
         <DialogTrigger asChild>
-          <Button className="gap-2" disabled={isDemo}>
+          <Button className="gap-2" disabled={isDemo} {...tourAnchor("conta.equipe.adicionar")}>
             <UserPlus className="h-4 w-4" />
             Adicionar pessoa
           </Button>
@@ -733,11 +756,13 @@ function RoleSelect({
   user,
   isSuperAdmin,
   canManage,
+  isFirstRow = false,
 }: {
   tenantId: string;
   user: TenantUser;
   isSuperAdmin: boolean;
   canManage: boolean;
+  isFirstRow?: boolean;
 }) {
   const isDemo = useIsDemoTenant(tenantId);
   const qc = useQueryClient();
@@ -773,7 +798,7 @@ function RoleSelect({
       onValueChange={(value) => mut.mutate(value as TenantUser["role"])}
     >
       <DemoDisabledTooltip active={isDemo}>
-        <SelectTrigger className="w-44">
+        <SelectTrigger className="w-44" {...(isFirstRow ? tourAnchor("conta.equipe.papel") : {})}>
           <SelectValue />
         </SelectTrigger>
       </DemoDisabledTooltip>
@@ -786,7 +811,15 @@ function RoleSelect({
   );
 }
 
-function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUser }) {
+function RemoveUserButton({
+  tenantId,
+  user,
+  isFirstRow = false,
+}: {
+  tenantId: string;
+  user: TenantUser;
+  isFirstRow?: boolean;
+}) {
   const isDemo = useIsDemoTenant(tenantId);
   const qc = useQueryClient();
   const fn = useServerFn(removeUserFromTenant);
@@ -822,6 +855,7 @@ function RemoveUserButton({ tenantId, user }: { tenantId: string; user: TenantUs
         label={`Remover ${label} da equipe`}
         disabled={isDemo || mut.isPending}
         icon={<Trash2 className="h-4 w-4 text-danger" />}
+        {...(isFirstRow ? tourAnchor("conta.equipe.remover") : {})}
         onClick={async () => {
           const confirmed = await requestConfirmation({
             title: "Remover pessoa da equipe?",
@@ -899,7 +933,11 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
       <CurrentPricesCard prices={detail.sms.summary.prices ?? {}} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <DataCard title="Extrato" bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3">
+        <DataCard
+          {...tourAnchor("conta.saldo.extrato")}
+          title="Extrato"
+          bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3"
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -941,7 +979,11 @@ function CreditsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAdm
           </Table>
         </DataCard>
 
-        <DataCard title="Pedidos de compra" bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3">
+        <DataCard
+          {...tourAnchor("conta.saldo.pedidos")}
+          title="Pedidos de compra"
+          bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3"
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -1140,7 +1182,10 @@ function ReportsTab({ detail }: { detail: TenantDetail }) {
   ];
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div
+      className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+      {...tourAnchor("conta.relatorios.cartoes")}
+    >
       {items.map((item) => (
         <MetricCard key={item.label} label={item.label} value={num(item.value)} />
       ))}
@@ -1154,6 +1199,7 @@ function AuditTab({ detail }: { detail: TenantDetail }) {
   );
   return (
     <DataCard
+      {...tourAnchor("conta.historico.tabela")}
       title="Histórico de alterações"
       bodyClassName="overflow-x-auto p-0 pt-3 sm:p-0 sm:pt-3"
     >
@@ -1168,7 +1214,7 @@ function AuditTab({ detail }: { detail: TenantDetail }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {detail.audit.map((entry) => (
+          {detail.audit.map((entry, i) => (
             <TableRow key={entry.id}>
               <TableCell className="whitespace-nowrap">{fmtDate(entry.created_at)}</TableCell>
               <TableCell>
@@ -1182,7 +1228,12 @@ function AuditTab({ detail }: { detail: TenantDetail }) {
               </TableCell>
               <TableCell>
                 <details className="max-w-xl">
-                  <summary className="cursor-pointer text-primary">ver detalhes</summary>
+                  <summary
+                    className="cursor-pointer text-primary"
+                    {...(i === 0 ? tourAnchor("conta.historico.detalhes") : {})}
+                  >
+                    ver detalhes
+                  </summary>
                   <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-muted/30 p-3 text-meta">
                     {JSON.stringify(
                       {
@@ -1261,6 +1312,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
           <Input
             value={form.nome}
             onChange={(event) => setForm((prev) => ({ ...prev, nome: event.target.value }))}
+            {...tourAnchor("conta.config.nome")}
           />
         </div>
         <div className="space-y-2">
@@ -1374,6 +1426,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
             (planTouchesInterno && planReason.trim().length < 5)
           }
           onClick={() => mut.mutate()}
+          {...tourAnchor("conta.config.salvar")}
         >
           <Save className="h-4 w-4" />
           Salvar configuração

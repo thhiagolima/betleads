@@ -11,6 +11,17 @@ export function tourAnchor(id: string): { "data-tour": string } {
   return { "data-tour": id };
 }
 
+/** The index of the first row that actually renders a per-row control
+ * (`hasControl`), or -1 when none does: a per-row anchor goes on that row,
+ * not blindly on row 0 — row 0 may not have the control at all (a journey
+ * that can't expand, an expert without access to remove), and the anchor
+ * would then never render. Use as
+ * `index === firstIndexWhere(rows, hasControl)` to pick the anchored row,
+ * with the index computed once, outside the `map`. */
+export function firstIndexWhere<T>(items: readonly T[], hasControl: (item: T) => boolean): number {
+  return items.findIndex((item) => hasControl(item));
+}
+
 // The HTML attribute name itself, exported so tour-runner.ts can build a
 // `[data-tour="…"]` selector without the literal string "data-tour=" in its
 // own source (-coverage.test.ts forbids that literal outside this file).

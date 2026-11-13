@@ -312,6 +312,8 @@ describe("processWebpushCampaignTick", () => {
     expect(state.deactivated).toEqual([rowId(2)]);
     expect(state.logs.filter((l) => l.status === "enviado")).toHaveLength(2);
     expect(state.logs.filter((l) => l.status === "recusado")).toHaveLength(1);
+    // webpush_send_logs.tenant_id is NOT NULL.
+    expect(state.logs.every((l) => l.tenantId === campaign().tenant_id)).toBe(true);
     expect(r.sent).toBe(2);
     expect(r.failed).toBe(1);
     expect(r.status).toBe("enviado");

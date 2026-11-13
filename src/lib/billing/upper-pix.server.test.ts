@@ -9,11 +9,25 @@ vi.mock("./billing-signals.server", async (importOriginal) => {
   return { ...actual, recordBillingSignal };
 });
 
+// Credentials come from the gateway config loader (DB, env fallback); the
+// tests drive it through this mutable config instead of process.env.
+type TestUpperConfig = { apiKey: string; webhookSecret: string | null; apiBase: string | null };
+const gatewayConfig = vi.hoisted(() => ({ upper: null as TestUpperConfig | null }));
+vi.mock("./payment-gateway-config.server", () => ({
+  getUpperConfig: async () => ({
+    source: gatewayConfig.upper ? "database" : "none",
+    config: gatewayConfig.upper,
+  }),
+}));
+
 const ORIGINAL_ENV = { ...process.env };
 
 function setConfigured() {
-  process.env.UPPER_API_KEY = "secret-upper-key";
-  process.env.UPPER_API_BASE = "https://api.uppersc.com.br/v1";
+  gatewayConfig.upper = {
+    apiKey: "secret-upper-key",
+    webhookSecret: null,
+    apiBase: "https://api.uppersc.com.br/v1",
+  };
 }
 
 function okResponse(body: unknown, status = 201) {
@@ -246,8 +260,8 @@ describe("upper-pix.server", () => {
     }
   });
 
-  it("throws UpperError NOT_CONFIGURED when UPPER_API_KEY is missing", async () => {
-    delete process.env.UPPER_API_KEY;
+  it("throws UpperError NOT_CONFIGURED when the Upper config is missing", async () => {
+    gatewayConfig.upper = null;
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const { getUpperCharge } = await import("./upper-pix.server");
@@ -261,8 +275,8 @@ describe("upper-pix.server", () => {
     ["https://api.uppersc.com.br/", "https://api.uppersc.com.br/v1/pix/charges/bl-top-abc"],
     ["https://api.uppersc.com.br/v1", "https://api.uppersc.com.br/v1/pix/charges/bl-top-abc"],
     ["https://api.uppersc.com.br/v1/", "https://api.uppersc.com.br/v1/pix/charges/bl-top-abc"],
-  ])("normalizes UPPER_API_BASE=%s to exactly one /v1 segment", async (configured, expectedUrl) => {
-    process.env.UPPER_API_BASE = configured;
+  ])("normalizes apiBase=%s to exactly one /v1 segment", async (configured, expectedUrl) => {
+    gatewayConfig.upper = { ...gatewayConfig.upper!, apiBase: configured };
     const fetchMock = vi.fn().mockResolvedValue(okResponse(chargeBody()));
     vi.stubGlobal("fetch", fetchMock);
     const { getUpperCharge } = await import("./upper-pix.server");
@@ -270,6 +284,20 @@ describe("upper-pix.server", () => {
     await getUpperCharge("bl-top-abc");
 
     expect(fetchMock).toHaveBeenCalledWith(expectedUrl, expect.anything());
+  });
+
+  it("uses the default Upper base URL when the config has no apiBase", async () => {
+    gatewayConfig.upper = { ...gatewayConfig.upper!, apiBase: null };
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(chargeBody()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getUpperCharge } = await import("./upper-pix.server");
+
+    await getUpperCharge("bl-top-abc");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.uppersc.com.br/v1/pix/charges/bl-top-abc",
+      expect.anything(),
+    );
   });
 
   it("throws UpperError INVALID_RESPONSE when amountCents doesn't parse to a finite number", async () => {

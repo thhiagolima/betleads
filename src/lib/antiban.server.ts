@@ -7,8 +7,6 @@ export interface AntibanSettings {
   delay_max_seconds: number;
   hourly_limit: number;
   daily_limit: number;
-  window_start: string; // "HH:MM" ou "HH:MM:SS"
-  window_end: string;
   randomization_enabled: boolean;
   smart_suppression_enabled: boolean;
   auto_pause_enabled: boolean;
@@ -22,8 +20,6 @@ const DEFAULTS: AntibanSettings = {
   delay_max_seconds: 720,
   hourly_limit: 40,
   daily_limit: 400,
-  window_start: "06:00",
-  window_end: "22:00",
   randomization_enabled: true,
   smart_suppression_enabled: true,
   auto_pause_enabled: true,
@@ -36,57 +32,12 @@ export async function getAntibanSettings(): Promise<AntibanSettings> {
   const { data } = await supabaseAdmin
     .from("antiban_settings")
     .select(
-      "delay_min_seconds, delay_max_seconds, hourly_limit, daily_limit, window_start, window_end, randomization_enabled, smart_suppression_enabled, auto_pause_enabled, warmup_enabled, warmup_initial_daily, warmup_days",
+      "delay_min_seconds, delay_max_seconds, hourly_limit, daily_limit, randomization_enabled, smart_suppression_enabled, auto_pause_enabled, warmup_enabled, warmup_initial_daily, warmup_days",
     )
     .limit(1)
     .maybeSingle();
   if (!data) return DEFAULTS;
   return data as AntibanSettings;
-}
-
-function parseHMS(s: string): number {
-  // retorna minutos desde 00:00
-  const [h = "0", m = "0"] = s.split(":");
-  return Number(h) * 60 + Number(m);
-}
-
-const TZ = "America/Sao_Paulo";
-const tzFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: TZ,
-  hour12: false,
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-function minutesOfDayInTZ(now: Date): number {
-  const parts = tzFormatter.formatToParts(now);
-  const h = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
-  const m = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
-  // Intl pode retornar "24" para meia-noite em alguns runtimes
-  return (h % 24) * 60 + m;
-}
-
-export function isWithinOperationalWindow(now: Date, s: AntibanSettings): boolean {
-  const cur = minutesOfDayInTZ(now);
-  const start = parseHMS(s.window_start);
-  const end = parseHMS(s.window_end);
-  if (start === end) return true; // janela 24h
-  if (start < end) return cur >= start && cur < end;
-  // janela cruza meia-noite (ex: 22:00 -> 06:00)
-  return cur >= start || cur < end;
-}
-
-export function nextWindowStart(now: Date, s: AntibanSettings): Date {
-  const start = parseHMS(s.window_start);
-  // Calcula o próximo início da janela no fuso de São Paulo.
-  // Brasil não observa DST desde 2019, então o offset é fixo em -03:00.
-  const curMin = minutesOfDayInTZ(now);
-  const diffMin = start - curMin;
-  const next = new Date(now.getTime() + diffMin * 60_000);
-  if (next.getTime() <= now.getTime()) {
-    next.setTime(next.getTime() + 24 * 60 * 60_000);
-  }
-  return next;
 }
 
 export interface FlowCapsInput {

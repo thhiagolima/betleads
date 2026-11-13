@@ -1,5 +1,5 @@
 // Conta própria de provedor por casa — Tarefa 4: custo informado na Central.
-// SQL tests for supabase/migrations/20261219100300_crm_results_own_cost.sql
+// SQL tests for supabase/migrations/20261231100300_crm_results_own_cost.sql
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -20,7 +20,8 @@ const FINISHED_WITHOUT_MESSAGE_MIGRATION = read("20261120100000_journey_metrics_
 const DORMANT_FIRST_DEPOSIT_MIGRATION = read("20261109100000_crm_influenced_dormant_first_deposit.sql");
 const LATE_DAYS_MIGRATION = read("20261202100000_crm_results_late_days.sql");
 const CONSUMO_P0_MIGRATION = read("20261129100000_supabase_consumo_p0.sql");
-const OWN_COST_MIGRATION = read("20261219100300_crm_results_own_cost.sql");
+const SUPERSET_MIGRATION = read("20261220100000_crm_influenced_superset.sql");
+const OWN_COST_MIGRATION = read("20261231100300_crm_results_own_cost.sql");
 
 // The current refresh_crm_results_day reads the SMS price through
 // crm_sms_report_price (billing); stand-in with the legacy price chain.
@@ -36,7 +37,7 @@ $$;
 `;
 
 // provider_accounts / provider_account_id: added by Task 1
-// (20261219100000_own_provider_accounts.sql). Stand-in with the columns this
+// (20261231100000_own_provider_accounts.sql). Stand-in with the columns this
 // function reads: id, owner_tenant_id, own_unit_cost.
 const PROVIDER_ACCOUNTS_STUB = `
 create table public.provider_accounts (
@@ -126,6 +127,7 @@ async function applyBaseMigrations() {
   await db.exec(`begin; ${FINISHED_WITHOUT_MESSAGE_MIGRATION}; commit;`);
   await db.exec(`begin; ${CONSUMO_P0_MIGRATION}; commit;`);
   await db.exec(`begin; ${LATE_DAYS_MIGRATION}; commit;`);
+  await db.exec(`begin; ${SUPERSET_MIGRATION}; commit;`);
   await db.exec(PROVIDER_ACCOUNTS_STUB);
   // Sale price 0,08 for this tenant.
   await db.exec(`

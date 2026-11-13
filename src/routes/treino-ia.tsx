@@ -16,6 +16,7 @@ import { requestConfirmation } from "@/components/system-dialog-host";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
+import { tourAnchor } from "@/help/anchor";
 
 export const Route = createFileRoute("/treino-ia")({
   component: TreinoIA,
@@ -171,12 +172,14 @@ function ExemplosTab() {
         <CardContent className="space-y-3">
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px]">
             <Input
+              {...tourAnchor("exemplos.pergunta")}
               value={pergunta}
               onChange={(e) => setPergunta(e.target.value)}
               placeholder="Pergunta (ex.: os 5 que mais depositaram hoje)"
               aria-label="Pergunta"
             />
             <Input
+              {...tourAnchor("exemplos.assunto")}
               value={intent}
               onChange={(e) => setIntent(e.target.value)}
               placeholder="Assunto (opcional)"
@@ -184,6 +187,7 @@ function ExemplosTab() {
             />
           </div>
           <Textarea
+            {...tourAnchor("exemplos.resposta")}
             value={resposta}
             onChange={(e) => setResposta(e.target.value)}
             rows={3}
@@ -192,13 +196,19 @@ function ExemplosTab() {
           />
           <div className="flex justify-between gap-2">
             <DemoDisabledTooltip active={isDemo}>
-              <Button variant="outline" size="sm" onClick={openImport} disabled={isDemo}>
+              <Button
+                {...tourAnchor("exemplos.importar")}
+                variant="outline"
+                size="sm"
+                onClick={openImport}
+                disabled={isDemo}
+              >
                 <Download className="h-3.5 w-3.5 mr-1.5" />
                 Importar do histórico
               </Button>
             </DemoDisabledTooltip>
             <DemoDisabledTooltip active={isDemo}>
-              <Button onClick={add} disabled={isDemo}>
+              <Button {...tourAnchor("exemplos.salvar")} onClick={add} disabled={isDemo}>
                 <Plus className="h-3.5 w-3.5 mr-1.5" />
                 Salvar exemplo
               </Button>
@@ -208,7 +218,7 @@ function ExemplosTab() {
       </Card>
 
       {showImport && (
-        <Card>
+        <Card {...tourAnchor("exemplos.importar-lista")}>
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle>Últimas perguntas feitas à IA</CardTitle>
             <Button size="sm" variant="ghost" onClick={() => setShowImport(false)}>
@@ -216,9 +226,10 @@ function ExemplosTab() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-1 max-h-72 overflow-y-auto">
-            {logs.map((l) => (
+            {logs.map((l, i) => (
               <button
                 key={l.id}
+                {...(i === 0 ? tourAnchor("exemplos.importar-item") : {})}
                 onClick={() => importFromLog(l)}
                 className="w-full rounded-lg border border-border/40 p-2 text-left text-meta hover:bg-muted/30"
               >
@@ -233,12 +244,12 @@ function ExemplosTab() {
         </Card>
       )}
 
-      <Card>
+      <Card {...tourAnchor("exemplos.lista")}>
         <CardHeader className="pb-3">
           <CardTitle>Exemplos cadastrados ({items.length})</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {items.map((it) => (
+          {items.map((it, i) => (
             <div key={it.id} className="rounded border border-border/40 p-3 space-y-1">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
@@ -263,9 +274,15 @@ function ExemplosTab() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Switch checked={it.ativo} disabled={isDemo} onCheckedChange={() => toggle(it)} />
+                  <Switch
+                    {...(i === 0 ? tourAnchor("exemplos.item.ligar") : {})}
+                    checked={it.ativo}
+                    disabled={isDemo}
+                    onCheckedChange={() => toggle(it)}
+                  />
                   <DemoDisabledTooltip active={isDemo}>
                     <Button
+                      {...(i === 0 ? tourAnchor("exemplos.item.excluir") : {})}
                       size="icon"
                       variant="ghost"
                       aria-label="Excluir exemplo"
@@ -346,20 +363,20 @@ function IntentsTab() {
 
   return (
     <div className="grid md:grid-cols-2 gap-4">
-      <Card>
+      <Card {...tourAnchor("assuntos.lista")}>
         <CardHeader className="pb-3">
           <CardTitle>Assuntos que o assistente entende ({intents.length})</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 max-h-[600px] overflow-y-auto">
-          {intents.map((i) => (
+          {intents.map((i, idx) => (
             <div key={i.id} className="rounded border border-border/40 p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1">
                   <p className="text-sm font-medium">{i.nome}</p>
                   <p className="text-meta text-muted-foreground">{i.descricao}</p>
                   <div className="flex flex-wrap gap-1 mt-2">
-                    {i.palavras_chave?.slice(0, 6).map((k, idx) => (
-                      <Badge key={idx} variant="outline" className="text-meta">
+                    {i.palavras_chave?.slice(0, 6).map((k, kidx) => (
+                      <Badge key={kidx} variant="outline" className="text-meta">
                         {k}
                       </Badge>
                     ))}
@@ -371,6 +388,7 @@ function IntentsTab() {
                   )}
                 </div>
                 <Switch
+                  {...(idx === 0 ? tourAnchor("assuntos.item.ligar") : {})}
                   aria-label={`${i.ativo ? "Desligar" : "Ligar"} ${i.nome}`}
                   checked={i.ativo}
                   disabled={isDemo}
@@ -395,18 +413,21 @@ function IntentsTab() {
             </p>
             <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_110px]">
               <Input
+                {...tourAnchor("assuntos.syn.termo")}
                 value={novoTermo}
                 onChange={(e) => setNovoTermo(e.target.value)}
                 placeholder="Palavra da casa (ex.: banca)"
                 aria-label="Palavra da casa"
               />
               <Input
+                {...tourAnchor("assuntos.syn.canonico")}
                 value={novoCanonico}
                 onChange={(e) => setNovoCanonico(e.target.value)}
                 placeholder="Termo conhecido (ex.: saldo_carteira)"
                 aria-label="Termo que o assistente conhece"
               />
               <select
+                {...tourAnchor("assuntos.syn.tipo")}
                 value={novoTipo}
                 onChange={(e) => setNovoTipo(e.target.value)}
                 aria-label="Tipo"
@@ -419,14 +440,14 @@ function IntentsTab() {
               </select>
             </div>
             <DemoDisabledTooltip active={isDemo}>
-              <Button size="sm" onClick={addSyn} disabled={isDemo}>
+              <Button {...tourAnchor("assuntos.syn.adicionar")} size="sm" onClick={addSyn} disabled={isDemo}>
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Adicionar
               </Button>
             </DemoDisabledTooltip>
           </div>
-          <div className="space-y-1 max-h-[440px] overflow-y-auto">
-            {syns.map((s) => (
+          <div {...tourAnchor("assuntos.syn.lista")} className="space-y-1 max-h-[440px] overflow-y-auto">
+            {syns.map((s, sidx) => (
               <div
                 key={s.id}
                 className="flex items-center gap-2 rounded-lg border border-border/30 px-2 py-1.5 text-meta"
@@ -439,12 +460,14 @@ function IntentsTab() {
                 <code className="text-success">{s.canonico}</code>
                 <div className="ml-auto flex items-center gap-1">
                   <Switch
+                    {...(sidx === 0 ? tourAnchor("assuntos.syn.item.ligar") : {})}
                     checked={s.ativo}
                     disabled={isDemo}
                     onCheckedChange={() => toggleSyn(s)}
                   />
                   <DemoDisabledTooltip active={isDemo}>
                     <Button
+                      {...(sidx === 0 ? tourAnchor("assuntos.syn.item.excluir") : {})}
                       size="icon"
                       variant="ghost"
                       aria-label={`Excluir sinônimo ${s.termo}`}
@@ -512,19 +535,19 @@ function FeedbackTab() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-3">
-        <Card>
+        <Card {...tourAnchor("avaliacoes.kpi.aprovacao")}>
           <CardContent className="p-4">
             <p className="text-label text-muted-foreground">Aprovação</p>
             <p className="text-kpi mt-1">{aprov}%</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card {...tourAnchor("avaliacoes.kpi.boas")}>
           <CardContent className="p-4">
             <p className="text-label text-muted-foreground">Respostas boas</p>
             <p className="text-kpi mt-1 text-success">{stats.good}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card {...tourAnchor("avaliacoes.kpi.ruins")}>
           <CardContent className="p-4">
             <p className="text-label text-muted-foreground">Respostas ruins</p>
             <p className="text-kpi mt-1 text-danger">{stats.bad}</p>
@@ -532,12 +555,12 @@ function FeedbackTab() {
         </Card>
       </div>
 
-      <Card>
+      <Card {...tourAnchor("avaliacoes.lista")}>
         <CardHeader className="pb-3">
           <CardTitle>Avaliações recentes</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {items.map((f) => (
+          {items.map((f, i) => (
             <div key={f.id} className="rounded-lg border border-border/40 p-3 text-meta">
               <div className="flex items-start gap-2">
                 {f.rating === "good" ? (
@@ -552,6 +575,7 @@ function FeedbackTab() {
                 {f.rating === "bad" && (
                   <DemoDisabledTooltip active={isDemo}>
                     <Button
+                      {...(i === 0 ? tourAnchor("avaliacoes.criar-exemplo") : {})}
                       size="sm"
                       variant="outline"
                       onClick={() => turnIntoExample(f)}

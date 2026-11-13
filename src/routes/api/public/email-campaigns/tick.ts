@@ -5,7 +5,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { EMAIL_CAMPAIGN_TICK_BUDGET_MS, runCampaignSend } from "@/lib/email.functions";
-import { deferIfOutsideWindow } from "@/lib/send-window.server";
 import { recordRun } from "@/lib/dispatch-rate.server";
 import { requireSharedSecret } from "@/lib/cron-auth.server";
 
@@ -16,34 +15,6 @@ export const Route = createFileRoute("/api/public/email-campaigns/tick")({
         try { requireSharedSecret(request, "CRON_SECRET"); } catch (r) { return r as Response; }
         try {
           const startedAt = Date.now();
-
-          // Janela de envio: se fora, empurra agendamento p/ próximo horário permitido.
-          const defer = await deferIfOutsideWindow();
-          if (defer) {
-            const { data: pending } = await supabaseAdmin
-              .from("email_campaigns")
-              .select("id")
-              .eq("status", "agendada")
-              .lte("scheduled_at", new Date().toISOString());
-            const ids = (pending ?? []).map((c) => c.id);
-            if (ids.length > 0) {
-              await supabaseAdmin
-                .from("email_campaigns")
-                .update({ scheduled_at: defer })
-                .in("id", ids);
-            }
-            await recordRun(startedAt, {
-              channel: "email",
-              kind: "campaign",
-              queue_before: ids.length,
-              stop_reason: "outside_window",
-              provider: "infobip",
-            });
-            return new Response(
-              JSON.stringify({ ok: true, deferred: ids.length, next_run_at: defer }),
-              { status: 200, headers: { "Content-Type": "application/json" } },
-            );
-          }
 
           // Claim atômico: marca status=enviando + locked_at, retorna campanhas reservadas.
           const { data: claimed, error: claimErr } = await supabaseAdmin.rpc(

@@ -2093,14 +2093,13 @@ export const getWhatsappQueueStats = createServerFn({ method: "GET" })
     };
   });
 
-// Destrava leads atrasados e roda o dispatcher imediatamente (bypass janela
-// opcional). Idempotente — pode chamar várias vezes sem efeito colateral.
+// Destrava leads atrasados e roda o dispatcher imediatamente.
+// Idempotente — pode chamar várias vezes sem efeito colateral.
 export const resumeWhatsappQueue = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) =>
     z
       .object({
-        bypassWindow: z.boolean().optional(),
         limit: z.number().int().min(1).max(500).optional(),
       })
       .parse(input ?? {}),
@@ -2129,7 +2128,6 @@ export const resumeWhatsappQueue = createServerFn({ method: "POST" })
     const { runDispatcher } = await import("@/lib/automation.server");
     const result = await runDispatcher({
       limit: data.limit ?? 100,
-      bypassWindow: !!data.bypassWindow,
       tenantId,
     });
     return {

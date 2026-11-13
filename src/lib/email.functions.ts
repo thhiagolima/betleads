@@ -614,8 +614,8 @@ const CampanhaInputSchema = z.object({
   shortDomainId: dbUuid().nullable().optional(),
   agendadoPara: z.string().nullable().optional(),
   status: z.enum(["rascunho", "agendada", "enviando", "pausada", "concluida"]).default("rascunho"),
-  targetPlayerIds: z.array(dbUuid()).max(5000).optional(),
-  extraEmails: z.array(z.string().email().max(255)).max(5000).optional(),
+  targetPlayerIds: z.array(dbUuid()).optional(),
+  extraEmails: z.array(z.string().email().max(255)).optional(),
   trackLinks: z.boolean().default(true),
   conversionObjective: z.enum(["acquisition", "conversion", "reactivation"]).default("conversion"),
   enabledFunnelSteps: z.array(z.string().max(80)).max(10).optional(),
@@ -839,8 +839,8 @@ export const previewSegmentCount = createServerFn({ method: "POST" })
       .object({
         audienceMode: z.enum(["segmento", "leads", "emails"]).default("segmento"),
         segmento: z.string().max(160).optional(),
-        targetPlayerIds: z.array(dbUuid()).max(5000).optional(),
-        extraEmails: z.array(z.string().email().max(255)).max(5000).optional(),
+        targetPlayerIds: z.array(dbUuid()).optional(),
+        extraEmails: z.array(z.string().email().max(255)).optional(),
       })
       .parse(d),
   )
@@ -851,12 +851,17 @@ export const previewSegmentCount = createServerFn({ method: "POST" })
     }
     if (data.audienceMode === "leads") {
       if (!data.targetPlayerIds || data.targetPlayerIds.length === 0) return { total: 0 };
-      const { data: rows, error } = await reads
-        .from("players")
-        .select("id, email")
-        .in("id", data.targetPlayerIds);
-      if (error) throw new Error(error.message);
-      const total = (rows ?? []).filter((p: any) => p.email && p.email.trim()).length;
+      // Short `in(...)` chunks: one request would hit the URL size and max_rows.
+      const ids = Array.from(new Set(data.targetPlayerIds));
+      let total = 0;
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data: rows, error } = await reads
+          .from("players")
+          .select("id, email")
+          .in("id", ids.slice(i, i + 300));
+        if (error) throw new Error(error.message);
+        total += (rows ?? []).filter((p: any) => p.email && p.email.trim()).length;
+      }
       return { total };
     }
     const tenantId = await resolveCurrentTenantId(context.supabase);
@@ -1419,16 +1424,35 @@ export async function runCampaignSend(
  * never risk re-sending a whole campaign).
  */
 async function loadCampaignReachedRecipients(campaignId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("email_send_logs")
-    .select("player_id, to_email, status, sent_at")
-    .eq("campaign_id", campaignId);
-  if (error) throw new Error(error.message);
+  // Paged by id: a single read stops at PostgREST max_rows (1000) silently,
+  // and every log past it would be re-sent.
+  const PAGE = 1000;
+  const logs: Array<{
+    id: string;
+    player_id: string | null;
+    to_email: string | null;
+    status: string | null;
+    sent_at: string | null;
+  }> = [];
+  let lastId: string | null = null;
+  for (;;) {
+    let q = supabaseAdmin
+      .from("email_send_logs")
+      .select("id, player_id, to_email, status, sent_at")
+      .eq("campaign_id", campaignId);
+    if (lastId !== null) q = q.gt("id", lastId);
+    const { data, error } = await q.order("id", { ascending: true }).limit(PAGE);
+    if (error) throw new Error(error.message);
+    const page = data ?? [];
+    logs.push(...page);
+    if (page.length < PAGE) break;
+    lastId = page[page.length - 1].id;
+  }
   const playerIds = new Set<string>();
   const emails = new Set<string>();
   /** Any log row (sent, pending or error): attempted by some run. */
   const attempted = { playerIds: new Set<string>(), emails: new Set<string>() };
-  for (const row of data ?? []) {
+  for (const row of logs) {
     if (row.player_id) attempted.playerIds.add(row.player_id);
     const attemptedEmail = String(row.to_email ?? "").trim().toLowerCase();
     if (attemptedEmail) attempted.emails.add(attemptedEmail);

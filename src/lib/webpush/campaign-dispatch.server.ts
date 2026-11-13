@@ -123,6 +123,7 @@ export type WebpushSendInput = {
 };
 
 export type WebpushLogRow = {
+  tenantId: string;
   campaignId: string;
   subscriptionRowId: string;
   playerId: string | null;
@@ -457,6 +458,7 @@ async function advanceBatch(
       const loggableIds = batch.subscriptionRowIds.filter((id) => existingIds.has(id));
 
       const logs: WebpushLogRow[] = loggableIds.map((rowId) => ({
+        tenantId: c.tenant_id,
         campaignId: c.id,
         subscriptionRowId: rowId,
         playerId: playerOf.get(rowId) ?? null,
@@ -846,6 +848,7 @@ function realWebpushDeps(loadIconUrl: (tenantId: string) => Promise<string | nul
       if (rows.length === 0) return;
       const { error } = await webpushDb.from("webpush_send_logs").upsert(
         rows.map((r) => ({
+          tenant_id: r.tenantId,
           campaign_id: r.campaignId,
           subscription_row_id: r.subscriptionRowId,
           player_id: r.playerId,

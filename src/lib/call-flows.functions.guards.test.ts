@@ -18,7 +18,6 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 vi.mock("./infobip-voice.server", () => ({ callInfobipVoice: vi.fn(), normalizeE164BR: vi.fn() }));
 vi.mock("./sms.functions", () => ({ sendSmsInternal: vi.fn() }));
 vi.mock("./consent.server", () => ({ evaluateVoiceContactPolicy: vi.fn() }));
-vi.mock("./send-window.server", () => ({ deferIfOutsideWindow: vi.fn(async () => null) }));
 vi.mock("./billing/wallet-alerts.server", () => ({ notifyNoBalance: vi.fn(async () => false) }));
 
 import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";

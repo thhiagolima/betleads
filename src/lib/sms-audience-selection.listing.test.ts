@@ -213,3 +213,27 @@ describe("resolveCriteriaToSave com lista vazia após o filtro da casa", () => {
     ).rejects.toThrow("Nenhum jogador desta casa na seleção");
   });
 });
+
+describe("campanhas sem teto de destinatários", () => {
+  it("scheduleBulkSms aceita mais de 20 mil telefones", () => {
+    const phones = Array.from({ length: 25_000 }, (_, i) => `+55119${String(i).padStart(8, "0")}`);
+    const parsed = ScheduleBulkSchema.safeParse({
+      content: "Oi",
+      campaignName: "C",
+      scheduledAt: "2026-10-24T12:00:00Z",
+      phones,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("o público de seleção aceita mais de 50 mil jogadores", () => {
+    const playerIds = Array.from({ length: 60_000 }, (_, i) => pid(i + 1));
+    const criteria = normalizeSmsAudienceCriteria({
+      timing: "selection",
+      playerIds,
+      selectionCount: playerIds.length,
+    });
+    expect(criteria.playerIds).toHaveLength(60_000);
+    expect(criteria.selectionCount).toBe(60_000);
+  });
+});

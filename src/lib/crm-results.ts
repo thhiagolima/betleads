@@ -1,5 +1,6 @@
 // Central de Resultados (F2): pure aggregation of crm_results_daily rows.
-// Direct (click) and influenced (recovered) are separate levels, never summed.
+// Direct (click) and influenced (after any SMS) are never summed: since
+// rule_version 5 influenced contains every direct deposit and player.
 // The click conversion is the headline measure (client, 16/10). Since
 // rule_version 3 it only counts players who were not already active at the
 // click (docs/AUDITORIA_NUMEROS_RESULTADOS_CRM_2026-10-19.md).
@@ -70,6 +71,23 @@ export type CrmMetricsWithRatios = CrmMetrics & {
 /** Below this many converted players a return is shown as "amostra pequena". */
 export const MIN_CONVERSIONS = 5;
 
+/**
+ * Below these volumes a percent variation is noise (8 players has a 95%
+ * interval of ~3 to 16), so the overview shows the absolute difference.
+ */
+export const MIN_DELTA_PLAYERS = 20;
+export const MIN_DELTA_SENT = 1000;
+
+/** Both periods big enough for a percent variation. */
+export function isComparable(
+  current: Pick<CrmMetrics, "directPlayers" | "sent">,
+  previous: Pick<CrmMetrics, "directPlayers" | "sent">,
+) {
+  return [current, previous].every(
+    (metrics) => metrics.directPlayers >= MIN_DELTA_PLAYERS && metrics.sent >= MIN_DELTA_SENT,
+  );
+}
+
 export const PLAYER_STATE_LABELS: Record<string, string> = {
   sem_ftd: "Sem 1º depósito",
   ativo: "Ativo (< 2 dias)",
@@ -132,8 +150,11 @@ export function withRatios(metrics: CrmMetrics): CrmMetricsWithRatios {
   };
 }
 
-/** Distinct players of the whole period (crm_click_players_period). */
-export type PeriodPlayers = { converted: number; active: number };
+/**
+ * Distinct players of the whole period (crm_click_players_period).
+ * `influenced` is null when the database predates rule_version 5.
+ */
+export type PeriodPlayers = { converted: number; active: number; influenced?: number | null };
 
 /**
  * Period totals with distinct players: the daily rows count a player once per
@@ -144,12 +165,19 @@ export function withPeriodPlayers<T extends CrmMetricsWithRatios>(
   players: PeriodPlayers | null,
 ): T {
   if (!players) return totals;
+  // No stored people while the daily rows have some: days not rebuilt with
+  // rule_version 5 yet, keep the daily sum.
+  const influenced =
+    players.influenced == null || (players.influenced === 0 && totals.influencedPlayers > 0)
+      ? totals.influencedPlayers
+      : players.influenced;
   return {
     ...totals,
     ...withRatios({
       ...totals,
       directPlayers: players.converted,
       directActivePlayers: players.active,
+      influencedPlayers: influenced,
     }),
   };
 }

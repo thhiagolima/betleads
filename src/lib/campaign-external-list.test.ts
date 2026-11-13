@@ -3,6 +3,7 @@ import {
   externalListBlockedVariables,
   externalListVariablesError,
   externalRecipientHash,
+  parseEmailList,
   parsePhoneList,
 } from "./campaign-external-list";
 
@@ -31,6 +32,44 @@ describe("parsePhoneList", () => {
   it("reads a spreadsheet exported as semicolon CSV with tabs and pipes", () => {
     const r = parsePhoneList("11987654321\t21998765432|31988887777");
     expect(r.phones).toHaveLength(3);
+  });
+});
+
+describe("parseEmailList", () => {
+  it("reads one-per-line, comma, semicolon and space separated lists", () => {
+    const r = parseEmailList(
+      "ana@exemplo.com\nBeto@Exemplo.com.br, carla@x.io;dani@y.com eva@z.net\r\n",
+    );
+    expect(r.emails).toEqual([
+      "ana@exemplo.com",
+      "beto@exemplo.com.br",
+      "carla@x.io",
+      "dani@y.com",
+      "eva@z.net",
+    ]);
+    expect(r.invalidCount).toBe(0);
+  });
+
+  it("strips quotes, angle brackets and mailto:", () => {
+    const r = parseEmailList('"ana@exemplo.com";<beto@exemplo.com>\nmailto:carla@exemplo.com');
+    expect(r.emails).toEqual(["ana@exemplo.com", "beto@exemplo.com", "carla@exemplo.com"]);
+  });
+
+  it("ignores header and name cells, counts invalid addresses and duplicates", () => {
+    const r = parseEmailList(
+      "nome;email\nAna;ana@exemplo.com\nBeto;beto@\nCarla;ANA@exemplo.com\nDani;dani@@x.com\nEva;eva..x@y.com",
+    );
+    expect(r.emails).toEqual(["ana@exemplo.com"]);
+    expect(r.duplicates).toBe(1);
+    expect(r.invalidCount).toBe(3);
+    expect(r.invalid).toEqual(["beto@", "dani@@x.com", "eva..x@y.com"]);
+  });
+
+  it("reads tabs and pipes and rejects addresses longer than 255 characters", () => {
+    const long = `${"a".repeat(250)}@x.com`;
+    const r = parseEmailList(`ana@x.com\tbeto@y.com|${long}`);
+    expect(r.emails).toEqual(["ana@x.com", "beto@y.com"]);
+    expect(r.invalidCount).toBe(1);
   });
 });
 

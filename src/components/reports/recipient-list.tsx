@@ -47,7 +47,7 @@ const SEND_STATUS_LABEL: Record<string, string> = {
 function stageReached(row: ReportRecipient, showDelivered: boolean) {
   if (row.depositAt)
     return { label: row.firstDepositAt ? "Primeiro depósito" : "Depositou", tone: "success" };
-  if (row.activeDepositAt) return { label: "Depositou · já ativo", tone: "muted" };
+  if (row.activeDepositAt) return { label: "Depositou · já estava jogando", tone: "muted" };
   if (row.loginOrGameAt) return { label: "Login ou jogo", tone: "neutral" };
   if (row.registeredAt) return { label: "Cadastro", tone: "neutral" };
   if (row.clicked) return { label: "Clicou", tone: "neutral" };
@@ -165,7 +165,7 @@ export function RecipientList({
                   </td>
                   <td className="px-3 py-2.5 text-muted-foreground">
                     {row.activeDepositAt
-                      ? `${dateTime(row.activeDepositAt)} · já ativo`
+                      ? `${dateTime(row.activeDepositAt)} · já estava jogando`
                       : dateTime(row.depositAt)}
                   </td>
                   <td className="px-3 py-2.5 text-right">
@@ -273,7 +273,7 @@ export function TrackedLeadList({ rows }: { rows: TrackedLead[] }) {
   const stage = (row: TrackedLead) =>
     row.depositedAt
       ? row.alreadyActive
-        ? { label: "Depositou · já ativo, não conta", tone: "muted" }
+        ? { label: "Depositou · já estava jogando, não conta", tone: "muted" }
         : { label: "Depositou", tone: "success" }
       : row.loginAt
         ? { label: "Login ou jogo", tone: "neutral" }
@@ -353,7 +353,7 @@ export function TrackedLeadList({ rows }: { rows: TrackedLead[] }) {
                       >
                         {money(row.depositValue)}
                       </span>
-                      {row.alreadyActive ? " · já ativo, não conta" : ""}
+                      {row.alreadyActive ? " · já estava jogando, não conta" : ""}
                     </span>
                   ) : (
                     <span className="text-muted-foreground">—</span>

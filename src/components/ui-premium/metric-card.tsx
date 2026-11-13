@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-interface MetricCardProps {
+interface MetricCardProps extends Omit<HTMLAttributes<HTMLElement>, "className" | "children"> {
   label: string;
   value: ReactNode;
   /** @deprecated Decorative icons are gone in the redesign; ignored. */
@@ -19,14 +19,26 @@ interface MetricCardProps {
   children?: ReactNode;
 }
 
-/** Same look as the Início KPI card: 12.5px label, 28px number, 12px detail. */
-export function MetricCard({ label, value, delta, hint, className, children }: MetricCardProps) {
+/** Same look as the Início KPI card: 12.5px label, 28px number, 12px detail.
+ * Extra HTML attributes (e.g. `tourAnchor(...)`) go to the outer `<section>`. */
+export function MetricCard({
+  label,
+  value,
+  icon: _icon,
+  delta,
+  hint,
+  accent: _accent,
+  className,
+  children,
+  ...rest
+}: MetricCardProps) {
   return (
     <section
       className={cn(
         "flex flex-col rounded-2xl border border-border bg-card/80 p-4 sm:p-5",
         className,
       )}
+      {...rest}
     >
       <h3 className="truncate text-label font-normal text-muted-foreground">{label}</h3>
       <div className="mt-1.5 text-2xl font-semibold tracking-[-0.03em] tabular-nums sm:text-kpi">

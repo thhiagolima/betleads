@@ -2,9 +2,9 @@
 // the price book (Task 2) through these two helpers.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
-export type BillingItem = "sms" | "voice_30s" | "email" | "webpush";
+export type BillingItem = "sms" | "voice_30s" | "email" | "webpush" | "webpush_lead";
 
-const ITEMS: BillingItem[] = ["sms", "voice_30s", "email", "webpush"];
+const ITEMS: BillingItem[] = ["sms", "voice_30s", "email", "webpush", "webpush_lead"];
 
 /**
  * The price used for internal cost/ROI accounting (campaign report, SMS

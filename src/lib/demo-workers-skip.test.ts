@@ -292,7 +292,7 @@ describe("queue workers exclude demo tenants before reading their queues", () =>
     expect(touched((a) => a.op === "update")).toEqual([]);
   });
 
-  it("runDispatcher never picks up nor postpones demo flow_leads", async () => {
+  it("runDispatcher never picks up demo flow_leads", async () => {
     state.tables.flow_leads = [
       {
         id: "fl-demo",
@@ -302,47 +302,10 @@ describe("queue workers exclude demo tenants before reading their queues", () =>
         phone_e164: "5511900000001",
       },
     ];
-    const inWindow = await runDispatcher({ bypassWindow: true });
-    expect(inWindow).toEqual({ processed: 0, sent: 0 });
+    const result = await runDispatcher();
+    expect(result).toEqual({ processed: 0, sent: 0 });
     expect(touched((a) => a.table === "flow_leads" && a.op === "update")).toEqual([]);
     expect(touched((a) => a.table === "flow_leads" && a.op === "not")).toHaveLength(1);
-  });
-
-  it("runDispatcher out of the operational window postpones only non-demo flow_leads", async () => {
-    // 03:00 in São Paulo, window 08:00-20:00 -> out of window.
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-10-17T06:00:00Z"));
-    state.tables.antiban_settings = [
-      {
-        delay_min_seconds: 5,
-        delay_max_seconds: 10,
-        hourly_limit: 100,
-        daily_limit: 1000,
-        window_start: "08:00",
-        window_end: "20:00",
-        randomization_enabled: false,
-        smart_suppression_enabled: false,
-        auto_pause_enabled: false,
-        warmup_enabled: false,
-        warmup_initial_daily: 0,
-        warmup_days: 0,
-      },
-    ];
-    const due = "2026-10-17T05:00:00.000Z";
-    state.tables.flow_leads = [
-      { id: "fl-demo", tenant_id: DEMO, status: "pending", next_run_at: due },
-      { id: "fl-normal", tenant_id: NORMAL, status: "pending", next_run_at: due },
-    ];
-
-    const result = await runDispatcher();
-
-    expect(result).toMatchObject({ skipped: "out-of-window" });
-    const [demoLead, normalLead] = state.tables.flow_leads;
-    expect(demoLead.next_run_at).toBe(due);
-    expect(normalLead.next_run_at).not.toBe(due);
-    expect(touched((a) => a.table === "flow_leads" && a.op === "not")).toEqual([
-      { table: "flow_leads", op: "not", args: ["tenant_id", "in", `(${DEMO})`] },
-    ]);
   });
 
   it("evaluateAllPlayers never evaluates demo players", async () => {

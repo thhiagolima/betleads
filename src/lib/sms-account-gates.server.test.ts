@@ -52,7 +52,8 @@ vi.mock("./provider-accounts.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./provider-accounts.server")>();
   return {
     ...actual,
-    resolveSmsAccount: vi.fn(async (tenantId: string | null) => {
+    resolveSmsAccount: vi.fn(async (tenantId: string | null, accountId?: string | null) => {
+      if (accountId) return { ...actual.envShortBrasilAccount(), id: accountId };
       if (tenantId === UNAVAILABLE) {
         throw new actual.ProviderAccountUnavailableError("conta desativada");
       }
@@ -74,6 +75,19 @@ beforeEach(() => {
 });
 
 describe("SmsAccountGates", () => {
+  it("an account chosen for a campaign is gated by ITS breaker, not the house default", async () => {
+    const CHOSEN = "55555555-5555-4555-8555-555555555555";
+    breakers.state.set(`sms:${CHOSEN}`, "open");
+    const gates = new SmsAccountGates("run-chosen");
+    expect(await gates.admit(ON_PLATFORM, "campaign:a", CHOSEN)).toMatchObject({
+      mode: "open",
+      key: `sms:${CHOSEN}`,
+    });
+    // Same house, default account: not affected.
+    expect((await gates.admit(ON_PLATFORM, "campaign:b")).mode).toBe("closed");
+    expect((await gates.admit(ON_PLATFORM, "campaign:c", null)).mode).toBe("closed");
+  });
+
   it("an account that is down holds only the houses on it", async () => {
     breakers.state.set("sms", "open");
     const gates = new SmsAccountGates("run-1");

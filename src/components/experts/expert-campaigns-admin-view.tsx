@@ -13,6 +13,7 @@ import { ExpertCampaignsQueue, ExpertUsageBar } from "@/components/experts/exper
 import { EXPERTS_QUERY_KEY } from "@/components/experts/experts-query";
 import { useExpertUsageAdmin } from "@/components/experts/use-expert-campaigns-admin";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { tourAnchor } from "@/help/anchor";
 import { listExperts } from "@/lib/experts-admin.functions";
 import { brl } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ export function ExpertDetailTabs({
         search={{}}
         className={tabClass(active === "rendimento")}
         aria-current={active === "rendimento" ? "page" : undefined}
+        {...tourAnchor("pessoa.tabs.rendimento")}
       >
         Rendimento
       </Link>
@@ -54,6 +56,7 @@ export function ExpertDetailTabs({
         search={{ aba: "campanhas" }}
         className={tabClass(active === "campanhas")}
         aria-current={active === "campanhas" ? "page" : undefined}
+        {...tourAnchor("pessoa.tabs.campanhas")}
       >
         Campanhas
         {pendentes > 0 && (
@@ -111,7 +114,7 @@ export function ExpertCampaignsAdminView({ expertId }: { expertId: string }) {
       <ExpertDetailTabs expertId={expertId} active="campanhas" pendentes={usage?.pendentes ?? 0} />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Card>
+        <Card {...tourAnchor("pessoa.campanhas.envio")}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Envio de campanhas
@@ -129,7 +132,7 @@ export function ExpertCampaignsAdminView({ expertId }: { expertId: string }) {
             </p>
           </CardContent>
         </Card>
-        <Card className="md:col-span-2">
+        <Card className="md:col-span-2" {...tourAnchor("pessoa.campanhas.teto")}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Uso do teto{mesLabel ? ` · ${mesLabel}` : ""}
@@ -158,7 +161,7 @@ export function ExpertCampaignsAdminView({ expertId }: { expertId: string }) {
         </Card>
       </div>
 
-      <Card>
+      <Card {...tourAnchor("pessoa.campanhas.fila")}>
         <CardHeader>
           <CardTitle>Campanhas do expert</CardTitle>
         </CardHeader>

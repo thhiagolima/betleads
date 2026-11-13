@@ -1,8 +1,5 @@
 import { z } from "zod";
 
-/** Teto de jogadores num público de seleção (mesmo teto da exportação de Jogadores). */
-export const MAX_SELECTION_PLAYER_IDS = 50_000;
-
 export const smsAudienceCriteriaSchema = z.object({
   activity: z
     .object({
@@ -48,14 +45,14 @@ export const smsAudienceCriteriaSchema = z.object({
    * jogadores (sempre restritos à casa). Exige `timing: "selection"` e
    * nenhuma regra.
    */
-  playerIds: z.array(z.string().uuid()).max(MAX_SELECTION_PLAYER_IDS).optional(),
+  playerIds: z.array(z.string().uuid()).optional(),
   /**
    * Público de seleção, forma de referência (lista, compositor, rascunho,
    * campanha agendada): o servidor carrega a lista do público pelo id + casa.
    */
   audienceId: z.string().uuid().optional(),
   /** Quantos jogadores a seleção tem (só exibição; a lista fica no servidor). */
-  selectionCount: z.number().int().min(0).max(MAX_SELECTION_PLAYER_IDS).optional(),
+  selectionCount: z.number().int().min(0).optional(),
 });
 
 /**

@@ -13,7 +13,6 @@ import {
 import { buildPlayerVariables, houseLinkVariables, renderTemplate } from "./template-vars.server";
 import { externalRecipientHash } from "./campaign-external-list";
 import { loadHouseLinks, type HouseLinks } from "./house-links.server";
-import { deferIfOutsideWindow } from "./send-window.server";
 import { brtDayStart } from "./tz";
 import {
   consumeBudget,
@@ -39,6 +38,7 @@ import {
 } from "./campaign-recipients.server";
 import {
   processSmsCampaignTick,
+  SMS_CAMPAIGN_ACCOUNT_UNAVAILABLE_MESSAGE,
   type CampaignDispatchDeps,
   type CampaignTarget,
   type ProviderGateDecision,
@@ -52,6 +52,7 @@ import {
   ownAccountPausedByRevocation,
   ProviderAccountUnavailableError,
   resolveSmsAccount,
+  smsSendChoiceProblem,
 } from "./provider-accounts.server";
 import { OWNED_ACCOUNT_MAX_INFLIGHT } from "./owned-account-isolation.server";
 import {
@@ -200,16 +201,6 @@ export async function runSmsDispatcher({ limit = 30 }: { limit?: number } = {}) 
       provider: "short-brasil",
     });
     return { processed: 0, paused: true };
-  }
-  const deferTo = await deferIfOutsideWindow();
-  if (deferTo) {
-    await recordRun(startedAt, {
-      channel,
-      queue_before: queueBefore,
-      stop_reason: "outside_window",
-      provider: "short-brasil",
-    });
-    return { processed: 0, deferred_until: deferTo };
   }
 
   // Cadência: NÃO consome budget ainda — só checa backoff.
@@ -892,7 +883,7 @@ async function runSmsFlowBatch({
 // processa cada uma com processSmsCampaignTick (sms-campaign-dispatch.server):
 // destinatários sem cadastro são pulados e reportados (ENV-06), a cota por
 // tick segue o ritmo configurado na cadência real do cron (ENV-07) e o cursor
-// só avança depois do envio registrado. Fora da janela de envio, não roda.
+// só avança depois do envio registrado.
 // ============================================================
 
 /**
@@ -944,12 +935,13 @@ async function campaignRecipientHash(tenantId: string, target: CampaignTarget) {
  * ENV-10 bulk path for a house: SMS_BULK_ENABLED and the house's SMS account
  * uses the legacy usuario/chave API (the Bearer API keeps the per-recipient
  * path). A house whose own account is unavailable stays on the per-recipient
- * path, where each send fails as misconfigured.
+ * path, where each send fails as misconfigured. `accountId`: the account
+ * chosen for the campaign (empty = the house's default).
  */
-async function campaignUsesBulk(tenantId: string): Promise<boolean> {
+async function campaignUsesBulk(tenantId: string, accountId?: string | null): Promise<boolean> {
   if (!smsBulkEnabled()) return false;
   try {
-    return smsBulkTransport(await resolveSmsAccount(tenantId)) === "short-brasil-bulk";
+    return smsBulkTransport(await resolveSmsAccount(tenantId, accountId)) === "short-brasil-bulk";
   } catch (error) {
     if (error instanceof ProviderAccountUnavailableError) return false;
     throw error;
@@ -1033,6 +1025,7 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
             },
         deliveryKey,
         ...(expertId ? { expertId } : {}),
+        providerAccountId: campaign.provider_account_id ?? null,
       });
       const errorKind = r.ok ? undefined : (r as { errorKind?: unknown }).errorKind;
       const providerAccount = errorKind === "provider_account";
@@ -1071,6 +1064,7 @@ function campaignDeps(bulk: boolean): CampaignDispatchDeps {
               await Promise.all(
                 items.map(async (it) => ({
                   tenantId: campaign.tenant_id,
+                  providerAccountId: campaign.provider_account_id ?? null,
                   to: it.target.phone,
                   content: renderSmsVariables(
                     campaign.content,
@@ -1127,13 +1121,6 @@ async function maybeReconcileBulkSubmissions() {
 
 export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number } = {}) {
   await maybeReconcileBulkSubmissions();
-  // Fora da janela → deixa pra próximo tick (idem outros canais).
-  const deferTo = await deferIfOutsideWindow();
-  if (deferTo) {
-    // Idle ticks only prove liveness; they do not write dispatcher_runs rows.
-    void pingHeartbeat(SMS_CAMPAIGN_JOB, true);
-    return { processed: 0, deferred_until: deferTo };
-  }
 
   const { data: claimed, error: claimErr } = await supabaseAdmin.rpc("claim_due_sms_campaigns", {
     p_limit: limit,
@@ -1204,7 +1191,7 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
                 scope,
               ),
           })
-        : campaignDeps(await campaignUsesBulk(c.tenant_id));
+        : campaignDeps(await campaignUsesBulk(c.tenant_id, c.provider_account_id));
       if (!scoped) continue;
       const deps = {
         ...scoped,
@@ -1272,10 +1259,10 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
  * busy send is handed back by the slot itself.
  */
 export async function campaignSendConcurrencyCap(
-  campaign: Pick<SmsCampaignRow, "tenant_id">,
+  campaign: Pick<SmsCampaignRow, "tenant_id"> & { provider_account_id?: string | null },
 ): Promise<number | null> {
   try {
-    const account = await resolveSmsAccount(campaign.tenant_id);
+    const account = await resolveSmsAccount(campaign.tenant_id, campaign.provider_account_id);
     return isOwnedAccount(account) ? OWNED_ACCOUNT_MAX_INFLIGHT : null;
   } catch (error) {
     if (!(error instanceof ProviderAccountUnavailableError)) {
@@ -1293,15 +1280,35 @@ export async function campaignSendConcurrencyCap(
  * before each batch. The first ask may get the half-open probe (ONE send);
  * the next ask of the same campaign learns its verdict. A campaign whose
  * account is refused stops before its next batch without moving the cursor;
- * campaigns of houses on other accounts keep sending.
+ * campaigns of houses on other accounts keep sending. A campaign sent through
+ * an account chosen by the house (provider_account_id) whose option was
+ * removed, or whose account was disabled / lost its credentials, is paused
+ * (accountUnavailable) instead of failing every recipient as misconfigured.
  */
 export async function campaignProviderGate(
   gates: SmsAccountGates,
-  campaign: Pick<SmsCampaignRow, "id" | "tenant_id">,
+  campaign: Pick<SmsCampaignRow, "id" | "tenant_id" | "provider_account_id">,
 ): Promise<ProviderGateDecision> {
   const itemId = `campaign:${campaign.id}`;
   await gates.settle(itemId);
-  const admission = await gates.admit(campaign.tenant_id, itemId);
+  const accountId = campaign.provider_account_id ?? null;
+  if (accountId) {
+    const problem = await smsSendChoiceProblem(campaign.tenant_id, accountId);
+    if (problem) {
+      console.warn("[sms-campaigns] conta de envio escolhida indisponível; pausando", {
+        campaignId: campaign.id,
+        tenantId: campaign.tenant_id,
+        accountId,
+        problem,
+      });
+      return {
+        mode: "open",
+        message: SMS_CAMPAIGN_ACCOUNT_UNAVAILABLE_MESSAGE,
+        accountUnavailable: true,
+      };
+    }
+  }
+  const admission = await gates.admit(campaign.tenant_id, itemId, accountId);
   return admission.mode === "open"
     ? { mode: "open", message: admission.message }
     : { mode: admission.mode };

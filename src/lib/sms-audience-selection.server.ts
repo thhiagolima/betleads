@@ -10,7 +10,6 @@
 import { RESOLUTION_CHUNK_SIZE } from "@/lib/campaign-recipients.server";
 import {
   isSelectionAudience,
-  MAX_SELECTION_PLAYER_IDS,
   normalizeSmsAudienceCriteria,
   selectionAudienceLabel,
   type SmsAudienceCriteria,
@@ -387,10 +386,6 @@ export async function createSelectionAudienceRecord(
   input: { playerIds: readonly string[]; label?: string | null; now?: Date },
 ): Promise<{ id: string; name: string; playerCount: number; discarded: number }> {
   const requested = Array.from(new Set(input.playerIds.map((id) => id.toLowerCase())));
-  if (requested.length > MAX_SELECTION_PLAYER_IDS)
-    throw new Error(
-      `A seleção passa de ${MAX_SELECTION_PLAYER_IDS.toLocaleString("pt-BR")} jogadores.`,
-    );
   const owned = await filterPlayerIdsToTenant(db, tenantId, requested);
   if (owned.length === 0) throw new Error("Nenhum jogador desta casa na seleção");
   const now = input.now ?? new Date();

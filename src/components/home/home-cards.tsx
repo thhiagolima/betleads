@@ -36,13 +36,16 @@ export function HomeCard({
 export function KpiCard({
   title,
   value,
+  meta,
   trend,
   detail,
   sparkline,
   className,
 }: {
-  title: string;
+  title: ReactNode;
   value: string;
+  /** Linha logo abaixo do número (ex.: "8 depósitos · ticket R$ 28,13"); a seta não vale para ela. */
+  meta?: ReactNode;
   trend?: Trend | null;
   detail?: string;
   sparkline?: Array<{ value: number }>;
@@ -72,8 +75,10 @@ export function KpiCard({
       <p className="mt-1 text-2xl font-semibold tracking-[-0.03em] tabular-nums sm:text-[28px]">
         {value}
       </p>
+      {meta && <p className="mt-0.5 text-[13px] text-foreground/80 tabular-nums">{meta}</p>}
+      {/* mt-auto: o rodapé fica alinhado entre cartões de alturas diferentes. */}
       {(trend || detail) && (
-        <p className="mt-2 flex flex-wrap gap-x-1.5 text-xs text-muted-foreground">
+        <p className="mt-auto flex flex-wrap gap-x-1.5 pt-2 text-xs text-muted-foreground">
           <TrendText trend={trend ?? null} />
           {detail && <span>{detail}</span>}
         </p>
@@ -87,12 +92,13 @@ export function MetricRow({
   value,
   valueClassName,
   to,
+  ...rest
 }: {
   label: string;
   value: ReactNode;
   valueClassName?: string;
   to?: "/jornadas" | "/resultados" | "/eventos";
-}) {
+} & HTMLAttributes<HTMLElement>) {
   const content = (
     <>
       <span className="text-muted-foreground">{label}</span>
@@ -105,10 +111,16 @@ export function MetricRow({
   const classes =
     "flex items-center justify-between gap-3 border-b border-border/70 py-2.5 text-[13.5px] last:border-b-0";
   return to ? (
-    <Link to={to} className={cn(classes, "-mx-2 rounded-md px-2 hover:bg-foreground/[0.04]")}>
+    <Link
+      to={to}
+      className={cn(classes, "-mx-2 rounded-md px-2 hover:bg-foreground/[0.04]")}
+      {...rest}
+    >
       {content}
     </Link>
   ) : (
-    <div className={classes}>{content}</div>
+    <div className={classes} {...rest}>
+      {content}
+    </div>
   );
 }

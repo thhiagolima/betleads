@@ -39,20 +39,21 @@ const screen: HelpScreen = {
       id: "hub",
       title: "Lista de campanhas",
       intro:
-        "Todas as campanhas de SMS, e-mail, voz e Web Push dos últimos 30 dias (os indicadores no topo) e todas as campanhas da lista, sem limite de data. Atualiza sozinha a cada 30 segundos.",
+        "Todas as campanhas de SMS, e-mail, voz e Web Push dos últimos 30 dias (os indicadores no topo) e todas as campanhas da lista, sem limite de data. Atualiza sozinha a cada 30 segundos. Uma campanha de um canal que o super admin desligou para a casa some da lista (os indicadores também deixam de contá-la).",
       items: [
         {
           anchor: "campanhas.hub.envio-teste",
           label: "Envio de teste",
           what: "Abre o diálogo para mandar SMS, e-mail ou voz a um único número/e-mail, sem criar uma campanha.",
-          notes: "Não existe envio de teste de Web Push: o teste só oferece SMS, E-mail e Voz.",
+          notes:
+            "Não existe envio de teste de Web Push: o teste só oferece SMS, E-mail e Voz. O botão desaparece quando SMS, e-mail e voz estão todos desligados para a casa.",
         },
         {
           anchor: "campanhas.hub.nova-campanha",
           label: "Nova campanha",
           what: "Abre o compositor para criar uma campanha de SMS, e-mail, voz ou Web Push.",
           notes:
-            "O compositor sempre abre no canal SMS. Web Push só aparece como opção de canal quando a casa já configurou o Web Push em Integrações → Web Push.",
+            "O compositor abre no primeiro canal ligado para a casa. Web Push só aparece como opção de canal quando o canal está ligado e a casa já configurou o Web Push em Integrações → Web Push; os demais canais só aparecem como opção quando o super admin os deixou ligados para a casa.",
         },
         {
           label: "Indicadores Enviados / Falhas / Em envio",
@@ -95,7 +96,11 @@ const screen: HelpScreen = {
         },
         {
           label: "Selo \"Bloqueada\"",
-          what: 'Aparece ao lado do status quando o último envio de uma campanha de e-mail foi bloqueado — por exemplo porque o remetente escolhido perdeu a verificação do domínio. Passe o mouse (ou veja o rótulo para leitor de tela) para o motivo completo.',
+          what: 'Aparece ao lado do status quando o último envio de uma campanha de e-mail foi bloqueado — por exemplo porque o remetente escolhido perdeu a verificação do domínio, ou porque o canal E-mail foi desabilitado para a casa ("Canal E-mail desabilitado para a casa."). Passe o mouse (ou veja o rótulo para leitor de tela) para o motivo completo.',
+        },
+        {
+          label: '"Motivo:" / "Motivo da recusa:"',
+          what: 'Linha abaixo dos detalhes da campanha com o motivo de uma recusa, falha, cancelamento ou pausa — por exemplo, "Saldo insuficiente" ou, quando o canal E-mail foi desabilitado para a casa, "Canal E-mail desabilitado para a casa."',
         },
         {
           label: 'Selo "N não enviados"',
@@ -144,7 +149,7 @@ const screen: HelpScreen = {
           label: "Canal",
           what: "Escolhe entre SMS, E-mail, Voz ou Web Push. Troca os campos de conteúdo mostrados abaixo.",
           notes:
-            'A opção "Web Push" só aparece quando a casa tem o Web Push configurado em Integrações → Web Push; sem isso, ela não aparece (e um link antigo que tente abrir o compositor já em Web Push volta sozinho para SMS). Ao escolher Web Push, o seletor "Público" comum some e dá lugar aos campos próprios do Web Push, descritos abaixo. O compositor do expert nunca oferece Web Push.',
+            'Só aparecem os canais que o super admin deixou ligados para a casa. A opção "Web Push" também exige que a casa tenha o Web Push configurado em Integrações → Web Push; sem isso (ou com o canal desligado), ela não aparece (e um link antigo que tente abrir o compositor já em Web Push volta sozinho para o primeiro canal ainda disponível). Se o canal escolhido for desligado enquanto o compositor está aberto, ele volta sozinho para o primeiro canal ainda disponível. Ao escolher Web Push, o seletor "Público" comum some e dá lugar aos campos próprios do Web Push, descritos abaixo. O compositor do expert nunca oferece Web Push.',
         },
         {
           anchor: "campanhas.compositor.nome",
@@ -154,16 +159,22 @@ const screen: HelpScreen = {
         {
           anchor: "campanhas.compositor.publico",
           label: "Público",
-          what: 'Escolhe quem recebe: um dos públicos automáticos, um nível, um público salvo ou — só em SMS — "Lista de números · quem ainda não é jogador". Não aparece em Web Push, que tem o seu próprio "Público" (veja "Público (Web Push)").',
+          what: 'Escolhe quem recebe: um dos públicos automáticos, um nível, um público salvo ou uma lista avulsa: em SMS, "Lista de números · quem ainda não é jogador"; em voz, "Lista de números"; em e-mail, "Lista de e-mails". Não aparece em Web Push, que tem o seu próprio "Público" (veja "Público (Web Push)").',
           notes:
             'Ao trocar o público (ou o canal), o número de destinatários elegíveis é recalculado ("Calculando o público…"). Num SMS agendado, o público é recalculado de novo na hora do envio: quem passou a se enquadrar entra e quem deixou de se enquadrar sai.',
         },
         {
           anchor: "campanhas.compositor.lista-numeros",
           label: "Números da lista (lista de números)",
-          what: "Campo de texto para colar números de celular: um por linha, ou separados por vírgula ou ponto e vírgula. Aceita até 20.000 números por campanha.",
+          what: "Campo de texto para colar números de celular: um por linha, ou separados por vírgula ou ponto e vírgula.",
           notes:
-            "Só aparece quando o público escolhido é a lista de números. Os números não são salvos como jogadores e quem já é jogador da casa fica de fora do envio — se essa pessoa clicar no link e se cadastrar com o mesmo telefone, o cadastro e os depósitos entram no relatório da campanha. Números inválidos são ignorados e contados; números repetidos recebem uma única vez — os dois avisos aparecem no bloco de avisos quando acontecem.",
+            "Só aparece quando o público escolhido é a lista de números (SMS ou voz). Os números não são salvos como jogadores. Em SMS, quem já é jogador da casa fica de fora do envio — se essa pessoa clicar no link e se cadastrar com o mesmo telefone, o cadastro e os depósitos entram no relatório da campanha. Em voz, a ligação vai para todos os números da lista, menos quem revogou o consentimento para ligações. Nos dois canais, a mensagem ou o roteiro só aceitam links da casa, sem variáveis de jogador. Números inválidos são ignorados e contados; números repetidos recebem uma única vez — os dois avisos aparecem no bloco de avisos quando acontecem.",
+        },
+        {
+          label: "E-mails da lista (lista de e-mails)",
+          what: 'Campo de texto para colar e-mails: um por linha, ou separados por vírgula, ponto e vírgula ou espaço. O botão "Enviar arquivo (CSV, TXT, XLS)" ao lado lê os e-mails de um arquivo e soma com o que já estiver colado.',
+          notes:
+            'Só aparece em e-mail, quando o público escolhido é "Lista de e-mails". Os e-mails não são salvos como jogadores; endereços descadastrados ou bloqueados ficam de fora. E-mails inválidos são ignorados e contados, repetidos recebem uma única vez, e variáveis de jogador do template (como {nome}) saem vazias — os avisos aparecem no bloco de avisos.',
         },
         {
           anchor: "campanhas.compositor.lista-arquivo",
@@ -247,7 +258,7 @@ const screen: HelpScreen = {
           label: "Áudio da biblioteca / Roteiro",
           what: "Escolhe o áudio ou o roteiro aprovado que será reproduzido na ligação.",
           notes:
-            "Até 200 destinatários por campanha de voz. Um roteiro repetido reaproveita o áudio já gerado antes, em vez de gerar de novo.",
+            "Sem limite de destinatários por campanha de voz. Um roteiro repetido reaproveita o áudio já gerado antes, em vez de gerar de novo.",
         },
         {
           anchor: "campanhas.compositor.voz-novo",
@@ -314,7 +325,7 @@ const screen: HelpScreen = {
           label: 'Bloco de avisos ("Falta para enviar:" / "Para continuar, corrija:")',
           what: 'Antes de tentar enviar, o título é "Falta para enviar:"; depois de tentar (e ainda faltar algo), vira "Para continuar, corrija:". Lista tudo que falta para o botão de enviar funcionar.',
           notes:
-            'Mensagens possíveis: "Informe o nome da campanha.", "Cole ou envie uma lista com números de celular válidos." (lista de números vazia), "Escolha um público com destinatários elegíveis." (outros públicos), "A lista aceita até 20.000 números por campanha.", o aviso de variáveis não aceitas na lista de números ("Campanhas para lista de números não aceitam variáveis de jogador (...); use apenas texto e links."), "Escreva ou selecione a mensagem de SMS.", "Selecione um template de e-mail.", "Selecione um roteiro."/"Selecione um áudio da biblioteca.", "Escolha a data e hora do agendamento.", "O agendamento deve ter pelo menos um minuto de antecedência.", "Variáveis não reconhecidas: ...", "Voz aceita até 200 destinatários por campanha.", e, quando nenhum destinatário puder receber, "Nenhum número da lista pode receber: todos já são jogadores ou foram bloqueados." (lista de números) ou "Nenhum destinatário deste público corresponde a um jogador cadastrado." (outros públicos). No Web Push, as mensagens possíveis são "Informe o nome da campanha.", "Escolha um público com destinatários elegíveis." (nenhuma inscrição no público, ou "Filtros do CRM" sem público escolhido), "O título deve ter entre 1 e 64 caracteres", "A mensagem deve ter entre 1 e 240 caracteres", "O link deve ser uma URL https", "A imagem deve ser uma URL https" e as duas de agendamento — dos problemas de conteúdo (título, mensagem, link, imagem), aparece um de cada vez, na ordem dos campos. Abaixo da lista (sem travar o envio) aparecem os avisos de quem fica de fora: números inválidos ou repetidos da lista, jogadores fora do público por cadastro inválido/sem contato/sem consentimento, e — só em SMS para público normal — a verificação do cadastro de cada destinatário: "Verificando o cadastro dos destinatários…"; se essa verificação falhar, "Não foi possível verificar os cadastros agora; a verificação será refeita no envio." (o envio não é bloqueado — a conferência de quem pode receber é feita de novo na hora de enviar); ou, quando concluída com sucesso, uma linha por motivo ("sem cadastro não receberão", "com telefone inválido não receberão", "sem consentimento para SMS não receberão", "no grupo de controle de uma jornada não receberão", "já são jogadores da casa e não receberão") seguida de "Os demais recebem normalmente." (ou "Nenhum destinatário desta lista pode receber.") e "A lista fica no relatório da campanha, em “Não enviados”."',
+            'Mensagens possíveis: "Informe o nome da campanha.", "Cole ou envie uma lista com números de celular válidos." (lista de números vazia), "Cole ou envie uma lista com e-mails válidos." (lista de e-mails vazia), "Escolha um público com destinatários elegíveis." (outros públicos), o aviso de variáveis não aceitas na lista de números ("Campanhas para lista de números não aceitam variáveis de jogador (...); use apenas texto e links."), "Escreva ou selecione a mensagem de SMS.", "Selecione um template de e-mail.", "Selecione um roteiro."/"Selecione um áudio da biblioteca.", "Escolha a data e hora do agendamento.", "O agendamento deve ter pelo menos um minuto de antecedência.", "Variáveis não reconhecidas: ...", e, quando nenhum destinatário puder receber, "Nenhum número da lista pode receber: todos já são jogadores ou foram bloqueados." (lista de números) ou "Nenhum destinatário deste público corresponde a um jogador cadastrado." (outros públicos). No Web Push, as mensagens possíveis são "Informe o nome da campanha.", "Escolha um público com destinatários elegíveis." (nenhuma inscrição no público, ou "Filtros do CRM" sem público escolhido), "O título deve ter entre 1 e 64 caracteres", "A mensagem deve ter entre 1 e 240 caracteres", "O link deve ser uma URL https", "A imagem deve ser uma URL https" e as duas de agendamento — dos problemas de conteúdo (título, mensagem, link, imagem), aparece um de cada vez, na ordem dos campos. Abaixo da lista (sem travar o envio) aparecem os avisos de quem fica de fora: números inválidos ou repetidos da lista, jogadores fora do público por cadastro inválido/sem contato/sem consentimento, e — só em SMS para público normal — a verificação do cadastro de cada destinatário: "Verificando o cadastro dos destinatários…"; se essa verificação falhar, "Não foi possível verificar os cadastros agora; a verificação será refeita no envio." (o envio não é bloqueado — a conferência de quem pode receber é feita de novo na hora de enviar); ou, quando concluída com sucesso, uma linha por motivo ("sem cadastro não receberão", "com telefone inválido não receberão", "sem consentimento para SMS não receberão", "no grupo de controle de uma jornada não receberão", "já são jogadores da casa e não receberão") seguida de "Os demais recebem normalmente." (ou "Nenhum destinatário desta lista pode receber.") e "A lista fica no relatório da campanha, em “Não enviados”."',
         },
         {
           anchor: "campanhas.compositor.resumo",
@@ -352,6 +363,8 @@ const screen: HelpScreen = {
           anchor: "campanhas.teste.canal",
           label: "Canal (SMS / E-mail / Voz)",
           what: "Escolhe o canal do envio de teste.",
+          notes:
+            "Só aparecem os canais ligados para a casa. Se o canal escolhido for desligado enquanto o diálogo está aberto, ele volta sozinho para o primeiro canal ainda disponível.",
         },
         {
           anchor: "campanhas.teste.telefone",
@@ -545,6 +558,16 @@ const screen: HelpScreen = {
       title:
         "Seu domínio personalizado ainda não foi verificado — os links estão saindo pelo encurtador padrão do CRM.",
       what: "Aviso no compositor quando a casa não tem domínio próprio do encurtador verificado. O envio continua funcionando; só o domínio do link encurtado muda.",
+    },
+    {
+      id: "compositor-sem-canal",
+      title: "Nenhum canal está disponível para campanhas nesta casa.",
+      what: "Aviso no compositor, abaixo do seletor de Canal, quando o super admin desligou SMS, e-mail, voz e Web Push (ou Web Push nunca foi configurado) — não há nenhum canal para escolher e a campanha não pode ser criada.",
+    },
+    {
+      id: "teste-sem-canal",
+      title: "Nenhum canal está disponível para envio nesta casa.",
+      what: 'Aviso no diálogo "Envio de teste", abaixo do seletor de Canal, quando SMS, e-mail e voz estão todos desligados para a casa.',
     },
     {
       id: "opcoes-de-envio-erro",

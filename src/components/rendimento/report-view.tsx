@@ -37,6 +37,7 @@ import { TEAM_REPORT_QUERY_KEY } from "@/components/rendimento/team-ranking";
 import { updatedLabel } from "@/components/rendimento/updated-label";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
+import { tourAnchor } from "@/help/anchor";
 import { exportExpertCreditsCsv } from "@/lib/expert-metrics.functions";
 import { DEFAULT_REPORT_PERIOD, EXPERT_PERIODS, type PeriodKey } from "@/lib/expert-period";
 import { getExpertReport } from "@/lib/expert-report.functions";
@@ -99,6 +100,7 @@ function AdminActions({ expertId }: { expertId: string }) {
           className="gap-2"
           disabled={isDemo || !expert}
           onClick={() => setFormOpen(true)}
+          {...tourAnchor("pessoa.header.editar")}
         >
           <Pencil className="h-4 w-4" />
           Editar
@@ -110,6 +112,7 @@ function AdminActions({ expertId }: { expertId: string }) {
           className="gap-2"
           disabled={isDemo || !expert || toggleActive.isPending}
           onClick={() => expert && toggleActive.mutate(!expert.ativo)}
+          {...tourAnchor("pessoa.header.ativar")}
         >
           <Power className="h-4 w-4" />
           {expert && !expert.ativo ? "Ativar" : "Desativar"}
@@ -141,6 +144,7 @@ function ExportStatementButton({ expertId, period }: { expertId?: string; period
       className="gap-2"
       onClick={() => exportMutation.mutate()}
       disabled={exportMutation.isPending}
+      {...tourAnchor("rendimento.header.csv")}
     >
       <Download className="h-4 w-4" />
       {exportMutation.isPending ? "Exportando…" : "Exportar CSV"}
@@ -205,7 +209,12 @@ export function ReportView({ expertId, tabs }: { expertId?: string; tabs?: React
         }
         actions={
           <>
-            <CentralPeriodPicker value={period} onChange={setPeriod} periods={EXPERT_PERIODS} />
+            <CentralPeriodPicker
+              value={period}
+              onChange={setPeriod}
+              periods={EXPERT_PERIODS}
+              {...tourAnchor("rendimento.header.periodo")}
+            />
             <ExportStatementButton expertId={expertId} period={period} />
             {expertId && <AdminActions expertId={expertId} />}
           </>

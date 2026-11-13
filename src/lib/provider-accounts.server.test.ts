@@ -7,18 +7,32 @@ const state = vi.hoisted(() => ({
     provider_accounts: [] as Row[],
     tenant_channel_providers: [] as Row[],
     platform_channel_defaults: [] as Row[],
+    tenant_channel_account_options: [] as Row[],
   },
   failReads: false,
+  missingOptionsTable: false,
   reads: 0,
 }));
 
 vi.mock("@/integrations/supabase/client.server", () => ({
   supabaseAdmin: {
-    from(table: "provider_accounts" | "tenant_channel_providers" | "platform_channel_defaults") {
+    from(
+      table:
+        | "provider_accounts"
+        | "tenant_channel_providers"
+        | "platform_channel_defaults"
+        | "tenant_channel_account_options",
+    ) {
       return {
         select: async () => {
           state.reads++;
           if (state.failReads) return { data: null, error: { message: "connection reset" } };
+          if (state.missingOptionsTable && table === "tenant_channel_account_options") {
+            return {
+              data: null,
+              error: { code: "42P01", message: "relation \"tenant_channel_account_options\" does not exist" },
+            };
+          }
           return { data: state.tables[table], error: null };
         },
       };
@@ -31,8 +45,10 @@ import {
   DEFAULT_INFOBIP_ACCOUNT_ID,
   DEFAULT_ONESIGNAL_ACCOUNT_ID,
   DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+  assertSmsSendChoice,
   ENV_ACCOUNT_IDS,
   isOwnedAccount,
+  listSmsSendChoices,
   oneSignalAccountById,
   ownAccountPausedByRevocation,
   platformDefaultAccountId,
@@ -43,6 +59,9 @@ import {
   resolveOneSignalAccount,
   resolveSmsAccount,
   revokedOwnChannelKeys,
+  SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE,
+  smsSendChoiceNames,
+  smsSendChoiceProblem,
 } from "./provider-accounts.server";
 import { decryptProviderCredentials, encryptProviderCredentials } from "./secret-box.server";
 
@@ -141,8 +160,10 @@ beforeEach(() => {
     provider_accounts: [],
     tenant_channel_providers: [],
     platform_channel_defaults: [],
+    tenant_channel_account_options: [],
   };
   state.failReads = false;
+  state.missingOptionsTable = false;
   state.reads = 0;
   __resetProviderAccountsCacheForTests();
 });
@@ -241,13 +262,13 @@ describe("resolveChannelAccount", () => {
     assign(TENANT, "sms", OWN_SMS);
     await resolveSmsAccount(TENANT);
     await resolveSmsAccount(TENANT);
-    expect(state.reads).toBe(3); // one snapshot = three table reads
+    expect(state.reads).toBe(4); // one snapshot = four table reads
 
     // A change made by the super admin shows up after the cache expires.
     state.tables.tenant_channel_providers = [];
     vi.advanceTimersByTime(PROVIDER_ACCOUNTS_CACHE_MS + 1);
     expect((await resolveSmsAccount(TENANT)).id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
-    expect(state.reads).toBe(6);
+    expect(state.reads).toBe(8);
   });
 
   it("keeps the last snapshot when the tables cannot be read; none yet fails closed", async () => {
@@ -465,6 +486,110 @@ describe("oneSignalAccountById", () => {
     await expect(oneSignalAccountById("00000000-0000-4000-8000-000000009999")).rejects.toThrow(
       /não existe mais/,
     );
+  });
+});
+
+describe("SMS account chosen per campaign (tenant_channel_account_options)", () => {
+  function addOption(tenantId: string, accountId: string, displayName: string) {
+    state.tables.tenant_channel_account_options.push({
+      tenant_id: tenantId,
+      channel: "sms",
+      provider_account_id: accountId,
+      display_name: displayName,
+    });
+  }
+
+  it("resolves a house option; empty accountId keeps the house default", async () => {
+    state.tables.provider_accounts.push(await ownSmsAccount());
+    addOption(TENANT, OWN_SMS, "Rota principal");
+    expect((await resolveSmsAccount(TENANT)).id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
+    expect((await resolveSmsAccount(TENANT, null)).id).toBe(DEFAULT_SHORT_BRASIL_ACCOUNT_ID);
+    expect(await resolveSmsAccount(TENANT, OWN_SMS)).toMatchObject({
+      id: OWN_SMS,
+      shortcodeToken: "own-token",
+    });
+  });
+
+  it("accepts the account the house default resolves to today", async () => {
+    expect((await resolveSmsAccount(TENANT, DEFAULT_SHORT_BRASIL_ACCOUNT_ID)).id).toBe(
+      DEFAULT_SHORT_BRASIL_ACCOUNT_ID,
+    );
+  });
+
+  it("refuses an account that is not an option of THIS house, without leaking its label", async () => {
+    state.tables.provider_accounts.push(await ownSmsAccount());
+    addOption(OTHER_TENANT, OWN_SMS, "Rota da outra casa");
+    const error = await resolveSmsAccount(TENANT, OWN_SMS).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderAccountUnavailableError);
+    expect((error as Error).message).toBe(SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE);
+    await expect(resolveSmsAccount(null, OWN_SMS)).rejects.toBeInstanceOf(
+      ProviderAccountUnavailableError,
+    );
+  });
+
+  it("a disabled option account is unavailable (no fallback), with the generic message", async () => {
+    state.tables.provider_accounts.push(await ownSmsAccount({ status: "disabled" }));
+    addOption(TENANT, OWN_SMS, "Rota principal");
+    const error = await resolveSmsAccount(TENANT, OWN_SMS).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderAccountUnavailableError);
+    expect((error as Error).message).toBe(SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE);
+    expect((error as Error).message).not.toContain("Short Brasil");
+  });
+
+  it("lists 'Padrão da casa' first, then the options by name with availability", async () => {
+    const DISABLED = "44444444-4444-4444-8444-444444444444";
+    state.tables.provider_accounts.push(
+      await ownSmsAccount(),
+      await ownSmsAccount({ id: DISABLED, status: "disabled" }),
+    );
+    addOption(TENANT, OWN_SMS, "Rota B");
+    addOption(TENANT, DISABLED, "Rota A");
+    addOption(OTHER_TENANT, OWN_SMS, "Outra casa");
+    expect(await listSmsSendChoices(TENANT)).toEqual([
+      { id: null, name: "Padrão da casa", available: true },
+      { id: DISABLED, name: "Rota A", available: false },
+      { id: OWN_SMS, name: "Rota B", available: true },
+    ]);
+    expect(await listSmsSendChoices(null)).toEqual([
+      { id: null, name: "Padrão da casa", available: true },
+    ]);
+  });
+
+  it("assertSmsSendChoice: null passes; unknown or unavailable option throws in pt-BR", async () => {
+    state.tables.provider_accounts.push(
+      await ownSmsAccount({ credentials_encrypted: await encryptProviderCredentials({}) }),
+    );
+    addOption(TENANT, OWN_SMS, "Rota sem credencial");
+    await expect(assertSmsSendChoice(TENANT, null)).resolves.toBeUndefined();
+    await expect(assertSmsSendChoice(TENANT, undefined)).resolves.toBeUndefined();
+    await expect(assertSmsSendChoice(TENANT, OWN_INFOBIP)).rejects.toThrow(
+      /não existe para esta casa/,
+    );
+    // Account without credentials: listed, but not available.
+    await expect(assertSmsSendChoice(TENANT, OWN_SMS)).rejects.toThrow(
+      /"Rota sem credencial" está indisponível/,
+    );
+    expect(await smsSendChoiceProblem(TENANT, OWN_SMS)).toBe(SMS_SEND_ACCOUNT_UNAVAILABLE_MESSAGE);
+    expect(await smsSendChoiceProblem(TENANT, null)).toBeNull();
+  });
+
+  it("smsSendChoiceNames: default, option name, removed option", async () => {
+    state.tables.provider_accounts.push(await ownSmsAccount());
+    addOption(TENANT, OWN_SMS, "Rota principal");
+    const nameOf = await smsSendChoiceNames(TENANT);
+    expect(nameOf(null)).toBe("Padrão da casa");
+    expect(nameOf(OWN_SMS)).toBe("Rota principal");
+    expect(nameOf(OWN_INFOBIP)).toBe("Conta removida");
+  });
+
+  it("a missing options table (app before the migration) is just no options", async () => {
+    state.missingOptionsTable = true;
+    state.tables.provider_accounts.push(await ownSmsAccount());
+    assign(TENANT, "sms", OWN_SMS);
+    expect((await resolveSmsAccount(TENANT)).id).toBe(OWN_SMS);
+    expect(await listSmsSendChoices(TENANT)).toEqual([
+      { id: null, name: "Padrão da casa", available: true },
+    ]);
   });
 });
 

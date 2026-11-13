@@ -27,7 +27,10 @@ vi.mock("@/lib/email.functions", () => ({
   listEmailCampaigns: vi.fn(),
   sendEmailCampaignNow: vi.fn(),
 }));
-vi.mock("@/lib/calls.functions", () => ({ listCallQueue: vi.fn() }));
+vi.mock("@/lib/calls.functions", () => ({
+  listVoiceCampaigns: vi.fn(),
+  cancelVoiceCampaign: vi.fn(),
+}));
 vi.mock("@/lib/campaign-drafts.functions", () => ({
   deleteCampaignDraft: vi.fn(),
   listCampaignDrafts: vi.fn(),
@@ -88,6 +91,16 @@ describe("CampaignRow", () => {
     expect(html).toContain("Relatório");
     expect(html).toContain("Retomar");
     expect(html).toContain('href="/plano-e-creditos"');
+  });
+
+  it("sms: shows the send account only when it isn't the house default", () => {
+    expect(row({ ...pausedSms, send_account_name: "Rota principal" })).toContain(
+      "por Rota principal",
+    );
+    expect(row({ ...pausedSms, send_account_name: "Padrão da casa" })).not.toContain(
+      "por Padrão da casa",
+    );
+    expect(row(pausedSms)).not.toContain(" · por ");
   });
 
   it("webpush: paused for lack of balance shows Retomar and the wallet link", () => {

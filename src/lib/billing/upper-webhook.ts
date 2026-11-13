@@ -1,7 +1,8 @@
 // Upper Pix webhook signature verification (server-only).
 //
 // Header: `X-Upper-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256>`, where
-// `v1 = HMAC-SHA256(UPPER_WEBHOOK_SECRET, "<t>.<rawBody>")`. The raw body
+// `v1 = HMAC-SHA256(webhookSecret, "<t>.<rawBody>")` (the route tries every
+// secret from upperWebhookSecrets(): gateway config, DB and env). The raw body
 // must be the exact bytes received (read with `request.text()` before any
 // JSON parsing) — re-serializing a parsed object would change the signature.
 

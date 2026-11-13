@@ -6,6 +6,7 @@ import { MetricRow } from "@/components/home/home-cards";
 import { Button } from "@/components/ui/button";
 import { num } from "@/lib/format";
 import { ownProviderSendRefusedMessage } from "@/lib/own-provider.shared";
+import { tourAnchor } from "@/help/anchor";
 
 /**
  * "Saúde do canal" block of the SMS overview. No delivery rate: the SMS
@@ -39,7 +40,7 @@ export function SmsChannelHealth({
       title="Saúde do canal"
       description="Disponibilidade, saldo e o que está programado para sair."
       action={
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" {...tourAnchor("sms.saude.acoes")}>
           <Button asChild variant="outline" className="h-9">
             <Link to="/plano-e-creditos">
               <CreditCard className="size-4" aria-hidden="true" />
@@ -52,7 +53,7 @@ export function SmsChannelHealth({
         </div>
       }
     >
-      <div className="grid gap-x-8 md:grid-cols-2">
+      <div className="grid gap-x-8 md:grid-cols-2" {...tourAnchor("sms.saude.metricas")}>
         <div>
           <MetricRow
             label="Disponibilidade"

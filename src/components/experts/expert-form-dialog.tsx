@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Term } from "@/components/help/term";
 import {
   Select,
   SelectContent,
@@ -109,6 +110,7 @@ export function ExpertFormDialog({
   const fieldId = useId();
   const ids = {
     nome: `${fieldId}-nome`,
+    affiliate: `${fieldId}-affiliate`,
     envio: `${fieldId}-envio`,
     envioHelp: `${fieldId}-envio-help`,
     envioPending: `${fieldId}-envio-pending`,
@@ -280,7 +282,9 @@ export function ExpertFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>IDs de afiliado</Label>
+            <Label htmlFor={ids.affiliate}>
+              <Term id="id-de-afiliado">IDs de afiliado</Term>
+            </Label>
             <div className="flex flex-wrap gap-1.5">
               {affiliateIds.map((id) => (
                 <span
@@ -300,6 +304,7 @@ export function ExpertFormDialog({
               ))}
             </div>
             <Input
+              id={ids.affiliate}
               value={affiliateInput}
               onChange={(e) => {
                 setAffiliateInput(e.target.value.slice(0, AFFILIATE_ID_MAX_LENGTH));
@@ -388,7 +393,9 @@ export function ExpertFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor={ids.teto}>Teto mensal</Label>
+            <Label htmlFor={ids.teto}>
+              <Term id="teto">Teto mensal</Term>
+            </Label>
             <div className="relative">
               <span
                 aria-hidden="true"

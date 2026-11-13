@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { MetaAccount } from "@/components/integrations/meta-summary";
+import { tourAnchor } from "@/help/anchor";
 import { cn } from "@/lib/utils";
 
 // Filtro "BM / conta" de Aquisição e LTV (MB4-04): escolhe as contas de anúncio
@@ -103,6 +104,7 @@ export function AdAccountFilter({
             "h-9 w-full justify-between gap-2 sm:w-auto sm:max-w-xs",
             active && "border-primary/60 bg-primary/5",
           )}
+          {...tourAnchor("midia.filtro.bm-conta")}
         >
           <span className="flex min-w-0 items-center gap-2">
             <Filter aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

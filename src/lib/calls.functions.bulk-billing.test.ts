@@ -114,3 +114,48 @@ describe("bulkDispatchCalls without balance", () => {
     expect(fake.db.rows("call_queue").every((r) => r.status === "audio_ready")).toBe(true);
   });
 });
+
+// No cap on a bulk voice send: past the inline size, "Disparar agora" queues
+// every target (in chunked inserts) for the per-minute voice dispatcher, the
+// same path a scheduled send already takes.
+describe("bulkDispatchCalls without a size cap", () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      lead_id: null,
+      phone_number: `55119${String(i).padStart(8, "0")}`,
+    }));
+
+  it("queues a large dispatch-now list for the dispatcher instead of dialing inline", async () => {
+    const result = await bulkDispatchCallsFor(fake.db.client as never, {
+      script_id: "00000000-0000-4000-8000-0000000000aa",
+      targets: many(1_250),
+    });
+
+    expect(calls.runVoiceQueueDispatcher).not.toHaveBeenCalled();
+    const rows = fake.db.rows("call_queue");
+    expect(rows).toHaveLength(1_250);
+    expect(new Set(rows.map((r) => r.phone_number)).size).toBe(1_250);
+    expect(rows.every((r) => r.status === "audio_ready")).toBe(true);
+    expect(rows.every((r) => Date.parse(String(r.scheduled_at)) <= Date.now())).toBe(true);
+    expect(result).toMatchObject({
+      total: 1_250,
+      queued: 0,
+      pending: 1_250,
+      failed: 0,
+      enfileirado: true,
+    });
+  });
+
+  it("queues a large scheduled list at its time", async () => {
+    const at = new Date(Date.now() + 60 * 60_000).toISOString();
+    const result = await bulkDispatchCallsFor(fake.db.client as never, {
+      script_id: "00000000-0000-4000-8000-0000000000aa",
+      targets: many(700),
+      scheduled_at: at,
+    });
+    const rows = fake.db.rows("call_queue");
+    expect(rows).toHaveLength(700);
+    expect(rows.every((r) => r.scheduled_at === at && r.status === "audio_ready")).toBe(true);
+    expect(result).toMatchObject({ total: 700, pending: 700, scheduled: true });
+  });
+});

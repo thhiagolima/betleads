@@ -8,6 +8,12 @@ import {
   groupVoiceQueueItems,
   isFinishedCampaignStatus,
   isPausedCampaignStatus,
+  summarizeVoiceCampaign,
+  summarizeVoiceCampaignCounts,
+  VOICE_EMPTY_SENDING_STALE_MS,
+  type VoiceCampaignRecord,
+  type VoiceItemCount,
+  type VoiceQueueItem,
 } from "./channel-operation-state";
 import { EMAIL_CAMPAIGN_CHANNEL_DISABLED_REASON } from "./tenant-channels.shared";
 
@@ -188,6 +194,116 @@ describe("groupVoiceQueueItems", () => {
     ).toBe("paused_limit");
     expect(status([{ id: "a", status: "failed", scheduled_at: at(-1) }])).toBe("falhou");
     expect(status([{ id: "a", status: "cancelled", scheduled_at: at(-1) }])).toBe("cancelada");
+  });
+});
+
+describe("summarizeVoiceCampaign / summarizeVoiceCampaignCounts", () => {
+  const now = new Date("2026-11-11T12:00:00.000Z").getTime();
+  const at = (minutes: number) => new Date(now + minutes * 60_000).toISOString();
+  const campaign = (extra: Partial<VoiceCampaignRecord> = {}): VoiceCampaignRecord => ({
+    id: "vc-1",
+    name: "Reativação",
+    status: "sending",
+    scheduled_at: at(-30),
+    created_at: at(-30),
+    recipient_count: 10,
+    ...extra,
+  });
+
+  // Same grouping as public.voice_campaign_item_counts: (status,
+  // provider_status, coalesce(scheduled_at, created_at) > now), with the item
+  // id when the group has exactly one item.
+  function aggregate(items: VoiceQueueItem[]): VoiceItemCount[] {
+    const groups = new Map<string, VoiceItemCount & { ids: string[] }>();
+    for (const item of items) {
+      const time = Date.parse(String(item.scheduled_at ?? item.created_at ?? ""));
+      const isFuture = Number.isFinite(time) && time > now;
+      const key = [item.status, item.provider_status ?? "", isFuture].join("|");
+      const group = groups.get(key) ?? {
+        status: item.status ?? null,
+        provider_status: item.provider_status ?? null,
+        is_future: isFuture,
+        item_count: 0,
+        ids: [],
+      };
+      group.item_count = Number(group.item_count) + 1;
+      group.ids.push(item.id);
+      groups.set(key, group);
+    }
+    return [...groups.values()].map(({ ids, ...row }) => ({
+      ...row,
+      // bigint arrives as a number; a string must work too.
+      item_count: String(row.item_count),
+      sample_item_id: ids.length === 1 ? ids[0] : null,
+    }));
+  }
+
+  const item = (
+    id: string,
+    status: string,
+    extra: Partial<VoiceQueueItem> = {},
+  ): VoiceQueueItem => ({
+    id,
+    status,
+    scheduled_at: at(-10),
+    created_at: at(-20),
+    ...extra,
+  });
+
+  const mixes: Record<string, VoiceQueueItem[]> = {
+    vazia: [],
+    "uma ligação": [item("a", "waiting_provider")],
+    concluída: [item("a", "completed"), item("b", "completed"), item("c", "cancelled")],
+    falhou: [item("a", "failed"), item("b", "cancelled")],
+    cancelada: [item("a", "cancelled"), item("b", "cancelled")],
+    enviando: [
+      item("a", "completed"),
+      item("b", "calling"),
+      item("c", "audio_ready"),
+      item("d", "audio_ready", { scheduled_at: at(30) }),
+    ],
+    "aguardando provedor": [item("a", "audio_ready"), item("b", "audio_ready")],
+    agendada: [
+      item("a", "audio_ready", { scheduled_at: at(60) }),
+      item("b", "audio_ready", { scheduled_at: at(61) }),
+    ],
+    "pausada por limite": [
+      item("a", "audio_ready", { provider_status: "cooldown" }),
+      item("b", "audio_ready", { provider_status: "rolling_24h_limit", scheduled_at: at(60) }),
+      item("c", "completed"),
+    ],
+    "sem horário": [item("a", "audio_ready", { scheduled_at: null, created_at: at(5) })],
+    pendente: [item("a", "pending_audio"), item("b", "paused")],
+  };
+
+  it.each(Object.entries(mixes))("rows and counts give the same summary (%s)", (_, items) => {
+    for (const stored of ["sending", "scheduled", "cancelled"]) {
+      const record = campaign({ status: stored });
+      const fromRows = summarizeVoiceCampaign(record, items, now);
+      const fromCounts = summarizeVoiceCampaignCounts(record, aggregate(items), now);
+      const { itemIds, ...rest } = fromRows;
+      expect(fromCounts).toEqual({ ...rest, itemIds: itemIds.length === 1 ? itemIds : [] });
+    }
+  });
+
+  it("a sending campaign with no item for over 10 minutes shows cancelled", () => {
+    const stale = campaign({
+      created_at: new Date(now - VOICE_EMPTY_SENDING_STALE_MS - 1).toISOString(),
+    });
+    expect(summarizeVoiceCampaignCounts(stale, [], now)).toMatchObject({
+      status: "cancelada",
+      campaignStatus: "cancelled",
+      total: 0,
+    });
+    const fresh = campaign({ created_at: at(-2) });
+    expect(summarizeVoiceCampaignCounts(fresh, [], now)).toMatchObject({
+      status: "enviando",
+      campaignStatus: "sending",
+    });
+    // A scheduled campaign keeps waiting for its time.
+    expect(
+      summarizeVoiceCampaignCounts(campaign({ status: "scheduled", created_at: at(-60) }), [], now),
+    ).toMatchObject({ status: "agendada", campaignStatus: "scheduled" });
   });
 });
 

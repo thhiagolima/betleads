@@ -43,15 +43,15 @@ export function buildRecommendations(
         source.influencedPlayers === 0
           ? {
               severity: "acao",
-              title: `${source.name} gastou ${money(source.cost)} sem nenhuma conversão`,
+              title: `${source.name} gastou ${money(source.cost)} sem ninguém voltar`,
               detail:
                 source.type === "campaign"
-                  ? "Ninguém depositou após clicar e nenhum jogador parado voltou. Não repita este formato; para relacionamento com ativos, reduza o volume."
+                  ? "Ninguém depositou após clicar e nenhum jogador parado voltou. Não repita este formato; para relacionamento com quem já está jogando, reduza o volume."
                   : "Ninguém depositou após clicar e nenhum jogador parado voltou. Revise os textos e a cadência, ou desligue a jornada até ajustar.",
             }
           : {
               severity: "atencao",
-              title: `${source.name} não converteu ninguém pelo link`,
+              title: `${source.name} não trouxe ninguém de volta pelo link`,
               detail: `${money(source.cost)} sem depósito após clique, embora ${source.influencedPlayers} jogador(es) parado(s) tenham voltado. Reforce a chamada para o link no texto.`,
             },
       );
@@ -65,15 +65,15 @@ export function buildRecommendations(
         )
           items.push({
             severity: "atencao",
-            title: `Etapa ${step.position + 1} de ${source.name} não converteu ninguém`,
-            detail: `Custou ${money(step.cost)} no período sem depósito após clique nem jogador recuperado. Troque o texto ou remova a etapa.`,
+            title: `Etapa ${step.position + 1} de ${source.name} não trouxe ninguém de volta`,
+            detail: `Custou ${money(step.cost)} no período sem depósito após clique nem reativação após SMS. Troque o texto ou remova a etapa.`,
           });
       }
     }
     if (source.cost >= MIN_COST && source.costOnActive / source.cost >= 0.5)
       items.push({
         severity: "atencao",
-        title: `${percent(source.costOnActive / source.cost)} do custo de ${source.name} foi para jogadores ativos`,
+        title: `${percent(source.costOnActive / source.cost)} do custo de ${source.name} foi para quem já estava jogando`,
         detail: `${money(source.costOnActive)} em mensagens para quem depositou há menos de 2 dias. Filtre a audiência para jogadores parados se o objetivo é trazer de volta.`,
       });
   }
@@ -88,14 +88,14 @@ export function buildRecommendations(
       if (cost <= typical / 2)
         items.push({
           severity: "oportunidade",
-          title: `${source.name} é a forma mais barata de converter`,
-          detail: `${money(cost)} por jogador convertido pelo link, contra ${money(typical)} na mediana das origens. Vale ampliar o alcance ou repetir o formato.`,
+          title: `${source.name} traz jogadores de volta pelo menor custo`,
+          detail: `${money(cost)} por jogador que voltou pelo link, contra ${money(typical)} na mediana das origens. Vale ampliar o alcance ou repetir o formato.`,
         });
       else if (cost >= typical * 3)
         items.push({
           severity: "atencao",
-          title: `${source.name} converte, mas caro`,
-          detail: `${money(cost)} por jogador convertido, ${Math.round(cost / typical)}x a mediana das origens (${money(typical)}).`,
+          title: `${source.name} traz jogadores de volta, mas caro`,
+          detail: `${money(cost)} por jogador que voltou, ${Math.round(cost / typical)} vezes a mediana das origens (${money(typical)}).`,
         });
     }
   }
@@ -110,7 +110,7 @@ export function buildRecommendations(
         items.push({
           severity: "atencao",
           title: `Pouca gente clica no link de ${source.name}`,
-          detail: `${percentFine(source.clickRate as number)} dos SMS clicados, contra ${percentFine(typical)} na mediana. Revise a primeira frase e a chamada para o link.`,
+          detail: `${percentFine(source.clickRate as number)} de cliques no link, contra ${percentFine(typical)} na mediana. Revise a primeira frase e a chamada para o link.`,
         });
     }
   }

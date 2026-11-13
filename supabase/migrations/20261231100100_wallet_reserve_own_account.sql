@@ -36,7 +36,7 @@
 --     `wallet_reserve` (ex. `expert_wallet_reserve`) continua funcionando
 --     com a função recriada.
 --   * Corpo das duas funções = versão atual (`wallet_reserve` de
---     20261210100100_webpush_billing_item.sql, `expert_wallet_reserve` de
+--     20261217100000_webpush_lead_billing.sql, `expert_wallet_reserve` de
 --     20261126100000_expert_campaigns.sql), só com o parâmetro novo e a
 --     checagem de dono. `grant`/`revoke execute` refeitos iguais aos atuais,
 --     com a assinatura nova.
@@ -50,7 +50,7 @@
 -- ROLLBACK
 --   drop function public.expert_wallet_reserve(uuid, uuid, text, integer, text, text, text, uuid);
 --   drop function public.wallet_reserve(uuid, text, integer, text, text, text, uuid);
---   -- (recriar as duas com o corpo de 20261210100100_webpush_billing_item.sql
+--   -- (recriar as duas com o corpo de 20261217100000_webpush_lead_billing.sql
 --   -- e 20261126100000_expert_campaigns.sql, sem o 7º/8º parâmetro.)
 
 drop function if exists public.wallet_reserve(uuid, text, integer, text, text, text);
@@ -94,7 +94,7 @@ begin
     raise exception 'invalid_wallet_reserve';
   end if;
 
-  if _item is null or _item not in ('sms', 'voice_30s', 'email', 'webpush') then
+  if _item is null or _item not in ('sms', 'voice_30s', 'email', 'webpush', 'webpush_lead') then
     raise exception 'invalid_item';
   end if;
 

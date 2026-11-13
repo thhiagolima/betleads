@@ -65,6 +65,7 @@ vi.mock("@/lib/webpush/campaigns.functions", () => ({
 }));
 vi.mock("@/lib/sms-templates.functions", () => ({ listSmsTemplates: vi.fn() }));
 vi.mock("@/lib/sms.functions", () => ({
+  listSmsSendAccounts: vi.fn(),
   previewSmsCampaignRecipients: vi.fn(),
   scheduleBulkSms: vi.fn(),
   sendBulkSms: vi.fn(),
@@ -131,13 +132,14 @@ vi.mock("@/hooks/use-enabled-channels", () => ({
 
 import { ChannelCampaignComposer, EXPERT_APPROVAL_NOTICE } from "./channel-campaign-composer";
 
-const render = (channel: "sms" | "email" | "voice" | "webpush" = "sms") =>
+const render = (channel: "sms" | "email" | "voice" | "webpush" = "sms", initialAudienceId = "") =>
   renderToStaticMarkup(
     <ChannelCampaignComposer
       open
       onOpenChange={() => undefined}
       onCreated={() => undefined}
       initialChannel={channel}
+      initialAudienceId={initialAudienceId}
     />,
   ).replace(/\u00a0/g, " ");
 
@@ -205,6 +207,52 @@ describe("ChannelCampaignComposer — house", () => {
     expect(html).not.toContain("Título da notificação");
   });
 
+  it("SMS: sem contas extras, não mostra “Enviar por”", () => {
+    queryData["sms-send-accounts"] = {
+      choices: [{ id: null, name: "Padrão da casa", available: true }],
+    };
+    expect(render("sms")).not.toContain("Enviar por");
+  });
+
+  it("SMS: com contas extras, mostra “Enviar por” com a padrão e as indisponíveis marcadas", () => {
+    queryData["sms-send-accounts"] = {
+      choices: [
+        { id: null, name: "Padrão da casa", available: true },
+        { id: "11111111-1111-4111-8111-111111111111", name: "Rota principal", available: true },
+        { id: "22222222-2222-4222-8222-222222222222", name: "Rota reserva", available: false },
+      ],
+    };
+    const html = render("sms");
+    expect(html).toContain("Enviar por");
+    expect(html).toContain(">Padrão da casa<");
+    expect(html).toContain(">Rota principal<");
+    expect(html).toContain(">Rota reserva (indisponível)<");
+    // Never the vendor.
+    expect(html).not.toMatch(/Short Brasil|Infobip/);
+    // The email channel never offers it.
+    expect(render("email")).not.toContain("Enviar por");
+  });
+
+  it("offers the number list in voice, without the SMS-only player exclusion copy", () => {
+    expect(render("voice")).toContain(">Lista de números<");
+    const html = render("voice", "external:list");
+    expect(html).toContain('aria-label="Números da lista"');
+    expect(html).toContain("quem revogou o consentimento para ligações não recebe");
+    expect(html).not.toContain("quem já é jogador da casa fica de fora");
+    expect(html).toContain("Cole ou envie uma lista com números de celular válidos.");
+  });
+
+  it("offers the e-mail list in e-mail only", () => {
+    expect(render("email")).toContain(">Lista de e-mails<");
+    expect(render("sms")).not.toContain("Lista de e-mails");
+    expect(render("voice")).not.toContain("Lista de e-mails");
+    const html = render("email", "external:emails");
+    expect(html).toContain('aria-label="E-mails da lista"');
+    expect(html).toContain("Enviar arquivo (CSV, TXT, XLS)");
+    expect(html).toContain("Lista de e-mails · 0 válido(s)");
+    expect(html).toContain("Cole ou envie uma lista com e-mails válidos.");
+  });
+
   it("não lista Voz no seletor de canal quando voz está desligada", () => {
     enabledChannels.isEnabled = (channel) => channel !== "voice";
     const html = render("sms");
@@ -241,6 +289,8 @@ describe("ChannelCampaignComposer — expert", () => {
 
     const email = render("email");
     expect(email).not.toContain("Remetente");
+    expect(email).not.toContain("Lista de e-mails");
+    expect(render("voice")).not.toContain("Lista de números");
     expect(email).not.toContain("Domínio do encurtador");
     expect(email).not.toContain("Novo template");
     expect(email).toContain("Boas-vindas");
@@ -279,6 +329,19 @@ describe("ChannelCampaignComposer — expert", () => {
     };
     const html = render("sms");
     expect(html).toContain("Seus envios estão bloqueados: o teto mensal é R$ 0,00.");
+  });
+
+  it("never offers the SMS account choice (the expert sends through the house default)", () => {
+    queryData["expert-composer-options"] = expertOptions("livre");
+    queryData["sms-send-accounts"] = {
+      choices: [
+        { id: null, name: "Padrão da casa", available: true },
+        { id: "11111111-1111-4111-8111-111111111111", name: "Rota principal", available: true },
+      ],
+    };
+    const html = render("sms");
+    expect(html).not.toContain("Enviar por");
+    expect(html).not.toContain("Rota principal");
   });
 
   it("labels house and system audiences for the expert", () => {

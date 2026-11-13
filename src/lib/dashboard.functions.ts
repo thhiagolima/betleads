@@ -23,6 +23,18 @@ export type DashboardRpc = {
   ftd?: number;
   previousFtd?: number;
   withdrawalAmount?: number | string;
+  previousWithdrawalAmount?: number | string;
+  withdrawalCount?: number;
+  /** Soma do primeiro depósito aprovado de quem fez FTD no período. */
+  ftdAmount?: number | string;
+  previousFtdAmount?: number | string;
+  /** Quem fez FTD no período e, desses, quantos redepositaram no mesmo período. */
+  ftdCohort?: number;
+  ftdCohortRedeposited?: number;
+  previousFtdCohort?: number;
+  previousFtdCohortRedeposited?: number;
+  /** R$ dos PIX gerados no período que não foram pagos. */
+  pixUnpaidAmount?: number | string;
   redepositAmount?: number | string;
   previousRedepositAmount?: number | string;
   redepositCount?: number;
@@ -32,6 +44,8 @@ export type DashboardRpc = {
   recoveredNew?: number | string;
   recoveredReactivated?: number | string;
   smsSent?: number;
+  /** Cliques humanos nos links das mensagens (crm_results_daily), só casa. */
+  smsClicks?: number;
   messageCost?: number | string;
   walletBalance?: number | string;
   exempt?: boolean;
@@ -41,6 +55,7 @@ export type DashboardRpc = {
   activeFlows?: number;
   totalFlows?: number;
   pausedFlows?: number;
+  /** Por dia ('YYYY-MM-DD'); num período de um dia só, por hora ('00'..'23', label '14h'). */
   cashflowChart?: Array<{
     key: string;
     label: string;
@@ -54,6 +69,8 @@ export type DashboardRpc = {
     action: string;
     amount?: number | string | null;
     at: string;
+    /** Id do jogador, para o nome virar link no "Ao vivo" (null sem jogador). */
+    playerId?: string | null;
   }>;
 };
 
@@ -153,6 +170,24 @@ export function mapLeadScopedDashboardRpc(value: DashboardRpc, periodDays: numbe
   const recoveredAmount = number(value.recoveredAmount);
   const recoveredNew = number(value.recoveredNew);
   const recoveredReactivated = number(value.recoveredReactivated);
+  const withdrawalAmount = number(value.withdrawalAmount);
+  const previousWithdrawalAmount = number(value.previousWithdrawalAmount);
+  const ftdAmount = number(value.ftdAmount);
+  // Líquido = depósitos - saques. Sem base positiva no período anterior a
+  // variação não diz nada (de -R$ 1 mil para +R$ 2 mil não é "+300%"): null.
+  const netAmount = depositAmount - withdrawalAmount;
+  const previousNetAmount = previousDepositAmount - previousWithdrawalAmount;
+  // Redepósito da safra: dos que fizeram FTD no período, quantos voltaram a
+  // depositar no mesmo período (variação em pontos percentuais).
+  const ftdCohort = number(value.ftdCohort);
+  const ftdCohortRedeposited = number(value.ftdCohortRedeposited);
+  const previousFtdCohort = number(value.previousFtdCohort);
+  const ftdRedepositRate = ftdCohort > 0 ? (ftdCohortRedeposited / ftdCohort) * 100 : 0;
+  // Sem FTD no período anterior não há taxa para comparar: null (sem seta).
+  const previousFtdRedepositRate =
+    previousFtdCohort > 0
+      ? (number(value.previousFtdCohortRedeposited) / previousFtdCohort) * 100
+      : null;
 
   return {
     periodDays,
@@ -161,10 +196,19 @@ export function mapLeadScopedDashboardRpc(value: DashboardRpc, periodDays: numbe
     depositCount,
     depositors,
     depositorsGrowth: pctChange(depositors, previousDepositors),
+    depositsPerDepositor: depositors > 0 ? depositCount / depositors : 0,
     newPlayers,
     newPlayersGrowth: pctChange(newPlayers, previousNewPlayers),
     ftd,
     ftdGrowth: pctChange(ftd, previousFtd),
+    ftdAmount,
+    ftdAmountGrowth: pctChange(ftdAmount, number(value.previousFtdAmount)),
+    ftdTicket: ftd > 0 ? ftdAmount / ftd : 0,
+    ftdCohort,
+    ftdCohortRedeposited,
+    ftdRedepositRate,
+    ftdRedepositRateGrowth:
+      previousFtdRedepositRate == null ? null : ftdRedepositRate - previousFtdRedepositRate,
     conversion,
     conversionGrowth: conversion - previousConversion,
     ticket,
@@ -178,7 +222,11 @@ export function mapLeadScopedDashboardRpc(value: DashboardRpc, periodDays: numbe
     recoveredReactivated,
     recoveredReturning: Math.max(0, recoveredAmount - recoveredNew - recoveredReactivated),
     recoveredPlayers: number(value.recoveredPlayers),
-    withdrawalAmount: number(value.withdrawalAmount),
+    withdrawalAmount,
+    withdrawalCount: number(value.withdrawalCount),
+    withdrawalGrowth: pctChange(withdrawalAmount, previousWithdrawalAmount),
+    netAmount,
+    netGrowth: previousNetAmount > 0 ? pctChange(netAmount, previousNetAmount) : null,
     cashflowChart: (value.cashflowChart ?? []).map((row) => ({
       ...row,
       deposits: number(row.deposits),
@@ -189,6 +237,7 @@ export function mapLeadScopedDashboardRpc(value: DashboardRpc, periodDays: numbe
     pixPayRate:
       number(value.pixGenerated) > 0 ? (depositCount / number(value.pixGenerated)) * 100 : 0,
     pixUnpaid: Math.max(0, number(value.pixGenerated) - depositCount),
+    pixUnpaidAmount: number(value.pixUnpaidAmount),
     reactivationQueue: number(value.reactivationQueue),
     liveEvents: (value.liveEvents ?? []).slice(0, 8).map((event) => ({
       ...event,
@@ -214,6 +263,8 @@ export function mapDashboardRpc(value: DashboardRpc, periodDays: number) {
   // (already on the price book and billed_units -- segments, not
   // sends -- since Task 6), so there's no fallback to compute here.
   const messageCost = number(value.messageCost);
+  // Cliques humanos da mesma fonte (crm_results_daily); CTR sobre os envios.
+  const smsClicks = number(value.smsClicks);
 
   return {
     ...base,
@@ -223,6 +274,8 @@ export function mapDashboardRpc(value: DashboardRpc, periodDays: number) {
     totalFlows: number(value.totalFlows),
     pausedFlows: number(value.pausedFlows),
     smsSent,
+    smsClicks,
+    smsCtr: smsSent > 0 ? (smsClicks / smsSent) * 100 : 0,
     walletBalance: number(value.walletBalance),
     exempt: value.exempt === true,
   };

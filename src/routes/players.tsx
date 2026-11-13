@@ -7,7 +7,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { POLL_INTERVALS } from "@/hooks/use-updated-ago";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -124,6 +124,7 @@ import {
   type OutcomeRow,
 } from "@/lib/pending-conversion.functions";
 import { useServerFn } from "@tanstack/react-start";
+import { tourAnchor } from "@/help/anchor";
 
 export const Route = createFileRoute("/players")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -353,6 +354,7 @@ type SortKey =
   | "ultimo_login"
   | "ultimo_jogo"
   | "ultimo_deposito"
+  | "created_at"
   | "total_depositado"
   | "total_sacado"
   | "lucro"
@@ -365,7 +367,22 @@ const MOBILE_SORTS: ReadonlyArray<{ value: string; label: string; key: SortKey |
   { value: "total_depositado", label: "Maior total depositado", key: "total_depositado" },
   { value: "ultimo_deposito", label: "Último depósito mais recente", key: "ultimo_deposito" },
   { value: "ultimo_login", label: "Último acesso mais recente", key: "ultimo_login" },
+  { value: "created_at", label: "Cadastro mais recente", key: "created_at" },
 ];
+
+/** Instante ISO -> data e hora do cadastro em São Paulo. */
+function brtDateTime(iso: string | null | undefined): { date: string; time: string } | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return {
+    date: d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }),
+    time: d.toLocaleTimeString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  };
+}
 
 function PlayersPage() {
   const navigate = useNavigate();
@@ -982,6 +999,8 @@ function PlayersPage() {
                 return p.ultimo_login ? new Date(p.ultimo_login).getTime() : 0;
               case "ultimo_jogo":
                 return p.ultimo_jogo ? new Date(p.ultimo_jogo).getTime() : 0;
+              case "created_at":
+                return p.created_at ? new Date(p.created_at).getTime() : 0;
               case "total_depositado":
                 return Number(p.total_depositado);
               case "total_sacado":
@@ -1548,6 +1567,7 @@ function PlayersPage() {
         actions={
           <>
             <Button
+              {...tourAnchor("jogadores.cabecalho.campanha")}
               className="h-11 px-4 sm:h-9"
               disabled={filteredCount === 0 || buildingAudience}
               onClick={() => sendToSmsAudience("filter")}
@@ -1562,6 +1582,7 @@ function PlayersPage() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton
+                  {...tourAnchor("jogadores.cabecalho.mais-acoes")}
                   variant="outline"
                   label="Mais ações"
                   icon={<MoreHorizontal className="h-4 w-4" />}
@@ -1569,6 +1590,7 @@ function PlayersPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem
+                  {...tourAnchor("jogadores.cabecalho.exportar-csv")}
                   disabled={filteredCount === 0 || exportingCsv}
                   onSelect={() => void exportCsv()}
                 >
@@ -1576,6 +1598,7 @@ function PlayersPage() {
                   {exportingCsv ? "Exportando…" : "Exportar CSV"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  {...tourAnchor("jogadores.cabecalho.copiar-ids")}
                   disabled={filteredCount === 0 || copyingFilter}
                   onSelect={() => void copyFilterIds()}
                 >
@@ -1588,7 +1611,7 @@ function PlayersPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4" {...tourAnchor("jogadores.kpis")}>
         <KpiCard
           title="Jogadores"
           value={(gamification?.totals.players ?? totalCount).toLocaleString("pt-BR")}
@@ -1606,12 +1629,14 @@ function PlayersPage() {
         />
       </div>
 
-      <PageTabs
-        label="Jogadores"
-        value={view}
-        onValueChange={(next) => setView(next as PlayersView)}
-        items={VIEW_TABS}
-      />
+      <div {...tourAnchor("jogadores.abas")}>
+        <PageTabs
+          label="Jogadores"
+          value={view}
+          onValueChange={(next) => setView(next as PlayersView)}
+          items={VIEW_TABS}
+        />
+      </div>
 
       {view === "lista" ? (
         <>
@@ -1623,6 +1648,7 @@ function PlayersPage() {
                   aria-hidden="true"
                 />
                 <Input
+                  {...tourAnchor("jogadores.lista.busca")}
                   type="search"
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
@@ -1645,6 +1671,7 @@ function PlayersPage() {
                 )}
               </div>
               <Button
+                {...tourAnchor("jogadores.lista.mais-filtros")}
                 type="button"
                 variant="outline"
                 className="h-10 gap-2 self-start sm:self-auto"
@@ -1661,52 +1688,57 @@ function PlayersPage() {
             </div>
 
             <div className="flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center">
-              <SegmentedFilter
-                label="Situação"
-                value={selectedSituation ?? "todos"}
-                onValueChange={(value) =>
-                  selectSituation(value === "todos" ? null : (value as PlayerSituation))
-                }
-                items={[
-                  { value: "todos", label: "Todas as situações" },
-                  ...SITUATIONS.map((situation) => ({
-                    value: situation,
-                    label: SITUATION_FILTER_LABEL[situation],
-                    count: situationCounts?.[situation] ?? null,
-                  })),
-                ]}
-              />
-              <SegmentedFilter
-                label="Nível"
-                value={selectedLevel ?? "todos"}
-                onValueChange={(value) =>
-                  selectLevel(value === "todos" ? null : (value as PaidLevelSlug))
-                }
-                items={[
-                  { value: "todos", label: "Todos os níveis" },
-                  ...PAID_LEVELS.map((level) => {
-                    const LevelIcon = LEVEL_IDENTITY[level].icon;
-                    return {
-                      value: level,
-                      label: LEVEL_LABEL[level],
-                      marker: (
-                        <LevelIcon
-                          className={`size-3.5 ${LEVEL_IDENTITY[level].text}`}
-                          aria-hidden="true"
-                        />
-                      ),
-                      count: contextualLevelCounts?.get(level) ?? null,
-                    };
-                  }),
-                ]}
-              />
+              <div {...tourAnchor("jogadores.lista.situacao")}>
+                <SegmentedFilter
+                  label="Situação"
+                  value={selectedSituation ?? "todos"}
+                  onValueChange={(value) =>
+                    selectSituation(value === "todos" ? null : (value as PlayerSituation))
+                  }
+                  items={[
+                    { value: "todos", label: "Todas as situações" },
+                    ...SITUATIONS.map((situation) => ({
+                      value: situation,
+                      label: SITUATION_FILTER_LABEL[situation],
+                      count: situationCounts?.[situation] ?? null,
+                    })),
+                  ]}
+                />
+              </div>
+              <div {...tourAnchor("jogadores.lista.nivel")}>
+                <SegmentedFilter
+                  label="Nível"
+                  value={selectedLevel ?? "todos"}
+                  onValueChange={(value) =>
+                    selectLevel(value === "todos" ? null : (value as PaidLevelSlug))
+                  }
+                  items={[
+                    { value: "todos", label: "Todos os níveis" },
+                    ...PAID_LEVELS.map((level) => {
+                      const LevelIcon = LEVEL_IDENTITY[level].icon;
+                      return {
+                        value: level,
+                        label: LEVEL_LABEL[level],
+                        marker: (
+                          <LevelIcon
+                            className={`size-3.5 ${LEVEL_IDENTITY[level].text}`}
+                            aria-hidden="true"
+                          />
+                        ),
+                        count: contextualLevelCounts?.get(level) ?? null,
+                      };
+                    }),
+                  ]}
+                />
+              </div>
             </div>
 
             {drawerChips.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
-                {drawerChips.map((chip) => (
+                {drawerChips.map((chip, i) => (
                   <span
                     key={chip.key}
+                    {...(i === 0 ? tourAnchor("jogadores.lista.chip-ativo") : {})}
                     className="inline-flex h-8 items-center gap-1 rounded-full border border-border bg-card pl-3 pr-1 text-label"
                   >
                     {chip.label}
@@ -1721,6 +1753,7 @@ function PlayersPage() {
                   </span>
                 ))}
                 <button
+                  {...tourAnchor("jogadores.lista.limpar-tudo")}
                   type="button"
                   onClick={clearAllFilters}
                   className="h-8 px-2 text-label text-primary hover:underline"
@@ -1742,6 +1775,7 @@ function PlayersPage() {
                   </p>
                   <div className="ml-auto flex flex-wrap items-center gap-2">
                     <Button
+                      {...tourAnchor("jogadores.lista.usar-selecionados")}
                       size="sm"
                       className="h-10 sm:h-9"
                       disabled={buildingAudience}
@@ -1751,6 +1785,7 @@ function PlayersPage() {
                       Usar selecionados na campanha
                     </Button>
                     <Button
+                      {...tourAnchor("jogadores.lista.copiar-selecionados")}
                       size="sm"
                       variant="outline"
                       className="h-10 sm:h-9"
@@ -1760,6 +1795,7 @@ function PlayersPage() {
                       Copiar IDs
                     </Button>
                     <Button
+                      {...tourAnchor("jogadores.lista.limpar-selecao")}
                       size="sm"
                       variant="ghost"
                       className="h-10 sm:h-9"
@@ -1793,7 +1829,11 @@ function PlayersPage() {
                         setSort(key ? { key, dir: "desc" } : null);
                       }}
                     >
-                      <SelectTrigger className="h-10 w-[150px]" aria-label="Ordenar por">
+                      <SelectTrigger
+                        {...tourAnchor("jogadores.lista.ordenar-mobile")}
+                        className="h-10 w-[150px]"
+                        aria-label="Ordenar por"
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1805,6 +1845,7 @@ function PlayersPage() {
                       </SelectContent>
                     </Select>
                     <Button
+                      {...tourAnchor("jogadores.lista.selecionar-mobile")}
                       size="sm"
                       variant="outline"
                       className="h-10"
@@ -1822,11 +1863,12 @@ function PlayersPage() {
             <div className={cn("transition-opacity", isPlaceholderData && "opacity-60")}>
               {/* Desktop: tabela, com a coluna do nome fixa ao rolar para o lado. */}
               <div className="hidden md:block">
-                <Table className="min-w-[880px]">
+                <Table className="min-w-[980px]">
                   <TableHeader>
                     <TableRow className="border-border/60 hover:bg-transparent">
                       <TableHead className="sticky left-0 z-10 w-10 bg-card">
                         <Checkbox
+                          {...tourAnchor("jogadores.lista.selecionar-todos")}
                           checked={allPageSelected}
                           onCheckedChange={(v) => togglePage(Boolean(v))}
                           aria-label="Selecionar todos desta página"
@@ -1836,11 +1878,14 @@ function PlayersPage() {
                       <TableHead>Nível</TableHead>
                       <TableHead>Situação</TableHead>
                       <TableHead className="text-right">Depósitos</TableHead>
-                      <TableHead className="text-right">
+                      <TableHead className="text-right" {...tourAnchor("jogadores.lista.colunas")}>
                         <SortHeader k="total_depositado" label="Total depositado" align="right" />
                       </TableHead>
                       <TableHead>
                         <SortHeader k="ultimo_deposito" label="Último depósito" />
+                      </TableHead>
+                      <TableHead>
+                        <SortHeader k="created_at" label="Criado em" />
                       </TableHead>
                       <TableHead>
                         <SortHeader k="origem" label="Veio de" />
@@ -1854,20 +1899,24 @@ function PlayersPage() {
                     {isLoading &&
                       Array.from({ length: 8 }).map((_, i) => (
                         <TableRow key={i}>
-                          {Array.from({ length: 9 }).map((_, j) => (
+                          {Array.from({ length: 10 }).map((_, j) => (
                             <TableCell key={j}>
                               <Skeleton className="h-4 w-20" />
                             </TableCell>
                           ))}
                         </TableRow>
                       ))}
-                    {paged.map((p) => {
+                    {paged.map((p, rowIndex) => {
                       const extId = (p.player_external_id ?? "").trim();
                       const depositsCount = Number(p.deposits_count ?? 0);
+                      const createdAt = brtDateTime(p.created_at);
                       return (
                         <TableRow key={p.id} className="group border-border/40">
                           <TableCell className="sticky left-0 z-10 w-10 bg-card group-hover:bg-secondary">
                             <Checkbox
+                              {...(rowIndex === 0
+                                ? tourAnchor("jogadores.lista.selecionar-linha")
+                                : {})}
                               checked={selectedIds.has(p.id)}
                               onCheckedChange={(v) => toggleSelected(p, Boolean(v))}
                               aria-label={`Selecionar ${p.nome}`}
@@ -1879,6 +1928,9 @@ function PlayersPage() {
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <Link
+                                    {...(rowIndex === 0
+                                      ? tourAnchor("jogadores.lista.abrir-ficha")
+                                      : {})}
                                     to="/players/$playerId"
                                     params={{ playerId: p.id }}
                                     search={{ id: undefined, focus: undefined }}
@@ -1897,6 +1949,9 @@ function PlayersPage() {
                                 {extId && (
                                   <button
                                     type="button"
+                                    {...(rowIndex === 0
+                                      ? tourAnchor("jogadores.lista.copiar-id-linha")
+                                      : {})}
                                     onClick={() => copyOneId(extId, p.id)}
                                     className="mt-0.5 inline-flex items-center gap-1 text-meta text-muted-foreground hover:text-primary"
                                   >
@@ -1928,6 +1983,18 @@ function PlayersPage() {
                           </TableCell>
                           <TableCell className="text-label text-muted-foreground">
                             {timeAgo(p.ultimo_deposito ?? p.ftd_em)}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap tabular-nums">
+                            {createdAt ? (
+                              <>
+                                <div className="text-body">{createdAt.date}</div>
+                                <div className="text-meta text-muted-foreground">
+                                  {createdAt.time}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="max-w-[240px]">
@@ -1969,7 +2036,7 @@ function PlayersPage() {
                       <Skeleton className="h-3 w-56" />
                     </li>
                   ))}
-                {paged.map((p) => {
+                {paged.map((p, rowIndex) => {
                   const selected = selectedIds.has(p.id);
                   const content = (
                     <PlayerCardContent
@@ -1984,6 +2051,9 @@ function PlayersPage() {
                       {selectionMode ? (
                         <button
                           type="button"
+                          {...(rowIndex === 0
+                            ? tourAnchor("jogadores.lista.selecionar-linha")
+                            : {})}
                           aria-pressed={selected}
                           onClick={() => toggleSelected(p, !selected)}
                           className={cn(
@@ -2006,6 +2076,7 @@ function PlayersPage() {
                         </button>
                       ) : (
                         <Link
+                          {...(rowIndex === 0 ? tourAnchor("jogadores.lista.abrir-ficha") : {})}
                           to="/players/$playerId"
                           params={{ playerId: p.id }}
                           search={{ id: undefined, focus: undefined }}
@@ -2045,6 +2116,7 @@ function PlayersPage() {
 
             {filteredCount > pageSize && (
               <nav
+                {...tourAnchor("jogadores.lista.paginacao")}
                 aria-label="Paginação da lista de jogadores"
                 className="flex items-center gap-3 border-t border-border/70 px-4 py-2.5 sm:px-5"
               >
@@ -2089,20 +2161,22 @@ function PlayersPage() {
             Jogadores que receberam mensagem e o desfecho do contato. Marque se converteu para tirar
             da fila.
           </p>
-          <SegmentedFilter
-            label="Fila de acompanhamento"
-            value={followupQueue}
-            onValueChange={setFollowupQueue}
-            items={FOLLOWUP_QUEUES.map((queue) => ({
-              ...queue,
-              count:
-                queue.value === "aguardando_conversao"
-                  ? (pendingData?.rows.length ?? null)
-                  : queue.value === "convertido"
-                    ? (convertedData?.rows.length ?? null)
-                    : (notConvertedData?.rows.length ?? null),
-            }))}
-          />
+          <div {...tourAnchor("jogadores.acompanhamento.fila")}>
+            <SegmentedFilter
+              label="Fila de acompanhamento"
+              value={followupQueue}
+              onValueChange={setFollowupQueue}
+              items={FOLLOWUP_QUEUES.map((queue) => ({
+                ...queue,
+                count:
+                  queue.value === "aguardando_conversao"
+                    ? (pendingData?.rows.length ?? null)
+                    : queue.value === "convertido"
+                      ? (convertedData?.rows.length ?? null)
+                      : (notConvertedData?.rows.length ?? null),
+              }))}
+            />
+          </div>
           <HomeCard className="overflow-hidden">
             <div className="border-b border-border/70 px-4 py-3 sm:px-5">
               <h2 className="text-section">
@@ -2133,7 +2207,7 @@ function PlayersPage() {
               />
             ) : (
               <ul className="divide-y divide-border/60">
-                {followupRows.map((row) => (
+                {followupRows.map((row, rowIndex) => (
                   <li
                     key={`${row.player_id}:${row.alerta_tipo}`}
                     className="flex flex-col gap-3 px-4 py-3 sm:px-5 lg:flex-row lg:items-center"
@@ -2176,6 +2250,9 @@ function PlayersPage() {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button
+                        {...(rowIndex === 0
+                          ? tourAnchor("jogadores.acompanhamento.historico")
+                          : {})}
                         size="sm"
                         variant="outline"
                         className="h-10 sm:h-9"
@@ -2185,6 +2262,7 @@ function PlayersPage() {
                         Histórico
                       </Button>
                       <Button
+                        {...(rowIndex === 0 ? tourAnchor("jogadores.acompanhamento.mensagem") : {})}
                         size="sm"
                         variant="outline"
                         className="h-10 sm:h-9"
@@ -2196,6 +2274,9 @@ function PlayersPage() {
                       {isPendingFilter && (
                         <>
                           <Button
+                            {...(rowIndex === 0
+                              ? tourAnchor("jogadores.acompanhamento.converteu")
+                              : {})}
                             size="sm"
                             variant="outline"
                             className="h-10 border-success/40 text-success hover:bg-success/10 hover:text-success sm:h-9"
@@ -2204,6 +2285,9 @@ function PlayersPage() {
                             Converteu
                           </Button>
                           <Button
+                            {...(rowIndex === 0
+                              ? tourAnchor("jogadores.acompanhamento.nao-converteu")
+                              : {})}
                             size="sm"
                             variant="ghost"
                             className="h-10 sm:h-9"
@@ -2244,7 +2328,11 @@ function PlayersPage() {
                     )
                   }
                 >
-                  <SelectTrigger className="h-10 w-[180px]" aria-label="Data usada no período">
+                  <SelectTrigger
+                    {...tourAnchor("jogadores.filtros.periodo-campo")}
+                    className="h-10 w-[180px]"
+                    aria-label="Data usada no período"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -2254,7 +2342,11 @@ function PlayersPage() {
                 </Select>
                 <Popover open={dateOpen} onOpenChange={setDateOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="h-10 gap-2">
+                    <Button
+                      {...tourAnchor("jogadores.filtros.periodo-calendario")}
+                      variant="outline"
+                      className="h-10 gap-2"
+                    >
                       <CalendarIcon className="h-4 w-4" />
                       {draftHasDateRange && sheetDraft.dateRange?.from
                         ? sheetDraft.dateRange.to &&
@@ -2305,6 +2397,7 @@ function PlayersPage() {
                 </Popover>
                 {draftHasDateRange && (
                   <Button
+                    {...tourAnchor("jogadores.filtros.limpar-periodo")}
                     variant="ghost"
                     onClick={() =>
                       setAdvancedDraft((current) =>
@@ -2325,9 +2418,10 @@ function PlayersPage() {
               description="Sem depósito não combina com nível pago."
             >
               <ChipGroup label="Situação">
-                {SITUATIONS.map((situation) => (
+                {SITUATIONS.map((situation, i) => (
                   <FilterChip
                     key={situation}
+                    {...(i === 0 ? tourAnchor("jogadores.filtros.situacao") : {})}
                     active={sheetDraft.situation === situation}
                     onClick={() => selectDraftSituation(situation)}
                     count={gamification ? draftStatusCount(situation) : null}
@@ -2337,9 +2431,10 @@ function PlayersPage() {
                 ))}
               </ChipGroup>
               <ChipGroup label="Nível">
-                {PAID_LEVELS.map((level) => (
+                {PAID_LEVELS.map((level, i) => (
                   <FilterChip
                     key={level}
+                    {...(i === 0 ? tourAnchor("jogadores.filtros.nivel") : {})}
                     active={sheetDraft.level === level}
                     onClick={() => selectDraftLevel(level)}
                     count={gamification ? draftLevelCount(level) : null}
@@ -2356,28 +2451,35 @@ function PlayersPage() {
             >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-label text-muted-foreground">Mostrar quem atende a</span>
-                <SegmentedFilter
-                  label="Como combinar as condições"
-                  value={sheetDraft.behaviorOperator}
-                  onValueChange={(operator) =>
-                    setAdvancedDraft((current) =>
-                      current ? { ...current, behaviorOperator: operator } : current,
-                    )
-                  }
-                  items={[
-                    { value: "and", label: "Todas as condições" },
-                    { value: "or", label: "Qualquer condição" },
-                  ]}
-                />
+                <div {...tourAnchor("jogadores.filtros.operador")}>
+                  <SegmentedFilter
+                    label="Como combinar as condições"
+                    value={sheetDraft.behaviorOperator}
+                    onValueChange={(operator) =>
+                      setAdvancedDraft((current) =>
+                        current ? { ...current, behaviorOperator: operator } : current,
+                      )
+                    }
+                    items={[
+                      { value: "and", label: "Todas as condições" },
+                      { value: "or", label: "Qualquer condição" },
+                    ]}
+                  />
+                </div>
               </div>
-              {advancedFilterGroups.map((group) => (
+              {advancedFilterGroups.map((group, groupIndex) => (
                 <ChipGroup key={group.title} label={group.title}>
-                  {group.ids.map((id) => {
+                  {group.ids.map((id, i) => {
                     const item = filters.find((candidate) => candidate.id === id);
                     if (!item) return null;
                     return (
                       <FilterChip
                         key={item.id}
+                        {...(i === 0
+                          ? groupIndex === 0
+                            ? tourAnchor("jogadores.filtros.comportamento-atividade")
+                            : tourAnchor("jogadores.filtros.comportamento-risco")
+                          : {})}
                         active={sheetDraft.behaviorFilters.includes(item.id)}
                         onClick={() => selectAdvancedFilter(item.id)}
                         count={
@@ -2399,9 +2501,10 @@ function PlayersPage() {
               description="Sinais para agir agora. Escolha um; a contagem aparece depois de aplicar."
             >
               <div className="flex flex-wrap gap-2">
-                {alertFilters.map((f) => (
+                {alertFilters.map((f, i) => (
                   <FilterChip
                     key={f.id}
+                    {...(i === 0 ? tourAnchor("jogadores.filtros.oportunidades") : {})}
                     active={sheetDraft.filter === f.id}
                     onClick={() => selectAdvancedFilter(f.id)}
                   >
@@ -2413,6 +2516,7 @@ function PlayersPage() {
           </div>
           <SheetFooter className="flex-row items-center gap-2 border-t border-border/60 px-5 py-3 sm:justify-between">
             <Button
+              {...tourAnchor("jogadores.filtros.limpar")}
               variant="ghost"
               className="h-11 sm:h-10"
               onClick={clearAdvancedDraft}
@@ -2420,7 +2524,11 @@ function PlayersPage() {
             >
               Limpar filtros
             </Button>
-            <Button className="ml-auto h-11 sm:h-10" onClick={applyAdvancedFilters}>
+            <Button
+              {...tourAnchor("jogadores.filtros.aplicar")}
+              className="ml-auto h-11 sm:h-10"
+              onClick={applyAdvancedFilters}
+            >
               {canEstimateDraft && !isFetchingDraftEstimate && draftEstimate
                 ? `Ver ${draftEstimate.total.toLocaleString("pt-BR")} ${
                     draftEstimate.total === 1 ? "jogador" : "jogadores"
@@ -2519,6 +2627,7 @@ function PlayerCardContent({
   awaiting: boolean;
 }) {
   const { money } = useMoney();
+  const createdAt = brtDateTime(player.created_at);
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2">
@@ -2533,6 +2642,12 @@ function PlayerCardContent({
         <span className="tabular-nums text-foreground/90">{money(player.total_depositado)}</span>
         <span aria-hidden="true">·</span>
         <span>último depósito {timeAgo(player.ultimo_deposito ?? player.ftd_em)}</span>
+        {createdAt && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>criado em {createdAt.date}</span>
+          </>
+        )}
       </p>
     </div>
   );
@@ -2572,15 +2687,17 @@ function FilterChip({
   onClick,
   count,
   children,
+  ...rest
 }: {
   active: boolean;
   onClick: () => void;
   count?: number | null;
   children: ReactNode;
-}) {
+} & HTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="button"
+      {...rest}
       aria-pressed={active}
       onClick={onClick}
       className={cn(

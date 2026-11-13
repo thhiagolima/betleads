@@ -3,14 +3,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { recordBillingSignal } from "@/lib/billing/billing-signals.server";
 import { maskDocumentsDeep } from "@/lib/billing/payer";
-import { confirmChargeFromUpper } from "@/lib/billing/payment-charges.server";
+import { confirmCharge } from "@/lib/billing/payment-charges.server";
+import { upperWebhookSecrets } from "@/lib/billing/payment-gateway-config.server";
 import { verifyUpperSignature } from "@/lib/billing/upper-webhook";
 
 // Signed webhook from the Upper Pix gateway.
 //
 // - The raw body is read with request.text() and checked byte-for-byte
 //   against the X-Upper-Signature header before any JSON parsing — see
-//   verifyUpperSignature. A bad signature answers 400 and writes nothing.
+//   verifyUpperSignature. The signature is accepted under ANY of
+//   upperWebhookSecrets() (gateway config: DB and env fallback); no secret
+//   at all answers 500. A bad signature answers 400 and writes nothing.
 // - Every event with a valid signature is deduplicated by event_id (the
 //   body's `id`, falling back to X-Upper-Delivery) and recorded in
 //   payment_webhook_events BEFORE any processing. If that recording itself
@@ -20,8 +23,8 @@ import { verifyUpperSignature } from "@/lib/billing/upper-webhook";
 //   stays null and we answer 503 too, so Upper redelivers and the next
 //   delivery processes it (the reconcile cron is the second safety net).
 // - A repeated event_id that already has `processed_at` is answered with 200
-//   without touching confirmChargeFromUpper again.
-// - `charge.*` events trigger confirmChargeFromUpper, which always re-checks
+//   without touching confirmCharge again.
+// - `charge.*` events trigger confirmCharge, which always re-checks
 //   the charge with Upper directly (the webhook is only ever a hint).
 //   `ping` and `payment.*` are recorded and otherwise ignored. The outcome
 //   ('credited', 'not_paid', 'needs_review', 'already_credited',
@@ -50,8 +53,9 @@ function externalIdFrom(body: UpperWebhookBody): string | null {
 
 /**
  * LGPD: payment_webhook_events.raw_body must never carry a full payer
- * document. Every object key named `document` (any case, at any depth,
- * inside objects or arrays) is masked — see maskDocumentsDeep. The signature
+ * document. Every document-like key (`document`, `cpf`, `cnpj`, `taxId`, ...,
+ * any case, at any depth, inside objects or arrays) is masked — see
+ * maskDocumentsDeep. The signature
  * was already verified against the exact original bytes before this runs;
  * only the stored copy is sanitized. When nothing needed masking, the
  * original bytes are stored unchanged.
@@ -73,10 +77,10 @@ function headersToStore(request: Request): Record<string, string> {
 }
 
 async function handlePost(request: Request): Promise<Response> {
-  const secret = process.env.UPPER_WEBHOOK_SECRET;
+  const secrets = await upperWebhookSecrets();
   const rawBody = await request.text();
 
-  if (!secret) {
+  if (secrets.length === 0) {
     return Response.json(
       { ok: false, error: "UPPER_WEBHOOK_SECRET not configured" },
       { status: 500 },
@@ -85,7 +89,12 @@ async function handlePost(request: Request): Promise<Response> {
 
   const signatureHeader = request.headers.get("x-upper-signature");
   const nowSec = Math.floor(Date.now() / 1000);
-  const verification = verifyUpperSignature(rawBody, signatureHeader, secret, nowSec);
+  let verification = verifyUpperSignature(rawBody, signatureHeader, secrets[0], nowSec);
+  for (const secret of secrets.slice(1)) {
+    // Only a "mismatch" depends on the secret; missing/malformed/stale are final.
+    if (verification.ok || verification.reason !== "mismatch") break;
+    verification = verifyUpperSignature(rawBody, signatureHeader, secret, nowSec);
+  }
   if (!verification.ok) {
     // PG6-03: nothing is written to payment_webhook_events (an unsigned
     // event_id must never block the real one), but the billing health
@@ -121,6 +130,7 @@ async function handlePost(request: Request): Promise<Response> {
       .upsert(
         {
           event_id: eventId,
+          provider: "upper",
           event: eventName,
           delivery_id: deliveryId,
           signature_valid: true,
@@ -152,7 +162,7 @@ async function handlePost(request: Request): Promise<Response> {
   // Stage 2: process. The event row is saved at this point; an error from
   // here on is recorded on that row (processed_at stays null) and answers
   // 503 so Upper redelivers — a redelivery of an unprocessed event is
-  // processed again (see the dedupe above), and confirmChargeFromUpper is
+  // processed again (see the dedupe above), and confirmCharge is
   // safe to repeat. The reconciliation cron still catches up if Upper gives
   // up redelivering.
   let outcome: string | null = null;
@@ -164,7 +174,7 @@ async function handlePost(request: Request): Promise<Response> {
     } else if (eventName && eventName.startsWith("charge.")) {
       const externalId = externalIdFrom(body);
       if (externalId) {
-        const result = await confirmChargeFromUpper(externalId);
+        const result = await confirmCharge(externalId);
         outcome = result.outcome;
       } else {
         outcome = "missing_external_id";

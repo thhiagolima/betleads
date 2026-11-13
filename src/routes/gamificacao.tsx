@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Plus, RefreshCw, Search } from "lucide-react
 import { toast } from "sonner";
 
 import { HomeCard } from "@/components/home/home-cards";
+import { tourAnchor } from "@/help/anchor";
 import {
   LevelRulesCard,
   LevelStrip,
@@ -172,7 +173,7 @@ function GamificacaoPage() {
         subtitle={SUBTITLE}
         actions={
           <>
-            <Button asChild className="h-9">
+            <Button asChild className="h-9" {...tourAnchor("gamificacao.cabecalho.criar-campanha")}>
               <Link to="/campanhas" search={NEW_CAMPAIGN_SEARCH}>
                 <Plus className="size-4" aria-hidden="true" />
                 Criar campanha
@@ -184,6 +185,7 @@ function GamificacaoPage() {
               onClick={() => refetch()}
               disabled={isFetching}
               icon={<RefreshCw className={cn("size-4", isFetching && "animate-spin")} />}
+              {...tourAnchor("gamificacao.cabecalho.atualizar")}
             />
           </>
         }
@@ -217,6 +219,7 @@ function GamificacaoPage() {
                       placeholder="Nome, telefone ou ID"
                       aria-label="Buscar jogador"
                       className="h-10 pl-9"
+                      {...tourAnchor("gamificacao.ranking.busca")}
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:contents">
@@ -224,7 +227,11 @@ function GamificacaoPage() {
                       value={levelFilter}
                       onValueChange={(value) => setLevelFilter(value as "all" | LevelSlug)}
                     >
-                      <SelectTrigger className="h-10" aria-label="Filtrar por nível">
+                      <SelectTrigger
+                        className="h-10"
+                        aria-label="Filtrar por nível"
+                        {...tourAnchor("gamificacao.ranking.nivel")}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -236,7 +243,11 @@ function GamificacaoPage() {
                       </SelectContent>
                     </Select>
                     <Select value={sort} onValueChange={(value) => setSort(value as typeof sort)}>
-                      <SelectTrigger className="h-10" aria-label="Ordenar">
+                      <SelectTrigger
+                        className="h-10"
+                        aria-label="Ordenar"
+                        {...tourAnchor("gamificacao.ranking.ordenar")}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -251,6 +262,7 @@ function GamificacaoPage() {
                     aria-pressed={onlyStopped}
                     className="h-10"
                     onClick={() => setOnlyStopped((value) => !value)}
+                    {...tourAnchor("gamificacao.ranking.so-parou")}
                   >
                     Só quem parou
                   </Button>
@@ -275,6 +287,7 @@ function GamificacaoPage() {
                         to="/players"
                         search={{ id: undefined, focus: undefined }}
                         className="font-medium text-primary hover:underline"
+                        {...tourAnchor("gamificacao.ranking.ver-todos-jogadores")}
                       >
                         Ver todos em Jogadores
                       </Link>
@@ -298,7 +311,12 @@ function GamificacaoPage() {
                   </p>
                 ) : (
                   visibleRows.map((player, index) => (
-                    <PlayerLine key={player.id} player={player} position={firstIndex + index + 1} />
+                    <PlayerLine
+                      key={player.id}
+                      player={player}
+                      position={firstIndex + index + 1}
+                      anchorProps={index === 0 ? tourAnchor("gamificacao.ranking.linha") : undefined}
+                    />
                   ))
                 )}
               </div>
@@ -314,6 +332,7 @@ function GamificacaoPage() {
                     disabled={currentPage === 1}
                     onClick={() => setPage((value) => Math.max(1, value - 1))}
                     icon={<ChevronLeft className="size-4" />}
+                    {...tourAnchor("gamificacao.ranking.pagina-anterior")}
                   />
                   {pageButtons(currentPage, totalPages).map((item, index) =>
                     item === "dots" ? (
@@ -332,6 +351,7 @@ function GamificacaoPage() {
                         aria-current={item === currentPage ? "page" : undefined}
                         className="size-11 px-0 tabular-nums sm:size-9"
                         onClick={() => setPage(item)}
+                        {...(index === 0 ? tourAnchor("gamificacao.ranking.pagina") : {})}
                       >
                         {item}
                       </Button>
@@ -343,6 +363,7 @@ function GamificacaoPage() {
                     disabled={currentPage === totalPages}
                     onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
                     icon={<ChevronRight className="size-4" />}
+                    {...tourAnchor("gamificacao.ranking.proxima-pagina")}
                   />
                 </nav>
               )}

@@ -59,7 +59,7 @@ describe("crmResultsCsv", () => {
     const cells = (line: string) => line.match(/"(?:[^"]|"")*"/g)?.length ?? 0;
     const width = cells(lines[0]);
     expect(lines.every((line) => cells(line) === width)).toBe(true);
-    expect(lines[0]).toContain('"jogadores_convertidos_clique"');
+    expect(lines[0]).toContain('"jogadores_que_voltaram_pelo_link"');
   });
 
   it("escapes quotes in names", () => {
@@ -68,8 +68,8 @@ describe("crmResultsCsv", () => {
 
   it("names the currency of each money column (cost in BRL, revenue in the house currency)", () => {
     expect(lines[0]).toContain('"custo_brl"');
-    expect(lines[0]).toContain('"receita_clique_brl"');
-    expect(lines[0]).toContain('"custo_por_convertido_brl"');
+    expect(lines[0]).toContain('"recuperado_pelo_crm_brl"');
+    expect(lines[0]).toContain('"custo_por_jogador_que_voltou_brl"');
   });
 
   it("uses the house currency for revenue and leaves the return blank outside BRL", () => {
@@ -78,9 +78,9 @@ describe("crmResultsCsv", () => {
       .split("\n");
     const cells = (line: string): string[] => line.match(/"(?:[^"]|"")*"/g) ?? [];
     const cols = cells(ars[0]);
-    expect(cols).toContain('"receita_influenciada_ars"');
+    expect(cols).toContain('"depositado_3d_reativacoes_ars"');
     expect(cols).toContain('"custo_brl"');
-    const roi = cols.indexOf('"retorno_recuperados"');
+    const roi = cols.indexOf('"retorno_reativacoes"');
     const total = cells(ars[1]);
     expect(total[roi]).toBe('""');
     const brlTotal = cells(lines[1]);

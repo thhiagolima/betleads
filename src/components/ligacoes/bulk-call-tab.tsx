@@ -31,6 +31,7 @@ import { listCallScripts, listPlayersForCalls, bulkDispatchCalls } from "@/lib/c
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { num } from "@/lib/format";
+import { tourAnchor } from "@/help/anchor";
 
 interface Target {
   key: string;
@@ -172,7 +173,19 @@ export function BulkCallTab() {
       const notAttempted = Number(res.notAttempted ?? 0);
       const notAttemptedNote =
         notAttempted > 0 ? `, ${notAttempted} não tentadas por saldo insuficiente` : "";
-      if (res.failed === 0 && (res.pending ?? 0) === 0) {
+      // The campaign was cancelled during the run: the rest was never dialed.
+      const campaignCancelled = Number(res.campaignCancelled ?? 0);
+      if (campaignCancelled > 0) {
+        toast.info(
+          `Campanha cancelada: ${res.queued} disparadas, ${campaignCancelled} não tentadas`,
+        );
+      } else if (res.enfileirado) {
+        toast.success(
+          res.scheduled
+            ? `${res.pending} ligações agendadas`
+            : `${res.pending} ligações na fila; o disparo começa em até 1 minuto`,
+        );
+      } else if (res.failed === 0 && (res.pending ?? 0) === 0) {
         toast.success(`${res.queued} ligações disparadas`);
       } else if (res.failed === 0) {
         toast.info(`${res.pending} ligação(ões) ficaram pendentes para retentativa`);
@@ -204,7 +217,7 @@ export function BulkCallTab() {
     const plural = count === 1 ? "ligação" : "ligações";
     const confirmed = await requestConfirmation({
       title: `Disparar ${num(count)} ${plural}?`,
-      description: `${num(count)} ${plural} com o ${source} começam a ser disparadas agora e não podem ser canceladas. O custo depende da duração de cada chamada e do contrato do provedor de voz. Fora da janela de envio configurada, as ligações ficam pendentes e saem no próximo horário permitido.`,
+      description: `${num(count)} ${plural} com o ${source} começam a ser disparadas agora e não podem ser canceladas. O custo depende da duração de cada chamada e do contrato do provedor de voz.`,
       confirmLabel: `Disparar ${num(count)} ${plural}`,
       destructive: true,
     });
@@ -233,7 +246,7 @@ export function BulkCallTab() {
                   value={audioMode}
                   onValueChange={(value: "tts" | "fixed") => setAudioMode(value)}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger {...tourAnchor("ligacoes.massa.fonte")}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -246,7 +259,7 @@ export function BulkCallTab() {
                 <Label>{audioMode === "tts" ? "Roteiro" : "Áudio reutilizável"}</Label>
                 {audioMode === "tts" ? (
                   <Select value={scriptId} onValueChange={setScriptId}>
-                    <SelectTrigger>
+                    <SelectTrigger {...tourAnchor("ligacoes.massa.selecao")}>
                       <SelectValue placeholder="Selecione um roteiro..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -264,7 +277,7 @@ export function BulkCallTab() {
                   </Select>
                 ) : (
                   <Select value={assetId} onValueChange={setAssetId}>
-                    <SelectTrigger>
+                    <SelectTrigger {...tourAnchor("ligacoes.massa.selecao")}>
                       <SelectValue placeholder="Selecione um áudio..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -295,7 +308,7 @@ export function BulkCallTab() {
 
             <Separator />
 
-            <div className="space-y-2">
+            <div className="space-y-2" {...tourAnchor("ligacoes.massa.busca")}>
               <Label className="flex items-center gap-2">
                 <Search className="h-4 w-4" /> Buscar jogadores
               </Label>
@@ -342,7 +355,7 @@ export function BulkCallTab() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1.5" {...tourAnchor("ligacoes.massa.avulsos")}>
               <Label>Ou cole números avulsos</Label>
               <Textarea
                 rows={3}
@@ -358,7 +371,7 @@ export function BulkCallTab() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card {...tourAnchor("ligacoes.massa.destinatarios")}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
               <Users className="h-4 w-4" /> Destinatários ({allTargets.length})
@@ -399,7 +412,7 @@ export function BulkCallTab() {
       </div>
 
       <div className="space-y-4">
-        <Card>
+        <Card {...tourAnchor("ligacoes.massa.resumo")}>
           <CardHeader className="pb-3">
             <CardTitle>Resumo do disparo</CardTitle>
           </CardHeader>
@@ -412,6 +425,7 @@ export function BulkCallTab() {
               className="w-full gap-2"
               onClick={() => void confirmDispatch()}
               disabled={!canSend}
+              {...tourAnchor("ligacoes.massa.disparar")}
             >
               {bulkMut.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

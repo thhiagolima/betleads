@@ -8,11 +8,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { ROUTE_META } from "@/lib/navigation";
+import { isExpertAllowedPath, ROUTE_META } from "@/lib/navigation";
 import {
   countRawDataTourUsages,
   extractTermIds,
   extractTourAnchorCalls,
+  countTermNextToInfoTip,
+  findAnchorWrappedPeriodPicker,
+  findTermInsideChipLabel,
+  findTermInsideLabelWithoutFor,
   isTestFile,
 } from "./coverage-scan";
 import {
@@ -23,7 +27,9 @@ import {
 } from "./coverage-config";
 import { GLOSSARY } from "./glossary";
 import { GUIDES } from "./guides";
-import { HELP_SCREEN_LOADERS } from "./registry";
+import { HELP_SCREEN_LOADERS, HELP_TAB_SEARCH_PARAMS } from "./registry";
+import { TABS as CENTRAL_TABS } from "@/components/crm-results/search";
+import { FINANCE_TABS } from "@/lib/finance/search";
 import type { HelpScreen } from "./types";
 
 const SRC_ROOT = path.resolve(__dirname, "..");
@@ -42,6 +48,10 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 const sourceFiles = walk(SRC_ROOT);
+
+/** Tests that dynamically import every article can exceed vitest's 5 s
+ * default on a cold cache; same value as the `npm test` script. */
+const LOAD_ALL_TIMEOUT_MS = 20_000;
 
 async function loadAllScreens(): Promise<HelpScreen[]> {
   const screens: HelpScreen[] = [];
@@ -145,7 +155,7 @@ describe("help coverage", () => {
         ).toBe(true);
       }
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it('todo tourAnchor("…") em src/ é citado por algum artigo', async () => {
     const declared = declaredAnchors();
@@ -154,7 +164,7 @@ describe("help coverage", () => {
     for (const id of declared) {
       expect(cited.has(id), `tourAnchor("${id}") não citado por nenhum artigo`).toBe(true);
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("proíbe data-tour cru fora de src/help/anchor.ts", () => {
     for (const file of sourceFiles) {
@@ -179,7 +189,7 @@ describe("help coverage", () => {
         );
       }
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("todo passo de tour tem anchor e body não vazios; cada tour tem de 1 a 8 passos", async () => {
     const screens = await loadAllScreens();
@@ -196,7 +206,7 @@ describe("help coverage", () => {
         }
       }
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("todo artigo do registro tem route igual à chave em HELP_SCREEN_LOADERS", async () => {
     // HelpProvider only shows an article whose `route` equals the resolved
@@ -207,7 +217,7 @@ describe("help coverage", () => {
         key,
       );
     }
-  });
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("tela com tours só por aba (sem \"default\") declara defaultTab, e ele é uma aba dela", async () => {
     // Without a hash the route shows its own fallback tab, but resolveHelpScreen
@@ -233,7 +243,116 @@ describe("help coverage", () => {
         `defaultTab "${screen.defaultTab}" de "${screen.id}" não é aba de nenhuma seção (nem pendente em PENDING_ROUTES)`,
       ).toBe(true);
     }
+  }, LOAD_ALL_TIMEOUT_MS);
+
+  it("tabSearchParam bate com HELP_TAB_SEARCH_PARAMS e cada tour/aba é um valor que a rota aceita", async () => {
+    // The tab values each query-param route accepts, from the route's own
+    // list where one exists. /rendimento/equipe/$expertId has no exported
+    // list: its validateSearch only accepts "campanhas" (documented in the
+    // article's header) — anything else shows the Rendimento view, which is
+    // the "default" tour.
+    const acceptedTabs: Record<string, readonly string[]> = {
+      "/resultados": CENTRAL_TABS.map((tab) => tab.key),
+      "/financeiro": FINANCE_TABS,
+      "/rendimento/equipe/$expertId": ["campanhas"],
+    };
+    const declared = new Set<string>();
+    for (const screen of await loadAllScreens()) {
+      expect(
+        screen.tabSearchParam,
+        `"${screen.id}": tabSearchParam diferente de HELP_TAB_SEARCH_PARAMS["${screen.route}"]`,
+      ).toBe(HELP_TAB_SEARCH_PARAMS[screen.route]);
+      if (!screen.tabSearchParam) continue;
+      declared.add(screen.route);
+      const accepted = acceptedTabs[screen.route];
+      expect(
+        accepted,
+        `"${screen.id}" declara tabSearchParam sem lista de abas aceitas neste teste`,
+      ).toBeTruthy();
+      for (const tab of Object.keys(screen.tours)) {
+        if (tab === "default") continue;
+        expect(
+          accepted.includes(tab),
+          `tour "${screen.id}#${tab}": "${tab}" não é um valor de ?${screen.tabSearchParam}= que ${screen.route} aceita`,
+        ).toBe(true);
+      }
+      for (const section of screen.sections) {
+        if (!section.tab) continue;
+        expect(
+          accepted.includes(section.tab),
+          `seção "${screen.id}" › "${section.id}": tab "${section.tab}" não é aceita pela rota`,
+        ).toBe(true);
+      }
+      if (screen.defaultTab) {
+        expect(
+          accepted.includes(screen.defaultTab) && !!screen.tours[screen.defaultTab],
+          `defaultTab "${screen.defaultTab}" de "${screen.id}" precisa ser um valor aceito e ter tour`,
+        ).toBe(true);
+      }
+    }
+    expect([...declared].sort()).toEqual(Object.keys(HELP_TAB_SEARCH_PARAMS).sort());
+  }, LOAD_ALL_TIMEOUT_MS);
+
+  it("âncora do seletor de período vai no próprio CentralPeriodPicker, nunca numa div em volta", () => {
+    for (const file of sourceFiles) {
+      const wrapped = findAnchorWrappedPeriodPicker(fs.readFileSync(file, "utf8"));
+      expect(
+        wrapped,
+        `${path.relative(SRC_ROOT, file)}: âncora ${wrapped.join(", ")} numa div em volta do CentralPeriodPicker — passe {...tourAnchor(...)} ao próprio seletor (a div impede que ele encolha no celular)`,
+      ).toEqual([]);
+    }
   });
+
+  it("<Term> dentro de <label>/<Label> só com htmlFor (senão o Term toma o rótulo do campo)", () => {
+    for (const file of sourceFiles) {
+      const labels = findTermInsideLabelWithoutFor(fs.readFileSync(file, "utf8"));
+      expect(
+        labels,
+        `<Term> dentro de ${labels.join(", ")} sem htmlFor em ${path.relative(SRC_ROOT, file)} — dê um id ao campo e htmlFor ao rótulo, ou tire o Term do rótulo`,
+      ).toEqual([]);
+    }
+  });
+
+  it("rótulo que já tem InfoTip (\"i\") não ganha <Term> ao lado", () => {
+    for (const file of sourceFiles) {
+      expect(
+        countTermNextToInfoTip(fs.readFileSync(file, "utf8")),
+        `<Term> colado a um <InfoTip> em ${path.relative(SRC_ROOT, file)} — o rótulo já tem um "i": tire o Term e deixe o id em screen.terms`,
+      ).toBe(0);
+    }
+  });
+
+  it("<Term> nunca vai dentro do label={…} de um *Chip (botão dentro de botão)", () => {
+    for (const file of sourceFiles) {
+      const chips = findTermInsideChipLabel(fs.readFileSync(file, "utf8"));
+      expect(
+        chips,
+        `<Term> dentro do label de ${chips.join(", ")} em ${path.relative(SRC_ROOT, file)} — ponha o Term fora do botão`,
+      ).toEqual([]);
+    }
+  });
+
+  it('artigo de rota que o expert não abre (isExpertAllowedPath) não lista "expert" nos roles', async () => {
+    // A pure expert is redirected to /expert from any other house route
+    // (navigation.ts), so "expert" there would be a promise the screen can't
+    // keep. Virtual screens (onboarding, shell) have no route of their own.
+    const virtual = new Set<string>(VIRTUAL_SCREENS);
+    for (const screen of await loadAllScreens()) {
+      if (virtual.has(screen.route) || isExpertAllowedPath(screen.route)) continue;
+      expect(
+        screen.roles.includes("expert"),
+        `"${screen.id}" (${screen.route}) lista "expert" nos roles, mas o expert não abre essa rota`,
+      ).toBe(false);
+      for (const section of screen.sections) {
+        for (const item of section.items) {
+          expect(
+            item.roles?.includes("expert") ?? false,
+            `"${screen.id}" › "${item.label}" lista "expert" nos roles, mas o expert não abre ${screen.route}`,
+          ).toBe(false);
+        }
+      }
+    }
+  }, LOAD_ALL_TIMEOUT_MS);
 
   it("GLOSSARY não tem ids duplicados", () => {
     const ids = GLOSSARY.map((term) => term.id);

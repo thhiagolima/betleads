@@ -7,6 +7,8 @@ import { HomeCard } from "@/components/home/home-cards";
 import { Skeleton } from "@/components/ui/skeleton";
 import { num } from "@/lib/format";
 import { getPlayerJourneys } from "@/lib/player-journeys.functions";
+import { tourAnchor } from "@/help/anchor";
+import { Term } from "@/components/help/term";
 
 const when = (iso: string | null) =>
   iso
@@ -29,7 +31,7 @@ export function PlayerJourneysCard({ playerId }: { playerId: string }) {
   });
 
   return (
-    <HomeCard className="space-y-3 p-4 sm:p-5">
+    <HomeCard className="space-y-3 p-4 sm:p-5" {...tourAnchor("jogador.jornadas.card")}>
       <div>
         <h2 className="text-section">Jornadas</h2>
         <p className="mt-0.5 text-label text-muted-foreground">
@@ -83,7 +85,7 @@ export function PlayerJourneysCard({ playerId }: { playerId: string }) {
                     <div className="flex flex-wrap gap-1">
                       {journey.holdout && (
                         <Badge variant="outline" title="Grupo de controle: não recebe mensagens">
-                          grupo de controle
+                          <Term id="grupo-de-controle">grupo de controle</Term>
                         </Badge>
                       )}
                       <Badge variant={journey.open ? "default" : "outline"}>
