@@ -90,4 +90,14 @@ describe("buildLoaderScript", () => {
     });
     expect(script).toContain("if (!appId) return;");
   });
+
+  it("embeds the popup runtime only when the house has an active popup", () => {
+    const base = { token: "tok-123", apiBase: "https://betleads.io", apps: [], prompt: BASE_PROMPT };
+    expect(buildLoaderScript(base)).not.toContain("betleadsPopupCore");
+    const withPopups = buildLoaderScript({ ...base, popups: true });
+    expect(withPopups).toContain("betleadsPopupCore");
+    // The popup part runs before the push part bails out on an unknown origin.
+    expect(withPopups.indexOf("betleadsPopupCore")).toBeLessThan(withPopups.indexOf("if (!appId) return;"));
+    expect(() => new Function(withPopups)).not.toThrow();
+  });
 });

@@ -6,6 +6,7 @@
 // origins, app ids, token) is embedded via `safeJsonStringify`, never raw
 // interpolation, so a house cannot break out of the generated <script> with
 // `</script>` or script-terminator line separators.
+import { POPUP_RUNTIME_JS } from "@/lib/popups/popup-runtime";
 import type { PromptConfig } from "@/lib/webpush/shared";
 
 export type LoaderScriptConfig = {
@@ -13,6 +14,8 @@ export type LoaderScriptConfig = {
   apiBase: string;
   apps: Array<{ origin: string; appId: string }>;
   prompt: PromptConfig;
+  /** The house has an active popup: embed the popup runtime (popups/popup-runtime.ts). */
+  popups?: boolean;
 };
 
 /**
@@ -36,6 +39,10 @@ function safeJsonStringify(value: unknown): string {
  * SDK, and on init / PushSubscription "change" reports state to
  * `/api/public/push/subscribe`. Never calls `OneSignal.login` — sends only
  * `include_subscription_ids` style tagging via `addTag("blk", clickKey)`.
+ *
+ * Push and popups are independent: with no app for the origin the push part
+ * does nothing, and the popup part runs only when `popups` is set (the
+ * popup endpoint itself refuses origins the house never registered).
  */
 export function buildLoaderScript(config: LoaderScriptConfig): string {
   const appsByOrigin: Record<string, string> = {};
@@ -71,6 +78,8 @@ export function buildLoaderScript(config: LoaderScriptConfig): string {
   var INIT_OPTIONS = ${safeJsonStringify(initOptions)};
 
   var appId = APPS_BY_ORIGIN[window.location.origin];
+  var PUSH_PROMPT = !!appId;
+${config.popups ? POPUP_RUNTIME_JS : ""}
   if (!appId) return;
 
   var sdkScript = document.createElement("script");

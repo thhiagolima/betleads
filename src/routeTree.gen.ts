@@ -32,6 +32,7 @@ import { Route as McpRouteImport } from './routes/mcp'
 import { Route as MidiaLtvRouteImport } from './routes/midia-ltv'
 import { Route as PlanoECreditosRouteImport } from './routes/plano-e-creditos'
 import { Route as PlayersRouteImport } from './routes/players'
+import { Route as PopupsRouteImport } from './routes/popups'
 import { Route as PublicosRouteImport } from './routes/publicos'
 import { Route as RegrasRouteImport } from './routes/regras'
 import { Route as RendimentoRouteImport } from './routes/rendimento'
@@ -94,6 +95,7 @@ import { Route as ApiPublicHooksMorningCheckRouteImport } from './routes/api/pub
 import { Route as ApiPublicHooksOrchestrateRouteImport } from './routes/api/public/hooks/orchestrate'
 import { Route as ApiPublicHooksPlatformAlertsRouteImport } from './routes/api/public/hooks/platform-alerts'
 import { Route as ApiPublicHooksPlatformDigestRouteImport } from './routes/api/public/hooks/platform-digest'
+import { Route as ApiPublicHooksPopupsHourlyRouteImport } from './routes/api/public/hooks/popups-hourly'
 import { Route as ApiPublicHooksRecoveryRouteImport } from './routes/api/public/hooks/recovery'
 import { Route as ApiPublicHooksSmsRefreshStatusRouteImport } from './routes/api/public/hooks/sms-refresh-status'
 import { Route as ApiPublicHooksSmsRouteProbeRouteImport } from './routes/api/public/hooks/sms-route-probe'
@@ -101,6 +103,8 @@ import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/pu
 import { Route as ApiPublicHooksWebpushLeadBillingRouteImport } from './routes/api/public/hooks/webpush-lead-billing'
 import { Route as ApiPublicHooksWhatsappResumeRouteImport } from './routes/api/public/hooks/whatsapp-resume'
 import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/meta-sync/tick'
+import { Route as ApiPublicPopupEventRouteImport } from './routes/api/public/popup/event'
+import { Route as ApiPublicPopupListRouteImport } from './routes/api/public/popup/list'
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
 import { Route as ApiPublicPushLoaderDotjsRouteImport } from './routes/api/public/push/loader[.]js'
 import { Route as ApiPublicPushSubscribeRouteImport } from './routes/api/public/push/subscribe'
@@ -232,6 +236,11 @@ const PlanoECreditosRoute = PlanoECreditosRouteImport.update({
 const PlayersRoute = PlayersRouteImport.update({
   id: '/players',
   path: '/players',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PopupsRoute = PopupsRouteImport.update({
+  id: '/popups',
+  path: '/popups',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PublicosRoute = PublicosRouteImport.update({
@@ -563,6 +572,12 @@ const ApiPublicHooksPlatformDigestRoute =
     path: '/api/public/hooks/platform-digest',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksPopupsHourlyRoute =
+  ApiPublicHooksPopupsHourlyRouteImport.update({
+    id: '/api/public/hooks/popups-hourly',
+    path: '/api/public/hooks/popups-hourly',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksRecoveryRoute = ApiPublicHooksRecoveryRouteImport.update({
   id: '/api/public/hooks/recovery',
   path: '/api/public/hooks/recovery',
@@ -601,6 +616,16 @@ const ApiPublicHooksWhatsappResumeRoute =
 const ApiPublicMetaSyncTickRoute = ApiPublicMetaSyncTickRouteImport.update({
   id: '/api/public/meta-sync/tick',
   path: '/api/public/meta-sync/tick',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicPopupEventRoute = ApiPublicPopupEventRouteImport.update({
+  id: '/api/public/popup/event',
+  path: '/api/public/popup/event',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicPopupListRoute = ApiPublicPopupListRouteImport.update({
+  id: '/api/public/popup/list',
+  path: '/api/public/popup/list',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicPrecallDispatchRoute =
@@ -726,6 +751,7 @@ export interface FileRoutesByFullPath {
   '/midia-ltv': typeof MidiaLtvRoute
   '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
+  '/popups': typeof PopupsRoute
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
   '/rendimento': typeof RendimentoRouteWithChildren
@@ -788,6 +814,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
   '/api/public/hooks/platform-alerts': typeof ApiPublicHooksPlatformAlertsRoute
   '/api/public/hooks/platform-digest': typeof ApiPublicHooksPlatformDigestRoute
+  '/api/public/hooks/popups-hourly': typeof ApiPublicHooksPopupsHourlyRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/sms-route-probe': typeof ApiPublicHooksSmsRouteProbeRoute
@@ -795,6 +822,8 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/webpush-lead-billing': typeof ApiPublicHooksWebpushLeadBillingRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
+  '/api/public/popup/event': typeof ApiPublicPopupEventRoute
+  '/api/public/popup/list': typeof ApiPublicPopupListRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/push/loader.js': typeof ApiPublicPushLoaderDotjsRoute
   '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
@@ -837,6 +866,7 @@ export interface FileRoutesByTo {
   '/midia-ltv': typeof MidiaLtvRoute
   '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
+  '/popups': typeof PopupsRoute
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
   '/rendimento': typeof RendimentoRouteWithChildren
@@ -899,6 +929,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
   '/api/public/hooks/platform-alerts': typeof ApiPublicHooksPlatformAlertsRoute
   '/api/public/hooks/platform-digest': typeof ApiPublicHooksPlatformDigestRoute
+  '/api/public/hooks/popups-hourly': typeof ApiPublicHooksPopupsHourlyRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/sms-route-probe': typeof ApiPublicHooksSmsRouteProbeRoute
@@ -906,6 +937,8 @@ export interface FileRoutesByTo {
   '/api/public/hooks/webpush-lead-billing': typeof ApiPublicHooksWebpushLeadBillingRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
+  '/api/public/popup/event': typeof ApiPublicPopupEventRoute
+  '/api/public/popup/list': typeof ApiPublicPopupListRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/push/loader.js': typeof ApiPublicPushLoaderDotjsRoute
   '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
@@ -949,6 +982,7 @@ export interface FileRoutesById {
   '/midia-ltv': typeof MidiaLtvRoute
   '/plano-e-creditos': typeof PlanoECreditosRoute
   '/players': typeof PlayersRouteWithChildren
+  '/popups': typeof PopupsRoute
   '/publicos': typeof PublicosRoute
   '/regras': typeof RegrasRoute
   '/rendimento': typeof RendimentoRouteWithChildren
@@ -1011,6 +1045,7 @@ export interface FileRoutesById {
   '/api/public/hooks/orchestrate': typeof ApiPublicHooksOrchestrateRoute
   '/api/public/hooks/platform-alerts': typeof ApiPublicHooksPlatformAlertsRoute
   '/api/public/hooks/platform-digest': typeof ApiPublicHooksPlatformDigestRoute
+  '/api/public/hooks/popups-hourly': typeof ApiPublicHooksPopupsHourlyRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/sms-route-probe': typeof ApiPublicHooksSmsRouteProbeRoute
@@ -1018,6 +1053,8 @@ export interface FileRoutesById {
   '/api/public/hooks/webpush-lead-billing': typeof ApiPublicHooksWebpushLeadBillingRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
+  '/api/public/popup/event': typeof ApiPublicPopupEventRoute
+  '/api/public/popup/list': typeof ApiPublicPopupListRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
   '/api/public/push/loader.js': typeof ApiPublicPushLoaderDotjsRoute
   '/api/public/push/subscribe': typeof ApiPublicPushSubscribeRoute
@@ -1062,6 +1099,7 @@ export interface FileRouteTypes {
     | '/midia-ltv'
     | '/plano-e-creditos'
     | '/players'
+    | '/popups'
     | '/publicos'
     | '/regras'
     | '/rendimento'
@@ -1124,6 +1162,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/orchestrate'
     | '/api/public/hooks/platform-alerts'
     | '/api/public/hooks/platform-digest'
+    | '/api/public/hooks/popups-hourly'
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/sms-route-probe'
@@ -1131,6 +1170,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/webpush-lead-billing'
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
+    | '/api/public/popup/event'
+    | '/api/public/popup/list'
     | '/api/public/precall/dispatch'
     | '/api/public/push/loader.js'
     | '/api/public/push/subscribe'
@@ -1173,6 +1214,7 @@ export interface FileRouteTypes {
     | '/midia-ltv'
     | '/plano-e-creditos'
     | '/players'
+    | '/popups'
     | '/publicos'
     | '/regras'
     | '/rendimento'
@@ -1235,6 +1277,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/orchestrate'
     | '/api/public/hooks/platform-alerts'
     | '/api/public/hooks/platform-digest'
+    | '/api/public/hooks/popups-hourly'
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/sms-route-probe'
@@ -1242,6 +1285,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/webpush-lead-billing'
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
+    | '/api/public/popup/event'
+    | '/api/public/popup/list'
     | '/api/public/precall/dispatch'
     | '/api/public/push/loader.js'
     | '/api/public/push/subscribe'
@@ -1284,6 +1329,7 @@ export interface FileRouteTypes {
     | '/midia-ltv'
     | '/plano-e-creditos'
     | '/players'
+    | '/popups'
     | '/publicos'
     | '/regras'
     | '/rendimento'
@@ -1346,6 +1392,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/orchestrate'
     | '/api/public/hooks/platform-alerts'
     | '/api/public/hooks/platform-digest'
+    | '/api/public/hooks/popups-hourly'
     | '/api/public/hooks/recovery'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/sms-route-probe'
@@ -1353,6 +1400,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/webpush-lead-billing'
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
+    | '/api/public/popup/event'
+    | '/api/public/popup/list'
     | '/api/public/precall/dispatch'
     | '/api/public/push/loader.js'
     | '/api/public/push/subscribe'
@@ -1396,6 +1445,7 @@ export interface RootRouteChildren {
   MidiaLtvRoute: typeof MidiaLtvRoute
   PlanoECreditosRoute: typeof PlanoECreditosRoute
   PlayersRoute: typeof PlayersRouteWithChildren
+  PopupsRoute: typeof PopupsRoute
   PublicosRoute: typeof PublicosRoute
   RegrasRoute: typeof RegrasRoute
   RendimentoRoute: typeof RendimentoRouteWithChildren
@@ -1440,6 +1490,7 @@ export interface RootRouteChildren {
   ApiPublicHooksOrchestrateRoute: typeof ApiPublicHooksOrchestrateRoute
   ApiPublicHooksPlatformAlertsRoute: typeof ApiPublicHooksPlatformAlertsRoute
   ApiPublicHooksPlatformDigestRoute: typeof ApiPublicHooksPlatformDigestRoute
+  ApiPublicHooksPopupsHourlyRoute: typeof ApiPublicHooksPopupsHourlyRoute
   ApiPublicHooksRecoveryRoute: typeof ApiPublicHooksRecoveryRoute
   ApiPublicHooksSmsRefreshStatusRoute: typeof ApiPublicHooksSmsRefreshStatusRoute
   ApiPublicHooksSmsRouteProbeRoute: typeof ApiPublicHooksSmsRouteProbeRoute
@@ -1447,6 +1498,8 @@ export interface RootRouteChildren {
   ApiPublicHooksWebpushLeadBillingRoute: typeof ApiPublicHooksWebpushLeadBillingRoute
   ApiPublicHooksWhatsappResumeRoute: typeof ApiPublicHooksWhatsappResumeRoute
   ApiPublicMetaSyncTickRoute: typeof ApiPublicMetaSyncTickRoute
+  ApiPublicPopupEventRoute: typeof ApiPublicPopupEventRoute
+  ApiPublicPopupListRoute: typeof ApiPublicPopupListRoute
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
   ApiPublicPushLoaderDotjsRoute: typeof ApiPublicPushLoaderDotjsRoute
   ApiPublicPushSubscribeRoute: typeof ApiPublicPushSubscribeRoute
@@ -1627,6 +1680,13 @@ declare module '@tanstack/react-router' {
       path: '/players'
       fullPath: '/players'
       preLoaderRoute: typeof PlayersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/popups': {
+      id: '/popups'
+      path: '/popups'
+      fullPath: '/popups'
+      preLoaderRoute: typeof PopupsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/publicos': {
@@ -2063,6 +2123,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksPlatformDigestRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/popups-hourly': {
+      id: '/api/public/hooks/popups-hourly'
+      path: '/api/public/hooks/popups-hourly'
+      fullPath: '/api/public/hooks/popups-hourly'
+      preLoaderRoute: typeof ApiPublicHooksPopupsHourlyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/recovery': {
       id: '/api/public/hooks/recovery'
       path: '/api/public/hooks/recovery'
@@ -2110,6 +2177,20 @@ declare module '@tanstack/react-router' {
       path: '/api/public/meta-sync/tick'
       fullPath: '/api/public/meta-sync/tick'
       preLoaderRoute: typeof ApiPublicMetaSyncTickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/popup/event': {
+      id: '/api/public/popup/event'
+      path: '/api/public/popup/event'
+      fullPath: '/api/public/popup/event'
+      preLoaderRoute: typeof ApiPublicPopupEventRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/popup/list': {
+      id: '/api/public/popup/list'
+      path: '/api/public/popup/list'
+      fullPath: '/api/public/popup/list'
+      preLoaderRoute: typeof ApiPublicPopupListRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/precall/dispatch': {
@@ -2409,6 +2490,7 @@ const rootRouteChildren: RootRouteChildren = {
   MidiaLtvRoute: MidiaLtvRoute,
   PlanoECreditosRoute: PlanoECreditosRoute,
   PlayersRoute: PlayersRouteWithChildren,
+  PopupsRoute: PopupsRoute,
   PublicosRoute: PublicosRoute,
   RegrasRoute: RegrasRoute,
   RendimentoRoute: RendimentoRouteWithChildren,
@@ -2455,6 +2537,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksOrchestrateRoute: ApiPublicHooksOrchestrateRoute,
   ApiPublicHooksPlatformAlertsRoute: ApiPublicHooksPlatformAlertsRoute,
   ApiPublicHooksPlatformDigestRoute: ApiPublicHooksPlatformDigestRoute,
+  ApiPublicHooksPopupsHourlyRoute: ApiPublicHooksPopupsHourlyRoute,
   ApiPublicHooksRecoveryRoute: ApiPublicHooksRecoveryRoute,
   ApiPublicHooksSmsRefreshStatusRoute: ApiPublicHooksSmsRefreshStatusRoute,
   ApiPublicHooksSmsRouteProbeRoute: ApiPublicHooksSmsRouteProbeRoute,
@@ -2462,6 +2545,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksWebpushLeadBillingRoute: ApiPublicHooksWebpushLeadBillingRoute,
   ApiPublicHooksWhatsappResumeRoute: ApiPublicHooksWhatsappResumeRoute,
   ApiPublicMetaSyncTickRoute: ApiPublicMetaSyncTickRoute,
+  ApiPublicPopupEventRoute: ApiPublicPopupEventRoute,
+  ApiPublicPopupListRoute: ApiPublicPopupListRoute,
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,
   ApiPublicPushLoaderDotjsRoute: ApiPublicPushLoaderDotjsRoute,
   ApiPublicPushSubscribeRoute: ApiPublicPushSubscribeRoute,

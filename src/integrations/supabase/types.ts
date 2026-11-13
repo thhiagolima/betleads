@@ -5870,6 +5870,172 @@ export type Database = {
           },
         ];
       };
+      site_popup_audience_members: {
+        Row: {
+          generation: number;
+          player_id: string;
+          popup_id: string;
+        };
+        Insert: {
+          generation: number;
+          player_id: string;
+          popup_id: string;
+        };
+        Update: {
+          generation?: number;
+          player_id?: string;
+          popup_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "site_popup_audience_members_popup_id_fkey";
+            columns: ["popup_id"];
+            isOneToOne: false;
+            referencedRelation: "site_popups";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      site_popup_daily_stats: {
+        Row: {
+          cliques: number;
+          dia: string;
+          exibicoes: number;
+          fechamentos: number;
+          popup_id: string;
+          tenant_id: string;
+        };
+        Insert: {
+          cliques?: number;
+          dia: string;
+          exibicoes?: number;
+          fechamentos?: number;
+          popup_id: string;
+          tenant_id: string;
+        };
+        Update: {
+          cliques?: number;
+          dia?: string;
+          exibicoes?: number;
+          fechamentos?: number;
+          popup_id?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "site_popup_daily_stats_popup_id_fkey";
+            columns: ["popup_id"];
+            isOneToOne: false;
+            referencedRelation: "site_popups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "site_popup_daily_stats_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      site_popups: {
+        Row: {
+          atraso_segundos: number;
+          audience_count: number | null;
+          audience_criteria: Json | null;
+          audience_generation: number;
+          audience_kind: string;
+          audience_label: string | null;
+          audience_refreshed_at: string | null;
+          botao_label: string | null;
+          botao_url: string | null;
+          created_at: string;
+          created_by: string | null;
+          ends_at: string | null;
+          formato: string;
+          frequencia: string;
+          frequencia_dias: number | null;
+          id: string;
+          image_url: string | null;
+          nome: string;
+          paginas: string[];
+          paginas_modo: string;
+          prioridade: number;
+          starts_at: string | null;
+          status: string;
+          tenant_id: string;
+          texto: string | null;
+          titulo: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          atraso_segundos?: number;
+          audience_count?: number | null;
+          audience_criteria?: Json | null;
+          audience_generation?: number;
+          audience_kind?: string;
+          audience_label?: string | null;
+          audience_refreshed_at?: string | null;
+          botao_label?: string | null;
+          botao_url?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          ends_at?: string | null;
+          formato?: string;
+          frequencia?: string;
+          frequencia_dias?: number | null;
+          id?: string;
+          image_url?: string | null;
+          nome: string;
+          paginas?: string[];
+          paginas_modo?: string;
+          prioridade?: number;
+          starts_at?: string | null;
+          status?: string;
+          tenant_id: string;
+          texto?: string | null;
+          titulo?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          atraso_segundos?: number;
+          audience_count?: number | null;
+          audience_criteria?: Json | null;
+          audience_generation?: number;
+          audience_kind?: string;
+          audience_label?: string | null;
+          audience_refreshed_at?: string | null;
+          botao_label?: string | null;
+          botao_url?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          ends_at?: string | null;
+          formato?: string;
+          frequencia?: string;
+          frequencia_dias?: number | null;
+          id?: string;
+          image_url?: string | null;
+          nome?: string;
+          paginas?: string[];
+          paginas_modo?: string;
+          prioridade?: number;
+          starts_at?: string | null;
+          status?: string;
+          tenant_id?: string;
+          texto?: string | null;
+          titulo?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "site_popups_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       sms_audiences: {
         Row: {
           created_at: string;
@@ -7891,6 +8057,7 @@ export type Database = {
           accept_label: string;
           cancel_label: string;
           icon_url: string | null;
+          popup_player_seen_at: string | null;
           prompt_text: string;
           public_token: string;
           tenant_id: string;
@@ -7900,6 +8067,7 @@ export type Database = {
           accept_label?: string;
           cancel_label?: string;
           icon_url?: string | null;
+          popup_player_seen_at?: string | null;
           prompt_text?: string;
           public_token?: string;
           tenant_id: string;
@@ -7909,6 +8077,7 @@ export type Database = {
           accept_label?: string;
           cancel_label?: string;
           icon_url?: string | null;
+          popup_player_seen_at?: string | null;
           prompt_text?: string;
           public_token?: string;
           tenant_id?: string;
@@ -9839,6 +10008,14 @@ export type Database = {
       webpush_app_sent_last_15m: {
         Args: { p_app: string };
         Returns: number;
+      };
+      site_popup_record_event: {
+        Args: { p_kind: string; p_popup_id: string };
+        Returns: boolean;
+      };
+      site_popup_set_audience_generation: {
+        Args: { p_count: number; p_generation: number; p_popup_id: string };
+        Returns: undefined;
       };
       webpush_app_active_count: {
         Args: { p_app: string };

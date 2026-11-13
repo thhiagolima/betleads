@@ -296,7 +296,7 @@ async function fetchSubscriptionCounts(
 
 /** `${PUBLIC_APP_URL}/api/public/push/loader.js?t=${publicToken}`, matching
  * the base-url pattern used elsewhere (e.g. `invite-email.server.ts`). */
-function buildLoaderSnippet(publicToken: string): string {
+export function buildLoaderSnippet(publicToken: string): string {
   const base = (process.env.PUBLIC_APP_URL ?? "https://betleads.io").replace(/\/$/, "");
   return `<script src="${base}/api/public/push/loader.js?t=${publicToken}" async></script>`;
 }
