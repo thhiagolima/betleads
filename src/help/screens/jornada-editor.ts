@@ -264,7 +264,7 @@ const screen: HelpScreen = {
       id: "etapas",
       title: "Etapas",
       intro:
-        "Cada etapa acontece depois que a anterior termina. SMS e e-mail usam templates ativos, e a jornada guarda uma cópia (template_snapshot) da versão usada, para não mudar depois de ativada.",
+        "Cada etapa acontece depois que a anterior termina. O texto do SMS é escrito na própria etapa (ou copiado de um template); o e-mail usa um template ativo, e a jornada guarda uma cópia (template_snapshot) da versão usada.",
       items: [
         {
           anchor: "jornada.etapas.remover",
@@ -284,10 +284,10 @@ const screen: HelpScreen = {
         },
         {
           anchor: "jornada.etapas.sms-template",
-          label: "Usar um template / Mensagem (etapa Enviar SMS)",
-          what: "O texto do SMS pode ser escrito direto no campo Mensagem ou vir de um template de SMS ativo escolhido acima. Escolher um template preenche a mensagem; editar o texto depois desliga a etapa do template.",
+          label: "Tipo de envio / Mensagem (etapa Enviar SMS)",
+          what: 'Em "Tipo de envio" a casa escolhe "Mensagem única" (todo jogador recebe sempre o mesmo texto nesta etapa) ou "Rodízio de textos" (a cada envio o CRM sorteia um dos textos; o mesmo jogador não recebe o mesmo texto duas vezes no dia enquanto houver outro disponível). Na mensagem única, o texto pode ser escrito no campo Mensagem ou vir de um template de SMS ativo ("Usar um template (opcional)"); editar o texto depois desliga a etapa do template. No rodízio, cada texto tem seu campo ("Texto 1", "Texto 2"…), com "Adicionar texto" (até 20) e a lixeira para remover (mínimo 2).',
           notes:
-            'Quando o template sorteia entre várias variações, aparece o aviso "Esta etapa sorteia entre N variações a cada envio; o texto acima é a primeira. Editar o texto ou escolher um template substitui todas." Sem domínio do encurtador verificado, aparece o aviso do encurtador padrão (ver estados).',
+            'Passar de rodízio para mensagem única mantém só o Texto 1. Texto vazio no rodízio impede salvar: "Escreva ou remova o texto N do rodízio da etapa M." Sem domínio do encurtador verificado, aparece o aviso do encurtador padrão (ver estados).',
         },
         {
           anchor: "jornada.etapas.sms-dominio",

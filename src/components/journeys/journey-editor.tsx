@@ -42,6 +42,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   eventMaxAgeHours,
   journeyEntryFilters,
+  smsVariants,
   type JourneyEntryFilters,
 } from "@/lib/journey-policy";
 import { MAX_LOOPS_LIMIT, endStepMaxLoops, type JourneyStepInput } from "@/lib/journeys.shared";
@@ -86,11 +87,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 
 type Step =
   | { kind: "wait"; amount: string; unit: WaitUnit }
-  | { kind: "sms"; templateId: string; content: string; extra?: Record<string, unknown> }
+  | {
+      kind: "sms";
+      templateId: string;
+      content: string;
+      /** Rodízio: each send draws one of these texts. Absent = single message. */
+      variants?: string[];
+      extra?: Record<string, unknown>;
+    }
   | {
       kind: "email";
       templateId: string;
@@ -281,6 +290,8 @@ function initialStep(s: SavedStep): Step[] {
     return [{ kind: "wait", ...splitWaitSeconds(Number(s.config.delay_seconds ?? 3600)) }];
   }
   if (s.step_type === "sms") {
+    const { variants: _variants, ...extra } = smsExtra(s.config);
+    const texts = smsVariants(s.config);
     return [
       {
         kind: "sms",
@@ -290,7 +301,8 @@ function initialStep(s: SavedStep): Step[] {
             s.config.content ??
             "",
         ),
-        extra: smsExtra(s.config),
+        ...(texts.length > 1 ? { variants: texts } : {}),
+        extra,
       },
     ];
   }
@@ -481,6 +493,13 @@ export function JourneyEditor({
       steps.forEach((s, index) => {
         if (s.kind === "wait" && waitToSeconds(s.amount, s.unit) === null)
           throw new Error(`Informe o tempo de espera da etapa ${index + 1}.`);
+        if (s.kind === "sms" && s.variants) {
+          const empty = s.variants.findIndex((text) => !text.trim());
+          if (empty >= 0)
+            throw new Error(
+              `Escreva ou remova o texto ${empty + 1} do rodízio da etapa ${index + 1}.`,
+            );
+        }
       });
       const body = steps.flatMap((s): JourneyStepInput[] =>
         s.kind === "wait"
@@ -491,7 +510,18 @@ export function JourneyEditor({
               },
             ]
           : s.kind === "sms"
-            ? s.content.trim() && !s.templateId
+            ? s.variants
+              ? [
+                  {
+                    step_type: "sms",
+                    config: {
+                      ...s.extra,
+                      content: s.variants[0],
+                      ...(s.variants.length > 1 ? { variants: s.variants } : {}),
+                    },
+                  },
+                ]
+              : s.content.trim() && !s.templateId
               ? [{ step_type: "sms", config: { ...s.extra, content: s.content } }]
               : s.templateId && s.content.trim()
                 ? [
@@ -1048,7 +1078,7 @@ export function JourneyEditor({
 
       <EditorSection
         title="Etapas"
-        help="Cada etapa acontece depois que a anterior termina. SMS e e-mail usam templates ativos, e a jornada guarda uma cópia da versão usada para não mudar depois de ativada."
+        help="Cada etapa acontece depois que a anterior termina. O texto do SMS é escrito aqui (ou copiado de um template); o e-mail usa um template ativo, e a jornada guarda uma cópia da versão usada."
       >
         {steps.length === 0 && (
           <p className="rounded-lg border border-dashed border-border p-4 text-center text-[13px] text-muted-foreground">
@@ -1115,54 +1145,122 @@ export function JourneyEditor({
                 </div>
               ) : s.kind === "sms" ? (
                 <div className="space-y-2">
-                  <Label htmlFor={`step-${i}-sms`}>Usar um template (opcional)</Label>
-                  <OptionSelect
-                    id={`step-${i}-sms`}
-                    anchorProps={
-                      isFirstOfKind ? tourAnchor("jornada.etapas.sms-template") : undefined
-                    }
-                    value={s.templateId}
-                    placeholder="Escreva abaixo ou escolha um template"
-                    onChange={(templateId) => {
-                      const template = (smsTemplates.data?.items ?? []).find(
-                        (item) => item.id === templateId,
-                      );
-                      change(i, {
-                        ...s,
-                        templateId,
-                        content: template?.content ?? "",
-                        extra: smsExtraForTemplateChange(s.extra),
-                      });
-                    }}
-                    options={(smsTemplates.data?.items ?? [])
-                      .filter((template) => template.isActive || template.id === s.templateId)
-                      .map((template) => ({
-                        value: template.id,
-                        label: `${template.name} · v${template.version}`,
-                      }))}
-                  />
-                  <Label htmlFor={`step-${i}-sms-text`}>Mensagem</Label>
-                  <Textarea
-                    id={`step-${i}-sms-text`}
-                    value={s.content}
-                    maxLength={1600}
-                    // Editing the text detaches the step from its template and
-                    // drops the template's variations (they would win at send time).
-                    onChange={(event) =>
-                      change(i, {
-                        ...s,
-                        templateId: "",
-                        content: event.target.value,
-                        extra: smsExtraForTemplateChange(s.extra),
-                      })
-                    }
-                    placeholder="Texto do SMS"
-                  />
-                  {Array.isArray(s.extra?.variants) && s.extra.variants.length > 1 && (
-                    <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-[12.5px] text-warning">
-                      Esta etapa sorteia entre {s.extra.variants.length} variações a cada envio; o
-                      texto acima é a primeira. Editar o texto ou escolher um template substitui todas.
+                  <div className="space-y-1.5">
+                    <Label id={`step-${i}-sms-mode`}>Tipo de envio</Label>
+                    <ToggleGroup
+                      type="single"
+                      size="sm"
+                      variant="outline"
+                      aria-labelledby={`step-${i}-sms-mode`}
+                      className="justify-start"
+                      value={s.variants ? "rodizio" : "unica"}
+                      onValueChange={(mode) => {
+                        if (mode === "rodizio" && !s.variants)
+                          change(i, { ...s, templateId: "", variants: [s.content, ""] });
+                        if (mode === "unica" && s.variants)
+                          change(i, { ...s, content: s.variants[0] ?? "", variants: undefined });
+                      }}
+                    >
+                      <ToggleGroupItem value="unica">Mensagem única</ToggleGroupItem>
+                      <ToggleGroupItem value="rodizio">Rodízio de textos</ToggleGroupItem>
+                    </ToggleGroup>
+                    <p className="text-[12.5px] text-muted-foreground">
+                      {s.variants
+                        ? "A cada envio o CRM sorteia um destes textos. O mesmo jogador não recebe o mesmo texto duas vezes no dia enquanto houver outro disponível."
+                        : "Todo jogador recebe sempre este texto nesta etapa."}
                     </p>
+                  </div>
+                  {s.variants ? (
+                    <div className="space-y-3">
+                      {s.variants.map((text, n) => (
+                        <div key={n} className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor={`step-${i}-sms-variant-${n}`}>Texto {n + 1}</Label>
+                            {s.variants!.length > 2 && (
+                              <IconButton
+                                label={`Remover texto ${n + 1}`}
+                                icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
+                                onClick={() =>
+                                  change(i, {
+                                    ...s,
+                                    variants: s.variants!.filter((_, k) => k !== n),
+                                  })
+                                }
+                              />
+                            )}
+                          </div>
+                          <Textarea
+                            id={`step-${i}-sms-variant-${n}`}
+                            value={text}
+                            maxLength={1600}
+                            onChange={(event) =>
+                              change(i, {
+                                ...s,
+                                variants: s.variants!.map((item, k) =>
+                                  k === n ? event.target.value : item,
+                                ),
+                              })
+                            }
+                            placeholder={`Texto ${n + 1} do SMS`}
+                          />
+                        </div>
+                      ))}
+                      {s.variants.length < 20 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => change(i, { ...s, variants: [...s.variants!, ""] })}
+                        >
+                          <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Adicionar texto
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <Label htmlFor={`step-${i}-sms`}>Usar um template (opcional)</Label>
+                      <OptionSelect
+                        id={`step-${i}-sms`}
+                        anchorProps={
+                          isFirstOfKind ? tourAnchor("jornada.etapas.sms-template") : undefined
+                        }
+                        value={s.templateId}
+                        placeholder="Escreva abaixo ou escolha um template"
+                        onChange={(templateId) => {
+                          const template = (smsTemplates.data?.items ?? []).find(
+                            (item) => item.id === templateId,
+                          );
+                          change(i, {
+                            ...s,
+                            templateId,
+                            content: template?.content ?? "",
+                            extra: smsExtraForTemplateChange(s.extra),
+                          });
+                        }}
+                        options={(smsTemplates.data?.items ?? [])
+                          .filter((template) => template.isActive || template.id === s.templateId)
+                          .map((template) => ({
+                            value: template.id,
+                            label: `${template.name} · v${template.version}`,
+                          }))}
+                      />
+                      <Label htmlFor={`step-${i}-sms-text`}>Mensagem</Label>
+                      <Textarea
+                        id={`step-${i}-sms-text`}
+                        value={s.content}
+                        maxLength={1600}
+                        // Editing the text detaches the step from its template.
+                        onChange={(event) =>
+                          change(i, {
+                            ...s,
+                            templateId: "",
+                            content: event.target.value,
+                            extra: smsExtraForTemplateChange(s.extra),
+                          })
+                        }
+                        placeholder="Texto do SMS"
+                      />
+                    </>
                   )}
                   <ShortenerFallbackNotice
                     isSuccess={composerOptions.isSuccess}
