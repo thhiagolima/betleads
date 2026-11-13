@@ -194,6 +194,9 @@ export const listJourneys = createServerFn({ method: "GET" })
           "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,express,daily_limit,cooldown_hours,ends_at,exit_rules,holdout_percent,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
         )
         .eq("tenant_id", tenantId)
+        // An applied revision is archived (promote_journey_revision); its
+        // content now lives in the original journey.
+        .or("revision_of.is.null,status.neq.archived")
         .order("updated_at", { ascending: false }),
       db.rpc("list_journey_metrics", { p_tenant_id: tenantId }),
     ]);
@@ -801,7 +804,7 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
       );
     }
     // Ativar uma revisão aplica o conteúdo dela na jornada original (mesmo id,
-    // inscritos e histórico) e apaga o rascunho; daqui em diante a original é
+    // inscritos e histórico) e arquiva o rascunho; daqui em diante a original é
     // a jornada ativada.
     let journeyId = data.id;
     if (data.status === "active" && journey.revision_of) {

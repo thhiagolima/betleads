@@ -87,7 +87,7 @@ export function useJourneyStatusControl() {
       setPauseCandidate(null);
       setActivateCandidate(null);
       // Activating a draft revision applies it to the original journey and
-      // deletes the draft: open the original.
+      // archives the draft: open the original.
       const appliedRevision = Boolean(result.id) && result.id !== variables.id;
       if (appliedRevision) {
         await queryClient.invalidateQueries({ queryKey: ["journey", result.id] });

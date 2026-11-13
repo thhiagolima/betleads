@@ -331,6 +331,7 @@ export function JourneyEditor({
     journey_priority?: number;
     conflict_policy?: ConflictPolicy;
     revision_of?: string | null;
+    conversion_objective?: "acquisition" | "conversion" | "reactivation" | "journey";
   };
   initialSteps?: SavedStep[];
   initialAudience?: string;
@@ -588,6 +589,9 @@ export function JourneyEditor({
             conflict_family: conflictFamily || null,
             journey_priority: journeyPriority,
             conflict_policy: conflictPolicy,
+            // Not edited here: resending the saved objective keeps it (the
+            // schema default would reset it and turn a text edit into a revision).
+            conversion_objective: initial?.conversion_objective,
             steps: [
               ...body,
               {

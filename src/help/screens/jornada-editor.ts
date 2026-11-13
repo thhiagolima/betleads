@@ -447,7 +447,7 @@ const screen: HelpScreen = {
           label: 'Diálogo "Ativar [nome]"',
           what: 'Pergunta "Quem pode entrar nesta jornada?": "Só casos novos, a partir de agora" (ninguém da base atual entra; quem já estava sai na próxima verificação) ou "Incluir a base atual" (jogadores que já cumprem o gatilho entram nos próximos minutos, com uma estimativa de quantos e do custo do 1º envio e da jornada completa). Botões "Cancelar" e "Ativar".',
           notes:
-            'Só aparece para gatilhos que fazem sentido perguntar isso (todos, exceto "Mudou de nível" e "Entrada manual ou API") — os outros ativam direto, sem este diálogo. A estimativa mostra "Calculando o impacto…" enquanto carrega. Ao confirmar, aparece o aviso de sucesso "Jornada ativada". Numa revisão em rascunho, ativar aplica a revisão na jornada original (mesmos jogadores, cada um na etapa em que estava), apaga o rascunho, abre a jornada original e mostra "Revisão aplicada: a jornada já segue a nova versão."',
+            'Só aparece para gatilhos que fazem sentido perguntar isso (todos, exceto "Mudou de nível" e "Entrada manual ou API") — os outros ativam direto, sem este diálogo. A estimativa mostra "Calculando o impacto…" enquanto carrega. Ao confirmar, aparece o aviso de sucesso "Jornada ativada". Numa revisão em rascunho, ativar aplica a revisão na jornada original (mesmos jogadores, cada um na etapa em que estava), arquiva o rascunho (ele some da lista), abre a jornada original e mostra "Revisão aplicada: a jornada já segue a nova versão."',
         },
         {
           label: 'Confirmação "Ativar sem as alterações?"',
