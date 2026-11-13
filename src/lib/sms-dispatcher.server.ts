@@ -1161,9 +1161,16 @@ export async function runScheduledSmsCampaigns({ limit = 20 }: { limit?: number 
   }
 }
 
+/**
+ * Campanhas processadas ao mesmo tempo numa execução. Em série, uma campanha
+ * lenta (ex.: conta Infobip, envio um a um) consumia o prazo de 45 s das
+ * outras casas; o ritmo de cada uma continua limitado pelo budget do canal.
+ */
+const SMS_CAMPAIGN_PARALLEL = 4;
+
 async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: JobRunHandle) {
-  // Um único orçamento de tempo por execução (cron 1×/min), compartilhado pelas
-  // campanhas reservadas; as que não couberem só têm o lock liberado.
+  // Um único prazo por execução (cron 1×/min), compartilhado pelas campanhas
+  // reservadas, que rodam em paralelo; as que não couberem só têm o lock liberado.
   const deadline = Date.now() + SMS_CAMPAIGN_RUN_BUDGET_MS;
   // Breakers per provider account: a campaign stops only when ITS house's
   // account is refused.
@@ -1173,12 +1180,13 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
   let totalFailed = 0;
   let totalDeduplicated = 0;
   let stopReason = "ok";
-  for (const c of campaigns) {
+  const processOne = async (c: SmsCampaignRow) => {
     if (Date.now() >= deadline) {
       stopReason = "deadline";
       await baseDeps.updateCampaign(c, { status: "enviando", locked_at: null, locked_by: null });
-      continue;
+      return;
     }
+    const tickStartedAt = Date.now();
     try {
       // Área do Expert: re-scoped per tick, never the bulk path; null = nothing to send.
       const scoped = c.expert_id
@@ -1192,7 +1200,7 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
               ),
           })
         : campaignDeps(await campaignUsesBulk(c.tenant_id, c.provider_account_id));
-      if (!scoped) continue;
+      if (!scoped) return;
       const deps = {
         ...scoped,
         providerGate: () => campaignProviderGate(gates, c),
@@ -1202,6 +1210,14 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
       const r = await processSmsCampaignTick(c, deps, {
         deadline,
         tickSeconds: SMS_CAMPAIGN_TICK_SECONDS,
+      });
+      console.info("[sms-campaigns] tick", {
+        campaignId: c.id,
+        tenantId: c.tenant_id,
+        bulk: Boolean(deps.sendBatch),
+        sent: r.sent,
+        stopReason: r.stopReason,
+        ms: Date.now() - tickStartedAt,
       });
       totalSent += r.sent;
       totalFailed += r.failed;
@@ -1238,7 +1254,13 @@ async function dispatchClaimedSmsCampaigns(campaigns: SmsCampaignRow[], run: Job
       });
     }
     run.progress({ sent: totalSent, errors: totalFailed });
-  }
+  };
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(SMS_CAMPAIGN_PARALLEL, campaigns.length) }, async () => {
+      while (next < campaigns.length) await processOne(campaigns[next++]);
+    }),
+  );
 
   await gates.release();
   return {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildUnresolvedRecipientsCsv,
   campaignBatchSize,
+  campaignBulkBatchSize,
   campaignDeliveryKey,
   campaignTickQuota,
   countUnresolvedByReason,
@@ -36,6 +37,12 @@ describe("campaign per-tick budget (ENV-07)", () => {
     expect(campaignBatchSize(80, 5000)).toBe(250);
     expect(campaignBatchSize(25, 7)).toBe(7);
     expect(campaignBatchSize(5, 0)).toBe(1);
+  });
+
+  it("bulk batches fill one provider request (500)", () => {
+    expect(campaignBulkBatchSize(5000)).toBe(500);
+    expect(campaignBulkBatchSize(120)).toBe(120);
+    expect(campaignBulkBatchSize(0)).toBe(1);
   });
 });
 

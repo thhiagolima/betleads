@@ -85,7 +85,9 @@ import { noteOwnedSmsTransport } from "./sms-account-gates.server";
 export const SMS_BULK_CHUNK_SIZE = 500;
 export const SMS_BULK_REQUEST_TIMEOUT_MS = 30_000;
 const NOT_SENT_MAX_ATTEMPTS = 3;
-const CREDIT_CONCURRENCY = 10;
+// One wallet reservation per recipient (HTTP round trip each): 50 in flight
+// keeps a 500-item batch at ~10 round trips instead of ~50.
+const CREDIT_CONCURRENCY = 50;
 const DB_CHUNK = 200;
 
 export type SmsBatchItem = {
@@ -837,6 +839,14 @@ export async function sendSmsBatch(
     });
     return result([], 0);
   }
+  const startedAt = Date.now();
+  const phaseMs: Record<string, number> = {};
+  let phaseFrom = startedAt;
+  const phase = (name: string) => {
+    const now = Date.now();
+    phaseMs[name] = now - phaseFrom;
+    phaseFrom = now;
+  };
   try {
 
     // 0. Tenant status (throws -> nothing done).
@@ -931,6 +941,7 @@ export async function sendSmsBatch(
     }
     sendable.sort((a, b) => a.index - b.index);
 
+    phase("checks");
     // c. Tracked links for every sendable item (bulk Short.io + set-based DB).
     const logIds = sendable.map(() => crypto.randomUUID());
     const links = await prepareTrackedTextBatch(
@@ -961,6 +972,7 @@ export async function sendSmsBatch(
       throw new SmsBatchDeferredError(`Rastreamento de links indisponível: ${blocked.error}`);
     }
 
+    phase("links");
     // b. Credits, one deterministic reservation per delivery key.
     const prepared: Prepared[] = [];
     await runLimited(
@@ -1028,6 +1040,7 @@ export async function sendSmsBatch(
     prepared.sort((a, b) => a.index - b.index);
     if (failLogs.length > 0) await insertLogs(failLogs);
 
+    phase("credits");
     // d/e/f. One HTTP call per chunk.
     const lotes: string[] = [];
     let httpCalls = 0;
@@ -1084,6 +1097,15 @@ export async function sendSmsBatch(
         outcomes[p.index] = { deliveryKey: p.item.deliveryKey, logId: p.logId, ...sent.outcomes[k] };
       });
     }
+    phase("send");
+    // Where a batch spends its time (campaign throughput diagnosis).
+    console.info("[sms-bulk] lote", {
+      items: items.length,
+      sent: prepared.length,
+      httpCalls,
+      totalMs: Date.now() - startedAt,
+      ...phaseMs,
+    });
     return result(lotes, httpCalls);
   } finally {
     slot.release();

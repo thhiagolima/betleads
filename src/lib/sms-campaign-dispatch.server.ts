@@ -5,12 +5,14 @@
 // throughput, dedupe and cursor rules are unit-tested without a database.
 import {
   campaignBatchSize,
+  campaignBulkBatchSize,
   campaignConcurrency,
   campaignDeliveryKey,
   campaignTickQuota,
   isUnresolvedReason,
   parseUnresolvedRecipients,
   SMS_CAMPAIGN_DEFAULT_RATE,
+  SMS_CAMPAIGN_MAX_PER_TICK,
   SMS_CAMPAIGN_TICK_SECONDS,
   type RecipientResolution,
   type UnresolvedReason,
@@ -527,7 +529,13 @@ export async function processSmsCampaignTick(
 
   // 2. Send loop.
   const rate = Math.max(1, c.rate_per_minute ?? SMS_CAMPAIGN_DEFAULT_RATE);
-  const quota = campaignTickQuota(rate, opts.tickSeconds ?? SMS_CAMPAIGN_TICK_SECONDS);
+  // Bulk path: as fast as the provider allows. The pace comes from the
+  // channel budget (channel_rate_limits, sized to the account limit), not from
+  // rate_per_minute, which the composer always fills with the 1000 default.
+  const bulk = Boolean(deps.sendBatch);
+  const quota = bulk
+    ? SMS_CAMPAIGN_MAX_PER_TICK
+    : campaignTickQuota(rate, opts.tickSeconds ?? SMS_CAMPAIGN_TICK_SECONDS);
   const cap = deps.sendConcurrencyCap ? await deps.sendConcurrencyCap(c) : null;
   const concurrency =
     cap && cap > 0 ? Math.min(campaignConcurrency(rate), cap) : campaignConcurrency(rate);
@@ -561,7 +569,11 @@ export async function processSmsCampaignTick(
       break;
     }
     const want =
-      gate.mode === "probe" ? 1 : campaignBatchSize(concurrency, quota - processedSendable);
+      gate.mode === "probe"
+        ? 1
+        : bulk
+          ? campaignBulkBatchSize(quota - processedSendable)
+          : campaignBatchSize(concurrency, quota - processedSendable);
 
     // Collect the next window in cursor order: skipped (unresolved) entries are
     // free; sendable ones count towards the batch size.

@@ -170,6 +170,17 @@ export function campaignBatchSize(concurrency: number, remainingQuota: number): 
 }
 
 /**
+ * Recipients per batch on the Short Brasil bulk path: one HTTP call carries up
+ * to 500 (SMS_BULK_CHUNK_SIZE), and each batch has a fixed cost (links,
+ * dedupe, checkpoint) that small batches pay over and over.
+ */
+export const SMS_CAMPAIGN_BULK_BATCH = 500;
+
+export function campaignBulkBatchSize(remainingQuota: number): number {
+  return Math.max(1, Math.min(remainingQuota, SMS_CAMPAIGN_BULK_BATCH));
+}
+
+/**
  * Deterministic, UUID-shaped delivery key for (campaign, player). Passed to
  * sendSmsInternal: a second attempt for the same recipient finds the accepted
  * log and never reaches the provider or billing again.

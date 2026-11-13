@@ -449,6 +449,17 @@ describe("processSmsCampaignTick with sendBatch (ENV-10 bulk)", () => {
     expect(lastPatch(w.state.patches)).toMatchObject({ status: "enviado" });
   });
 
+  it("bulk: batches of 500 and no rate_per_minute cap (the channel budget paces it)", async () => {
+    const w = batchWorld();
+    const r = await processSmsCampaignTick(
+      campaign(recipients(1600), { rate_per_minute: 1000 }),
+      w.deps,
+      { deadline: 45_000 },
+    );
+    expect(r).toMatchObject({ sent: 1600, status: "enviado" });
+    expect(w.batches.map((b) => b.length)).toEqual([500, 500, 500, 100]);
+  });
+
   it("pending confirmation counts as sent and is deduped on the next run", async () => {
     const w = batchWorld();
     w.setBehaviour((key) => {
