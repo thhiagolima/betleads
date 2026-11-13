@@ -18,6 +18,21 @@ describe("assertInfobipBaseUrl", () => {
     expect(assertInfobipBaseUrl("https://api.infobip.com")).toBe("https://api.infobip.com");
   });
 
+  it("accepts a regional zone (api-us)", () => {
+    expect(assertInfobipBaseUrl("https://6zly5z.api-us.infobip.com/")).toBe(
+      "https://6zly5z.api-us.infobip.com",
+    );
+  });
+
+  it("rejects a lookalike regional host", () => {
+    expect(() => assertInfobipBaseUrl("https://abc.api-us.infobip.com.evil.io")).toThrow(
+      /URL base da Infobip/,
+    );
+    expect(() => assertInfobipBaseUrl("https://abc.apix.infobip.com")).toThrow(
+      /URL base da Infobip/,
+    );
+  });
+
   it("normalizes a trailing slash away", () => {
     expect(assertInfobipBaseUrl("https://abc12.api.infobip.com/")).toBe(
       "https://abc12.api.infobip.com",

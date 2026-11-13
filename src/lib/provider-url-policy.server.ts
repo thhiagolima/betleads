@@ -13,8 +13,9 @@ export const PROVIDER_TEST_FAILURE_MESSAGE =
 const INFOBIP_BASE_URL_MESSAGE =
   "URL base da Infobip inválida. Use o endereço https://xxxx.api.infobip.com do seu portal.";
 
-/** `https://api.infobip.com` or `https://<sub>.api.infobip.com`, no path, no
- * port, no credentials. Returns the normalized origin (no trailing slash). */
+/** `https://api.infobip.com` or `https://<sub>.api.infobip.com`, also in a
+ * regional zone (`https://<sub>.api-us.infobip.com`), no path, no port, no
+ * credentials. Returns the normalized origin (no trailing slash). */
 export function assertInfobipBaseUrl(value: string): string {
   let url: URL;
   try {
@@ -23,7 +24,7 @@ export function assertInfobipBaseUrl(value: string): string {
     throw new Error(INFOBIP_BASE_URL_MESSAGE);
   }
   const host = url.hostname.toLowerCase();
-  const hostOk = host === "api.infobip.com" || /^[a-z0-9-]+\.api\.infobip\.com$/.test(host);
+  const hostOk = /^([a-z0-9-]+\.)?api(-[a-z0-9]+)?\.infobip\.com$/.test(host);
   const pathOk = url.pathname === "" || url.pathname === "/";
   if (
     url.protocol !== "https:" ||
