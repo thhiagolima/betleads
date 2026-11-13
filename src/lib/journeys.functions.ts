@@ -749,7 +749,7 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await tenant(context);
     await requireJourneyPublisher(context.userId, tenantId);
-    const { data: journey, error: journeyError } = await db
+    const { data: loadedJourney, error: journeyError } = await db
       .from("journeys")
       .select(
         "id,version,status,revision_of,conversion_objective,conversion_funnel_snapshot,trigger_type,trigger_config",
@@ -757,7 +757,8 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
       .maybeSingle();
-    if (journeyError || !journey) throw new Error("Jornada não encontrada.");
+    if (journeyError || !loadedJourney) throw new Error("Jornada não encontrada.");
+    let journey = loadedJourney;
     if (data.status === "active") {
       const { data: steps, error: stepsError } = await db
         .from("journey_steps")
@@ -799,6 +800,32 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
         actionable as StepLike[],
       );
     }
+    // Ativar uma revisão aplica o conteúdo dela na jornada original (mesmo id,
+    // inscritos e histórico) e apaga o rascunho; daqui em diante a original é
+    // a jornada ativada.
+    let journeyId = data.id;
+    if (data.status === "active" && journey.revision_of) {
+      const { data: promotedId, error: promoteError } = await db.rpc("promote_journey_revision", {
+        p_tenant_id: tenantId,
+        p_revision_id: data.id,
+        p_actor_user_id: context.userId,
+      });
+      if (promoteError || !promotedId)
+        throw new Error("Não foi possível aplicar a revisão na jornada. Tente novamente.");
+      journeyId = String(promotedId);
+      if (journeyId !== data.id) {
+        const { data: promoted, error: promotedError } = await db
+          .from("journeys")
+          .select(
+            "id,version,status,revision_of,conversion_objective,conversion_funnel_snapshot,trigger_type,trigger_config",
+          )
+          .eq("id", journeyId)
+          .eq("tenant_id", tenantId)
+          .maybeSingle();
+        if (promotedError || !promoted) throw new Error("Jornada não encontrada.");
+        journey = promoted;
+      }
+    }
     const now = new Date().toISOString();
     const statusFields =
       data.status === "active"
@@ -825,12 +852,12 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
     const { error } = await db
       .from("journeys")
       .update({ status: data.status, ...statusFields })
-      .eq("id", data.id)
+      .eq("id", journeyId)
       .eq("tenant_id", tenantId);
     if (error) throw new Error(error.message);
     await db.from("journey_events").insert({
       tenant_id: tenantId,
-      journey_id: data.id,
+      journey_id: journeyId,
       event_type: "status_changed",
       actor_user_id: context.userId,
       detail: {
@@ -851,7 +878,7 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
           claimed_at: null,
           claimed_by: null,
         })
-        .eq("journey_id", data.id)
+        .eq("journey_id", journeyId)
         .eq("tenant_id", tenantId)
         .in("status", ["active", "waiting", "paused_by_priority"])
         .select("id");
@@ -859,13 +886,13 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
       closed = (exited ?? []).length;
       await db.from("journey_events").insert({
         tenant_id: tenantId,
-        journey_id: data.id,
+        journey_id: journeyId,
         event_type: "enrollments_closed_on_pause",
         actor_user_id: context.userId,
         detail: { count: closed },
       });
     }
-    return { ok: true, closed };
+    return { ok: true, closed, id: journeyId };
   });
 
 /**

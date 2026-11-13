@@ -330,6 +330,7 @@ export function JourneyEditor({
     conflict_family?: string | null;
     journey_priority?: number;
     conflict_policy?: ConflictPolicy;
+    revision_of?: string | null;
   };
   initialSteps?: SavedStep[];
   initialAudience?: string;
@@ -604,15 +605,18 @@ export function JourneyEditor({
     onSuccess: async (r, savedAs) => {
       if (!r.id) throw new Error("Jornada salva sem identificador");
       setSavedSignature(savedAs);
-      // save_journey_draft edits a draft in place; for an active or paused journey
-      // it creates a new draft revision and leaves the live version untouched.
-      const createdRevision = Boolean(id) && savedStatus !== "draft";
+      // save_journey_draft edits a draft in place. On an active or paused journey
+      // it also saves in place when the steps keep their order and kinds (text,
+      // waits, limits); a change of structure creates a draft revision instead.
+      const createdRevision = Boolean(id) && r.id !== id;
       toast.success(
         !id
           ? "Jornada criada como rascunho. Ela só envia depois de ativada."
           : createdRevision
-            ? `Alterações salvas numa revisão em rascunho. A versão ${journeyStatusLabel(savedStatus).toLowerCase()} continua igual.`
-            : "Rascunho salvo",
+            ? `Você mudou as etapas ou o gatilho, então as alterações foram para uma revisão em rascunho. A jornada ${journeyStatusLabel(savedStatus).toLowerCase()} continua igual até você ativar a revisão.`
+            : savedStatus === "draft"
+              ? "Rascunho salvo"
+              : "Alterações salvas na jornada. Os próximos envios já saem com elas.",
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["journeys"] }),
@@ -638,7 +642,7 @@ export function JourneyEditor({
       const confirmed = await requestConfirmation({
         title: "Ativar sem as alterações?",
         description:
-          "As alterações que você fez aqui ainda não foram salvas e não entram na jornada. Para usá-las, salve (isso cria uma revisão em rascunho) e ative a revisão.",
+          "As alterações que você fez aqui ainda não foram salvas e não entram na jornada. Para usá-las, clique em Salvar antes de ativar.",
         confirmLabel: "Ativar versão salva",
       });
       if (!confirmed) return;
@@ -765,9 +769,16 @@ export function JourneyEditor({
       />
       {id && (savedStatus === "active" || savedStatus === "paused") && (
         <p className="rounded-xl border border-border bg-card/80 px-4 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
-          Esta jornada está {journeyStatusLabel(savedStatus).toLowerCase()}. Salvar cria uma revisão
-          em rascunho; a versão {journeyStatusLabel(savedStatus).toLowerCase()} continua como está
-          até você ativar a revisão.
+          Esta jornada está {journeyStatusLabel(savedStatus).toLowerCase()}. Mudar textos, esperas e
+          limites vale assim que você salvar, inclusive para quem já está na jornada. Adicionar,
+          remover ou trocar a ordem das etapas, ou mudar o gatilho, cria uma revisão em rascunho: a
+          jornada continua como está até você ativar a revisão.
+        </p>
+      )}
+      {id && savedStatus === "draft" && initial?.revision_of && (
+        <p className="rounded-xl border border-border bg-card/80 px-4 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
+          Esta é uma revisão em rascunho de outra jornada. Ao ativar, ela substitui a jornada
+          original: quem já está lá continua na mesma etapa e passa a seguir esta versão.
         </p>
       )}
 
@@ -1100,14 +1111,14 @@ export function JourneyEditor({
                 </div>
               ) : s.kind === "sms" ? (
                 <div className="space-y-2">
-                  <Label htmlFor={`step-${i}-sms`}>Template de SMS</Label>
+                  <Label htmlFor={`step-${i}-sms`}>Usar um template (opcional)</Label>
                   <OptionSelect
                     id={`step-${i}-sms`}
                     anchorProps={
                       isFirstOfKind ? tourAnchor("jornada.etapas.sms-template") : undefined
                     }
                     value={s.templateId}
-                    placeholder="Selecione um template de SMS"
+                    placeholder="Escreva abaixo ou escolha um template"
                     onChange={(templateId) => {
                       const template = (smsTemplates.data?.items ?? []).find(
                         (item) => item.id === templateId,
@@ -1126,16 +1137,27 @@ export function JourneyEditor({
                         label: `${template.name} · v${template.version}`,
                       }))}
                   />
+                  <Label htmlFor={`step-${i}-sms-text`}>Mensagem</Label>
                   <Textarea
+                    id={`step-${i}-sms-text`}
                     value={s.content}
-                    readOnly
-                    aria-label="Conteúdo do template"
-                    placeholder="Conteúdo do template"
+                    maxLength={1600}
+                    // Editing the text detaches the step from its template and
+                    // drops the template's variations (they would win at send time).
+                    onChange={(event) =>
+                      change(i, {
+                        ...s,
+                        templateId: "",
+                        content: event.target.value,
+                        extra: smsExtraForTemplateChange(s.extra),
+                      })
+                    }
+                    placeholder="Texto do SMS"
                   />
                   {Array.isArray(s.extra?.variants) && s.extra.variants.length > 1 && (
                     <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-[12.5px] text-warning">
                       Esta etapa sorteia entre {s.extra.variants.length} variações a cada envio; o
-                      texto acima é a primeira. Escolher um template substitui todas.
+                      texto acima é a primeira. Editar o texto ou escolher um template substitui todas.
                     </p>
                   )}
                   <ShortenerFallbackNotice
