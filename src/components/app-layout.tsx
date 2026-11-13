@@ -8,6 +8,7 @@ import { BillingBanner } from "@/components/billing/billing-banner";
 import { DemoBanner } from "@/components/demo-banner";
 import { HelpButton } from "@/components/help/help-button";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
+import { SmsRouteProbeBanner } from "@/components/sms-route-probe-banner";
 import { AccountMenu } from "@/components/shell/account-menu";
 import { MobileMenu, MobileTabBar } from "@/components/shell/mobile-nav";
 import { useSidebarCollapsed } from "@/components/shell/sidebar-collapse";
@@ -113,6 +114,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="mx-auto w-full max-w-[1600px]">
             <DemoBanner />
             <ProviderAuthBanner />
+            <SmsRouteProbeBanner />
           </div>
         </div>
         <main

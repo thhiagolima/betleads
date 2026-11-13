@@ -54,6 +54,7 @@ import { ChannelObservabilityPanel } from "@/components/admin/channel-observabil
 import { PlatformHealthTab } from "@/components/admin/platform-health/platform-health-tab";
 import { GeneralFinanceTab } from "@/components/admin/general-finance/general-finance-tab";
 import { ProviderAccountsPanel } from "@/components/admin/provider-accounts-panel";
+import { SmsRouteProbePanel } from "@/components/admin/sms-route-probe-panel";
 import { McpAccessPanel } from "@/components/admin/mcp-access-panel";
 import { getMyMcpStatus } from "@/lib/mcp/mcp.functions";
 import { MetaHousesPanel } from "@/components/admin/meta-houses-panel";
@@ -248,7 +249,12 @@ function AdminPage() {
         {view === "pricing" && <PricingTab />}
         {view === "sms-credits" && <BalanceAdminTab />}
         {view === "billing" && <BillingTab />}
-        {view === "channels" && <ChannelObservabilityPanel />}
+        {view === "channels" && (
+          <>
+            <ChannelObservabilityPanel />
+            <SmsRouteProbePanel />
+          </>
+        )}
         {view === "integrations" && <AdminIntegrationsTab />}
         {view === "mcp" && <McpTab />}
       </div>

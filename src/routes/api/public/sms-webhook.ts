@@ -9,6 +9,7 @@ import {
   parseSmsCallbackPayloads,
   type CallbackPayload,
 } from "@/lib/sms-callback-parse";
+import { applyRouteProbeCallback } from "@/lib/sms-route-probe.server";
 
 // Callback Short Brasil SMS.
 // URL cadastrada na Short Brasil (sem token):
@@ -234,6 +235,21 @@ async function updateFromPayload(
       await updateLog().eq("id", targetId);
       matched = true;
     }
+  }
+
+  // SMS de controle da sonda da rota (não fica em sms_send_logs).
+  if (
+    !matched &&
+    (await applyRouteProbeCallback({
+      providerMessageId,
+      idempotencyKey,
+      deliveryStatus: patch.delivery_status,
+      deliveredAt: deliveredAt ?? null,
+      error: errorMsg,
+      payload,
+    }))
+  ) {
+    return true;
   }
 
   // A dispatch uses `${sms_log.idempotency_key}:position`; this carries the
