@@ -37,7 +37,7 @@ $$;
 `;
 
 // provider_accounts / provider_account_id: added by Task 1
-// (20261231100000_own_provider_accounts.sql). Stand-in with the columns this
+// (20261231095000_own_provider_accounts.sql). Stand-in with the columns this
 // function reads: id, owner_tenant_id, own_unit_cost.
 const PROVIDER_ACCOUNTS_STUB = `
 create table public.provider_accounts (

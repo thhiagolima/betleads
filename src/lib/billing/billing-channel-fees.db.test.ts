@@ -8,7 +8,7 @@
 // the PG2 invoices migration (20261023100000), a minimal provider_accounts +
 // tenant_channel_providers stub (same shape as the real 20261108100000
 // migration, trimmed), the Task 1 own-provider-accounts migration
-// (20261231100000, adds owner_tenant_id/tenant_own_provider_grants) and this
+// (20261231095000, adds owner_tenant_id/tenant_own_provider_grants) and this
 // task's migration, over the shared billing stub schema.
 
 import { PGlite } from "@electric-sql/pglite";
@@ -25,7 +25,7 @@ const PIX_CHARGES_MIGRATION = readMigration(
 );
 const INVOICES_MIGRATION = readMigration("supabase/migrations/20261023100000_billing_invoices.sql");
 const OWN_PROVIDER_MIGRATION = readMigration(
-  "supabase/migrations/20261231100000_own_provider_accounts.sql",
+  "supabase/migrations/20261231095000_own_provider_accounts.sql",
 );
 const CHANNEL_FEES_MIGRATION = readMigration(
   "supabase/migrations/20261231100200_billing_channel_fees.sql",

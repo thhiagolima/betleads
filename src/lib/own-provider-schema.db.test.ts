@@ -1,5 +1,5 @@
 // PGlite test for
-// supabase/migrations/20261231100000_own_provider_accounts.sql:
+// supabase/migrations/20261231095000_own_provider_accounts.sql:
 // provider_accounts.owner_tenant_id/own_unit_cost/callback_token_encrypted/
 // last_callback_at, tenant_own_provider_grants, and the owner checks added
 // to tenant_channel_providers_check_channel and platform_channel_defaults_check.

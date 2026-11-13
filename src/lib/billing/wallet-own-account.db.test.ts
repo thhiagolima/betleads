@@ -27,13 +27,13 @@ const MIGRATIONS = [
   "supabase/migrations/20261024100000_billing_wallet_settle.sql",
   "supabase/migrations/20261126100000_expert_campaigns.sql",
   "supabase/migrations/20261210100100_webpush_billing_item.sql",
-  "supabase/migrations/20261231100000_own_provider_accounts.sql",
+  "supabase/migrations/20261231095000_own_provider_accounts.sql",
   "supabase/migrations/20261231100100_wallet_reserve_own_account.sql",
 ].map(readMigration);
 
 // Same stub tables as expert-campaigns.db.test.ts (20261126100000 touches
 // all of these), plus a minimal provider_accounts stub that
-// 20261231100000_own_provider_accounts.sql alters with owner_tenant_id.
+// 20261231095000_own_provider_accounts.sql alters with owner_tenant_id.
 const STUBS = `
 create function public.set_updated_at() returns trigger language plpgsql as $$
 begin new.updated_at = now(); return new; end $$;

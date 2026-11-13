@@ -24,7 +24,12 @@ conectar.
 
 ## Visão geral da ordem (não pule nem inverta)
 
-**As 5 migrations (`20261231100000`..`20261231100400`) têm que ser aplicadas,
+> **2026-11-13: Passos 1–5 aplicados em produção.** A versão `20261231100000`
+> já era de outra migration (`journey_live_edit`), por isso a
+> `own_provider_accounts` foi registrada como `20261231095000`. Por ~minutos
+> 100100..100300 rodaram antes dela; nenhum envio falhou nesse intervalo.
+
+**As 5 migrations (`20261231095000`..`20261231100400`) têm que ser aplicadas,
 nesta ordem, ANTES do deploy do app novo.** Elas foram renumeradas (11-13)
 para ordenar depois de `20261230100100_site_popups_cron` (do `main`), e
 `wallet_reserve` / `refresh_crm_results_day` partem dos corpos de
@@ -39,7 +44,7 @@ do super admin e a aba "Canais" da 99Bet quebram, e o envio de SMS por conta
 com dono cai no `catch` genérico (a UI mostra erro, não envia — não há
 fallback para a rota BetLeads, por constraint).
 
-1. Migration `20261231100000_own_provider_accounts` (Passo 1).
+1. Migration `20261231095000_own_provider_accounts` (Passo 1).
 2. Migration `20261231100100_wallet_reserve_own_account` (Passo 2).
 3. Migration `20261231100200_billing_channel_fees` (Passo 3).
 4. Migration `20261231100300_crm_results_own_cost` (Passo 4).
@@ -56,7 +61,7 @@ fallback para a rota BetLeads, por constraint).
 
 ---
 
-## Passo 1 — Migration `20261231100000_own_provider_accounts` (requer autorização)
+## Passo 1 — Migration `20261231095000_own_provider_accounts` (requer autorização)
 
 Cria `provider_accounts.owner_tenant_id` (NULL = conta da BetLeads;
 preenchido = conta própria de uma casa, só ligável à própria casa, nunca
@@ -70,9 +75,9 @@ Pelo pooler, em uma conexão de escrita:
 
 ```sql
 begin;
--- cole o conteúdo INTEGRAL de supabase/migrations/20261231100000_own_provider_accounts.sql aqui
+-- cole o conteúdo INTEGRAL de supabase/migrations/20261231095000_own_provider_accounts.sql aqui
 insert into supabase_migrations.schema_migrations (version, name, statements)
-values ('20261231100000', 'own_provider_accounts', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
+values ('20261231095000', 'own_provider_accounts', array[$mig$<conteúdo integral do arquivo aqui>$mig$]);
 commit;
 ```
 
@@ -88,7 +93,7 @@ nesta máquina para `supabase db push`.
 **Verificação:**
 ```sql
 select version from supabase_migrations.schema_migrations
-where version = '20261231100000';
+where version = '20261231095000';
 
 select column_name from information_schema.columns
 where table_schema = 'public' and table_name = 'provider_accounts'
@@ -108,7 +113,7 @@ alter table public.provider_accounts drop column if exists last_callback_at;
 alter table public.provider_accounts drop column if exists callback_token_encrypted;
 alter table public.provider_accounts drop column if exists own_unit_cost;
 alter table public.provider_accounts drop column if exists owner_tenant_id;
-delete from supabase_migrations.schema_migrations where version = '20261231100000';
+delete from supabase_migrations.schema_migrations where version = '20261231095000';
 commit;
 notify pgrst, 'reload schema';
 ```
