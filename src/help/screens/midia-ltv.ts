@@ -1,5 +1,6 @@
-// Help article for "Aquisição e LTV" (/midia-ltv), duas abas: Mídia e
-// Retenção. Fonte: src/routes/midia-ltv.tsx, src/components/midia-ltv/
+// Help article for "Aquisição e LTV" (/midia-ltv), três abas: Mídia, Origem e
+// Retenção. Origem: src/components/midia-ltv/origin-panel.tsx e
+// src/lib/origin-breakdown.ts (ESCOPO_ORIGEM_UTM_2026-11-14). Fonte: src/routes/midia-ltv.tsx, src/components/midia-ltv/
 // ad-account-filter.tsx e src/components/crm-results/retention.tsx, mais os
 // tipos/erros de src/lib/marketing-overview.ts, src/lib/marketing.functions.ts,
 // src/lib/meta.functions.ts e src/lib/crm-results.functions.ts (getCrmRetention).
@@ -15,10 +16,60 @@ const screen: HelpScreen = {
   defaultTab: "midia",
   title: "Aquisição e LTV",
   purpose:
-    "Cada jogador carrega o anúncio que o trouxe: a aba Mídia mostra quem trouxe cadastro barato, quem trouxe dinheiro e qual anúncio devolveu mais do que custou; a aba Retenção mostra onde a base de jogadores está, o funil de cadastro ao 1º depósito e a retenção (cohorts) de quem acabou de depositar por 1ª vez.",
+    "Cada jogador carrega o anúncio que o trouxe: a aba Mídia mostra quem trouxe cadastro barato, quem trouxe dinheiro e qual anúncio devolveu mais do que custou; a aba Origem mostra de onde vieram os cadastros pela UTM ou pelo código de afiliado, sem precisar da Meta conectada; a aba Retenção mostra onde a base de jogadores está, o funil de cadastro ao 1º depósito e a retenção (cohorts) de quem acabou de depositar por 1ª vez.",
   roles: ["admin", "gestor", "member"],
   terms: ["roas", "cpa-cac", "ctr", "impressoes", "bm", "utm", "ads-read", "cohort", "ltv"],
   sections: [
+    // ---------------------------------------------------------------
+    // Aba Origem — UTM e afiliado do cadastro, sem Meta
+    // ---------------------------------------------------------------
+    {
+      id: "origem-visao",
+      title: "De onde vieram os cadastros",
+      tab: "origem",
+      intro:
+        "A aba Origem lê a UTM (utm_source, utm_medium, utm_campaign, utm_term, utm_content) e o código de afiliado que a casa manda no cadastro. Funciona com qualquer tráfego: Meta, Kwai, TikTok, lives, influenciadores, afiliados. Não precisa da Meta conectada. Abre até 93 dias de cadastros por vez.",
+      items: [
+        {
+          anchor: "midia.origem.kpis",
+          label: "Cadastros, Com origem, 1º depósito, Depósito líquido",
+          what: "Cadastros feitos no período escolhido; quantos deles chegaram com alguma origem; quantos desses cadastros já fizeram o 1º depósito até hoje; e depósitos menos saques desses mesmos cadastros, desde o cadastro até hoje.",
+          notes:
+            "Depósito líquido não é GGR: o GGR só existe para a casa inteira. Os cadastros que vieram de link das mensagens do próprio CRM ficam fora de todos os números, porque não são aquisição.",
+        },
+        {
+          anchor: "midia.origem.cobertura",
+          label: "Aviso de origem",
+          what: 'Aparece quando menos de 70% dos cadastros do período chegaram com origem. Separa quantos vieram com UTM, quantos só com código de afiliado, quantos só com o clique da Meta (fbclid) e quantos sem nada. Os sem nada ficam na linha "Sem origem informada", sempre no fim da tabela, e nunca são divididos entre as campanhas.',
+        },
+        {
+          anchor: "midia.origem.agrupar",
+          label: "Agrupar por, caminho, busca e 1º depósito",
+          what: "Escolha o nível da tabela: Canal (Meta, Lives, Kwai, Afiliados…), Fonte, Meio, Campanha, Conjunto, Anúncio ou Afiliado. Clicar numa linha abre o próximo nível só com os cadastros dela; o caminho em cima volta para qualquer nível. A busca procura no texto da UTM, no ID e no código ou nome do afiliado.",
+          notes:
+            "O canal junta nomes diferentes da mesma fonte (ig, fb, instagram, an viram Meta). Meio começando com live vira Lives. Cadastro sem UTM mas com código de afiliado ou de indicação vira Afiliados e indicação.",
+        },
+        {
+          anchor: "midia.origem.tabela",
+          label: "Tabela",
+          what: "Uma linha por valor do nível escolhido, com cadastros, 1º depósito, conversão, depósitos, depósito líquido e líquido por cadastro. Quando a casa manda o ID da campanha, do conjunto ou do anúncio da Meta, a tela mostra o nome que está nas contas da Meta conectadas; sem conta conectada, mostra o ID abreviado com (sem nome).",
+          notes:
+            'Aparecem as 100 maiores por cadastros; o resto soma em "Outros". Com menos de 30 cadastros com origem, a conversão aparece como "poucos dados".',
+        },
+        {
+          anchor: "midia.origem.csv",
+          label: "Exportar CSV",
+          what: "Baixa o nível aberto, com o caminho, o valor que chegou na UTM, o nome exibido e os números de cada linha, mais Outros e Sem origem.",
+        },
+        {
+          anchor: "midia.origem.montar-link",
+          label: "Montar link com UTM",
+          what: 'Aparece no lugar da tabela quando nenhum cadastro do período chegou com origem. Cole o link da casa, preencha fonte, meio e campanha (ou clique em "Preencher para Meta Ads", que usa os parâmetros que a própria Meta preenche) e copie o link pronto.',
+          notes:
+            "Também é preciso que a plataforma da casa repasse as UTMs no webhook de cadastro. Sem isso, o link com UTM não chega até aqui.",
+        },
+      ],
+    },
     // ---------------------------------------------------------------
     // Aba Mídia — cabeçalho: conectar, sincronizar, período, filtro
     // ---------------------------------------------------------------
@@ -135,8 +186,9 @@ const screen: HelpScreen = {
         },
         {
           anchor: "midia.aviso.sem-anuncio",
-          label: 'Aviso "N cadastros do período chegaram com marcação, mas não foram ligados a nenhum anúncio"',
-          what: "Acima dos indicadores: os cadastros com UTM que não viraram anúncio conhecido, separados por motivo, cada um com o que fazer, e o botão \"Ver no Diagnóstico\".",
+          label:
+            'Aviso "N cadastros do período chegaram com marcação, mas não foram ligados a nenhum anúncio"',
+          what: 'Acima dos indicadores: os cadastros com UTM que não viraram anúncio conhecido, separados por motivo, cada um com o que fazer, e o botão "Ver no Diagnóstico".',
           notes: "Esses cadastros e os depósitos deles ficam fora do ROAS e do custo por cadastro.",
         },
         {
@@ -167,12 +219,13 @@ const screen: HelpScreen = {
       items: [
         {
           anchor: "midia.subabas.tabs",
-          label: "Por criativo / Por público da Meta / Por campanha da Meta / Evolução / Diagnóstico",
+          label:
+            "Por criativo / Por público da Meta / Por campanha da Meta / Evolução / Diagnóstico",
           what: "Troca a tabela ou o gráfico mostrado abaixo, sem mudar o período nem o filtro de BM/conta escolhidos.",
         },
         {
           label: "Por criativo",
-          what: "Uma linha por anúncio (criativo): miniatura, nome e campanha; investido e impressões; cliques no link e CTR (cliques ÷ impressões); cadastros; 1º depósito; custo por 1º depósito; depósito líquido (e o bruto, sem subtrair saques, ao lado); ROAS líquido. Uma linha \"Outros N criativos\" soma o que não entrou na lista, e a linha final \"Total\" soma tudo.",
+          what: 'Uma linha por anúncio (criativo): miniatura, nome e campanha; investido e impressões; cliques no link e CTR (cliques ÷ impressões); cadastros; 1º depósito; custo por 1º depósito; depósito líquido (e o bruto, sem subtrair saques, ao lado); ROAS líquido. Uma linha "Outros N criativos" soma o que não entrou na lista, e a linha final "Total" soma tudo.',
           notes:
             'Vazio mostra "Sem dados atribuídos" (ou "Carregando criativos" durante o carregamento) — na casa de demonstração, o texto troca para o padrão de demonstração.',
         },
@@ -190,7 +243,8 @@ const screen: HelpScreen = {
         {
           label: "Evolução",
           what: 'Dois gráficos de área — "Investimento por dia" e "1º depósito de anúncio por dia", ambos pelos dias do período — e o cartão "Onde o dinheiro está": a participação de cada criativo nos depósitos do período (1º depósito e redepósito), em barras de %.',
-          notes: 'Sem receita atribuída, o cartão mostra "Sem receita atribuída" em vez das barras.',
+          notes:
+            'Sem receita atribuída, o cartão mostra "Sem receita atribuída" em vez das barras.',
         },
         {
           anchor: "midia.evolucao.money-map-paginacao",
@@ -222,8 +276,7 @@ const screen: HelpScreen = {
       id: "retencao-periodo",
       title: "Período",
       tab: "retencao",
-      intro:
-        "A aba Retenção tem seu próprio seletor de período, independente do da aba Mídia.",
+      intro: "A aba Retenção tem seu próprio seletor de período, independente do da aba Mídia.",
       items: [
         {
           anchor: "midia.retencao.periodo",
@@ -262,7 +315,8 @@ const screen: HelpScreen = {
           anchor: "midia.retencao.funil",
           label: '"Funil dos cadastros"',
           what: "Barras com os cadastros do período e até onde chegaram: Cadastros, 1º depósito, 2º depósito e 3 ou mais depósitos. Mostra também a mediana de tempo do cadastro ao 1º depósito.",
-          notes: 'Sem nenhum cadastro no período, mostra "Nenhum cadastro hoje/ontem/nos últimos N dias." em vez das barras.',
+          notes:
+            'Sem nenhum cadastro no período, mostra "Nenhum cadastro hoje/ontem/nos últimos N dias." em vez das barras.',
         },
         {
           anchor: "midia.retencao.origem",
@@ -290,6 +344,29 @@ const screen: HelpScreen = {
   ],
 
   states: [
+    {
+      id: "origem-periodo-longo",
+      title: "A aba Origem abre até 93 dias de cadastros por vez. Escolha um período menor.",
+      what: "Mostrado na aba Origem quando o período escolhido passa de 93 dias.",
+    },
+    {
+      id: "origem-erro",
+      title: "Não foi possível carregar a origem dos cadastros deste período.",
+      what: "Mostrado na aba Origem quando a leitura falha; o texto entre parênteses, quando existe, é o motivo devolvido pelo servidor.",
+      action: 'Clique em "Tentar novamente".',
+    },
+    {
+      id: "origem-sem-cadastro",
+      title: "Nenhum cadastro neste período",
+      what: "Mostrado na aba Origem quando não houve cadastro no período escolhido.",
+      action: "Escolha outro período.",
+    },
+    {
+      id: "origem-nada-com-filtro",
+      title: "Nada com esse filtro",
+      what: "Mostrado na tabela da aba Origem quando nenhum cadastro bate com o caminho, a busca ou o filtro de 1º depósito.",
+      action: "Volte no caminho, limpe a busca ou desmarque o filtro.",
+    },
     {
       id: "numeros-em-validacao",
       title:
@@ -327,12 +404,14 @@ const screen: HelpScreen = {
       id: "sync-nao-admin",
       title: "Só o administrador da casa sincroniza a Meta.",
       what: 'Mostrado ao lado do botão "Atualizar agora" para quem não é administrador da casa (nem super admin) — o botão aparece desabilitado para esse perfil.',
-      action: "Peça a um administrador da casa para sincronizar, se os dados estiverem desatualizados.",
+      action:
+        "Peça a um administrador da casa para sincronizar, se os dados estiverem desatualizados.",
     },
     {
       id: "diagnostico-com-filtro",
-      title: "O diagnóstico de atribuição considera todo o tráfego. Limpe o filtro de BM / conta para ver.",
-      what: 'Mostrado no lugar dos indicadores e da tabela da aba Diagnóstico quando o filtro de BM/conta está ativo: com filtro, só entra tráfego já atribuído a essas contas, e a saúde da atribuição daria 100% e 0 órfãos de forma artificial.',
+      title:
+        "O diagnóstico de atribuição considera todo o tráfego. Limpe o filtro de BM / conta para ver.",
+      what: "Mostrado no lugar dos indicadores e da tabela da aba Diagnóstico quando o filtro de BM/conta está ativo: com filtro, só entra tráfego já atribuído a essas contas, e a saúde da atribuição daria 100% e 0 órfãos de forma artificial.",
       action: 'Escolha "Todas as contas" no filtro para ver o diagnóstico real.',
     },
     {
@@ -411,6 +490,32 @@ const screen: HelpScreen = {
         title: "Abas internas",
         body: "Por criativo, por público, por campanha, a evolução diária e o diagnóstico de atribuição (que mostra os órfãos, sem anúncio correspondente).",
         articleSection: "midia-abas",
+      },
+    ],
+    origem: [
+      {
+        anchor: "midia.origem.kpis",
+        title: "Cadastros do período",
+        body: "Quem se cadastrou no período e o que esses cadastros já depositaram até hoje. Não precisa da Meta conectada.",
+        articleSection: "origem-visao",
+      },
+      {
+        anchor: "midia.origem.cobertura",
+        title: "Quanto chegou com origem",
+        body: "Quantos cadastros vieram com UTM, só com afiliado ou sem nada. Os sem nada nunca são divididos entre as campanhas.",
+        articleSection: "origem-visao",
+      },
+      {
+        anchor: "midia.origem.agrupar",
+        title: "Agrupar e abrir",
+        body: "Escolha Canal, Fonte, Campanha, Anúncio ou Afiliado. Clique numa linha para descer um nível; o caminho em cima volta.",
+        articleSection: "origem-visao",
+      },
+      {
+        anchor: "midia.origem.tabela",
+        title: "Tabela por origem",
+        body: "Cadastros, 1º depósito, conversão e depósito líquido de cada valor. IDs da Meta ganham o nome quando a conta está conectada.",
+        articleSection: "origem-visao",
       },
     ],
     retencao: [
