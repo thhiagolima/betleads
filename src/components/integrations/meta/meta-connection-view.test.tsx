@@ -116,8 +116,11 @@ describe("MetaConnectionView", () => {
     expect(html).toContain("Usuário do Sistema: Usuário Mídia");
     expect(html).toContain("Alcança 1 BM · 1 conta");
     expect(html).toContain("Não expira");
-    expect(html).toContain("Adicionar Usuário do Sistema");
+    expect(html).toContain("Conectar outra BM ou chave");
     expect(html).toContain("Testar acesso");
+    // F1-08: ações da chave com texto, fora do menu "...".
+    expect(html).toContain("Renomear");
+    expect(html).toContain("Desconectar");
     expect(html).toContain("SA - Captação 01");
     expect(html).toContain("act_123");
     expect(html).toContain("America/Sao_Paulo");
@@ -176,10 +179,11 @@ describe("MetaConnectionView", () => {
       { readOnly: true },
     );
     expect(html).toContain(META_TEXTS.readOnly);
-    expect(html).not.toContain("Adicionar Usuário do Sistema");
+    expect(html).not.toContain("Conectar outra BM ou chave");
     expect(html).not.toContain("Sincronizar agora");
     expect(html).not.toContain("Testar acesso");
-    expect(html).not.toContain("Mais ações da chave");
+    expect(html).not.toContain("Renomear");
+    expect(html).not.toContain("Desconectar");
     expect(html).not.toContain("Validar acesso e buscar contas");
     // A lista continua visível, com os checkboxes desabilitados.
     expect(html).toContain("SA - Captação 01");
@@ -251,7 +255,7 @@ describe("MetaConnectionView", () => {
       summary({ connections: [connection()], accounts: [account({ selected: true })] }),
       { isDemo: true },
     );
-    expect(buttonWith(html, "Adicionar Usuário do Sistema")).toContain('disabled=""');
+    expect(buttonWith(html, "Conectar outra BM ou chave")).toContain('disabled=""');
     expect(buttonWith(html, "Testar acesso")).toContain('disabled=""');
   });
   it("shows the load error with 'Tentar novamente' instead of the first-key form", () => {
@@ -351,8 +355,12 @@ describe("MetaConnectionView", () => {
       }),
     );
     expect(html).toContain("1 conta com erro de sincronização.");
-    // Só no menu "⋯" (fechado no markup estático), não no aviso.
-    expect(html).not.toContain("Trocar chave");
+    // Erro de conta não é problema da chave: o aviso não oferece "Trocar chave", que
+    // fica uma vez só, nas ações do cartão (F1-08).
+    const strip = html.match(/<div role="status"[^>]*>.*?<\/div>/)?.[0] ?? "";
+    expect(strip).toContain("1 conta com erro de sincronização.");
+    expect(strip).not.toContain("Trocar chave");
+    expect(html.match(/Trocar chave/g)).toHaveLength(1);
   });
 });
 

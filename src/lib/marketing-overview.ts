@@ -35,6 +35,8 @@ export type MarketingTotals = {
   cpaFtd: number | null;
   /** spend / paidPlayers. */
   cacSignup: number | null;
+  /** F1-05: gasto das campanhas sem nenhum cadastro ligado no período. */
+  spendUnlinked: number;
 };
 
 export type AttributionHealth = {
@@ -101,11 +103,40 @@ export type OthersRow = Partial<BusinessColumns> & {
   linkClicks?: number;
 };
 
+/**
+ * F1-03: por que um cadastro com marcação não virou anúncio conhecido.
+ * Classificação da RPC; o status gravado em player_attributions não muda.
+ */
+export type OrphanReason =
+  | "live"
+  | "other_source"
+  | "macro"
+  | "id_not_found"
+  | "source_only"
+  | "ambiguous"
+  | "name_not_found"
+  | "pending";
+
+export type OrphanReasonRow = {
+  reason: OrphanReason;
+  players: number;
+  ftd: number;
+  revenue: number;
+};
+
+export type UnlinkedCampaignRow = {
+  campaign: string;
+  campaign_id: string | null;
+  spend: number;
+};
+
 export type OrphanAttributionRow = {
   campaign: string;
   creative: string;
   adset: string | null;
   source: string | null;
+  medium?: string | null;
+  reason?: OrphanReason | null;
   provider: string | null;
   ambiguous: boolean;
   players: number;
@@ -146,11 +177,17 @@ export type MarketingOverviewRpc = {
   audiences: AudienceRow[];
   audiencesOthers: OthersRow;
   orphanAttributions: OrphanAttributionRow[];
+  /** F1-03: ausente antes da migração 20261231100900. */
+  orphanReasons?: OrphanReasonRow[];
+  /** F1-05: as 5 campanhas de maior gasto sem cadastro ligado. */
+  unlinkedCampaigns?: UnlinkedCampaignRow[];
   daily: DailyPoint[];
   filter?: MarketingOverviewFilter | null;
 };
 
 export type MarketingOverview = MarketingOverviewRpc & {
+  orphanReasons: OrphanReasonRow[];
+  unlinkedCampaigns: UnlinkedCampaignRow[];
   moneyMap: MoneyRow[];
   filter: MarketingOverviewFilter | null;
 };
@@ -195,6 +232,7 @@ export function buildMarketingOverview(raw: MarketingOverviewRpc): MarketingOver
     roasGross: nullableNum(t.roasGross),
     cpaFtd: nullableNum(t.cpaFtd),
     cacSignup: nullableNum(t.cacSignup),
+    spendUnlinked: num(t.spendUnlinked),
   };
 
   const business = ["players", "ftd", "revenue", "net"] as const;
@@ -270,6 +308,10 @@ export function buildMarketingOverview(raw: MarketingOverviewRpc): MarketingOver
     orphanAttributions: (raw.orphanAttributions ?? []).map((row) =>
       numbers(row, ["players", "ftd", "revenue"]),
     ),
+    orphanReasons: (raw.orphanReasons ?? []).map((row) =>
+      numbers(row, ["players", "ftd", "revenue"]),
+    ),
+    unlinkedCampaigns: (raw.unlinkedCampaigns ?? []).map((row) => numbers(row, ["spend"])),
     daily: (raw.daily ?? []).map((row) => numbers(row, ["spend", "ftd", "signups"])),
     moneyMap,
     filter: raw.filter

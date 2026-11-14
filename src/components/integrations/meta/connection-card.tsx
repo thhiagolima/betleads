@@ -1,16 +1,9 @@
-import { KeyRound, Loader2, MoreHorizontal, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { KeyRound, Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import type { ConnectionCard as ConnectionCardModel } from "@/components/integrations/meta-connection-model";
 import { cn } from "@/lib/utils";
@@ -46,8 +39,6 @@ export function ConnectionCard({
   const { connection } = card;
   const [renaming, setRenaming] = useState(false);
   const [label, setLabel] = useState(card.title);
-  // "Renomear" veio do menu: o menu não devolve o foco ao gatilho, o campo recebe.
-  const renameRequested = useRef(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!renaming) return;
@@ -198,48 +189,44 @@ export function ConnectionCard({
               Testar acesso
             </Button>
           </DemoDisabledTooltip>
+          {/* F1-08: ações com texto, fora do menu "...". */}
           <DemoDisabledTooltip active={isDemo}>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={locked}
-                  aria-label={`Mais ações da chave ${card.title}`}
-                >
-                  <MoreHorizontal aria-hidden className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                onCloseAutoFocus={(event) => {
-                  if (!renameRequested.current) return;
-                  renameRequested.current = false;
-                  event.preventDefault();
-                  renameInputRef.current?.focus();
-                }}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2"
+              disabled={locked}
+              onClick={() => {
+                setLabel(card.title);
+                setRenaming(true);
+              }}
+            >
+              <Pencil aria-hidden className="h-3.5 w-3.5" /> Renomear
+            </Button>
+          </DemoDisabledTooltip>
+          {!keyProblem && (
+            <DemoDisabledTooltip active={isDemo}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2"
+                disabled={locked}
+                onClick={() => actions.onReplaceKey(card)}
               >
-                <DropdownMenuItem
-                  onSelect={() => {
-                    renameRequested.current = true;
-                    setLabel(card.title);
-                    setRenaming(true);
-                  }}
-                >
-                  <Pencil aria-hidden className="h-3.5 w-3.5" /> Renomear
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => actions.onReplaceKey(card)}>
-                  <KeyRound aria-hidden className="h-3.5 w-3.5" /> Trocar chave
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-danger focus:text-danger"
-                  onSelect={() => actions.onDisconnect(connection.id)}
-                >
-                  <Trash2 aria-hidden className="h-3.5 w-3.5" /> Desconectar
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                <KeyRound aria-hidden className="h-3.5 w-3.5" /> Trocar chave
+              </Button>
+            </DemoDisabledTooltip>
+          )}
+          <DemoDisabledTooltip active={isDemo}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2 text-danger hover:text-danger"
+              disabled={locked}
+              onClick={() => actions.onDisconnect(connection.id)}
+            >
+              <Trash2 aria-hidden className="h-3.5 w-3.5" /> Desconectar
+            </Button>
           </DemoDisabledTooltip>
         </div>
       )}

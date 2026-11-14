@@ -6,7 +6,7 @@
 //
 // A conexão com a Meta (chave, contas, sincronização automática) é tratada em
 // Integrações (/webhooks#meta, screens/webhooks.ts) — aqui só o atalho
-// "Conectar Meta" e o "Atualizar agora" desta tela.
+// "Conectar Meta" / "Contas da Meta" e o "Atualizar agora" desta tela.
 import type { HelpScreen } from "../types";
 
 const screen: HelpScreen = {
@@ -32,9 +32,16 @@ const screen: HelpScreen = {
         {
           anchor: "midia.header.conectar-meta",
           label: "Conectar Meta",
-          what: "Aparece só quando a casa ainda não tem nenhuma chave da Meta conectada. Leva para Integrações (/webhooks, aba Meta Ads), onde a conexão de fato é feita.",
+          what: "Aparece quando a casa ainda não tem nenhuma chave da Meta conectada. Leva para Integrações (/webhooks, aba Meta Ads), onde a conexão de fato é feita.",
           notes:
-            "Depois que a 1ª chave é conectada, o botão some desta tela — chaves e contas passam a ser geridas só em Integrações; aqui elas só aparecem já prontas, no filtro BM/conta e nos relatórios.",
+            'Depois que a 1ª chave é conectada, o lugar dele passa a ser do botão "Contas da Meta".',
+        },
+        {
+          anchor: "midia.header.contas-meta",
+          label: "Contas da Meta · N contas",
+          what: "Aparece depois que a casa tem pelo menos uma chave conectada, com quantas contas de anúncio estão marcadas. Leva para Integrações (/webhooks, aba Meta Ads), onde se conecta outra BM ou chave, troca ou desconecta uma chave e marca ou desmarca contas.",
+          notes:
+            'O filtro "BM / conta" tem o mesmo atalho no rodapé: "Adicionar ou remover BMs e contas". Só entram nos números as contas marcadas.',
         },
         {
           anchor: "midia.sync.atualizar",
@@ -42,11 +49,11 @@ const screen: HelpScreen = {
           what: "Coloca na fila uma releitura do gasto da Meta para o mesmo intervalo de dias do período aberto na tela.",
           roles: ["admin"],
           notes:
-            'Fica desativado no ambiente de demonstração (mostra a dica "Ambiente de demonstração: esta ação não está disponível"), para quem não é administrador da casa (ao lado aparece "Só o administrador da casa sincroniza a Meta."), enquanto já existe uma sincronização na fila ou em andamento (o texto muda para "sincronização na fila", com um ícone girando) e quando não há nenhuma conta de anúncio marcada. Ao clicar, mostra "Sincronização adicionada à fila" ou, se já havia uma pendente, "A sincronização já está na fila"; falhando, mostra a mensagem do servidor (por exemplo "Apenas administradores da casa podem sincronizar a Meta.") ou, sem mensagem específica, "Erro ao agendar sincronização".',
+            'Fica desativado no ambiente de demonstração (mostra a dica "Ambiente de demonstração: esta ação não está disponível"), para quem não é administrador da casa (ao lado aparece "Só o administrador da casa sincroniza a Meta."), enquanto já existe uma sincronização na fila ou em andamento (o texto muda para "sincronização na fila", com um ícone girando) e quando não há nenhuma conta de anúncio (ao lado aparece "Conecte uma conta da Meta para atualizar o gasto."). Ao clicar, mostra "Sincronização adicionada à fila" ou, se já havia uma pendente, "A sincronização já está na fila"; falhando, mostra a mensagem do servidor (por exemplo "Apenas administradores da casa podem sincronizar a Meta.") ou, sem mensagem específica, "Erro ao agendar sincronização".',
         },
         {
           label: 'Faixa "Última sincronização: ..."',
-          what: 'Aparece depois da 1ª sincronização, com o status mais recente — "na fila", "sincronizando", "concluída", "concluída com atenção" (parcial, com alguma conta com erro), "falhou" ou "cancelada" — mais quantas contas já foram processadas e quantas linhas foram importadas.',
+          what: 'Aparece depois da 1ª sincronização, com o status mais recente — "na fila", "sincronizando", "concluída", "concluída com atenção" (parcial, com alguma conta com erro), "falhou" ou "cancelada" — mais de quantas contas o gasto já foi lido ("Gasto de 14 de 14 contas lido").',
           notes:
             'Enquanto está "na fila" ou "sincronizando", mostra uma barra de progresso e a % no lugar da hora; terminando, mostra a data e a hora em que terminou. Uma sincronização com erro mostra o motivo embaixo, em vermelho.',
         },
@@ -74,11 +81,11 @@ const screen: HelpScreen = {
           label: "Filtro BM / conta",
           what: 'Botão "BM / conta: Todas as contas" (ou o nome da conta, ou "N contas", quando algum filtro está marcado) que abre uma busca ("Buscar BM, conta ou act_") com as contas agrupadas por BM — a Business Manager de cada uma. Dentro: "Todas as contas" (limpa o filtro), "Toda a BM" (marca/desmarca o grupo inteiro de uma vez, só aparece com mais de uma conta na BM) e cada conta, com o ID (act_...) ao lado do nome.',
           notes:
-            'Só lista as contas marcadas em Integrações; sem nenhuma conta marcada na casa, o botão nem aparece. Sem resultado na busca, mostra "Nenhuma conta encontrada." Com o filtro ativo aparece embaixo o aviso "Com filtro, entram só os jogadores atribuídos a essas contas; tráfego sem atribuição fica de fora."',
+            'Só lista as contas marcadas em Integrações; sem nenhuma conta marcada na casa, o botão nem aparece. Sem resultado na busca, mostra "Nenhuma conta encontrada." Com o filtro ativo aparece embaixo o aviso "Com filtro, entram só os jogadores atribuídos a essas contas; tráfego sem atribuição fica de fora." No rodapé, "Adicionar ou remover BMs e contas" leva a Integrações → Meta Ads.',
         },
         {
-          label: 'Linha "Gasto: Meta Ads, N conta(s)..."',
-          what: 'Resume de onde vêm os números: "Gasto: Meta Ads, N conta(s), última leitura em <data e hora>" (ou ", aguardando a primeira leitura" sem nenhuma sincronização ainda) e "Cadastros, 1º depósito e depósitos: integração da casa." — avisando que o gasto vem da Meta e o resto vem dos webhooks da casa.',
+          label: 'Linha "Gasto: Meta Ads, N contas marcadas..."',
+          what: 'Resume de onde vêm os números: "Gasto: Meta Ads, N contas marcadas, última leitura em <data e hora>" (ou ", aguardando a primeira leitura" sem nenhuma sincronização ainda) e "Cadastros, 1º depósito e depósitos: integração da casa." — avisando que o gasto vem da Meta e o resto vem dos webhooks da casa.',
         },
       ],
     },
@@ -96,7 +103,7 @@ const screen: HelpScreen = {
         {
           anchor: "midia.kpis.investido",
           label: "Investido no período",
-          what: "Soma do gasto em reais das contas de anúncio marcadas (ou filtradas) no período.",
+          what: "Soma do gasto em reais das contas de anúncio marcadas (ou filtradas) no período. Conta desmarcada em Integrações não entra, em nenhum período.",
           notes: 'Detalhe: "<valor> por dia, em média" (investido ÷ dias do período).',
         },
         {
@@ -104,7 +111,7 @@ const screen: HelpScreen = {
           label: "ROAS líquido",
           what: "Depósitos (1º depósito + redepósito) dos jogadores vindos de anúncio, menos os saques deles, dividido pelo investido.",
           notes:
-            'Detalhe: a fórmula em palavras ("depósitos − saques ÷ investido") e o ROAS bruto ao lado, como referência (sem subtrair os saques — por isso é sempre igual ou maior que o líquido). Numa casa que opera em moeda diferente de real, mostra "—": a receita está numa moeda e o custo (Meta) em reais, sem conversão de câmbio.',
+            'Detalhe: quanto voltou para cada R$ 1 investido ("cada R$ 1 investido voltou R$ 0,04") e o ROAS bruto ao lado, como referência (sem subtrair os saques — por isso é sempre igual ou maior que o líquido). Numa casa que opera em moeda diferente de real, mostra "—": a receita está numa moeda e o custo (Meta) em reais, sem conversão de câmbio.',
         },
         {
           anchor: "midia.kpis.custo-1o-deposito",
@@ -122,9 +129,22 @@ const screen: HelpScreen = {
         },
         {
           anchor: "midia.kpis.deposito-liquido",
-          label: "Depósito líquido",
-          what: "Tudo o que os jogadores vindos de anúncio depositaram no período, menos o que sacaram.",
+          label: "Depósito líquido de anúncio",
+          what: "Tudo o que os jogadores vindos de anúncio depositaram no período, menos o que sacaram. Não inclui jogadores de live, orgânico, CRM ou sem marcação.",
           notes: "Detalhe: o valor depositado e o valor sacado, separados.",
+        },
+        {
+          anchor: "midia.aviso.sem-anuncio",
+          label: 'Aviso "N cadastros do período chegaram com marcação, mas não foram ligados a nenhum anúncio"',
+          what: "Acima dos indicadores: os cadastros com UTM que não viraram anúncio conhecido, separados por motivo, cada um com o que fazer, e o botão \"Ver no Diagnóstico\".",
+          notes: "Esses cadastros e os depósitos deles ficam fora do ROAS e do custo por cadastro.",
+        },
+        {
+          anchor: "midia.aviso.gasto-sem-cadastro",
+          label: '"R$ X do investido (Y%) foram para campanhas sem nenhum cadastro ligado"',
+          what: "Logo abaixo dos indicadores: quanto do investido foi para campanhas que não tiveram nenhum cadastro ligado no período, com as 5 de maior gasto.",
+          notes:
+            "Esse gasto entra no investido sem nenhum jogador do outro lado, por isso o custo por cadastro e o ROAS ficam piores. Acontece com campanha que leva a uma live ou ao perfil (o link da live não diz qual campanha pagou) e com campanhas de engajamento e aquecimento. Para ligar uma campanha de live, coloque o ID dela em utm_campaign nos links da live.",
         },
         {
           label: '"Como o ROAS é calculado"',
@@ -188,7 +208,7 @@ const screen: HelpScreen = {
         },
         {
           label: 'Tabela "Marcações sem anúncio correspondente"',
-          what: 'Uma linha por combinação de campanha/criativo/público declarados que não bateu com nenhum anúncio das contas conectadas: campanha declarada, criativo, conjunto, origem (com o selo "fora das contas" ou "nome repetido"), jogadores, 1º depósitos e depósitos; as colunas Investido e ROAS aparecem como "não encontrado" e "não calculado" — não há gasto importado para ligar a essas linhas.',
+          what: 'Uma linha por combinação de campanha/criativo/público declarados que não bateu com nenhum anúncio das contas conectadas: campanha declarada, criativo, conjunto, origem (utm_source / utm_medium), motivo ("Live", "Outra origem", "Conta não conectada", "{{…}} sem preencher", "Só a origem", "Nome repetido", "Nome não encontrado" ou "Aguardando"), jogadores, 1º depósitos e depósitos; as colunas Investido e ROAS aparecem como "não encontrado" e "não calculado" — não há gasto importado para ligar a essas linhas.',
           notes:
             'Vazio mostra "Nenhuma marcação sem anúncio no período" (ou "Conferindo atribuições" durante o carregamento) com a explicação "Quando uma UTM chegar de uma campanha fora das BMs conectadas, ela aparece aqui sem gerar ROAS artificial."',
         },
@@ -285,16 +305,17 @@ const screen: HelpScreen = {
     },
     {
       id: "conta-sem-gasto",
-      title: "A conta conectada ainda não está entregando gasto",
+      title: "N contas marcadas ainda não tiveram o gasto lido",
       what: "Mostrado na aba Mídia quando alguma conta marcada nunca teve uma sincronização concluída com sucesso.",
       action:
-        '"O token pode estar válido, mas sem leitura recente para uma conta de anúncio. Enquanto isso o gasto dessa conta não entra, e o ROI aparece melhor do que é." Aguarde a próxima sincronização automática ou clique em "Atualizar agora".',
+        '"A chave pode estar válida, mas a Meta ainda não entregou o gasto dessa conta. Enquanto isso o gasto dela não entra, e o ROAS aparece melhor do que é." Aguarde a próxima sincronização automática ou clique em "Atualizar agora".',
     },
     {
       id: "cadastros-sem-anuncio",
-      title: "N cadastros marcados sem anúncio correspondente nas contas conectadas",
-      what: "Mostrado na aba Mídia quando existe depósito ou cadastro com UTM que não bateu com nenhum anúncio ou campanha das contas conectadas.",
-      action: "Veja os detalhes na aba Diagnóstico.",
+      title: "N cadastros do período chegaram com marcação, mas não foram ligados a nenhum anúncio",
+      what: "Mostrado na aba Mídia quando há cadastros com UTM que não bateram com nenhum anúncio ou campanha das contas marcadas, com o total em depósitos e uma linha por motivo: link de live; outra origem (Kwai, Google, afiliado); ID de anúncio fora das contas marcadas; parâmetro {{…}} sem preencher; só a origem, sem campanha nem anúncio; nome repetido; nome que não existe nas contas; ainda não conferidos.",
+      action:
+        'Cada motivo traz o que fazer (por exemplo, colocar o ID da campanha que impulsiona a live em utm_campaign). "Ver no Diagnóstico" abre a aba com a lista completa.',
     },
     {
       id: "erro-midia",
@@ -350,6 +371,12 @@ const screen: HelpScreen = {
         articleSection: "midia-header",
       },
       {
+        anchor: "midia.header.contas-meta",
+        title: "Contas da Meta",
+        body: "Conecte outra BM, troque ou desconecte uma chave e escolha quais contas entram nos números. Leva para Integrações.",
+        articleSection: "midia-header",
+      },
+      {
         anchor: "midia.sync.atualizar",
         title: "Atualizar agora",
         body: "Pede uma releitura do gasto da Meta para o período aberto, sem esperar a sincronização automática. Só o administrador da casa pode clicar.",
@@ -371,6 +398,12 @@ const screen: HelpScreen = {
         anchor: "midia.kpis.roas",
         title: "ROAS líquido",
         body: "Depósitos menos saques dos jogadores vindos de anúncio, dividido pelo investido. Acima de 1x, o anúncio devolveu mais do que custou.",
+        articleSection: "midia-kpis",
+      },
+      {
+        anchor: "midia.aviso.gasto-sem-cadastro",
+        title: "Gasto sem cadastro ligado",
+        body: "Quanto do investido foi para campanhas sem nenhum cadastro ligado, como as de live ou engajamento. Esse gasto deixa o ROAS pior.",
         articleSection: "midia-kpis",
       },
       {

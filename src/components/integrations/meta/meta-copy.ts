@@ -13,9 +13,9 @@ export type ConnectKeyMode = { kind: "add" } | { kind: "replace"; connectionTitl
 export function connectKeyCopy(mode: ConnectKeyMode) {
   return mode.kind === "add"
     ? {
-        title: "Adicionar Usuário do Sistema",
+        title: "Conectar outra BM ou chave",
         description:
-          "Conecte a chave de um Usuário do Sistema. As contas que ela alcança somam às que você já tem.",
+          'Cole a chave de um Usuário do Sistema. As contas que ela alcança somam às que você já tem. Se a BM nova deu acesso ao mesmo Usuário do Sistema que você já conectou, não precisa de chave nova: use "Testar acesso" na chave existente e marque as contas novas.',
       }
     : {
         title: `Trocar chave · ${mode.connectionTitle}`,

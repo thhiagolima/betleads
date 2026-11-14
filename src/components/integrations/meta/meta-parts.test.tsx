@@ -147,7 +147,7 @@ describe("texts", () => {
     expect(connectKeyCopy({ kind: "replace", connectionTitle: "Agência X" }).description).toContain(
       "substitui a chave desta conexão",
     );
-    expect(connectKeyCopy({ kind: "add" }).title).toBe("Adicionar Usuário do Sistema");
+    expect(connectKeyCopy({ kind: "add" }).title).toBe("Conectar outra BM ou chave");
   });
 
   it("keeps the connect button disabled until a token is typed", () => {

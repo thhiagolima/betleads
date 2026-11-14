@@ -12,7 +12,7 @@ import {
   Target,
   Wallet,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type HTMLAttributes } from "react";
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
 import {
   Area,
   AreaChart,
@@ -67,6 +67,8 @@ import {
   type MetaSummary,
 } from "@/components/integrations/meta-summary";
 import { AdAccountFilter, AdAccountFilterNote } from "@/components/midia-ltv/ad-account-filter";
+import { OrphanReasonsNotice, UnlinkedSpendNote } from "@/components/midia-ltv/attribution-gaps";
+import { orphanReasonLabel, orphanTotals } from "@/components/midia-ltv/attribution-copy";
 import { tourAnchor } from "@/help/anchor";
 import { Term } from "@/components/help/term";
 import { splitTermText } from "@/components/help/term-text";
@@ -266,8 +268,12 @@ function MediaLtvPage() {
     qc.invalidateQueries({ queryKey: ["meta-connection-summary"] });
   }, [latestMetaRunId, latestMetaRunStatus, qc]);
 
-  // A conexão com a Meta mora em Integrações (/webhooks#meta); aqui só um atalho.
+  // A conexão com a Meta mora em Integrações (/webhooks#meta); aqui só o atalho (F1-01):
+  // "Conectar Meta" sem nenhuma chave, "Contas da Meta" depois, para somar, trocar ou
+  // remover BMs e contas.
   const noMetaConnection = Boolean(metaSummary) && (metaSummary?.connections.length ?? 0) === 0;
+  const markedAccounts =
+    metaSummary?.accounts.filter((account) => account.selected !== false).length ?? 0;
 
   return (
     <Page>
@@ -275,14 +281,35 @@ function MediaLtvPage() {
         title={titleWithLtvTerm(ROUTE_META["/midia-ltv"].title)}
         subtitle="Cada jogador carrega o anúncio que o trouxe. Veja quem trouxe cadastro barato, quem trouxe dinheiro e quem continua depositando."
         actions={
-          view === "midia" && noMetaConnection ? (
-            <Button asChild size="sm" className="gap-2" {...tourAnchor("midia.header.conectar-meta")}>
+          view !== "midia" || !metaSummary ? undefined : noMetaConnection ? (
+            <Button
+              asChild
+              size="sm"
+              className="gap-2"
+              {...tourAnchor("midia.header.conectar-meta")}
+            >
               <Link to="/webhooks" hash="meta">
                 <Target className="h-3.5 w-3.5" />
                 Conectar Meta
               </Link>
             </Button>
-          ) : undefined
+          ) : (
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              {...tourAnchor("midia.header.contas-meta")}
+            >
+              <Link to="/webhooks" hash="meta">
+                <Target className="h-3.5 w-3.5" />
+                Contas da Meta
+                <span className="text-muted-foreground">
+                  · {markedAccounts === 1 ? "1 conta" : `${num(markedAccounts)} contas`}
+                </span>
+              </Link>
+            </Button>
+          )
         }
       />
 
@@ -415,6 +442,7 @@ function VisualizacaoSection({
   syncRuns: MetaSyncRun[];
 }) {
   const isDemo = useIsDemoTenant();
+  const navigate = useNavigate();
   const { house, roas, crossCurrency, crossNote } = useHouseMoney();
   // Só o admin da casa (ou o super admin) sincroniza a Meta; o servidor também confere.
   // Enquanto o papel carrega, nada fica bloqueado.
@@ -433,8 +461,16 @@ function VisualizacaoSection({
     .at(-1);
   const staleAccounts = selectedAccounts.filter((account) => !account.last_sync_at).length;
   const orphanRows = data?.orphanAttributions ?? [];
-  const orphanRevenue = orphanRows.reduce((sum, row) => sum + row.revenue, 0);
-  const orphanFtd = orphanRows.reduce((sum, row) => sum + row.ftd, 0);
+  // F1-03: o resumo por motivo cobre todos os órfãos; orphanRows corta em 50 linhas.
+  const orphanReasons = data?.orphanReasons ?? [];
+  const orphanRevenue = orphanReasons.length
+    ? orphanTotals(orphanReasons).revenue
+    : orphanRows.reduce((sum, row) => sum + row.revenue, 0);
+  const reportTabsRef = useRef<HTMLDivElement>(null);
+  const openDiagnostics = () => {
+    setReportView("diagnostics");
+    reportTabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const spendOther = totals?.spendOther ?? [];
   const latestRun = syncRuns[0];
   const progress = latestRun?.total_accounts
@@ -468,6 +504,11 @@ function VisualizacaoSection({
             Só o administrador da casa sincroniza a Meta.
           </span>
         )}
+        {!readOnly && !isDemo && metaSummary && accounts.length === 0 && (
+          <span className="text-xs text-muted-foreground">
+            Conecte uma conta da Meta para atualizar o gasto.
+          </span>
+        )}
       </div>
 
       {latestRun && (
@@ -486,8 +527,11 @@ function VisualizacaoSection({
                 Última sincronização: {syncStatusLabel(latestRun.status)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {latestRun.processed_accounts} de {latestRun.total_accounts} conta(s) ·{" "}
-                {num(latestRun.rows_imported)} linhas processadas
+                Gasto de {latestRun.processed_accounts} de{" "}
+                {latestRun.total_accounts === 1
+                  ? "1 conta"
+                  : `${num(latestRun.total_accounts)} contas`}{" "}
+                lido
               </p>
             </div>
             <span className="text-sm font-semibold">
@@ -592,13 +636,21 @@ function VisualizacaoSection({
             }
           />
         </div>
-        <AdAccountFilter accounts={accounts} value={adAccountIds} onChange={onAdAccountIdsChange} />
+        <AdAccountFilter
+          accounts={accounts}
+          value={adAccountIds}
+          onChange={onAdAccountIdsChange}
+          onManageAccounts={() => void navigate({ to: "/webhooks", hash: "meta" })}
+        />
       </div>
 
       <AdAccountFilterNote active={adAccountIds.length > 0} />
 
       <p className="text-meta text-muted-foreground">
-        Gasto: Meta Ads, {num(adAccountIds.length || selectedAccounts.length)} conta(s)
+        Gasto: Meta Ads,{" "}
+        {(adAccountIds.length || selectedAccounts.length) === 1
+          ? "1 conta marcada"
+          : `${num(adAccountIds.length || selectedAccounts.length)} contas marcadas`}
         {lastSync
           ? `, última leitura em ${new Date(lastSync).toLocaleString("pt-BR")}`
           : ", aguardando a primeira leitura"}
@@ -634,25 +686,23 @@ function VisualizacaoSection({
       {staleAccounts > 0 && (
         <div className="rounded-xl border border-danger/40 bg-card/70 p-4 text-sm">
           <p className="flex items-center gap-2 font-semibold text-danger">
-            <AlertTriangle className="h-4 w-4" />A conta conectada ainda não está entregando gasto
+            <AlertTriangle className="h-4 w-4" />
+            {staleAccounts === 1
+              ? "1 conta marcada ainda não teve o gasto lido"
+              : `${num(staleAccounts)} contas marcadas ainda não tiveram o gasto lido`}
           </p>
           <p className="mt-2 text-muted-foreground">
-            O token pode estar válido, mas sem leitura recente para uma conta de anúncio. Enquanto
-            isso o gasto dessa conta não entra, e o ROI aparece melhor do que é.
+            A chave pode estar válida, mas a Meta ainda não entregou o gasto dessa conta. Enquanto
+            isso o gasto dela não entra, e o ROAS aparece melhor do que é.
           </p>
         </div>
       )}
 
-      {orphanRows.length > 0 && (
-        <div className="rounded-lg border border-warning/20 bg-warning/15 px-4 py-3 text-sm text-warning">
-          <strong>
-            {num(totals?.orphanPlayers)} cadastros marcados sem anúncio correspondente nas contas
-            conectadas
-          </strong>
-          : {house(orphanRevenue)} de depósitos e {num(orphanFtd)} primeiros depósitos sem gasto
-          importado. Veja os detalhes na aba Diagnóstico.
-        </div>
-      )}
+      <OrphanReasonsNotice
+        reasons={orphanReasons}
+        formatHouse={(value) => house(value)}
+        onOpenDiagnostics={openDiagnostics}
+      />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
         <Kpi
@@ -667,7 +717,9 @@ function VisualizacaoSection({
           detail={
             crossCurrency
               ? crossNote
-              : `depósitos − saques ÷ investido · bruto ${ratio(totals?.roasGross)}`
+              : totals?.roas == null
+                ? `depósitos − saques ÷ investido · bruto ${ratio(totals?.roasGross)}`
+                : `cada R$ 1 investido voltou ${brl2(totals.roas)} · bruto ${ratio(totals.roasGross)}`
           }
           tone="info"
           {...tourAnchor("midia.kpis.roas")}
@@ -685,7 +737,7 @@ function VisualizacaoSection({
           {...tourAnchor("midia.kpis.custo-cadastro")}
         />
         <Kpi
-          title="Depósito líquido"
+          title="Depósito líquido de anúncio"
           value={house(totals?.net)}
           detail={`${house(totals?.revenue)} depositados − ${house(totals?.withdrawals)} sacados`}
           tone="success"
@@ -693,6 +745,13 @@ function VisualizacaoSection({
           {...tourAnchor("midia.kpis.deposito-liquido")}
         />
       </div>
+
+      <UnlinkedSpendNote
+        spend={totals?.spend ?? 0}
+        spendUnlinked={totals?.spendUnlinked ?? 0}
+        campaigns={data?.unlinkedCampaigns ?? []}
+        formatSpend={brl}
+      />
 
       <p className="text-meta text-muted-foreground">
         Como o <Term id="roas">ROAS</Term> é calculado:{" "}
@@ -712,6 +771,7 @@ function VisualizacaoSection({
         período por um anúncio (horário de Brasília).
       </p>
 
+      <div ref={reportTabsRef} className="scroll-mt-20" />
       <Tabs value={reportView} onValueChange={(value) => setReportView(value as typeof reportView)}>
         <TabsList className="app-scrollbar h-auto max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="creatives" {...tourAnchor("midia.subabas.tabs")}>
@@ -1270,6 +1330,7 @@ function OrphanAttributionTable({
               <TableHead>Criativo</TableHead>
               <TableHead>Conjunto</TableHead>
               <TableHead>Origem</TableHead>
+              <TableHead>Motivo</TableHead>
               <TableHead className="text-right">Jogadores</TableHead>
               <TableHead className="text-right">1º dep.</TableHead>
               <TableHead className="text-right">Depósitos</TableHead>
@@ -1281,15 +1342,23 @@ function OrphanAttributionTable({
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={`${row.campaign}-${row.creative}-${row.source ?? ""}`}>
+              <TableRow
+                key={`${row.campaign}-${row.creative}-${row.source ?? ""}-${row.reason ?? ""}`}
+              >
                 <TableCell className="font-semibold">{row.campaign}</TableCell>
                 <TableCell>{row.creative}</TableCell>
                 <TableCell>{row.adset ?? "-"}</TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-2">
-                    <span>{row.source ?? row.provider ?? "-"}</span>
+                  {[row.source ?? row.provider, row.medium].filter(Boolean).join(" / ") || "-"}
+                </TableCell>
+                <TableCell>
+                  {row.reason ? (
+                    <Badge variant="outline" className="whitespace-nowrap">
+                      {orphanReasonLabel(row.reason)}
+                    </Badge>
+                  ) : (
                     <AttributionBadge status={row.ambiguous ? "ambiguous" : "orphan_campaign"} />
-                  </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-right">{num(row.players)}</TableCell>
                 <TableCell className="text-right">{num(row.ftd)}</TableCell>
