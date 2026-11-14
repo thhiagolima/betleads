@@ -121,11 +121,21 @@ Por isso a U1 ganhou o canal **"Afiliados e indicação"** e o agrupamento **Afi
 
 **`bl_click_id`:** está vazio em todos os cadastros dos últimos 30 dias. Na prática, o CRM é reconhecido por `utm_source=betleads`.
 
-**Pendências (fora da U1, para decidir):**
-- **`inviteCode` da betgreen:** é indicação entre jogadores e hoje não é lido. Gravar como "indicação" separada do afiliado.
-- **`tracking.ref` e `ref` (777):** guardar como afiliado. Cuidado: `affiliate_id` também credita expert, então antes é preciso confirmar com as casas que o `ref` é código de afiliado.
-- **`resolveUtm`:** usar a query da `landingUrl` como fallback, para proteger casas que só ecoam a URL.
-- **Pedir às casas** UTM nos links de anúncio.
+**Parser (feito em 14/11, migração 20261231101100):**
+
+O que um payload real mostrou:
+- **99bet e mega-sorte-7k:** o afiliado já chega em `inviter` (o e-mail da conta do afiliado), e o `tracking.ref` é o código do link desse mesmo afiliado. Por isso o `ref` **não** vira afiliado.
+
+O que foi feito:
+- **Código de indicação em coluna própria.** A nova `players.referral_code` guarda:
+  - o `inviteCode`, que pode vir no payload ou só na landing (betgreen);
+  - o `ref` solto, mas só quando não há afiliado (caso do 777).
+
+  A coluna não credita expert. A gravação é um update separado, só quando o campo está vazio, e o erro dele não derruba o evento. Assim o app pode subir antes da migração.
+- **UTMs e click IDs também a partir da URL de entrada.** O parser lê a query da `landing_url` / `trackingContext.landingUrl` e o `tracking.params`, mas só como último recurso: um campo explícito do payload sempre vence.
+- **Na aba Origem,** quem tem só o código de indicação cai em "Afiliados e indicação". No nível Afiliado, aparece numa linha "Indicação entre jogadores".
+
+Fica pendente pedir às casas que coloquem UTM nos links de anúncio.
 
 ### U1 — aba Origem (leitura) — FEITO 14/11 (migração 20261231101000 não aplicada)
 
@@ -172,13 +182,30 @@ Os tempos incluem a rede. A série diária por subconsulta custava 2,6 s e foi t
 
 **Ajuda:** seção `origem` em `src/help/screens/midia-ltv.ts`.
 
-### U2 — regras e apelidos por casa
+### U2 — regras e apelidos por casa — FEITO 14/11 (migração 20261231101200 não aplicada)
 
 - `tenant_utm_labels (tenant_id, dimension, value_norm, label)`, com edição na própria tabela (✎).
 - `tenant_channel_rules (tenant_id, field, match, pattern, channel, priority)`, com sugestões a partir dos 20 valores mais frequentes.
 - A gravação passa por uma RPC de admin com auditoria. A leitura segue a RLS por casa.
 
-### U3 — aprofundar
+### U3 — aprofundar — FEITO EM PARTE 14/11 (mesma migração)
+
+**Feito:**
+- **Lista de jogadores de cada linha:** `origin_breakdown_players`, com 50 por página e CSV de até 2.000 jogadores, com todas as UTMs.
+- **Líquido por cadastro em 7 e 30 dias:** conta só a coorte madura e mostra "—" quando ainda não há ninguém com essa idade.
+- **Variação contra o período anterior** de mesmo tamanho nos cards.
+
+**Ficou para depois:**
+- alternância "por data do depósito";
+- visões salvas.
+
+**Como as funções ficaram organizadas:**
+- `origin_signups` classifica os cadastros: CRM → regra da casa → regra padrão → afiliado ou indicação.
+- `origin_cohort` aplica os filtros e soma o dinheiro.
+
+Elas não têm grant para `authenticated` e são chamadas pelas RPCs.
+
+O escopo original da U3:
 
 - lista de jogadores de uma linha (`origin_breakdown_players`, 50 por página), ligada aos números;
 - depósito líquido em D7 e D30 da coorte, com "coorte imatura" quando ainda não deu o prazo;

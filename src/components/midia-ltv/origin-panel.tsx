@@ -1,5 +1,6 @@
-// U1 de ESCOPO_ORIGEM_UTM_2026-11-14: aba Origem de Aquisição e LTV. Lê só a UTM e o
-// afiliado gravados no cadastro; não depende da Meta conectada.
+// ESCOPO_ORIGEM_UTM_2026-11-14: aba Origem de Aquisição e LTV. Lê só a UTM e o afiliado
+// gravados no cadastro; não depende da Meta conectada. U1 leitura, U2 apelidos e regras,
+// U3 jogadores, janelas de 7/30 dias e comparação com o período anterior.
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronRight, Copy, Download, Link2, Loader2, RefreshCw, Search, X } from "lucide-react";
@@ -30,12 +31,25 @@ import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { MetricCard } from "@/components/ui-premium/metric-card";
 import { MediaPeriodPicker } from "@/components/midia-ltv/period-picker";
+import { ChannelRuleButton, LabelEditor } from "@/components/midia-ltv/origin-row-actions";
+import { OriginRulesCard } from "@/components/midia-ltv/origin-rules-card";
+import {
+  OriginPlayersSheet,
+  type PlayersTarget,
+} from "@/components/midia-ltv/origin-players-sheet";
+import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { tourAnchor } from "@/help/anchor";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipStyle } from "@/lib/chart-theme";
 import type { PeriodPreset } from "@/lib/marketing-overview";
 import {
   buildUtmLink,
+  canLabel,
+  canRule,
+  delta,
+  perSignupWindow,
+  previousRange,
+  type OriginFilters,
   CHANNEL_HINTS,
   CHANNEL_LABELS,
   conversion,
@@ -89,6 +103,8 @@ export function OriginPanel({
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [onlyFtd, setOnlyFtd] = useState(false);
+  const [players, setPlayers] = useState<PlayersTarget>(null);
+  const isDemo = useIsDemoTenant();
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput.trim()), 350);
@@ -114,6 +130,26 @@ export function OriginPanel({
     enabled: !tooLong,
     placeholderData: (previous) => previous,
   });
+
+  // Só os totais do período anterior de mesmo tamanho, com os mesmos filtros (U3).
+  const prev = useMemo(() => previousRange(range.from, range.to), [range.from, range.to]);
+  const { data: previous } = useQuery({
+    queryKey: ["origin-breakdown", prev.from, prev.to, "channel", JSON.stringify(filters), "prev"],
+    queryFn: () =>
+      fetchBreakdown({
+        data: {
+          from: prev.from,
+          to: prev.to,
+          group: "channel",
+          filters,
+          includeCrm: false,
+          limit: 1,
+        },
+      }) as Promise<OriginBreakdown>,
+    enabled: !tooLong && Boolean(data),
+    staleTime: 5 * 60_000,
+  });
+  const canEdit = Boolean(data?.canEdit) && !isDemo;
 
   const open = (row: { key: string | null; name: string }) => {
     const next = nextGroup(group, row.key);
@@ -210,7 +246,7 @@ export function OriginPanel({
 
       {data && !tooLong && !noData && (
         <>
-          <Kpis data={data} money={money} />
+          <Kpis data={data} previous={previous} money={money} />
           <CoverageNote data={data} />
 
           {nothingKnown && path.length === 0 && !search && !onlyFtd ? (
@@ -320,27 +356,55 @@ export function OriginPanel({
               </div>
 
               <DailyChart data={data} />
-              <OriginTable data={data} money={money} onOpen={open} />
+              <OriginTable
+                data={data}
+                money={money}
+                actions={{
+                  onOpen: open,
+                  onPlayers: setPlayers,
+                  baseFilters: filters,
+                  canEdit,
+                }}
+              />
+              <OriginRulesCard canEdit={canEdit} />
             </>
           )}
         </>
       )}
+
+      <OriginPlayersSheet target={players} range={range} onClose={() => setPlayers(null)} />
     </div>
   );
 }
 
 type Money = (value: number | null | undefined) => string;
 
-function Kpis({ data, money }: { data: OriginBreakdown; money: Money }) {
+function Kpis({
+  data,
+  previous,
+  money,
+}: {
+  data: OriginBreakdown;
+  previous: OriginBreakdown | undefined;
+  money: Money;
+}) {
   const { totals, coverage } = data;
   const known = coverage.signups - coverage.noOrigin;
   const period = `${ddmm(data.period.from)} a ${ddmm(data.period.to)}`;
+  const vs = previous ? ` vs. ${ddmm(previous.period.from)} a ${ddmm(previous.period.to)}` : "";
+  const change = (current: number, before: number | undefined) => {
+    const d = delta(current, before);
+    if (d == null) return undefined;
+    const sign = d > 0 ? "+" : "";
+    return { value: `${sign}${(d * 100).toFixed(0)}%${vs}`, positive: d >= 0 };
+  };
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <MetricCard
         label="Cadastros"
         value={num(totals.signups)}
         hint={`feitos de ${period}`}
+        delta={change(totals.signups, previous?.totals.signups)}
         {...tourAnchor("midia.origem.kpis")}
       />
       <MetricCard
@@ -352,11 +416,13 @@ function Kpis({ data, money }: { data: OriginBreakdown; money: Money }) {
         label="1º depósito"
         value={num(totals.ftd)}
         hint={`${pct(conversion(totals))} desses cadastros, até hoje`}
+        delta={change(totals.ftd, previous?.totals.ftd)}
       />
       <MetricCard
         label="Depósito líquido"
         value={money(totals.net)}
         hint="depósitos − saques desses cadastros, até hoje"
+        delta={change(totals.net, previous?.totals.net)}
       />
     </div>
   );
@@ -452,14 +518,21 @@ function DailyChart({ data }: { data: OriginBreakdown }) {
   );
 }
 
+type RowActions = {
+  onOpen: (row: { key: string | null; name: string }) => void;
+  onPlayers: (target: { title: string; filters: OriginFilters }) => void;
+  baseFilters: OriginFilters;
+  canEdit: boolean;
+};
+
 function OriginTable({
   data,
   money,
-  onOpen,
+  actions,
 }: {
   data: OriginBreakdown;
   money: Money;
-  onOpen: (row: { key: string | null; name: string }) => void;
+  actions: RowActions;
 }) {
   const { group } = data;
   const rows = data.rows.map((row) => ({ row, display: rowDisplay(group, row) }));
@@ -468,17 +541,53 @@ function OriginTable({
   const empty = rows.length === 0 && data.noOrigin.signups === 0;
 
   const rate = (m: OriginMetrics) => (few ? "poucos dados" : pct(conversion(m)));
-  const perSignup = (m: OriginMetrics) => (m.signups > 0 ? money(net(m) / m.signups) : "—");
+  const windowValue = (m: OriginMetrics, days: 7 | 30) => {
+    const value = perSignupWindow(m, days);
+    return value == null ? "—" : money(value);
+  };
+  const playersOf = (key: string | null, title: string, extra?: OriginFilters) =>
+    actions.onPlayers({
+      title,
+      filters: { ...actions.baseFilters, ...(extra ?? { [group]: key }) },
+    });
+  const noOriginFilters: OriginFilters = { channel: "sem_origem" };
+
+  const metricCells = (m: OriginMetrics, onPlayers?: () => void) => (
+    <>
+      <TableCell className="text-right tabular-nums">
+        {onPlayers ? (
+          <button
+            type="button"
+            className="underline-offset-2 hover:underline"
+            title="Ver os jogadores"
+            onClick={(event) => {
+              event.stopPropagation();
+              onPlayers();
+            }}
+          >
+            {num(m.signups)}
+          </button>
+        ) : (
+          num(m.signups)
+        )}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">{num(m.ftd)}</TableCell>
+      <TableCell className="text-right tabular-nums">{rate(m)}</TableCell>
+      <TableCell className="text-right tabular-nums">{money(net(m))}</TableCell>
+      <TableCell className="text-right tabular-nums">{windowValue(m, 7)}</TableCell>
+      <TableCell className="text-right tabular-nums">{windowValue(m, 30)}</TableCell>
+    </>
+  );
 
   return (
     <DataCard
       title={`Por ${GROUP_LABELS[group].toLowerCase()}`}
       description={
         param
-          ? `Valor que chegou em ${param}. Clique numa linha para abrir o próximo nível.`
+          ? `Valor que chegou em ${param}. Clique numa linha para abrir o próximo nível e no número de cadastros para ver os jogadores.`
           : group === "affiliate"
-            ? "Código de afiliado ou de indicação que a casa mandou no cadastro."
-            : "Clique numa linha para ver as fontes e campanhas dela."
+            ? "Código de afiliado ou de indicação que a casa mandou no cadastro. Clique no número de cadastros para ver os jogadores."
+            : "Clique numa linha para ver as fontes e campanhas dela, e no número de cadastros para ver os jogadores."
       }
       {...tourAnchor("midia.origem.tabela")}
     >
@@ -498,9 +607,19 @@ function OriginTable({
                   <TableHead className="text-right">Cadastros</TableHead>
                   <TableHead className="text-right">1º depósito</TableHead>
                   <TableHead className="text-right">Conversão</TableHead>
-                  <TableHead className="text-right">Depósitos</TableHead>
                   <TableHead className="text-right">Depósito líquido</TableHead>
-                  <TableHead className="text-right">Líquido por cadastro</TableHead>
+                  <TableHead
+                    className="text-right"
+                    title="Depósitos menos saques nos 7 primeiros dias, dividido pelos cadastros que já têm 7 dias"
+                  >
+                    Líquido por cadastro em 7 dias
+                  </TableHead>
+                  <TableHead
+                    className="text-right"
+                    title="Depósitos menos saques nos 30 primeiros dias, dividido pelos cadastros que já têm 30 dias"
+                  >
+                    em 30 dias
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -511,26 +630,21 @@ function OriginTable({
                       key={row.key ?? "(vazio)"}
                       className={cn(canOpen && "cursor-pointer")}
                       onClick={
-                        canOpen ? () => onOpen({ key: row.key, name: display.name }) : undefined
+                        canOpen
+                          ? () => actions.onOpen({ key: row.key, name: display.name })
+                          : undefined
                       }
                     >
-                      <TableCell className="max-w-[22rem]">
+                      <TableCell className="max-w-[24rem]">
                         <NameCell
                           group={group}
                           row={row}
                           display={display}
                           canOpen={canOpen}
-                          onOpen={onOpen}
+                          actions={actions}
                         />
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{num(row.signups)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{num(row.ftd)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{rate(row)}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {money(row.deposits)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{money(net(row))}</TableCell>
-                      <TableCell className="text-right tabular-nums">{perSignup(row)}</TableCell>
+                      {metricCells(row, () => playersOf(row.key, display.name))}
                     </TableRow>
                   );
                 })}
@@ -539,22 +653,7 @@ function OriginTable({
                     <TableCell>
                       Outros {num(data.others.count)} (use a busca para achar um deles)
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {num(data.others.signups)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {num(data.others.ftd)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{rate(data.others)}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {money(data.others.deposits)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {money(net(data.others))}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {perSignup(data.others)}
-                    </TableCell>
+                    {metricCells(data.others)}
                   </TableRow>
                 )}
                 {data.noOrigin.signups > 0 && (
@@ -563,24 +662,9 @@ function OriginTable({
                       {CHANNEL_LABELS.sem_origem}
                       <span className="block text-meta">sem UTM, sem afiliado e sem clique</span>
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {num(data.noOrigin.signups)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {num(data.noOrigin.ftd)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {pct(conversion(data.noOrigin))}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {money(data.noOrigin.deposits)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {money(net(data.noOrigin))}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {perSignup(data.noOrigin)}
-                    </TableCell>
+                    {metricCells(data.noOrigin, () =>
+                      playersOf(null, CHANNEL_LABELS.sem_origem, noOriginFilters),
+                    )}
                   </TableRow>
                 )}
               </TableBody>
@@ -592,20 +676,31 @@ function OriginTable({
             {rows.map(({ row, display }) => {
               const canOpen = nextGroup(group, row.key) != null;
               return (
-                <li key={row.key ?? "(vazio)"}>
+                <li
+                  key={row.key ?? "(vazio)"}
+                  className="rounded-xl border border-border bg-background/40 p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <NameText group={group} row={row} display={display} />
+                    <EditActions group={group} row={row} canEdit={actions.canEdit} />
+                    {canOpen && (
+                      <button
+                        type="button"
+                        aria-label={`Abrir ${display.name}`}
+                        className="shrink-0 rounded p-0.5 text-muted-foreground"
+                        onClick={() => actions.onOpen({ key: row.key, name: display.name })}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  <MobileMetrics m={row} money={money} rate={rate(row)} />
                   <button
                     type="button"
-                    disabled={!canOpen}
-                    onClick={() => onOpen({ key: row.key, name: display.name })}
-                    className="w-full rounded-xl border border-border bg-background/40 p-3 text-left disabled:cursor-default"
+                    className="mt-2 text-meta text-primary"
+                    onClick={() => playersOf(row.key, display.name)}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <NameText group={group} row={row} display={display} />
-                      {canOpen && (
-                        <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                      )}
-                    </div>
-                    <MobileMetrics m={row} money={money} rate={rate(row)} />
+                    Ver jogadores
                   </button>
                 </li>
               );
@@ -636,29 +731,53 @@ function OriginTable({
 type Display = ReturnType<typeof rowDisplay>;
 type RowLike = OriginBreakdown["rows"][number];
 
+const SOURCE_NOTE: Record<NonNullable<Display["source"]>, string> = {
+  label: "nome dado pela casa",
+  meta: "nome da Meta",
+  expert: "código",
+};
+
 function NameText({ group, row, display }: { group: OriginGroup; row: RowLike; display: Display }) {
   const hint = group === "channel" ? CHANNEL_HINTS[row.key ?? ""] : null;
   return (
-    <span className="min-w-0">
+    <span className="min-w-0 flex-1">
       <span className="block truncate font-medium" title={display.detail ?? display.name}>
         {display.name}
         {display.unnamedId && (
           <span className="ml-1.5 text-meta font-normal text-muted-foreground">(sem nome)</span>
         )}
       </span>
-      {display.detail && !display.unnamedId && (
+      {display.detail && (
         <span className="block truncate font-mono text-meta text-muted-foreground">
           {display.detail}
-          {row.metaName && group !== "affiliate" && " · nome da Meta"}
-          {row.metaName && group === "affiliate" && " · código"}
-        </span>
-      )}
-      {display.unnamedId && (
-        <span className="block truncate font-mono text-meta text-muted-foreground">
-          {display.detail}
+          {display.source && ` · ${SOURCE_NOTE[display.source]}`}
         </span>
       )}
       {hint && <span className="block text-meta text-muted-foreground">{hint}</span>}
+    </span>
+  );
+}
+
+function EditActions({
+  group,
+  row,
+  canEdit,
+}: {
+  group: OriginGroup;
+  row: RowLike;
+  canEdit: boolean;
+}) {
+  if (!canEdit || row.key == null) return null;
+  const value = row.raw ?? row.key;
+  return (
+    <span className="flex shrink-0 items-center">
+      {canLabel(group, row.key) && group !== "channel" && (
+        <LabelEditor group={group} value={value} current={row.label} />
+      )}
+      {canRule(group, row.key) &&
+        (group === "source" || group === "medium" || group === "campaign") && (
+          <ChannelRuleButton group={group} value={value} />
+        )}
     </span>
   );
 }
@@ -668,25 +787,26 @@ function NameCell({
   row,
   display,
   canOpen,
-  onOpen,
+  actions,
 }: {
   group: OriginGroup;
   row: RowLike;
   display: Display;
   canOpen: boolean;
-  onOpen: (row: { key: string | null; name: string }) => void;
+  actions: RowActions;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1">
       <NameText group={group} row={row} display={display} />
+      <EditActions group={group} row={row} canEdit={actions.canEdit} />
       {canOpen && (
         <button
           type="button"
           aria-label={`Abrir ${display.name}`}
-          className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
           onClick={(event) => {
             event.stopPropagation();
-            onOpen({ key: row.key, name: display.name });
+            actions.onOpen({ key: row.key, name: display.name });
           }}
         >
           <ChevronRight className="h-4 w-4" />

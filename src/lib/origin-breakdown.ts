@@ -69,6 +69,33 @@ export const CHANNEL_HINTS: Record<string, string> = {
   outros: "fontes que ainda não reconhecemos",
 };
 
+/** Canais que uma regra da casa pode escolher (os demais são calculados). */
+export const RULE_CHANNELS = [
+  "meta",
+  "live",
+  "google",
+  "tiktok",
+  "kwai",
+  "whatsapp",
+  "telegram",
+  "mensagens",
+  "busca",
+  "afiliados",
+  "influencer",
+  "outros",
+] as const;
+export type RuleChannel = (typeof RULE_CHANNELS)[number];
+
+export const RULE_FIELD_LABELS = { source: "Fonte", medium: "Meio", campaign: "Campanha" } as const;
+export const RULE_MATCH_LABELS = {
+  exact: "é igual a",
+  prefix: "começa com",
+  contains: "contém",
+} as const;
+
+/** Chave da RPC para os cadastros só com código de indicação, no nível Afiliado. */
+export const REFERRAL_KEY = "__indicacao__";
+
 export const channelLabel = (key: string | null) =>
   key == null ? EMPTY_VALUE.channel : (CHANNEL_LABELS[key] ?? key);
 
@@ -83,6 +110,11 @@ export type OriginMetrics = {
   ftdValue: number;
   deposits: number;
   withdrawals: number;
+  /** Cadastros com 7/30 dias de vida e o líquido deles nessa janela (U3). */
+  mature7: number;
+  net7: number;
+  mature30: number;
+  net30: number;
 };
 
 export type OriginRow = OriginMetrics & {
@@ -91,6 +123,8 @@ export type OriginRow = OriginMetrics & {
   channel: string;
   /** Nome da Meta para um ID, ou o nome do expert ligado ao código de afiliado. */
   metaName: string | null;
+  /** Apelido dado pela casa (U2). */
+  label: string | null;
 };
 
 export type OriginBreakdown = {
@@ -105,7 +139,9 @@ export type OriginBreakdown = {
     noOrigin: number;
   };
   noOrigin: OriginMetrics;
-  crm: { signups: number; byLink: number };
+  crm: { signups: number };
+  /** Admin ou gestor da casa: pode dar apelido e criar regra de canal. */
+  canEdit: boolean;
   totalRows: number;
   rows: OriginRow[];
   others: OriginMetrics & { count: number };
@@ -126,6 +162,10 @@ function metrics(raw: Record<string, unknown> | null | undefined): OriginMetrics
     ftdValue: n(r.ftdValue),
     deposits: n(r.deposits),
     withdrawals: n(r.withdrawals),
+    mature7: n(r.mature7),
+    net7: n(r.net7),
+    mature30: n(r.mature30),
+    net30: n(r.net30),
   };
 }
 
@@ -155,7 +195,8 @@ export function buildOriginBreakdown(raw: unknown): OriginBreakdown {
       noOrigin: n(coverage.noOrigin),
     },
     noOrigin: metrics(obj(r.noOrigin)),
-    crm: { signups: n(crm.signups), byLink: n(crm.byLink) },
+    crm: { signups: n(crm.signups) },
+    canEdit: r.canEdit === true,
     totalRows: n(r.totalRows),
     rows: list(r.rows).map((row) => ({
       ...metrics(row),
@@ -163,6 +204,7 @@ export function buildOriginBreakdown(raw: unknown): OriginBreakdown {
       raw: str(row.raw),
       channel: String(row.channel ?? "outros"),
       metaName: str(row.metaName),
+      label: str(row.label),
     })),
     others: { ...metrics(others), count: n(others.count) },
     daily: list(r.daily).map((d) => ({
@@ -185,19 +227,66 @@ export function shortId(value: string) {
 
 /**
  * Nome exibido de uma linha: o canal tem nome nosso; os outros níveis mostram o
- * nome da Meta (ou do expert) quando há, senão o valor que a casa mandou.
- * `detail` é o valor bruto, mostrado embaixo quando o nome não é ele.
+ * apelido da casa, depois o nome da Meta (ou do expert), senão o valor que a casa
+ * mandou. `detail` é o valor bruto, mostrado embaixo quando o nome não é ele.
  */
-export function rowDisplay(group: OriginGroup, row: Pick<OriginRow, "key" | "raw" | "metaName">) {
-  if (group === "channel") {
-    return { name: channelLabel(row.key), detail: null, unnamedId: false };
+export function rowDisplay(
+  group: OriginGroup,
+  row: Pick<OriginRow, "key" | "raw" | "metaName"> & { label?: string | null },
+): {
+  name: string;
+  detail: string | null;
+  unnamedId: boolean;
+  source: "label" | "meta" | "expert" | null;
+} {
+  const none = { detail: null, unnamedId: false, source: null };
+  if (group === "channel") return { ...none, name: channelLabel(row.key) };
+  if (group === "affiliate" && row.key === REFERRAL_KEY) {
+    return { ...none, name: "Indicação entre jogadores" };
   }
   const raw = row.raw ?? row.key;
-  if (raw == null) return { name: EMPTY_VALUE[group], detail: null, unnamedId: false };
-  if (row.metaName) return { name: row.metaName, detail: raw, unnamedId: false };
-  if (isNumericId(raw)) return { name: shortId(raw), detail: raw, unnamedId: true };
-  return { name: raw, detail: null, unnamedId: false };
+  if (raw == null) return { ...none, name: EMPTY_VALUE[group] };
+  if (row.label) return { name: row.label, detail: raw, unnamedId: false, source: "label" };
+  if (row.metaName) {
+    return {
+      name: row.metaName,
+      detail: raw,
+      unnamedId: false,
+      source: group === "affiliate" ? "expert" : "meta",
+    };
+  }
+  if (isNumericId(raw)) return { name: shortId(raw), detail: raw, unnamedId: true, source: null };
+  return { ...none, name: raw };
 }
+
+/** Pode ganhar apelido: qualquer valor real fora do nível Canal. */
+export const canLabel = (group: OriginGroup, key: string | null) =>
+  group !== "channel" && key != null && key !== REFERRAL_KEY;
+
+/** Pode virar regra de canal: fonte, meio ou campanha com valor. */
+export const canRule = (group: OriginGroup, key: string | null) =>
+  key != null && (group === "source" || group === "medium" || group === "campaign");
+
+/** Líquido por cadastro nos primeiros 7/30 dias, só de quem já tem essa idade. */
+export function perSignupWindow(m: OriginMetrics, days: 7 | 30) {
+  const mature = days === 7 ? m.mature7 : m.mature30;
+  const value = days === 7 ? m.net7 : m.net30;
+  return mature > 0 ? value / mature : null;
+}
+
+/** Período anterior de mesmo tamanho, colado antes do atual (datas YYYY-MM-DD). */
+export function previousRange(from: string, to: string) {
+  const day = 86_400_000;
+  const start = Date.parse(`${from}T00:00:00Z`);
+  const end = Date.parse(`${to}T00:00:00Z`);
+  const length = Math.round((end - start) / day) + 1;
+  const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+  return { from: iso(start - length * day), to: iso(start - day) };
+}
+
+/** Variação contra o período anterior (0,1 = +10%); null sem base. */
+export const delta = (current: number, previous: number | null | undefined) =>
+  previous == null || previous === 0 ? null : (current - previous) / Math.abs(previous);
 
 /** Próximo nível ao clicar numa linha; null quando não há mais o que abrir. */
 export function nextGroup(group: OriginGroup, key: string | null): OriginGroup | null {
@@ -240,6 +329,10 @@ export function coverageLevel(c: OriginBreakdown["coverage"]) {
 
 const csvCell = (value: unknown) => `"${neutralizeCsvFormula(value ?? "").replaceAll('"', '""')}"`;
 const amount = (value: number) => value.toFixed(2);
+const windowCell = (m: OriginMetrics, days: 7 | 30) => {
+  const value = perSignupWindow(m, days);
+  return value == null ? "" : value.toFixed(2);
+};
 
 /** Uma linha por valor do nível aberto, mais "outros" e "sem origem", com o caminho. */
 export function originCsv(data: OriginBreakdown, path: OriginStep[], currency: string) {
@@ -259,6 +352,8 @@ export function originCsv(data: OriginBreakdown, path: OriginStep[], currency: s
     `depositos_${house}`,
     `saques_${house}`,
     `deposito_liquido_${house}`,
+    `liquido_por_cadastro_7d_${house}`,
+    `liquido_por_cadastro_30d_${house}`,
   ];
   const where = path.map((step) => `${GROUP_LABELS[step.group]}: ${step.name}`).join(" > ");
   const line = (value: string | null, name: string, channel: string, m: OriginMetrics) => {
@@ -278,6 +373,8 @@ export function originCsv(data: OriginBreakdown, path: OriginStep[], currency: s
       amount(m.deposits),
       amount(m.withdrawals),
       amount(net(m)),
+      windowCell(m, 7),
+      windowCell(m, 30),
     ];
   };
   const lines: unknown[][] = [header];
@@ -333,3 +430,69 @@ export const META_UTM_PRESET = {
   term: "{{adset.id}}",
   content: "{{ad.id}}",
 };
+
+export type OriginPlayerRow = {
+  id: string;
+  nome: string | null;
+  createdAt: string;
+  channel: string;
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  term: string | null;
+  content: string | null;
+  affiliate: string | null;
+  referral: string | null;
+  expert: string | null;
+  ftd: boolean;
+  ftdValue: number;
+  deposits: number;
+  withdrawals: number;
+};
+
+/** Um jogador por linha, com todas as UTMs (U3). */
+export function originPlayersCsv(rows: OriginPlayerRow[], currency: string) {
+  const house = currency.toLowerCase();
+  const header = [
+    "jogador_id",
+    "nome",
+    "cadastro_em",
+    "canal",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "afiliado",
+    "codigo_indicacao",
+    "expert",
+    "fez_primeiro_deposito",
+    `valor_primeiro_deposito_${house}`,
+    `depositos_${house}`,
+    `saques_${house}`,
+    `deposito_liquido_${house}`,
+  ];
+  const lines: unknown[][] = [header];
+  for (const r of rows) {
+    lines.push([
+      r.id,
+      r.nome ?? "",
+      r.createdAt,
+      channelLabel(r.channel),
+      r.source,
+      r.medium,
+      r.campaign,
+      r.term,
+      r.content,
+      r.affiliate,
+      r.referral,
+      r.expert,
+      r.ftd ? "sim" : "nao",
+      amount(r.ftdValue),
+      amount(r.deposits),
+      amount(r.withdrawals),
+      amount(r.deposits - r.withdrawals),
+    ]);
+  }
+  return lines.map((cells) => cells.map(csvCell).join(",")).join("\n");
+}

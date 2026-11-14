@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildOriginBreakdown,
+  canLabel,
+  canRule,
+  delta,
+  originPlayersCsv,
+  perSignupWindow,
+  previousRange,
+  REFERRAL_KEY,
   buildUtmLink,
   coverageLevel,
   META_UTM_PRESET,
@@ -17,7 +24,8 @@ const RAW = {
   totals: { signups: "10", ftd: 4, ftdValue: "200.5", deposits: 900, withdrawals: 100, net: 800 },
   coverage: { signups: 10, withUtm: 6, affiliateOnly: 1, clickOnly: 1, noOrigin: 2 },
   noOrigin: { signups: 2, ftd: 1, ftdValue: 10, deposits: 50, withdrawals: 0 },
-  crm: { signups: 3, byLink: 0 },
+  crm: { signups: 3 },
+  canEdit: true,
   totalRows: 3,
   rows: [
     {
@@ -77,14 +85,14 @@ describe("rowDisplay", () => {
         raw: "120250280510370075",
         metaName: "CBO",
       }),
-    ).toEqual({ name: "CBO", detail: "120250280510370075", unnamedId: false });
+    ).toEqual({ name: "CBO", detail: "120250280510370075", unnamedId: false, source: "meta" });
     expect(
       rowDisplay("campaign", {
         key: "120250280510370075",
         raw: "120250280510370075",
         metaName: null,
       }),
-    ).toEqual({ name: "1202…0075", detail: "120250280510370075", unnamedId: true });
+    ).toEqual({ name: "1202…0075", detail: "120250280510370075", unnamedId: true, source: null });
   });
 
   it("valor vazio e texto comum", () => {
@@ -154,6 +162,8 @@ describe("originCsv", () => {
     expect(csv[1]).toContain('"Canal: Meta"');
     expect(csv[1]).toContain('"120250280510370075","CBO Novembro"');
     expect(csv[1]).toContain('"550.00"');
+    // Sem cadastro maduro: janelas vazias.
+    expect(csv[1].endsWith('"",""')).toBe(true);
     expect(csv[2]).toContain(`"'=cmd"`);
     expect(csv[3]).toContain('"Outros 1"');
     expect(csv[4]).toContain('"Sem origem informada"');
@@ -181,5 +191,82 @@ describe("buildUtmLink", () => {
     expect(
       buildUtmLink("javascript:alert(1)", { source: "a", medium: "b", campaign: "c" }),
     ).toBeNull();
+  });
+});
+
+describe("U2/U3", () => {
+  it("apelido vence o nome da Meta; indicação tem nome próprio", () => {
+    expect(
+      rowDisplay("campaign", { key: "1202", raw: "1202", metaName: "CBO", label: "Pasteleiro" }),
+    ).toEqual({ name: "Pasteleiro", detail: "1202", unnamedId: false, source: "label" });
+    expect(
+      rowDisplay("affiliate", { key: REFERRAL_KEY, raw: REFERRAL_KEY, metaName: null }).name,
+    ).toBe("Indicação entre jogadores");
+    expect(rowDisplay("affiliate", { key: "aff9", raw: "AFF9", metaName: "Fulano" }).source).toBe(
+      "expert",
+    );
+  });
+
+  it("o que pode ganhar nome e regra", () => {
+    expect(canLabel("channel", "meta")).toBe(false);
+    expect(canLabel("campaign", null)).toBe(false);
+    expect(canLabel("affiliate", REFERRAL_KEY)).toBe(false);
+    expect(canLabel("content", "x")).toBe(true);
+    expect(canRule("source", "kwai")).toBe(true);
+    expect(canRule("term", "x")).toBe(false);
+  });
+
+  it("janelas de 7/30 dias só com coorte madura", () => {
+    const m = { signups: 10, ftd: 0, ftdValue: 0, deposits: 0, withdrawals: 0 };
+    expect(perSignupWindow({ ...m, mature7: 4, net7: 100, mature30: 0, net30: 0 }, 7)).toBe(25);
+    expect(perSignupWindow({ ...m, mature7: 4, net7: 100, mature30: 0, net30: 0 }, 30)).toBeNull();
+  });
+
+  it("período anterior de mesmo tamanho e variação", () => {
+    expect(previousRange("2026-11-08", "2026-11-14")).toEqual({
+      from: "2026-11-01",
+      to: "2026-11-07",
+    });
+    expect(previousRange("2026-11-01", "2026-11-01")).toEqual({
+      from: "2026-10-31",
+      to: "2026-10-31",
+    });
+    expect(previousRange("2026-03-01", "2026-03-31")).toEqual({
+      from: "2026-01-29",
+      to: "2026-02-28",
+    });
+    expect(delta(110, 100)).toBeCloseTo(0.1);
+    expect(delta(5, 0)).toBeNull();
+    expect(delta(-50, -100)).toBeCloseTo(0.5);
+  });
+
+  it("CSV de jogadores com todas as UTMs", () => {
+    const csv = originPlayersCsv(
+      [
+        {
+          id: "p1",
+          nome: "=Ana",
+          createdAt: "2026-11-01T12:00:00Z",
+          channel: "afiliados",
+          source: null,
+          medium: null,
+          campaign: null,
+          term: null,
+          content: null,
+          affiliate: "AFF9",
+          referral: null,
+          expert: "Fulano",
+          ftd: true,
+          ftdValue: 50,
+          deposits: 150,
+          withdrawals: 30,
+        },
+      ],
+      "BRL",
+    ).split("\n");
+    expect(csv[0]).toContain('"deposito_liquido_brl"');
+    expect(csv[1]).toContain(`"'=Ana"`);
+    expect(csv[1]).toContain('"Afiliados e indicação"');
+    expect(csv[1]).toContain('"sim","50.00","150.00","30.00","120.00"');
   });
 });

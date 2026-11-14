@@ -1,5 +1,7 @@
-// U1 de ESCOPO_ORIGEM_UTM_2026-11-14: attribution_channel e origin_breakdown.
-// supabase/migrations/20261231101000_origem_utm_u1.sql
+// ESCOPO_ORIGEM_UTM_2026-11-14: attribution_channel, origin_breakdown (U1), código de
+// indicação (U0), apelidos e regras de canal (U2), jogadores e janelas de 7/30 dias (U3).
+// supabase/migrations/20261231101000_origem_utm_u1.sql, 20261231101100_players_referral_code.sql
+// e 20261231101200_origem_utm_u2_u3.sql, aplicadas em ordem.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,6 +14,14 @@ const U1 = readFileSync(
   resolve(root, "supabase/migrations/20261231101000_origem_utm_u1.sql"),
   "utf8",
 );
+const REFERRAL = readFileSync(
+  resolve(root, "supabase/migrations/20261231101100_players_referral_code.sql"),
+  "utf8",
+);
+const U2U3 = readFileSync(
+  resolve(root, "supabase/migrations/20261231101200_origem_utm_u2_u3.sql"),
+  "utf8",
+);
 
 const SCHEMA = `
 create role anon nologin;
@@ -20,11 +30,16 @@ create role service_role nologin;
 create schema auth;
 create function auth.role() returns text language sql as $$
   select coalesce(nullif(current_setting('test.role', true), ''), 'authenticated') $$;
+create function auth.uid() returns uuid language sql as $$
+  select '00000000-0000-4000-8000-00000000aaaa'::uuid $$;
+create table public.user_roles (user_id uuid, tenant_id uuid, role text);
+create function public.is_tenant_admin(_tenant uuid) returns boolean language sql as $$
+  select coalesce(nullif(current_setting('test.admin', true), ''), 'on') = 'on' $$;
 create table public.tenants (id uuid primary key, slug text);
 create function public.has_tenant_access(_tenant uuid) returns boolean language sql as $$
   select coalesce(nullif(current_setting('test.access', true), ''), 'on') = 'on' $$;
 create table public.players (
-  id uuid primary key, tenant_id uuid, created_at timestamptz, ftd_em timestamptz,
+  id uuid primary key, tenant_id uuid, nome text, created_at timestamptz, ftd_em timestamptz,
   utm_source text, utm_medium text, utm_campaign text, utm_content text, utm_term text, utm_id text,
   affiliate_id text, expert text);
 create table public.deposits (
@@ -109,10 +124,11 @@ type Row = {
   withdrawals: number;
 };
 type Breakdown = {
+  canEdit: boolean;
   totals: Record<string, number>;
   coverage: Record<string, number>;
   noOrigin: Record<string, number>;
-  crm: { signups: number; byLink: number };
+  crm: { signups: number };
   totalRows: number;
   rows: Row[];
   others: Record<string, number>;
@@ -156,6 +172,14 @@ beforeAll(async () => {
   await db.exec(SCHEMA);
   await db.exec(SEED);
   await db.exec(U1);
+  await db.exec(REFERRAL);
+  await db.exec(U2U3);
+  // Só código de indicação, em 10/10 para não mexer nas contas de 01–07/10.
+  await db.exec(`
+    insert into public.players (id, tenant_id, created_at, referral_code) values
+      ('${P(13)}', '${T}', '2026-10-10 12:00+00', '9618DEE99DEB'),
+      ('${P(14)}', '${T}', '2026-10-10 12:00+00', null);
+  `);
 }, 60_000);
 
 afterAll(async () => {
@@ -202,7 +226,7 @@ describe("origin_breakdown", () => {
     expect(rows.crm).toBeUndefined();
 
     // P(5) betleads e P(11) com bl_click_id.
-    expect(b.crm).toEqual({ signups: 2, byLink: 1 });
+    expect(b.crm).toEqual({ signups: 2 });
     // P(8) sem nada.
     expect(b.noOrigin.signups).toBe(1);
     // Fora: CRM (2), outro período, outra casa.
@@ -311,6 +335,142 @@ describe("origin_breakdown", () => {
     await db.exec("set test.access = 'off'");
     try {
       await expect(breakdown()).rejects.toThrow(/Sem acesso/);
+    } finally {
+      await db.exec("set test.access = 'on'");
+    }
+  });
+});
+
+describe("U0: código de indicação", () => {
+  it("cadastro só com código de indicação vira afiliados, numa linha de indicação", async () => {
+    const opts = { from: "2026-10-10", to: "2026-10-10" };
+    const b = await breakdown("channel", {}, opts);
+    expect(byKey(b).afiliados.signups).toBe(1);
+    expect(b.noOrigin.signups).toBe(1);
+    expect(b.coverage.affiliateOnly).toBe(1);
+
+    const aff = await breakdown("affiliate", { channel: "afiliados" }, opts);
+    expect(aff.rows.map((r) => r.key)).toEqual(["__indicacao__"]);
+    const drill = await breakdown("channel", { affiliate: "__indicacao__" }, opts);
+    expect(drill.totals.signups).toBe(1);
+  });
+});
+
+describe("U2: regras de canal e apelidos", () => {
+  const rpc = (sql: string, params: unknown[]) => db.query(sql, params);
+
+  it("regra da casa vence a padrão e não mexe no CRM", async () => {
+    const { rows } = await rpc(
+      "select public.upsert_channel_rule($1, 'source', 'exact', ' KWAI ', 'influencer') id",
+      [T],
+    );
+    const id = (rows[0] as { id: string }).id;
+    await rpc("select public.upsert_channel_rule($1, 'source', 'exact', 'betleads', 'meta')", [T]);
+    try {
+      const b = byKey(await breakdown());
+      expect(b.kwai).toBeUndefined();
+      expect(b.influencer.signups).toBe(1);
+      expect(b.meta.signups).toBe(3);
+      expect((await breakdown()).crm.signups).toBe(2);
+
+      // Mesma regra de novo só troca o canal.
+      await rpc("select public.upsert_channel_rule($1, 'source', 'exact', 'kwai', 'outros')", [T]);
+      expect(byKey(await breakdown()).outros.signups).toBe(1);
+    } finally {
+      await rpc("select public.delete_channel_rule($1, $2)", [T, id]);
+      await db.exec(`delete from public.tenant_channel_rules where tenant_id = '${T}'`);
+    }
+    expect(byKey(await breakdown()).kwai.signups).toBe(1);
+  });
+
+  it("prefixo e contém, pela prioridade", async () => {
+    await rpc(
+      "select public.upsert_channel_rule($1, 'campaign', 'prefix', 'live_', 'influencer', 10)",
+      [T],
+    );
+    await rpc("select public.upsert_channel_rule($1, 'campaign', 'contains', '12', 'kwai', 20)", [
+      T,
+    ]);
+    try {
+      const b = byKey(await breakdown());
+      expect(b.live).toBeUndefined();
+      expect(b.influencer.signups).toBe(1);
+    } finally {
+      await db.exec(`delete from public.tenant_channel_rules where tenant_id = '${T}'`);
+    }
+  });
+
+  it("apelido aparece na linha e entra na busca; vazio apaga", async () => {
+    await rpc("select public.set_utm_label($1, 'campaign', ' CBO LA ELE ', 'Pasteleiro')", [T]);
+    const camp = byKey(await breakdown("campaign", { channel: "meta" }));
+    expect((camp["cbo la ele"] as Row & { label: string }).label).toBe("Pasteleiro");
+    expect((await breakdown("channel", { search: "pastel" })).totals.signups).toBe(1);
+
+    await rpc("select public.set_utm_label($1, 'campaign', 'cbo la ele', '  ')", [T]);
+    const after = byKey(await breakdown("campaign", { channel: "meta" }));
+    expect((after["cbo la ele"] as Row & { label: string | null }).label).toBeNull();
+  });
+
+  it("só admin ou gestor grava; regra inválida é recusada", async () => {
+    expect((await breakdown()).canEdit).toBe(true);
+    await db.exec("set test.admin = 'off'");
+    try {
+      expect((await breakdown()).canEdit).toBe(false);
+      await expect(
+        rpc("select public.set_utm_label($1, 'campaign', 'x', 'y')", [T]),
+      ).rejects.toThrow(/administrador ou o gestor/);
+      await db.exec(
+        `insert into public.user_roles values ('00000000-0000-4000-8000-00000000aaaa', '${T}', 'gestor')`,
+      );
+      await rpc("select public.set_utm_label($1, 'campaign', 'x', 'y')", [T]);
+    } finally {
+      await db.exec("set test.admin = 'on'");
+      await db.exec("delete from public.user_roles");
+      await db.exec("delete from public.tenant_utm_labels");
+    }
+    await expect(
+      rpc("select public.upsert_channel_rule($1, 'source', 'exact', 'x', 'inventado')", [T]),
+    ).rejects.toThrow(/Regra inválida/);
+    await expect(rpc("select public.set_utm_label($1, 'nope', 'x', 'y')", [T])).rejects.toThrow(
+      /Nível inválido/,
+    );
+  });
+
+  it("authenticated não executa as funções internas nem grava as tabelas direto", async () => {
+    const { rows } = await db.query<{ f: boolean; t: boolean }>(
+      `select has_function_privilege('authenticated',
+         'public.origin_cohort(uuid, timestamptz, timestamptz, jsonb, boolean)', 'execute') f,
+       has_table_privilege('authenticated', 'public.tenant_utm_labels', 'insert') t`,
+    );
+    expect(rows[0]).toEqual({ f: false, t: false });
+  });
+});
+
+describe("U3: janelas de 7/30 dias e jogadores", () => {
+  it("líquido em 7 e 30 dias só da coorte madura", async () => {
+    const meta = byKey(await breakdown()).meta as Row & Record<string, number>;
+    expect(meta.mature7).toBe(3);
+    // P(1): 100 no 1º dia, saque de 20 no 5º; os 50 de 05/11 passam dos 30 dias.
+    expect(meta.net7).toBe(80);
+    expect(meta.net30).toBe(80);
+    expect(meta.deposits).toBe(150);
+  });
+
+  it("lista os jogadores da linha, paginada, pelo maior depósito", async () => {
+    const { rows } = await db.query<{ o: { total: number; rows: Array<Record<string, unknown>> } }>(
+      "select public.origin_breakdown_players($1, '2026-10-01', '2026-10-07', $2::jsonb, false, 2, 0) o",
+      [T, JSON.stringify({ channel: "meta" })],
+    );
+    expect(rows[0].o.total).toBe(3);
+    expect(rows[0].o.rows).toHaveLength(2);
+    expect(rows[0].o.rows[0].id).toBe(P(1));
+    expect(Number(rows[0].o.rows[0].deposits)).toBe(150);
+
+    await db.exec("set test.access = 'off'");
+    try {
+      await expect(
+        db.query("select public.origin_breakdown_players($1, '2026-10-01', '2026-10-07')", [T]),
+      ).rejects.toThrow(/Sem acesso/);
     } finally {
       await db.exec("set test.access = 'on'");
     }

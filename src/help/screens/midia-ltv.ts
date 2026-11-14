@@ -33,7 +33,7 @@ const screen: HelpScreen = {
         {
           anchor: "midia.origem.kpis",
           label: "Cadastros, Com origem, 1º depósito, Depósito líquido",
-          what: "Cadastros feitos no período escolhido; quantos deles chegaram com alguma origem; quantos desses cadastros já fizeram o 1º depósito até hoje; e depósitos menos saques desses mesmos cadastros, desde o cadastro até hoje.",
+          what: "Cadastros feitos no período escolhido; quantos deles chegaram com alguma origem; quantos desses cadastros já fizeram o 1º depósito até hoje; e depósitos menos saques desses mesmos cadastros, desde o cadastro até hoje. Embaixo de Cadastros, 1º depósito e Depósito líquido aparece a variação contra o período anterior de mesmo tamanho (por exemplo, 7 dias contra os 7 dias antes).",
           notes:
             "Depósito líquido não é GGR: o GGR só existe para a casa inteira. Os cadastros que vieram de link das mensagens do próprio CRM ficam fora de todos os números, porque não são aquisição.",
         },
@@ -47,14 +47,35 @@ const screen: HelpScreen = {
           label: "Agrupar por, caminho, busca e 1º depósito",
           what: "Escolha o nível da tabela: Canal (Meta, Lives, Kwai, Afiliados…), Fonte, Meio, Campanha, Conjunto, Anúncio ou Afiliado. Clicar numa linha abre o próximo nível só com os cadastros dela; o caminho em cima volta para qualquer nível. A busca procura no texto da UTM, no ID e no código ou nome do afiliado.",
           notes:
-            "O canal junta nomes diferentes da mesma fonte (ig, fb, instagram, an viram Meta). Meio começando com live vira Lives. Cadastro sem UTM mas com código de afiliado ou de indicação vira Afiliados e indicação.",
+            'O canal junta nomes diferentes da mesma fonte (ig, fb, instagram, an viram Meta). Meio começando com live vira Lives. Cadastro sem UTM mas com código de afiliado ou de indicação vira Afiliados e indicação; no nível Afiliado, quem veio só por indicação de outro jogador fica na linha "Indicação entre jogadores".',
         },
         {
           anchor: "midia.origem.tabela",
           label: "Tabela",
-          what: "Uma linha por valor do nível escolhido, com cadastros, 1º depósito, conversão, depósitos, depósito líquido e líquido por cadastro. Quando a casa manda o ID da campanha, do conjunto ou do anúncio da Meta, a tela mostra o nome que está nas contas da Meta conectadas; sem conta conectada, mostra o ID abreviado com (sem nome).",
+          what: "Uma linha por valor do nível escolhido, com cadastros, 1º depósito, conversão, depósito líquido e o líquido por cadastro em 7 e em 30 dias. O nome mostrado é, nesta ordem: o nome dado pela casa, o nome que está nas contas da Meta conectadas (quando a casa manda o ID da campanha, do conjunto ou do anúncio) ou o valor que chegou; um ID sem nome aparece abreviado com (sem nome).",
           notes:
-            'Aparecem as 100 maiores por cadastros; o resto soma em "Outros". Com menos de 30 cadastros com origem, a conversão aparece como "poucos dados".',
+            'Aparecem as 100 maiores por cadastros; o resto soma em "Outros". Com menos de 30 cadastros com origem, a conversão aparece como "poucos dados". O líquido em 7 e 30 dias só conta quem já se cadastrou há pelo menos 7 ou 30 dias; sem ninguém com essa idade, aparece "—".',
+        },
+        {
+          label: "Ver os jogadores",
+          what: "Clique no número de cadastros de uma linha (ou em Ver jogadores, no celular) para abrir a lista dos jogadores dela, do maior depósito para o menor, com o 1º depósito, os depósitos e o líquido de cada um. O nome leva à ficha do jogador.",
+          notes:
+            '"Exportar jogadores" baixa até 2.000 jogadores da linha com todas as UTMs, o afiliado e o código de indicação.',
+        },
+        {
+          label: "Dar nome (lápis) e escolher o canal",
+          what: "O lápis ao lado de uma campanha, conjunto, anúncio, fonte, meio ou afiliado dá um nome a esse valor, para toda a equipe da casa. Serve para os IDs da Meta e para nomes confusos. O ícone de formas, em fonte, meio ou campanha, manda todo cadastro com aquele valor para um canal.",
+          roles: ["admin", "gestor"],
+          notes:
+            "Só o administrador e o gestor da casa veem esses botões. A busca também encontra pelo nome dado. Não aparecem no ambiente de demonstração.",
+        },
+        {
+          anchor: "midia.origem.regras",
+          label: "Regras de canal da casa",
+          what: "Lista as regras da casa (fonte, meio ou campanha que é igual a, começa com ou contém um texto → canal) e permite criar ou apagar. A regra vale para todos os períodos e vence a classificação automática.",
+          roles: ["admin", "gestor"],
+          notes:
+            "Os cadastros que vieram de link das mensagens do CRM continuam fora da conta, com ou sem regra.",
         },
         {
           anchor: "midia.origem.csv",
