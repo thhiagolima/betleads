@@ -1,4 +1,4 @@
-// Pix gateway seam (server-only). Upper and SpacePay both sit behind this
+// Pix gateway seam (server-only). Upper, SpacePay and PaganoPay sit behind this
 // contract so the charge state machine (top-up, invoice, webhook, reconcile)
 // never imports a gateway client directly.
 //
@@ -11,6 +11,7 @@
 // - Every client normalizes its response to `PixCharge` (the original Upper
 //   shape), so `recordChargeSnapshot` and the crediting checks are shared.
 
+import { paganoPayGateway } from "./paganopay-pix.server";
 import { getActivePixProvider, getUpperConfig } from "./payment-gateway-config.server";
 import { spacePayGateway } from "./spacepay-pix.server";
 import {
@@ -75,10 +76,11 @@ export const upperGateway: PixGateway = {
 const GATEWAYS: Record<PixProvider, PixGateway> = {
   upper: upperGateway,
   spacepay: spacePayGateway,
+  paganopay: paganoPayGateway,
 };
 
 export function isPixProvider(value: unknown): value is PixProvider {
-  return value === "upper" || value === "spacepay";
+  return value === "upper" || value === "spacepay" || value === "paganopay";
 }
 
 /** Gateway that owns an existing charge. An unknown provider value is a bug, never a fallback. */
@@ -89,7 +91,7 @@ export function getPixGateway(provider: string | null | undefined): PixGateway {
 
 /**
  * Provider for NEW charges, from the gateway config: DB settings row, else env
- * `BILLING_PIX_PROVIDER` (upper | spacepay), else upper.
+ * `BILLING_PIX_PROVIDER` (upper | spacepay | paganopay), else upper.
  */
 export async function activePixProvider(): Promise<PixProvider> {
   const provider = await getActivePixProvider();

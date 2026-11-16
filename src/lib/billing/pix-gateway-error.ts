@@ -1,10 +1,10 @@
-// Common base for every Pix gateway client error (Upper, SpacePay), so the
+// Common base for every Pix gateway client error (Upper, SpacePay, PaganoPay), so the
 // charge state machine can branch on `status`/`retryable` without knowing
 // which gateway created the charge. Kept in its own file (no imports) so the
 // gateway clients and pix-gateway.server.ts can all depend on it without a
 // cycle.
 
-export type PixProvider = "upper" | "spacepay";
+export type PixProvider = "upper" | "spacepay" | "paganopay";
 
 export class PixGatewayError extends Error {
   provider: PixProvider;

@@ -20,7 +20,11 @@ const BILLING_HEALTH_QUERY_KEY = ["admin", "billing", "health"];
 type HealthReport = Awaited<ReturnType<typeof adminBillingHealth>>;
 
 /** Client-side copy of PIX_PROVIDER_LABEL (billing-health.server.ts is server-only). */
-const PROVIDER_LABEL: Record<string, string> = { upper: "Upper", spacepay: "SpacePay" };
+const PROVIDER_LABEL: Record<string, string> = {
+  upper: "Upper",
+  spacepay: "SpacePay",
+  paganopay: "PaganoPay",
+};
 
 function providerLabel(provider: string | null | undefined): string | null {
   if (!provider) return null;
@@ -63,7 +67,7 @@ export function BillingHealthCard() {
             Saúde da cobrança
           </CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            Webhooks, cobranças pagas sem crédito, carteiras, gateways Pix (Upper e SpacePay) e
+            Webhooks, cobranças pagas sem crédito, carteiras, gateways Pix (Upper, SpacePay e PaganoPay) e
             crons (últimas 24 h).
           </p>
         </div>

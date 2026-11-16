@@ -15,15 +15,18 @@ import {
   deletePaymentGatewayCredentials,
   describePaymentGateways,
   getActivePixProvider,
+  getPaganoPayConfig,
   getSpacePayConfig,
   getUpperConfig,
   invalidatePaymentGatewayConfigCache,
   maskDocument,
   maskSecret,
+  paganoPayWebhookSecrets,
   savePaymentGatewayCredentials,
   setActivePixProvider,
   spacePayCallbackSecrets,
   upperWebhookSecrets,
+  type PaganoPayConfig,
   type SpacePayConfig,
   type UpperConfig,
 } from "./payment-gateway-config.server";
@@ -45,6 +48,14 @@ const ENV_KEYS = [
   "SPACEPAY_PAYER_DOCUMENT",
   "SPACEPAY_PAYER_EMAIL",
   "SPACEPAY_PAYER_PHONE",
+  "PAGANOPAY_PUBLIC_KEY",
+  "PAGANOPAY_SECRET_KEY",
+  "PAGANOPAY_WEBHOOK_SECRET",
+  "PAGANOPAY_API_BASE",
+  "PAGANOPAY_PAYER_NAME",
+  "PAGANOPAY_PAYER_DOCUMENT",
+  "PAGANOPAY_PAYER_EMAIL",
+  "PAGANOPAY_PAYER_PHONE",
 ] as const;
 
 const saved: Record<string, string | undefined> = {};
@@ -433,6 +444,7 @@ describe("describePaymentGateways", () => {
       gateways: {
         upper: { source: "env", hints: { apiKey: "env-…7890" }, updatedAt: null },
         spacepay: expect.objectContaining({ source: "env", updatedAt: null }),
+        paganopay: { source: "none", hints: {}, updatedAt: null },
       },
     });
 
@@ -467,5 +479,85 @@ describe("describePaymentGateways", () => {
       hints: {},
       updatedAt: null,
     });
+  });
+});
+
+describe("PaganoPay config", () => {
+  const PAGANOPAY_ENV = {
+    PAGANOPAY_PUBLIC_KEY: "pk_0123456789abcdef0123456789abcdef",
+    PAGANOPAY_SECRET_KEY: "sk_" + "cd".repeat(32),
+    PAGANOPAY_WEBHOOK_SECRET: "env-pagano-whsec-4444444444",
+  };
+  const DB_PAGANOPAY: PaganoPayConfig = {
+    publicKey: "pk_fedcba9876543210fedcba9876543210",
+    secretKey: "sk_" + "ef".repeat(32),
+    webhookSecret: "db-pagano-whsec-5555555555",
+    apiBase: null,
+    payer: {
+      name: "BetLeads Ltda",
+      document: "11222333000181",
+      email: "fin@betleads.com",
+      phone: "11999998888",
+    },
+  };
+
+  it("env: falls back to the SpacePay payer vars (same fixed payer)", async () => {
+    setEnv({ ...PAGANOPAY_ENV, ...SPACEPAY_ENV });
+    const loaded = await getPaganoPayConfig();
+    expect(loaded.source).toBe("env");
+    expect(loaded.config?.payer).toEqual({
+      name: SPACEPAY_ENV.SPACEPAY_PAYER_NAME,
+      document: SPACEPAY_ENV.SPACEPAY_PAYER_DOCUMENT,
+      email: SPACEPAY_ENV.SPACEPAY_PAYER_EMAIL,
+      phone: SPACEPAY_ENV.SPACEPAY_PAYER_PHONE,
+    });
+  });
+
+  it("env: PAGANOPAY_PAYER_* wins; no payer at all means not configured", async () => {
+    setEnv({ ...PAGANOPAY_ENV, ...SPACEPAY_ENV, PAGANOPAY_PAYER_NAME: "Outro Nome" });
+    expect((await getPaganoPayConfig()).config?.payer.name).toBe("Outro Nome");
+
+    for (const k of Object.keys(SPACEPAY_ENV)) delete process.env[k];
+    delete process.env.PAGANOPAY_PAYER_NAME;
+    invalidatePaymentGatewayConfigCache();
+    expect(await getPaganoPayConfig()).toEqual({ source: "none", config: null });
+  });
+
+  it("database row round-trips and only masked hints come out", async () => {
+    await savePaymentGatewayCredentials("paganopay", DB_PAGANOPAY, ACTOR);
+    expect(await getPaganoPayConfig()).toEqual({ source: "database", config: DB_PAGANOPAY });
+
+    const view = await describePaymentGateways();
+    expect(view.gateways.paganopay.source).toBe("database");
+    expect(view.gateways.paganopay.hints).toMatchObject({
+      publicKey: "pk_f…3210",
+      payerName: "BetLeads Ltda",
+      payerDocument: "**.222.333/0001-**",
+    });
+    const text = JSON.stringify(view);
+    for (const secret of [DB_PAGANOPAY.secretKey, DB_PAGANOPAY.webhookSecret, "11222333000181"]) {
+      expect(text).not.toContain(secret);
+    }
+  });
+
+  it("paganoPayWebhookSecrets: DB + replaced (24 h) + env", async () => {
+    setEnv(PAGANOPAY_ENV);
+    expect(await paganoPayWebhookSecrets()).toEqual([PAGANOPAY_ENV.PAGANOPAY_WEBHOOK_SECRET]);
+    await savePaymentGatewayCredentials("paganopay", DB_PAGANOPAY, ACTOR);
+    await savePaymentGatewayCredentials(
+      "paganopay",
+      { ...DB_PAGANOPAY, webhookSecret: "rotated-pagano-whsec-6666" },
+      ACTOR,
+    );
+    expect(await paganoPayWebhookSecrets()).toEqual([
+      "rotated-pagano-whsec-6666",
+      DB_PAGANOPAY.webhookSecret,
+      PAGANOPAY_ENV.PAGANOPAY_WEBHOOK_SECRET,
+    ]);
+  });
+
+  it("the active provider can be paganopay (DB row or env)", async () => {
+    setEnv({ BILLING_PIX_PROVIDER: "paganopay" });
+    expect(await getActivePixProvider()).toBe("paganopay");
   });
 });

@@ -28,6 +28,27 @@ vi.mock("./spacepay-pix.server", () => ({
   SpacePayError: class SpacePayError extends Error {},
 }));
 
+// PaganoPay: only the gateway is replaced; the status sets stay real.
+const { paganoPayGet } = vi.hoisted(() => ({ paganoPayGet: vi.fn() }));
+vi.mock("./paganopay-pix.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./paganopay-pix.server")>();
+  return {
+    ...actual,
+    paganoPayGateway: {
+      provider: "paganopay",
+      isConfigured: async () => true,
+      create: vi.fn(),
+      get: paganoPayGet,
+      cancel: vi.fn(),
+    },
+  };
+});
+
+const { recordBillingSignal } = vi.hoisted(() => ({
+  recordBillingSignal: vi.fn(async () => undefined),
+}));
+vi.mock("./billing-signals.server", () => ({ recordBillingSignal }));
+
 const { sendBillingEmail } = vi.hoisted(() => ({ sendBillingEmail: vi.fn() }));
 vi.mock("./billing-emails.server", () => ({ sendBillingEmail }));
 
@@ -489,6 +510,55 @@ describe("confirmCharge", () => {
     const row = fake.admin.rows("payment_charges")[0];
     expect(row.status).toBe("FAILED");
     expect(row.needs_review).toBe(false);
+  });
+
+  it("holds a PaganoPay charge in dispute (MED) for review instead of crediting it", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fake.admin.rows("payment_charges").push(
+      chargeRow({ external_id: "bl-top-pp-1", provider: "paganopay", provider_charge_id: "26150" }),
+    );
+    paganoPayGet.mockResolvedValue(
+      upperCharge({
+        id: "26150",
+        externalId: "bl-top-pp-1",
+        status: "PAID",
+        paidAmountCents: 50000,
+        raw: { id: 26150, status: "MED" },
+      }),
+    );
+
+    expect(await confirmCharge("bl-top-pp-1")).toEqual({ outcome: "needs_review" });
+    expect(paganoPayGet).toHaveBeenCalledWith({
+      externalId: "bl-top-pp-1",
+      providerChargeId: "26150",
+    });
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("PAID");
+    expect(row.needs_review).toBe(true);
+    expect(row.credited_at ?? null).toBeNull();
+    expect(recordBillingSignal).toHaveBeenCalledWith("paganopay_dispute", "dispute");
+  });
+
+  it("flags a credited PaganoPay charge needs_review when it is REFUNDED", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fake.admin.rows("payment_charges").push(
+      chargeRow({
+        external_id: "bl-top-pp-2",
+        provider: "paganopay",
+        provider_charge_id: "26151",
+        status: "PAID",
+        paid_amount_cents: 50000,
+        credited_at: "2026-11-16T12:00:00Z",
+      }),
+    );
+    paganoPayGet.mockResolvedValue(
+      upperCharge({ id: "26151", status: "FAILED", raw: { status: "REFUNDED" } }),
+    );
+
+    expect(await confirmCharge("bl-top-pp-2")).toEqual({ outcome: "not_paid" });
+    const row = fake.admin.rows("payment_charges")[0];
+    expect(row.status).toBe("PAID");
+    expect(row.needs_review).toBe(true);
   });
 
   it("passes the stored provider_charge_id (null when unknown) to the Upper gateway too", async () => {

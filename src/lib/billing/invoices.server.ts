@@ -40,6 +40,8 @@ const MAX_EXPIRES_IN_SECONDS = 604800;
 const REUSE_MIN_REMAINING_MS: Record<PixProvider, number> = {
   upper: 5 * 60_000,
   spacepay: 60_000,
+  // PaganoPay honors our expiresIn (1 h to 7 d here), like Upper.
+  paganopay: 5 * 60_000,
 };
 /**
  * Fix round 1: at most one retry, and only for an `external_id` collision
@@ -391,7 +393,9 @@ async function findOpenCharge(invoiceId: string): Promise<OpenChargeRow | null> 
 
 /** Rows written before the provider column mattered are Upper's (the column default). */
 function chargeProvider(charge: OpenChargeRow): PixProvider {
-  return charge.provider === "spacepay" ? "spacepay" : "upper";
+  return charge.provider === "spacepay" || charge.provider === "paganopay"
+    ? charge.provider
+    : "upper";
 }
 
 /**
@@ -588,8 +592,10 @@ export async function createInvoicePayment(
       throw new Error(GENERATING_MESSAGE);
     } else if (
       chargeProvider(openCharge) !== gateway.provider ||
-      chargeProvider(openCharge) === "spacepay"
+      chargeProvider(openCharge) !== "upper"
     ) {
+      // (PaganoPay near expiry too: it has a real cancel, so a fresh Pix is
+      // better than making the house wait for the old one to lapse.)
       // ACTIVE but created on the other gateway (the active provider was
       // switched), or a short-lived SpacePay QR about to expire: close it
       // (SpacePay has no cancel — closed locally only) and create attempt
@@ -668,7 +674,7 @@ export type CancelOpenInvoiceChargesFailure = { chargeId: string; error: string 
 export type CancelOpenInvoiceChargesResult = {
   canceled: number;
   failed: CancelOpenInvoiceChargesFailure[];
-  /** Charges found PAID at the gateway instead of closed (SpacePay only; see below). */
+  /** Charges found PAID at the gateway instead of closed (SpacePay pre-close read, PaganoPay cancel). */
   paid: number;
 };
 
@@ -767,7 +773,21 @@ export async function cancelOpenInvoiceCharges(
         });
       }
       const cancelled = configured ? await gateway.cancel(ref) : null;
-      if (cancelled) {
+      if (cancelled?.status === "PAID") {
+        // PaganoPay: already paid when we tried to cancel. Record it and run
+        // the normal confirm path (credit or needs_review) instead of closing.
+        await recordChargeSnapshot(chargeId, cancelled);
+        try {
+          await confirmCharge(externalId);
+        } catch (err) {
+          console.error("[billing/invoices] confirm after cancel-found-PAID failed", {
+            chargeId,
+            error: errorMessage(err),
+          });
+        }
+        paid += 1;
+        continue;
+      } else if (cancelled) {
         await recordChargeSnapshot(chargeId, cancelled);
       } else if (
         gateway.provider === "spacepay" &&

@@ -7,6 +7,7 @@ const audit = vi.hoisted(() => ({ calls: [] as Array<Record<string, unknown>> })
 const loader = vi.hoisted(() => ({
   getUpperConfig: vi.fn(),
   getSpacePayConfig: vi.fn(),
+  getPaganoPayConfig: vi.fn(),
   getActivePixProvider: vi.fn(),
   savePaymentGatewayCredentials: vi.fn(),
   deletePaymentGatewayCredentials: vi.fn(),
@@ -16,6 +17,7 @@ const loader = vi.hoisted(() => ({
 const probe = vi.hoisted(() => ({
   testUpperConnection: vi.fn(),
   testSpacePayConnection: vi.fn(),
+  testPaganoPayConnection: vi.fn(),
 }));
 
 vi.mock("@/integrations/supabase/client.server", async () => {
@@ -67,6 +69,7 @@ beforeEach(() => {
   for (const fn of [...Object.values(loader), ...Object.values(probe)]) fn.mockReset();
   loader.getUpperConfig.mockResolvedValue(none);
   loader.getSpacePayConfig.mockResolvedValue(none);
+  loader.getPaganoPayConfig.mockResolvedValue(none);
   loader.getActivePixProvider.mockResolvedValue("upper");
   fake.db.onRpc("is_super_admin", (args) => ({ data: args._user_id === ADMIN.userId, error: null }));
 });
@@ -301,6 +304,116 @@ describe("adminSavePaymentGatewayFor — SpacePay", () => {
       clearFields: ["platformId"],
     });
     expect(loader.savePaymentGatewayCredentials.mock.calls[1][1].platformId).toBeNull();
+  });
+});
+
+describe("adminSavePaymentGatewayFor — PaganoPay", () => {
+  const PK = "pk_0123456789abcdef0123456789abcdef";
+  const SK = "sk_" + "ab".repeat(32);
+
+  it("copies the SpacePay payer when the payer fields are left blank", async () => {
+    loader.getSpacePayConfig.mockResolvedValue({ source: "database", config: STORED_SPACEPAY });
+    await adminSavePaymentGatewayFor(ADMIN, {
+      provider: "paganopay",
+      credentials: { publicKey: PK, secretKey: SK, webhookSecret: "whsec" },
+    });
+    expect(loader.savePaymentGatewayCredentials).toHaveBeenCalledWith(
+      "paganopay",
+      {
+        publicKey: PK,
+        secretKey: SK,
+        webhookSecret: "whsec",
+        apiBase: null,
+        payer: STORED_SPACEPAY.payer,
+      },
+      ADMIN.userId,
+    );
+    expect(allAuditText()).not.toContain(SK);
+    expect(allAuditText()).not.toContain(STORED_SPACEPAY.payer.document);
+  });
+
+  it("a typed payer field wins over the SpacePay copy, digits only", async () => {
+    loader.getSpacePayConfig.mockResolvedValue({ source: "env", config: STORED_SPACEPAY });
+    await adminSavePaymentGatewayFor(ADMIN, {
+      provider: "paganopay",
+      credentials: {
+        publicKey: PK,
+        secretKey: SK,
+        webhookSecret: "whsec",
+        payer: { document: VALID_CNPJ, phone: "(21) 98888-7777" },
+      },
+    });
+    const saved = loader.savePaymentGatewayCredentials.mock.calls[0][1];
+    expect(saved.payer).toEqual({
+      ...STORED_SPACEPAY.payer,
+      document: "11222333000181",
+      phone: "21988887777",
+    });
+  });
+
+  it("blank keys keep the stored PaganoPay row", async () => {
+    loader.getPaganoPayConfig.mockResolvedValue({
+      source: "database",
+      config: {
+        publicKey: PK,
+        secretKey: SK,
+        webhookSecret: "old",
+        apiBase: null,
+        payer: STORED_SPACEPAY.payer,
+      },
+    });
+    await adminSavePaymentGatewayFor(ADMIN, {
+      provider: "paganopay",
+      credentials: { webhookSecret: "new-secret" },
+    });
+    const saved = loader.savePaymentGatewayCredentials.mock.calls[0][1];
+    expect(saved).toMatchObject({ publicKey: PK, secretKey: SK, webhookSecret: "new-secret" });
+  });
+
+  it("requires the keys, the webhook secret and a payer", async () => {
+    await expect(
+      adminSavePaymentGatewayFor(ADMIN, {
+        provider: "paganopay",
+        credentials: { secretKey: SK, webhookSecret: "w" },
+      }),
+    ).rejects.toThrow(/chave pública/);
+    await expect(
+      adminSavePaymentGatewayFor(ADMIN, {
+        provider: "paganopay",
+        credentials: { publicKey: PK, secretKey: SK },
+      }),
+    ).rejects.toThrow(/segredo do webhook/);
+    await expect(
+      adminSavePaymentGatewayFor(ADMIN, {
+        provider: "paganopay",
+        credentials: { publicKey: PK, secretKey: SK, webhookSecret: "w" },
+      }),
+    ).rejects.toThrow(/pagador/);
+    expect(loader.savePaymentGatewayCredentials).not.toHaveBeenCalled();
+  });
+
+  it("rejects keys that don't look like pk_/sk_", async () => {
+    await expect(
+      adminSavePaymentGatewayFor(ADMIN, {
+        provider: "paganopay",
+        credentials: { publicKey: "sk_abcdef0123", secretKey: SK, webhookSecret: "w" },
+      }),
+    ).rejects.toThrow(/pk_/);
+  });
+
+  it("tests the candidate keys without saving", async () => {
+    probe.testPaganoPayConnection.mockResolvedValue({ ok: true, message: "Conectado." });
+    const result = await adminTestPaymentGatewayFor(ADMIN, {
+      provider: "paganopay",
+      credentials: { publicKey: PK, secretKey: SK },
+    });
+    expect(result.ok).toBe(true);
+    expect(probe.testPaganoPayConnection).toHaveBeenCalledWith({
+      publicKey: PK,
+      secretKey: SK,
+      apiBase: null,
+    });
+    expect(loader.savePaymentGatewayCredentials).not.toHaveBeenCalled();
   });
 });
 

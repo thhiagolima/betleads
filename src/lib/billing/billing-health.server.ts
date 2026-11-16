@@ -58,6 +58,10 @@ export type BillingHealthCode =
   | "spacepay_webhook_invalid_token"
   | "spacepay_unauthorized"
   | "spacepay_unavailable"
+  | "paganopay_webhook_invalid_signature"
+  | "paganopay_unauthorized"
+  | "paganopay_unavailable"
+  | "paganopay_dispute"
   | "reconcile_cron_stale"
   | "billing_cycle_cron_stale"
   | "billing_health_check_failed"
@@ -88,6 +92,10 @@ export const SIGNAL_FINDING_CODES: ReadonlySet<BillingHealthCode> = new Set<Bill
   "spacepay_webhook_invalid_token",
   "spacepay_unauthorized",
   "spacepay_unavailable",
+  "paganopay_webhook_invalid_signature",
+  "paganopay_unauthorized",
+  "paganopay_unavailable",
+  "paganopay_dispute",
 ]);
 
 /** Gateway timeouts/network errors/5xx alert from this many events in the window (any provider). */
@@ -99,6 +107,7 @@ export const UPPER_UNAVAILABLE_THRESHOLD = PIX_UNAVAILABLE_THRESHOLD;
 export const PIX_PROVIDER_LABEL: Record<PixProvider, string> = {
   upper: "Upper",
   spacepay: "SpacePay",
+  paganopay: "PaganoPay",
 };
 
 export type BillingHealthReport = {
@@ -253,6 +262,33 @@ export const PIX_SIGNAL_CHECKS: readonly PixSignalCheck[] = [
     provider: "spacepay",
     threshold: PIX_UNAVAILABLE_THRESHOLD,
     message: (row, { window }) => unavailableMessage(row, "O SpacePay", window),
+  },
+  {
+    code: "paganopay_webhook_invalid_signature",
+    provider: "paganopay",
+    threshold: 1,
+    message: (row, { window }) =>
+      webhookRejectedMessage(row, "da PaganoPay", "assinatura inválida", window),
+  },
+  {
+    code: "paganopay_unauthorized",
+    provider: "paganopay",
+    threshold: 1,
+    message: (row, { window }) =>
+      `A PaganoPay recusou as chaves de API (401/403 ou conta desativada) ${row.count} ${plural(row.count, "vez", "vezes")} ${window}.`,
+  },
+  {
+    code: "paganopay_unavailable",
+    provider: "paganopay",
+    threshold: PIX_UNAVAILABLE_THRESHOLD,
+    message: (row, { window }) => unavailableMessage(row, "A PaganoPay", window),
+  },
+  {
+    code: "paganopay_dispute",
+    provider: "paganopay",
+    threshold: 1,
+    message: (row, { window }) =>
+      `${row.count} ${plural(row.count, "Pix pago entrou", "Pix pagos entraram")} em contestação (MED) ou estorno na PaganoPay ${window}. Veja a fila de revisão.`,
   },
 ];
 

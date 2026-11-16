@@ -29,11 +29,12 @@ import {
 } from "@/lib/billing/billing-admin.functions";
 import { canSubmitReason, validatePixFeeFixedCents, validatePixFeePercent } from "./billing-admin-ui";
 
-type PixProvider = "upper" | "spacepay";
+type PixProvider = "upper" | "spacepay" | "paganopay";
 
 const PROVIDER_LABEL: Record<PixProvider, string> = {
   upper: "Upper",
   spacepay: "SpacePay",
+  paganopay: "PaganoPay",
 };
 
 const PIX_FEES_QUERY_KEY = ["admin", "billing", "pix-fees"];

@@ -20,6 +20,8 @@ vi.mock("@/lib/billing/payment-gateway-admin.functions", () => ({
 import {
   generateCallbackSecret,
   isBlank,
+  PaganoPayEditForm,
+  paganoPayPayload,
   PaymentGatewaysCard,
   PUBLIC_APP_URL_LOCAL_WARNING,
   PUBLIC_APP_URL_MISSING_WARNING,
@@ -28,6 +30,59 @@ import {
   spacePayPayload,
   upperPayload,
 } from "./payment-gateways-card";
+
+describe("PaganoPay panel", () => {
+  it("shows the PaganoPay panel with the webhook URL to register in their panel", () => {
+    queryState.data = {
+      activeProvider: "upper",
+      activeSource: "default",
+      gateways: {
+        upper: { source: "env", hints: {}, updatedAt: null },
+        spacepay: { source: "none", hints: {}, updatedAt: null },
+        paganopay: { source: "database", hints: { publicKey: "pk_f…3210" }, updatedAt: null },
+      },
+      publicAppUrl: "https://crm.betleads.com",
+    };
+    const html = renderToStaticMarkup(<PaymentGatewaysCard />);
+    expect(html).toContain("PaganoPay");
+    expect(html).toContain("pk_f…3210");
+    expect(html).toContain("https://crm.betleads.com/api/public/paganopay/webhook");
+    expect(html).toContain("Integrações → Webhook");
+  });
+
+  it("the edit form offers the SpacePay payer as the blank-field fallback", () => {
+    const html = renderToStaticMarkup(
+      <PaganoPayEditForm
+        info={{ source: "none", hints: {}, updatedAt: null }}
+        onSaved={() => undefined}
+        spacePayHints={{ payerName: "BetLeads Ltda", payerDocument: "**.222.333/0001-**" }}
+      />,
+    );
+    expect(html).toContain("copiar o pagador já cadastrado na SpacePay");
+    expect(html).toContain("BetLeads Ltda (da SpacePay)");
+    expect(html).toContain("**.222.333/0001-** (da SpacePay)");
+    expect(html).toContain("também permite saques");
+  });
+
+  it("paganoPayPayload sends blank fields blank and only apiBase is clearable", () => {
+    const payload = paganoPayPayload(
+      {
+        publicKey: "pk_1",
+        secretKey: "",
+        webhookSecret: "",
+        apiBase: "",
+        payerName: "",
+        payerDocument: "",
+        payerEmail: "",
+        payerPhone: "",
+      },
+      ["apiBase", "secretKey"],
+    );
+    expect(payload.provider).toBe("paganopay");
+    expect(payload.credentials.secretKey).toBe("");
+    expect(payload.clearFields).toEqual(["apiBase"]);
+  });
+});
 
 describe("PaymentGatewaysCard", () => {
   it("shows each gateway's source, active badge, masked hints and webhook URLs", () => {

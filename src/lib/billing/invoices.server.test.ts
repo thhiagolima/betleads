@@ -33,6 +33,24 @@ vi.mock("./spacepay-pix.server", () => ({
   },
 }));
 
+const { paganoCancel, paganoConfigured } = vi.hoisted(() => ({
+  paganoCancel: vi.fn(),
+  paganoConfigured: vi.fn(async () => true),
+}));
+vi.mock("./paganopay-pix.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./paganopay-pix.server")>();
+  return {
+    ...actual,
+    paganoPayGateway: {
+      provider: "paganopay",
+      isConfigured: paganoConfigured,
+      create: vi.fn(),
+      get: vi.fn(),
+      cancel: paganoCancel,
+    },
+  };
+});
+
 const { confirmCharge } = vi.hoisted(() => ({ confirmCharge: vi.fn() }));
 vi.mock("./payment-charges.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./payment-charges.server")>();
@@ -822,6 +840,47 @@ describe("createInvoicePayment with two gateways", () => {
 });
 
 describe("cancelOpenInvoiceCharges per provider", () => {
+  function paganoRow() {
+    return {
+      id: "charge-pp",
+      tenant_id: TENANT,
+      kind: "invoice",
+      ref_id: "invoice-7",
+      provider: "paganopay",
+      external_id: "bl-inv-invoice-7-1",
+      provider_charge_id: "26150",
+      status: "ACTIVE",
+      amount_cents: 400000,
+    };
+  }
+
+  it("cancels a PaganoPay charge at PaganoPay and records it CANCELLED", async () => {
+    fake.admin.rows("payment_charges").push(paganoRow());
+    paganoCancel.mockResolvedValue(upperChargeResult({ id: "26150", status: "CANCELLED" }));
+
+    const result = await cancelOpenInvoiceCharges("invoice-7");
+
+    expect(paganoCancel).toHaveBeenCalledWith({
+      externalId: "bl-inv-invoice-7-1",
+      providerChargeId: "26150",
+    });
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("CANCELLED");
+    expect(result).toEqual({ canceled: 1, failed: [], paid: 0 });
+  });
+
+  it("a PaganoPay charge found PAID while cancelling is confirmed, not closed", async () => {
+    fake.admin.rows("payment_charges").push(paganoRow());
+    paganoCancel.mockResolvedValue(
+      upperChargeResult({ id: "26150", status: "PAID", paidAmountCents: 400000 }),
+    );
+
+    const result = await cancelOpenInvoiceCharges("invoice-7");
+
+    expect(confirmCharge).toHaveBeenCalledWith("bl-inv-invoice-7-1");
+    expect(fake.admin.rows("payment_charges")[0].status).toBe("PAID");
+    expect(result).toEqual({ canceled: 0, failed: [], paid: 1 });
+  });
+
   it("closes a SpacePay charge locally (gateway has no cancel) and cancels Upper ones at Upper", async () => {
     fake.admin.rows("payment_charges").push(
       {

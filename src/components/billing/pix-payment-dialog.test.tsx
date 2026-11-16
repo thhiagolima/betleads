@@ -78,6 +78,19 @@ describe("PixPaymentDialog", () => {
     expect(html).not.toContain("Este Pix expirou");
   });
 
+  it("draws the QR from the EMV when the gateway sent no image (PaganoPay)", () => {
+    const html = render(charge({ qrCodeImage: null }));
+    expect(html).toContain('data-testid="pix-qr-from-emv"');
+    expect(html).toContain("<svg");
+    expect(html).toContain('aria-label="QR Code Pix"');
+  });
+
+  it("prefers the gateway's https image over drawing one", () => {
+    const html = render(charge({ qrCodeImage: "https://gw.example/qr.png" }));
+    expect(html).toContain('src="https://gw.example/qr.png"');
+    expect(html).not.toContain('data-testid="pix-qr-from-emv"');
+  });
+
   it("once expiresAt has passed, hides the code and offers 'Gerar novo Pix'", () => {
     const html = render(charge({ expiresAt: new Date(Date.now() - 1000).toISOString() }), {
       onRegenerate: () => undefined,

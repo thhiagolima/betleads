@@ -1,5 +1,5 @@
 // "Gateways de pagamento" (super admin, Admin → Faturamento): credentials of
-// Upper and SpacePay (stored encrypted in the database, env vars as fallback)
+// Upper, SpacePay and PaganoPay (stored encrypted in the database, env vars as fallback)
 // and which gateway receives NEW Pix charges. Existing charges always stay on
 // the gateway that created them.
 //
@@ -24,7 +24,7 @@ import {
   adminTestPaymentGateway,
 } from "@/lib/billing/payment-gateway-admin.functions";
 
-type PixProvider = "upper" | "spacepay";
+type PixProvider = "upper" | "spacepay" | "paganopay";
 type GatewaySource = "database" | "env" | "none";
 
 export type PaymentGatewaysView = {
@@ -43,9 +43,13 @@ type TestResult = { ok: boolean; message: string };
 export const PAYMENT_GATEWAYS_QUERY_KEY = ["admin", "billing", "payment-gateways"];
 const PIX_FEES_QUERY_KEY = ["admin", "billing", "pix-fees"];
 
-const PROVIDERS: PixProvider[] = ["upper", "spacepay"];
+const PROVIDERS: PixProvider[] = ["upper", "spacepay", "paganopay"];
 
-const PROVIDER_LABEL: Record<PixProvider, string> = { upper: "Upper", spacepay: "SpacePay" };
+const PROVIDER_LABEL: Record<PixProvider, string> = {
+  upper: "Upper",
+  spacepay: "SpacePay",
+  paganopay: "PaganoPay",
+};
 
 export const SOURCE_LABEL: Record<GatewaySource, string> = {
   database: "Banco",
@@ -61,6 +65,8 @@ const HINT_LABEL: Record<string, string> = {
   casinoToken: "Token do cassino",
   platformId: "Platform ID",
   callbackSecret: "Segredo do callback",
+  publicKey: "Chave pública",
+  secretKey: "Chave secreta",
   payerName: "Pagador",
   payerDocument: "CPF/CNPJ do pagador",
   payerEmail: "E-mail do pagador",
@@ -89,10 +95,14 @@ export const PUBLIC_APP_URL_MISSING_WARNING =
 export const PUBLIC_APP_URL_LOCAL_WARNING =
   "PUBLIC_APP_URL aponta para um endereço local; a SpacePay não alcança esse endereço.";
 
-/** Warnings about the server's PUBLIC_APP_URL, from which the SpacePay callback URL is built. */
-export function publicAppUrlWarning(url: string | null | undefined): string | null {
-  if (!url) return PUBLIC_APP_URL_MISSING_WARNING;
-  if (/localhost|127\.0\.0\.1/i.test(url)) return PUBLIC_APP_URL_LOCAL_WARNING;
+/** Warnings about the server's PUBLIC_APP_URL, from which the callback/webhook URL is built. */
+export function publicAppUrlWarning(
+  url: string | null | undefined,
+  gateway = "SpacePay",
+): string | null {
+  const swap = (text: string) => text.replace("SpacePay", gateway);
+  if (!url) return swap(PUBLIC_APP_URL_MISSING_WARNING);
+  if (/localhost|127\.0\.0\.1/i.test(url)) return swap(PUBLIC_APP_URL_LOCAL_WARNING);
   return null;
 }
 
@@ -155,6 +165,47 @@ export function spacePayPayload(form: SpacePayForm, clearFields: string[] = []) 
   };
 }
 
+export type PaganoPayForm = {
+  publicKey: string;
+  secretKey: string;
+  webhookSecret: string;
+  apiBase: string;
+  payerName: string;
+  payerDocument: string;
+  payerEmail: string;
+  payerPhone: string;
+};
+
+const EMPTY_PAGANOPAY: PaganoPayForm = {
+  publicKey: "",
+  secretKey: "",
+  webhookSecret: "",
+  apiBase: "",
+  payerName: "",
+  payerDocument: "",
+  payerEmail: "",
+  payerPhone: "",
+};
+
+export function paganoPayPayload(form: PaganoPayForm, clearFields: string[] = []) {
+  return {
+    provider: "paganopay" as const,
+    credentials: {
+      publicKey: form.publicKey,
+      secretKey: form.secretKey,
+      webhookSecret: form.webhookSecret,
+      apiBase: form.apiBase,
+      payer: {
+        name: form.payerName,
+        document: form.payerDocument,
+        email: form.payerEmail,
+        phone: form.payerPhone,
+      },
+    },
+    clearFields: clearFields.filter((f) => f === "apiBase") as Array<"apiBase">,
+  };
+}
+
 /** True when no field of the form was typed in. */
 export function isBlank(form: Record<string, string>): boolean {
   return Object.values(form).every((v) => !v.trim());
@@ -190,7 +241,7 @@ export function PaymentGatewaysCard() {
           Gateways de pagamento
         </CardTitle>
         <p className="text-sm text-muted-foreground">
-          Credenciais da Upper e da SpacePay e qual delas recebe as novas cobranças Pix. Cobranças já
+          Credenciais da Upper, da SpacePay e da PaganoPay e qual delas recebe as novas cobranças Pix. Cobranças já
           criadas continuam no gateway em que nasceram. Credenciais salvas aqui valem no lugar das
           variáveis de ambiente.
         </p>
@@ -202,13 +253,15 @@ export function PaymentGatewaysCard() {
           <p className="text-sm text-destructive">Não foi possível carregar os gateways.</p>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
-            {PROVIDERS.map((provider) => (
+            {/* A server without a provider yet (mid-deploy) just doesn't list it. */}
+            {PROVIDERS.filter((provider) => data.gateways[provider]).map((provider) => (
               <GatewayPanel
                 key={provider}
                 provider={provider}
                 info={data.gateways[provider]}
                 active={data.activeProvider === provider}
                 publicAppUrl={data.publicAppUrl ?? null}
+                spacePayHints={data.gateways.spacepay?.hints ?? {}}
               />
             ))}
           </div>
@@ -223,11 +276,14 @@ function GatewayPanel({
   info,
   active,
   publicAppUrl,
+  spacePayHints,
 }: {
   provider: PixProvider;
   info: PaymentGatewaysView["gateways"][PixProvider];
   active: boolean;
   publicAppUrl: string | null;
+  /** Masked SpacePay payer: what a blank PaganoPay payer field falls back to. */
+  spacePayHints: Record<string, string>;
 }) {
   const label = PROVIDER_LABEL[provider];
   const queryClient = useQueryClient();
@@ -368,6 +424,8 @@ function GatewayPanel({
       {editing &&
         (provider === "upper" ? (
           <UpperEditForm info={info} onSaved={onSaved} />
+        ) : provider === "paganopay" ? (
+          <PaganoPayEditForm info={info} onSaved={onSaved} spacePayHints={spacePayHints} />
         ) : (
           <SpacePayEditForm info={info} onSaved={onSaved} />
         ))}
@@ -390,6 +448,25 @@ function GatewayUrlNote({
         Webhook a cadastrar na Upper:{" "}
         <code className="break-all rounded bg-muted px-1">{`${base}/api/public/upper/webhook`}</code>
       </p>
+    );
+  }
+  if (provider === "paganopay") {
+    const warning = publicAppUrlWarning(publicAppUrl, "PaganoPay");
+    return (
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground">
+          Webhook a cadastrar no painel da PaganoPay (Integrações → Webhook, com "Atualização de
+          transações"):{" "}
+          <code className="break-all rounded bg-muted px-1">{`${base}/api/public/paganopay/webhook`}</code>
+          . Copie o segredo exibido lá para o campo "Segredo do webhook". Trocar o segredo no painel
+          vale na hora: atualize aqui logo em seguida.
+        </p>
+        {warning && (
+          <p className="text-sm text-destructive" role="alert">
+            {warning}
+          </p>
+        )}
+      </div>
     );
   }
   const warning = publicAppUrlWarning(publicAppUrl);
@@ -717,6 +794,100 @@ export function SpacePayEditForm({
           test.mutate(isBlank(form) ? { provider: "spacepay" } : spacePayPayload(form));
         }}
         onSave={() => save.mutate(spacePayPayload(form, clear))}
+      />
+    </div>
+  );
+}
+
+export function PaganoPayEditForm({
+  info,
+  onSaved,
+  spacePayHints,
+}: {
+  info: PaymentGatewaysView["gateways"][PixProvider];
+  onSaved: () => void;
+  spacePayHints: Record<string, string>;
+}) {
+  const stored = info.source === "database";
+  const hints = stored ? info.hints : {};
+  const [form, setForm] = useState<PaganoPayForm>(EMPTY_PAGANOPAY);
+  const [clear, setClear] = useState<string[]>([]);
+  const { save, test, testResult, setTestResult } = useSaveAndTest(onSaved);
+  const set = (key: keyof PaganoPayForm) => (v: string) => setForm((f) => ({ ...f, [key]: v }));
+  // A blank payer field keeps the stored one, else copies SpacePay's (server side).
+  const payerHint = (key: "payerName" | "payerDocument" | "payerEmail" | "payerPhone") =>
+    hints[key] ?? (spacePayHints[key] ? `${spacePayHints[key]} (da SpacePay)` : undefined);
+  const copiesFromSpacePay = !hints.payerName && Boolean(spacePayHints.payerName);
+
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <EditIntro stored={stored} source={info.source} />
+      <Field
+        label="Chave pública (pk_…)"
+        secret
+        value={form.publicKey}
+        onChange={set("publicKey")}
+        hint={hints.publicKey}
+      />
+      <Field
+        label="Chave secreta (sk_…)"
+        secret
+        value={form.secretKey}
+        onChange={set("secretKey")}
+        hint={hints.secretKey}
+        help="Esta chave também permite saques. Ela só fica no servidor, criptografada, e o sistema nunca faz saque."
+      />
+      <Field
+        label="Segredo do webhook"
+        secret
+        value={form.webhookSecret}
+        onChange={set("webhookSecret")}
+        hint={hints.webhookSecret}
+        help="O segredo exibido no painel da PaganoPay, em Integrações → Webhook."
+      />
+      <Field
+        label="URL da API (opcional)"
+        value={form.apiBase}
+        onChange={set("apiBase")}
+        hint={hints.apiBase}
+        placeholder="https://www.paganopay.com/api"
+      />
+      <ClearToggle field="apiBase" label="a URL da API" hints={hints} clear={clear} setClear={setClear} />
+      <p className="text-xs text-muted-foreground">
+        Pagador enviado em toda cobrança (dados da empresa, não das casas).
+        {copiesFromSpacePay &&
+          " Deixe em branco para copiar o pagador já cadastrado na SpacePay."}
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Nome do pagador" value={form.payerName} onChange={set("payerName")} hint={payerHint("payerName")} />
+        <Field
+          label="CPF ou CNPJ do pagador"
+          value={form.payerDocument}
+          onChange={set("payerDocument")}
+          hint={payerHint("payerDocument")}
+        />
+        <Field
+          label="E-mail do pagador"
+          value={form.payerEmail}
+          onChange={set("payerEmail")}
+          hint={payerHint("payerEmail")}
+        />
+        <Field
+          label="Telefone do pagador (com DDD)"
+          value={form.payerPhone}
+          onChange={set("payerPhone")}
+          hint={payerHint("payerPhone")}
+        />
+      </div>
+      <FormActions
+        saving={save.isPending}
+        testing={test.isPending}
+        testResult={testResult}
+        onTest={() => {
+          setTestResult(null);
+          test.mutate(isBlank(form) ? { provider: "paganopay" } : paganoPayPayload(form));
+        }}
+        onSave={() => save.mutate(paganoPayPayload(form, clear))}
       />
     </div>
   );

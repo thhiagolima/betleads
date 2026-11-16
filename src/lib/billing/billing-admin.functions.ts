@@ -796,7 +796,7 @@ export const adminResendBillingEmail = createServerFn({ method: "POST" })
 // Taxa do Pix
 // ===========================================================================
 
-const PIX_FEE_PROVIDERS = ["upper", "spacepay"] as const satisfies readonly PixProvider[];
+const PIX_FEE_PROVIDERS = ["upper", "spacepay", "paganopay"] as const satisfies readonly PixProvider[];
 
 export const adminSetPixFeeInput = z.object({
   /** Fees are per gateway (`payment_fee_settings.provider`); omitted = Upper (old clients). */
@@ -876,14 +876,15 @@ export async function adminGetPixFeesFor(ctx: ServerContext): Promise<AdminPixFe
   if (error) throw new Error(error.message);
 
   const nowMs = Date.now();
-  const fees: Record<PixProvider, PixFeeSetting | null> = { upper: null, spacepay: null };
+  const fees: Record<PixProvider, PixFeeSetting | null> = { upper: null, spacepay: null, paganopay: null };
   // Same rule as `billing_credit_paid_charge`: latest row already in force.
   for (const row of data ?? []) {
-    if (row.provider !== "upper" && row.provider !== "spacepay") continue;
+    const provider = row.provider as PixProvider;
+    if (!(PIX_FEE_PROVIDERS as readonly string[]).includes(provider)) continue;
     if (new Date(row.valid_from).getTime() > nowMs) continue;
-    const current = fees[row.provider];
+    const current = fees[provider];
     if (current && current.validFrom >= row.valid_from) continue;
-    fees[row.provider] = {
+    fees[provider] = {
       feePercent: Number(row.fee_percent),
       feeFixedCents: Number(row.fee_fixed_cents),
       validFrom: row.valid_from,

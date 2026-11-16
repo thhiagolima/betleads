@@ -1,7 +1,8 @@
 // Confirms and records Pix charge state (server-only), for every gateway
-// (Upper, SpacePay) behind the `PixGateway` seam (pix-gateway.server.ts).
+// (Upper, SpacePay, PaganoPay) behind the `PixGateway` seam (pix-gateway.server.ts).
 // The webhooks (src/routes/api/public/upper/webhook.ts,
-// src/routes/api/public/spacepay/webhook.$token.ts) and the reconciliation
+// src/routes/api/public/spacepay/webhook.$token.ts,
+// src/routes/api/public/paganopay/webhook.ts) and the reconciliation
 // cron (Task 5) all call `confirmCharge`; crediting is only ever done
 // through `billing_credit_paid_charge` (service_role RPC, Task 1), after a
 // fresh `gateway.get` — always through the gateway stored on the charge's
@@ -14,6 +15,8 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { invalidateTenantStatusCache } from "@/lib/tenant-access.server";
 
 import { sendBillingEmail } from "./billing-emails.server";
+import { recordBillingSignal } from "./billing-signals.server";
+import { PAGANOPAY_DISPUTE_STATUSES } from "./paganopay-pix.server";
 import { maskDocumentsDeep, maskPayerDocument } from "./payer";
 import {
   getPixGateway,
@@ -176,12 +179,31 @@ function refreshTenantAfterInvoiceSettle(charge: {
 }
 
 /**
- * SpacePay maps `refunded` to FAILED, and a FAILED snapshot never overwrites a
- * PAID row (recordChargeSnapshot), so a refund of money we already took
- * would go unnoticed. Flags the row for a human instead (needs_review is
- * sticky; nothing is debited automatically). Only SpacePay exposes the raw
- * status: its `raw` is an allow-list carrying `status` (spacepay-pix.server).
+ * Why a gateway's raw status needs a human, or null:
+ * - "refunded": SpacePay `refunded` / PaganoPay `REFUNDED` map to FAILED, and a
+ *   FAILED snapshot never overwrites a PAID row (recordChargeSnapshot), so a
+ *   refund of money we already took would go unnoticed. Only flagged when the
+ *   charge was paid or credited.
+ * - "dispute": PaganoPay MED/chargeback. Maps to PAID (money was received) but
+ *   is held by PaganoPay: flagged before crediting (needs_review blocks the
+ *   credit) or after (a human decides; nothing is debited automatically).
+ * Both gateways keep `status` in their allow-listed `raw`.
  */
+function reviewReasonFromRaw(
+  provider: string | null,
+  charge: PixCharge,
+): "refunded" | "dispute" | null {
+  const rawStatus = (charge.raw as { status?: unknown } | null)?.status;
+  if (typeof rawStatus !== "string") return null;
+  if (provider === "spacepay") return rawStatus === "refunded" ? "refunded" : null;
+  if (provider === "paganopay") {
+    const status = rawStatus.trim().toUpperCase();
+    if (status === "REFUNDED") return "refunded";
+    if (PAGANOPAY_DISPUTE_STATUSES.has(status)) return "dispute";
+  }
+  return null;
+}
+
 async function flagRefundedPaidCharge(
   chargeRow: {
     id: string;
@@ -191,22 +213,25 @@ async function flagRefundedPaidCharge(
     needs_review: boolean | null;
   },
   charge: PixCharge,
-): Promise<void> {
-  if (chargeRow.provider !== "spacepay") return;
-  const rawStatus = (charge.raw as { status?: unknown } | null)?.status;
-  if (rawStatus !== "refunded") return;
-  if (chargeRow.status !== "PAID" && !chargeRow.credited_at) return;
+): Promise<boolean> {
+  const reason = reviewReasonFromRaw(chargeRow.provider, charge);
+  if (!reason) return false;
+  if (reason === "refunded" && chargeRow.status !== "PAID" && !chargeRow.credited_at) return false;
 
-  console.error("[billing/payment-charges] SpacePay refunded a paid charge; flagged needs_review", {
+  console.error("[billing/payment-charges] gateway refunded or disputed a charge; flagged needs_review", {
     chargeId: chargeRow.id,
+    provider: chargeRow.provider,
+    reason,
     credited: Boolean(chargeRow.credited_at),
   });
-  if (chargeRow.needs_review) return;
+  if (chargeRow.needs_review) return true;
+  if (chargeRow.provider === "paganopay") void recordBillingSignal("paganopay_dispute", reason);
   const { error } = await supabaseAdmin
     .from("payment_charges")
     .update({ needs_review: true, updated_at: new Date().toISOString() })
     .eq("id", chargeRow.id);
   if (error) throw new Error(error.message);
+  return true;
 }
 
 /**
@@ -236,7 +261,7 @@ export async function confirmCharge(
     providerChargeId: chargeRow.provider_charge_id ?? null,
   });
   await recordChargeSnapshot(chargeRow.id, charge);
-  await flagRefundedPaidCharge(chargeRow, charge);
+  const flagged = await flagRefundedPaidCharge(chargeRow, charge);
 
   if (charge.status !== "PAID") return { outcome: "not_paid" };
 
@@ -247,7 +272,7 @@ export async function confirmCharge(
   // server-side as a second layer.
   const amountMismatch =
     charge.paidAmountCents === null || charge.paidAmountCents !== chargeRow.amount_cents;
-  if (chargeRow.needs_review || amountMismatch) {
+  if (chargeRow.needs_review || flagged || amountMismatch) {
     return { outcome: "needs_review" };
   }
 

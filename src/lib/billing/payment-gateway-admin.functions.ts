@@ -1,5 +1,5 @@
 // Super admin management of the Pix gateways (Admin → Faturamento → "Gateways
-// de pagamento"): credentials of Upper and SpacePay stored encrypted in
+// de pagamento"): credentials of Upper, SpacePay and PaganoPay stored encrypted in
 // `payment_gateway_accounts`, and which one receives NEW charges
 // (`payment_gateway_settings`). Env vars stay the fallback (the loader in
 // payment-gateway-config.server.ts reads both).
@@ -19,14 +19,18 @@ import {
   deletePaymentGatewayCredentials,
   describePaymentGateways,
   getActivePixProvider,
+  getPaganoPayConfig,
   getSpacePayConfig,
   getUpperConfig,
   savePaymentGatewayCredentials,
   setActivePixProvider,
+  type GatewayConfigSource,
+  type PaganoPayConfig,
   type SpacePayConfig,
   type UpperConfig,
 } from "./payment-gateway-config.server";
 import {
+  testPaganoPayConnection,
   testSpacePayConnection,
   testUpperConnection,
   type GatewayTestResult,
@@ -38,7 +42,16 @@ type AdminContext = { userId: string };
 export const PAYMENT_GATEWAY_LABEL: Record<PixProvider, string> = {
   upper: "Upper",
   spacepay: "SpacePay",
+  paganopay: "PaganoPay",
 };
+
+async function loadedConfigOf(
+  provider: PixProvider,
+): Promise<{ source: GatewayConfigSource; config: unknown }> {
+  if (provider === "upper") return getUpperConfig();
+  if (provider === "spacepay") return getSpacePayConfig();
+  return getPaganoPayConfig();
+}
 
 export const SPACEPAY_CALLBACK_SECRET_MIN = 32;
 export const SPACEPAY_PLATFORM_ID_MAX = 200;
@@ -94,23 +107,8 @@ const apiBaseField = optionalText(500).refine(
   "A URL da API precisa começar com https://.",
 );
 
-const upperCredentialsInput = z.object({
-  apiKey: optionalText(),
-  webhookSecret: optionalText(),
-  apiBase: apiBaseField,
-});
-
-const spacePayCredentialsInput = z.object({
-  gatewayToken: optionalText(4000),
-  casinoToken: optionalText(4000),
-  /** X-Platform-Id (optional; blank = keep, clearFields erases; unset sends the gateway token). */
-  platformId: optionalText(SPACEPAY_PLATFORM_ID_MAX),
-  callbackSecret: optionalText(500).refine(
-    (v) => v === undefined || v.length >= SPACEPAY_CALLBACK_SECRET_MIN,
-    `O segredo do callback precisa ter ao menos ${SPACEPAY_CALLBACK_SECRET_MIN} caracteres.`,
-  ),
-  apiBase: apiBaseField,
-  payer: z
+function payerInput() {
+  return z
     .object({
       name: optionalText(200),
       document: optionalText(30).refine(
@@ -127,13 +125,48 @@ const spacePayCredentialsInput = z.object({
       ),
     })
     .optional()
-    .default({ name: undefined, document: undefined, email: undefined, phone: undefined }),
+    .default({ name: undefined, document: undefined, email: undefined, phone: undefined });
+}
+
+const upperCredentialsInput = z.object({
+  apiKey: optionalText(),
+  webhookSecret: optionalText(),
+  apiBase: apiBaseField,
+});
+
+const spacePayCredentialsInput = z.object({
+  gatewayToken: optionalText(4000),
+  casinoToken: optionalText(4000),
+  /** X-Platform-Id (optional; blank = keep, clearFields erases; unset sends the gateway token). */
+  platformId: optionalText(SPACEPAY_PLATFORM_ID_MAX),
+  callbackSecret: optionalText(500).refine(
+    (v) => v === undefined || v.length >= SPACEPAY_CALLBACK_SECRET_MIN,
+    `O segredo do callback precisa ter ao menos ${SPACEPAY_CALLBACK_SECRET_MIN} caracteres.`,
+  ),
+  apiBase: apiBaseField,
+  payer: payerInput(),
+});
+
+const paganoPayCredentialsInput = z.object({
+  publicKey: optionalText(200).refine(
+    (v) => v === undefined || /^pk_[0-9a-f]{8,}$/i.test(v),
+    "A chave pública da PaganoPay começa com pk_.",
+  ),
+  secretKey: optionalText(300).refine(
+    (v) => v === undefined || /^sk_[0-9a-f]{8,}$/i.test(v),
+    "A chave secreta da PaganoPay começa com sk_.",
+  ),
+  webhookSecret: optionalText(500),
+  apiBase: apiBaseField,
+  /** Blank fields fall back to the payer stored for SpacePay (decision 2026-11-16). */
+  payer: payerInput(),
 });
 
 const UPPER_CLEARABLE = ["webhookSecret", "apiBase"] as const;
 const SPACEPAY_CLEARABLE = ["casinoToken", "platformId", "apiBase"] as const;
+const PAGANOPAY_CLEARABLE = ["apiBase"] as const;
 
-const providerInput = z.enum(["upper", "spacepay"]);
+const providerInput = z.enum(["upper", "spacepay", "paganopay"]);
 
 export const adminSavePaymentGatewayInput = z.discriminatedUnion("provider", [
   z.object({
@@ -147,11 +180,17 @@ export const adminSavePaymentGatewayInput = z.discriminatedUnion("provider", [
     credentials: spacePayCredentialsInput,
     clearFields: z.array(z.enum(SPACEPAY_CLEARABLE)).optional().default([]),
   }),
+  z.object({
+    provider: z.literal("paganopay"),
+    credentials: paganoPayCredentialsInput,
+    clearFields: z.array(z.enum(PAGANOPAY_CLEARABLE)).optional().default([]),
+  }),
 ]);
 
 export const adminTestPaymentGatewayInput = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("upper"), credentials: upperCredentialsInput.optional() }),
   z.object({ provider: z.literal("spacepay"), credentials: spacePayCredentialsInput.optional() }),
+  z.object({ provider: z.literal("paganopay"), credentials: paganoPayCredentialsInput.optional() }),
 ]);
 
 export const adminSetActivePixProviderInput = z.object({ provider: providerInput });
@@ -161,6 +200,7 @@ type SaveInput = z.output<typeof adminSavePaymentGatewayInput>;
 type TestInput = z.output<typeof adminTestPaymentGatewayInput>;
 type UpperInput = z.output<typeof upperCredentialsInput>;
 type SpacePayInput = z.output<typeof spacePayCredentialsInput>;
+type PaganoPayInput = z.output<typeof paganoPayCredentialsInput>;
 
 // ---------------------------------------------------------------------------
 // Merge with what is stored (blank = keep)
@@ -209,6 +249,40 @@ function mergeSpacePay(input: SpacePayInput, stored: SpacePayConfig | null, clea
   };
 }
 
+async function storedPaganoPay(): Promise<PaganoPayConfig | null> {
+  const loaded = await getPaganoPayConfig();
+  return loaded.source === "database" ? loaded.config : null;
+}
+
+/**
+ * Field by field: typed value, else the stored PaganoPay payer, else the payer
+ * configured for SpacePay (DB or env) — the same fixed payer of ours
+ * (decision 2026-11-16), copied into the PaganoPay row so deleting SpacePay
+ * later never leaves PaganoPay without one.
+ */
+export function mergePaganoPay(
+  input: PaganoPayInput,
+  stored: PaganoPayConfig | null,
+  spacePayPayer: SpacePayConfig["payer"] | null,
+  clear: readonly string[] = [],
+) {
+  const payer = input.payer ?? {};
+  const pickPayer = (key: "name" | "document" | "email" | "phone", typed: string | undefined) =>
+    typed ?? stored?.payer[key] ?? spacePayPayer?.[key] ?? null;
+  return {
+    publicKey: input.publicKey ?? stored?.publicKey ?? null,
+    secretKey: input.secretKey ?? stored?.secretKey ?? null,
+    webhookSecret: input.webhookSecret ?? stored?.webhookSecret ?? null,
+    apiBase: input.apiBase ?? (clear.includes("apiBase") ? null : (stored?.apiBase ?? null)),
+    payer: {
+      name: pickPayer("name", payer.name),
+      document: pickPayer("document", payer.document?.replace(/\D/g, "")),
+      email: pickPayer("email", payer.email),
+      phone: pickPayer("phone", payer.phone?.replace(/\D/g, "")),
+    },
+  };
+}
+
 /** Names (never values) of the fields that differ between two credential objects. */
 function changedFields(before: unknown, after: unknown, prefix = ""): string[] {
   const a = (before ?? {}) as Record<string, unknown>;
@@ -252,9 +326,35 @@ export async function adminSavePaymentGatewayFor(
   await assertSuperAdmin(context.userId);
   const data: SaveInput = adminSavePaymentGatewayInput.parse(raw);
 
-  let before: UpperConfig | SpacePayConfig | null;
-  let next: UpperConfig | SpacePayConfig;
-  if (data.provider === "upper") {
+  let before: UpperConfig | SpacePayConfig | PaganoPayConfig | null;
+  let next: UpperConfig | SpacePayConfig | PaganoPayConfig;
+  if (data.provider === "paganopay") {
+    const stored = await storedPaganoPay();
+    before = stored;
+    const spacePayPayer = (await getSpacePayConfig()).config?.payer ?? null;
+    const m = mergePaganoPay(data.credentials, stored, spacePayPayer, data.clearFields);
+    if (!m.publicKey) throw new Error("Informe a chave pública (pk_) da PaganoPay.");
+    if (!m.secretKey) throw new Error("Informe a chave secreta (sk_) da PaganoPay.");
+    if (!m.webhookSecret) {
+      throw new Error("Informe o segredo do webhook (painel da PaganoPay → Integrações → Webhook).");
+    }
+    const { name, document, email, phone } = m.payer;
+    if (!name || !document || !email || !phone) {
+      throw new Error(
+        "Informe os dados do pagador (não há pagador salvo na SpacePay para copiar).",
+      );
+    }
+    if (!isValidCpf(document) && !isValidCnpj(document)) {
+      throw new Error("Documento do pagador inválido (informe um CPF ou CNPJ válido).");
+    }
+    next = {
+      publicKey: m.publicKey,
+      secretKey: m.secretKey,
+      webhookSecret: m.webhookSecret,
+      apiBase: m.apiBase,
+      payer: { name, document, email, phone },
+    };
+  } else if (data.provider === "upper") {
     const stored = await storedUpper();
     before = stored;
     const merged = mergeUpper(data.credentials, stored, data.clearFields);
@@ -310,7 +410,20 @@ export async function adminTestPaymentGatewayFor(
   const candidate = data.credentials !== undefined;
 
   let result: GatewayTestResult;
-  if (data.provider === "upper") {
+  if (data.provider === "paganopay") {
+    const loaded = await getPaganoPayConfig();
+    const creds = data.credentials
+      ? mergePaganoPay(data.credentials, loaded.source === "database" ? loaded.config : null, null)
+      : loaded.config;
+    result =
+      creds?.publicKey && creds.secretKey
+        ? await testPaganoPayConnection({
+            publicKey: creds.publicKey,
+            secretKey: creds.secretKey,
+            apiBase: creds.apiBase ?? null,
+          })
+        : { ok: false, message: "PaganoPay sem chaves de API configuradas." };
+  } else if (data.provider === "upper") {
     const loaded = await getUpperConfig();
     const creds = data.credentials
       ? mergeUpper(data.credentials, loaded.source === "database" ? loaded.config : null)
@@ -347,7 +460,7 @@ export async function adminSetActivePixProviderFor(
 ): Promise<{ ok: true; activeProvider: PixProvider }> {
   await assertSuperAdmin(context.userId);
   const { provider } = adminSetActivePixProviderInput.parse(raw);
-  const loaded = provider === "upper" ? await getUpperConfig() : await getSpacePayConfig();
+  const loaded = await loadedConfigOf(provider);
   if (loaded.source === "none" || !loaded.config) {
     throw new Error(
       `${PAYMENT_GATEWAY_LABEL[provider]} não tem credenciais configuradas. Salve as credenciais antes de usá-la.`,
@@ -368,6 +481,14 @@ export async function adminSetActivePixProviderFor(
 function envHasFallback(provider: PixProvider): boolean {
   const has = (name: string) => Boolean(process.env[name]?.trim());
   if (provider === "upper") return has("UPPER_API_KEY");
+  if (provider === "paganopay") {
+    const payer = (field: string) =>
+      has(`PAGANOPAY_PAYER_${field}`) || has(`SPACEPAY_PAYER_${field}`);
+    return (
+      ["PAGANOPAY_PUBLIC_KEY", "PAGANOPAY_SECRET_KEY", "PAGANOPAY_WEBHOOK_SECRET"].every(has) &&
+      ["NAME", "DOCUMENT", "EMAIL", "PHONE"].every(payer)
+    );
+  }
   return [
     "SPACEPAY_GATEWAY_TOKEN",
     "SPACEPAY_CALLBACK_SECRET",
@@ -395,7 +516,7 @@ export async function adminDeletePaymentGatewayFor(
   await assertSuperAdmin(context.userId);
   const { provider } = adminDeletePaymentGatewayInput.parse(raw);
   const label = PAYMENT_GATEWAY_LABEL[provider];
-  const loaded = provider === "upper" ? await getUpperConfig() : await getSpacePayConfig();
+  const loaded = await loadedConfigOf(provider);
   if (loaded.source !== "database") {
     throw new Error(`${label} não tem credenciais salvas no banco.`);
   }

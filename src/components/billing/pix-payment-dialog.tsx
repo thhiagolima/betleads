@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, Copy, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -294,7 +295,7 @@ export function PixPaymentDialog({
                     Expira em {formatCountdown(secondsLeft)}
                   </p>
                 )}
-                {qrSrc && (
+                {qrSrc ? (
                   <div className="flex justify-center">
                     <img
                       src={qrSrc}
@@ -302,6 +303,20 @@ export function PixPaymentDialog({
                       className="h-48 w-48 rounded-md border bg-white p-2"
                     />
                   </div>
+                ) : (
+                  charge.emv && (
+                    // Gateway sent no image (PaganoPay often doesn't): draw it from the EMV.
+                    <div className="flex justify-center" data-testid="pix-qr-from-emv">
+                      <QRCodeSVG
+                        value={charge.emv}
+                        size={176}
+                        marginSize={0}
+                        role="img"
+                        aria-label="QR Code Pix"
+                        className="h-48 w-48 rounded-md border bg-white p-2"
+                      />
+                    </div>
+                  )
                 )}
                 {charge.emv && (
                   <div className="space-y-2">

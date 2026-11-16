@@ -671,7 +671,7 @@ describe("adminGetPixFeesFor", () => {
 
   it("reports the loader's active provider (upper)", async () => {
     const result = await adminGetPixFeesFor(ctxFor(SUPER_ADMIN));
-    expect(result).toEqual({ activeProvider: "upper", fees: { upper: null, spacepay: null } });
+    expect(result).toEqual({ activeProvider: "upper", fees: { upper: null, spacepay: null, paganopay: null } });
   });
 
   it("refuses a non-super-admin", async () => {

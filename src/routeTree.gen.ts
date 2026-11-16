@@ -103,6 +103,7 @@ import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/pu
 import { Route as ApiPublicHooksWebpushLeadBillingRouteImport } from './routes/api/public/hooks/webpush-lead-billing'
 import { Route as ApiPublicHooksWhatsappResumeRouteImport } from './routes/api/public/hooks/whatsapp-resume'
 import { Route as ApiPublicMetaSyncTickRouteImport } from './routes/api/public/meta-sync/tick'
+import { Route as ApiPublicPaganopayWebhookRouteImport } from './routes/api/public/paganopay/webhook'
 import { Route as ApiPublicPopupEventRouteImport } from './routes/api/public/popup/event'
 import { Route as ApiPublicPopupListRouteImport } from './routes/api/public/popup/list'
 import { Route as ApiPublicPrecallDispatchRouteImport } from './routes/api/public/precall/dispatch'
@@ -619,6 +620,12 @@ const ApiPublicMetaSyncTickRoute = ApiPublicMetaSyncTickRouteImport.update({
   path: '/api/public/meta-sync/tick',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicPaganopayWebhookRoute =
+  ApiPublicPaganopayWebhookRouteImport.update({
+    id: '/api/public/paganopay/webhook',
+    path: '/api/public/paganopay/webhook',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicPopupEventRoute = ApiPublicPopupEventRouteImport.update({
   id: '/api/public/popup/event',
   path: '/api/public/popup/event',
@@ -829,6 +836,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/webpush-lead-billing': typeof ApiPublicHooksWebpushLeadBillingRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
+  '/api/public/paganopay/webhook': typeof ApiPublicPaganopayWebhookRoute
   '/api/public/popup/event': typeof ApiPublicPopupEventRoute
   '/api/public/popup/list': typeof ApiPublicPopupListRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
@@ -945,6 +953,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/webpush-lead-billing': typeof ApiPublicHooksWebpushLeadBillingRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
+  '/api/public/paganopay/webhook': typeof ApiPublicPaganopayWebhookRoute
   '/api/public/popup/event': typeof ApiPublicPopupEventRoute
   '/api/public/popup/list': typeof ApiPublicPopupListRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
@@ -1062,6 +1071,7 @@ export interface FileRoutesById {
   '/api/public/hooks/webpush-lead-billing': typeof ApiPublicHooksWebpushLeadBillingRoute
   '/api/public/hooks/whatsapp-resume': typeof ApiPublicHooksWhatsappResumeRoute
   '/api/public/meta-sync/tick': typeof ApiPublicMetaSyncTickRoute
+  '/api/public/paganopay/webhook': typeof ApiPublicPaganopayWebhookRoute
   '/api/public/popup/event': typeof ApiPublicPopupEventRoute
   '/api/public/popup/list': typeof ApiPublicPopupListRoute
   '/api/public/precall/dispatch': typeof ApiPublicPrecallDispatchRoute
@@ -1180,6 +1190,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/webpush-lead-billing'
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
+    | '/api/public/paganopay/webhook'
     | '/api/public/popup/event'
     | '/api/public/popup/list'
     | '/api/public/precall/dispatch'
@@ -1296,6 +1307,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/webpush-lead-billing'
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
+    | '/api/public/paganopay/webhook'
     | '/api/public/popup/event'
     | '/api/public/popup/list'
     | '/api/public/precall/dispatch'
@@ -1412,6 +1424,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/webpush-lead-billing'
     | '/api/public/hooks/whatsapp-resume'
     | '/api/public/meta-sync/tick'
+    | '/api/public/paganopay/webhook'
     | '/api/public/popup/event'
     | '/api/public/popup/list'
     | '/api/public/precall/dispatch'
@@ -1511,6 +1524,7 @@ export interface RootRouteChildren {
   ApiPublicHooksWebpushLeadBillingRoute: typeof ApiPublicHooksWebpushLeadBillingRoute
   ApiPublicHooksWhatsappResumeRoute: typeof ApiPublicHooksWhatsappResumeRoute
   ApiPublicMetaSyncTickRoute: typeof ApiPublicMetaSyncTickRoute
+  ApiPublicPaganopayWebhookRoute: typeof ApiPublicPaganopayWebhookRoute
   ApiPublicPopupEventRoute: typeof ApiPublicPopupEventRoute
   ApiPublicPopupListRoute: typeof ApiPublicPopupListRoute
   ApiPublicPrecallDispatchRoute: typeof ApiPublicPrecallDispatchRoute
@@ -2193,6 +2207,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicMetaSyncTickRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/paganopay/webhook': {
+      id: '/api/public/paganopay/webhook'
+      path: '/api/public/paganopay/webhook'
+      fullPath: '/api/public/paganopay/webhook'
+      preLoaderRoute: typeof ApiPublicPaganopayWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/popup/event': {
       id: '/api/public/popup/event'
       path: '/api/public/popup/event'
@@ -2566,6 +2587,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksWebpushLeadBillingRoute: ApiPublicHooksWebpushLeadBillingRoute,
   ApiPublicHooksWhatsappResumeRoute: ApiPublicHooksWhatsappResumeRoute,
   ApiPublicMetaSyncTickRoute: ApiPublicMetaSyncTickRoute,
+  ApiPublicPaganopayWebhookRoute: ApiPublicPaganopayWebhookRoute,
   ApiPublicPopupEventRoute: ApiPublicPopupEventRoute,
   ApiPublicPopupListRoute: ApiPublicPopupListRoute,
   ApiPublicPrecallDispatchRoute: ApiPublicPrecallDispatchRoute,

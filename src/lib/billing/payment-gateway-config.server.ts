@@ -1,4 +1,4 @@
-// Pix gateway credentials (Upper, SpacePay) and the active provider, read from
+// Pix gateway credentials (Upper, SpacePay, PaganoPay) and the active provider, read from
 // the database (supabase/migrations/20261227100100_payment_gateway_accounts.sql)
 // with the env vars used before as fallback.
 //
@@ -34,17 +34,27 @@ export type SpacePayConfig = {
   apiBase: string | null;
   payer: { name: string; document: string; email: string; phone: string };
 };
+export type PaganoPayConfig = {
+  /** X-API-Public-Key (pk_…). */
+  publicKey: string;
+  /** X-API-Secret-Key (sk_…). Also authorizes withdrawals: server only, never logged. */
+  secretKey: string;
+  /** Secret shown in the PaganoPay panel (Integrações → Webhook); signs every webhook. */
+  webhookSecret: string;
+  apiBase: string | null;
+  payer: { name: string; document: string; email: string; phone: string };
+};
 export type GatewayConfigSource = "database" | "env" | "none";
 export type Loaded<T> = { source: GatewayConfigSource; config: T | null };
 
-type GatewayConfig = UpperConfig | SpacePayConfig;
+type GatewayConfig = UpperConfig | SpacePayConfig | PaganoPayConfig;
 
-const PROVIDERS: PixProvider[] = ["upper", "spacepay"];
+const PROVIDERS: PixProvider[] = ["upper", "spacepay", "paganopay"];
 const CACHE_TTL_MS = 30_000;
 const LOG_PREFIX = "[payment-gateway-config]";
 
 function isPixProvider(value: unknown): value is PixProvider {
-  return value === "upper" || value === "spacepay";
+  return value === "upper" || value === "spacepay" || value === "paganopay";
 }
 
 function clean(value: string | null | undefined): string | null {
@@ -83,8 +93,36 @@ function envSpacePayConfig(): SpacePayConfig | null {
   };
 }
 
+/**
+ * PaganoPay sends the same fixed payer of ours that SpacePay did (decision
+ * 2026-11-16): PAGANOPAY_PAYER_* when set, else SPACEPAY_PAYER_*.
+ */
+function envPaganoPayConfig(): PaganoPayConfig | null {
+  const publicKey = env("PAGANOPAY_PUBLIC_KEY");
+  const secretKey = env("PAGANOPAY_SECRET_KEY");
+  const webhookSecret = env("PAGANOPAY_WEBHOOK_SECRET");
+  const payerVar = (field: string) =>
+    env(`PAGANOPAY_PAYER_${field}`) ?? env(`SPACEPAY_PAYER_${field}`);
+  const name = payerVar("NAME");
+  const document = payerVar("DOCUMENT");
+  const email = payerVar("EMAIL");
+  const phone = payerVar("PHONE");
+  if (!publicKey || !secretKey || !webhookSecret || !name || !document || !email || !phone) {
+    return null;
+  }
+  return {
+    publicKey,
+    secretKey,
+    webhookSecret,
+    apiBase: env("PAGANOPAY_API_BASE"),
+    payer: { name, document, email, phone },
+  };
+}
+
 function envConfig(provider: PixProvider): GatewayConfig | null {
-  return provider === "upper" ? envUpperConfig() : envSpacePayConfig();
+  if (provider === "upper") return envUpperConfig();
+  if (provider === "spacepay") return envSpacePayConfig();
+  return envPaganoPayConfig();
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +139,16 @@ function toStored(provider: PixProvider, creds: GatewayConfig): Record<string, s
     put("apiKey", c.apiKey);
     put("webhookSecret", c.webhookSecret);
     put("apiBase", c.apiBase);
+  } else if (provider === "paganopay") {
+    const c = creds as PaganoPayConfig;
+    put("publicKey", c.publicKey);
+    put("secretKey", c.secretKey);
+    put("webhookSecret", c.webhookSecret);
+    put("apiBase", c.apiBase);
+    put("payerName", c.payer?.name);
+    put("payerDocument", c.payer?.document);
+    put("payerEmail", c.payer?.email);
+    put("payerPhone", c.payer?.phone);
   } else {
     const c = creds as SpacePayConfig;
     put("gatewayToken", c.gatewayToken);
@@ -124,12 +172,27 @@ function fromStored(provider: PixProvider, stored: Record<string, string>): Gate
     if (!apiKey) return null;
     return { apiKey, webhookSecret: get("webhookSecret"), apiBase: get("apiBase") };
   }
-  const gatewayToken = get("gatewayToken");
-  const callbackSecret = get("callbackSecret");
   const name = get("payerName");
   const document = get("payerDocument");
   const email = get("payerEmail");
   const phone = get("payerPhone");
+  if (provider === "paganopay") {
+    const publicKey = get("publicKey");
+    const secretKey = get("secretKey");
+    const webhookSecret = get("webhookSecret");
+    if (!publicKey || !secretKey || !webhookSecret || !name || !document || !email || !phone) {
+      return null;
+    }
+    return {
+      publicKey,
+      secretKey,
+      webhookSecret,
+      apiBase: get("apiBase"),
+      payer: { name, document, email, phone },
+    };
+  }
+  const gatewayToken = get("gatewayToken");
+  const callbackSecret = get("callbackSecret");
   if (!gatewayToken || !callbackSecret || !name || !document || !email || !phone) return null;
   return {
     gatewayToken,
@@ -178,6 +241,19 @@ function buildHints(provider: PixProvider, creds: GatewayConfig): Record<string,
     if (c.apiBase) hints.apiBase = c.apiBase;
     return hints;
   }
+  if (provider === "paganopay") {
+    const c = creds as PaganoPayConfig;
+    // The public key is not secret but still only identifies; masked like the rest.
+    hints.publicKey = maskSecret(c.publicKey);
+    hints.secretKey = maskSecret(c.secretKey);
+    hints.webhookSecret = maskSecret(c.webhookSecret);
+    if (c.apiBase) hints.apiBase = c.apiBase;
+    hints.payerName = c.payer.name;
+    hints.payerDocument = maskDocument(c.payer.document);
+    hints.payerEmail = maskEmail(c.payer.email);
+    hints.payerPhone = maskPhone(c.payer.phone);
+    return hints;
+  }
   const c = creds as SpacePayConfig;
   hints.gatewayToken = maskSecret(c.gatewayToken);
   if (c.casinoToken) hints.casinoToken = maskSecret(c.casinoToken);
@@ -214,10 +290,17 @@ const PREVIOUS_SECRET_UNTIL_KEY = "previousSecretUntil";
 
 function currentSecretOf(provider: PixProvider, config: GatewayConfig | null): string | null {
   if (!config) return null;
-  return provider === "upper"
-    ? clean((config as UpperConfig).webhookSecret)
-    : clean((config as SpacePayConfig).callbackSecret);
+  if (provider === "upper") return clean((config as UpperConfig).webhookSecret);
+  if (provider === "paganopay") return clean((config as PaganoPayConfig).webhookSecret);
+  return clean((config as SpacePayConfig).callbackSecret);
 }
+
+/** Env var holding each provider's webhook/callback secret. */
+const ENV_SECRET_VAR: Record<PixProvider, string> = {
+  upper: "UPPER_WEBHOOK_SECRET",
+  spacepay: "SPACEPAY_CALLBACK_SECRET",
+  paganopay: "PAGANOPAY_WEBHOOK_SECRET",
+};
 
 function previousSecretFrom(
   stored: Record<string, string>,
@@ -346,6 +429,10 @@ export async function getSpacePayConfig(): Promise<Loaded<SpacePayConfig>> {
   return (await loadConfig("spacepay")) as Loaded<SpacePayConfig>;
 }
 
+export async function getPaganoPayConfig(): Promise<Loaded<PaganoPayConfig>> {
+  return (await loadConfig("paganopay")) as Loaded<PaganoPayConfig>;
+}
+
 function envActiveProvider(): PixProvider | null {
   const raw = env("BILLING_PIX_PROVIDER")?.toLowerCase();
   return isPixProvider(raw) ? raw : null;
@@ -404,13 +491,27 @@ export async function upperWebhookSecrets(): Promise<string[]> {
   return dedupe([fromDb?.webhookSecret, await dbPreviousSecret("upper"), env("UPPER_WEBHOOK_SECRET")]);
 }
 
+/**
+ * PaganoPay webhook secrets: DB webhookSecret, the replaced one (24 h) and env
+ * PAGANOPAY_WEBHOOK_SECRET. PaganoPay switches its secret instantly on
+ * rotation, so the old one only helps with deliveries signed just before.
+ */
+export async function paganoPayWebhookSecrets(): Promise<string[]> {
+  const fromDb = (await dbConfig("paganopay")) as PaganoPayConfig | null;
+  return dedupe([
+    fromDb?.webhookSecret,
+    await dbPreviousSecret("paganopay"),
+    env("PAGANOPAY_WEBHOOK_SECRET"),
+  ]);
+}
+
 // ---------------------------------------------------------------------------
 // Admin write helpers (validation is the caller's job)
 
 /** Encrypts, stores masked hints, upserts the provider row and drops the cache. */
 export async function savePaymentGatewayCredentials(
   provider: PixProvider,
-  creds: UpperConfig | SpacePayConfig,
+  creds: GatewayConfig,
   actorUserId: string,
 ): Promise<void> {
   if (!isPixProvider(provider)) throw new Error(`unknown_pix_provider: ${String(provider)}`);
@@ -424,8 +525,7 @@ export async function savePaymentGatewayCredentials(
   const snap = await snapshot();
   const before = snap.accounts[provider];
   const replaced =
-    currentSecretOf(provider, before?.config ?? null) ??
-    (provider === "upper" ? env("UPPER_WEBHOOK_SECRET") : env("SPACEPAY_CALLBACK_SECRET"));
+    currentSecretOf(provider, before?.config ?? null) ?? env(ENV_SECRET_VAR[provider]);
   const next = currentSecretOf(provider, normalized);
   if (replaced && replaced !== next) {
     stored[PREVIOUS_SECRET_KEY] = replaced;

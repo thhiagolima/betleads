@@ -19,7 +19,11 @@ export type BillingSignalCode =
   | "upper_unavailable"
   | "spacepay_unauthorized"
   | "spacepay_unavailable"
-  | "spacepay_webhook_invalid_token";
+  | "spacepay_webhook_invalid_token"
+  | "paganopay_unauthorized"
+  | "paganopay_unavailable"
+  | "paganopay_webhook_invalid_signature"
+  | "paganopay_dispute";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LooseDb = any;
