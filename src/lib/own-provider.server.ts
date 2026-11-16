@@ -497,7 +497,7 @@ export async function testOwnProviderAccountFor(
   if (account.ownerTenantId !== ctx.tenantId || account.provider === "onesignal") {
     throw new Error("Cadastre a conta própria deste canal antes.");
   }
-  return runProviderAccountTest(account, data.phone);
+  return runProviderAccountTest(account, data.phone, { ownShortBrasilDetail: true });
 }
 
 // ---------------------------------------------------------------------------

@@ -813,7 +813,7 @@ export async function runProviderAccountTest(
    * Super admin only: Infobip 401/403 with the provider's text. The house
    * admin (own account) keeps the generic failure, as designed.
    */
-  options: { infobipStatusDetail?: boolean } = {},
+  options: { infobipStatusDetail?: boolean; ownShortBrasilDetail?: boolean } = {},
 ): Promise<ProviderAccountTestResult> {
   let result: ProviderAccountTestResult;
 
@@ -891,7 +891,7 @@ export async function runProviderAccountTest(
   } else {
     if (!rawPhone) throw new Error("Informe um celular para receber o SMS de teste.");
     const phone = requireBrazilianPhone(rawPhone);
-    const { postShortBrasilSingle } = await import("@/lib/sms.functions");
+    const { postShortBrasilSingle, summarizeProviderError } = await import("@/lib/sms.functions");
     try {
       if (!isEnvAccount) {
         // A URL que postShortBrasilSingle realmente usa: a da API Short Code
@@ -908,7 +908,15 @@ export async function runProviderAccountTest(
         result = { ok: true, message: `SMS de teste aceito pelo provedor para ${phone}.` };
       } else {
         console.error(`provider_account.test short_brasil: status ${r.status}`, r.body);
-        result = { ok: false, message: PROVIDER_TEST_FAILURE_MESSAGE };
+        // Conta própria da casa: os endereços são fixos no código (nada de
+        // URL vinda da casa), então a resposta não serve de oráculo — a casa
+        // vê o motivo que a conta DELA deu.
+        result = {
+          ok: false,
+          message: options.ownShortBrasilDetail
+            ? `A Short Brasil recusou o teste (${account.shortcodeToken ? "API Short Code" : "API legada: usuário e chave"}): ${summarizeProviderError(r.status, r.body)}`
+            : PROVIDER_TEST_FAILURE_MESSAGE,
+        };
       }
     } catch (error) {
       console.error("provider_account.test short_brasil:", error);

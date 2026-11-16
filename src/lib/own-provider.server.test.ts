@@ -407,6 +407,17 @@ describe("testOwnProviderAccountFor", () => {
     expect(await testOwnProviderAccountFor(ctx(), { channel: "sms" })).toMatchObject({ ok: true });
   });
 
+  it("Short Brasil: the house sees which API refused and why (fixed URLs, no oracle)", async () => {
+    await save({ channel: "sms", provider: "short_brasil", label: "Short da casa", credentials: { usuario: "u", chave: SECRET } });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ status: 101 })));
+    const result = await testOwnProviderAccountFor(ctx(), { channel: "sms", phone: "11999990000" });
+    expect(result).toEqual({
+      ok: false,
+      message: "A Short Brasil recusou o teste (API legada: usuário e chave): Short Brasil: erro de autenticacao",
+    });
+    expect(result.message).not.toContain(SECRET);
+  });
+
   it("refuses when the house has no account in the channel", async () => {
     await expect(testOwnProviderAccountFor(ctx(), { channel: "sms" })).rejects.toThrow(/Cadastre/);
   });
