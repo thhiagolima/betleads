@@ -279,6 +279,38 @@ describe("saveOwnProviderAccountFor", () => {
     expect(await decryptProviderCredentials(String(row.credentials_encrypted))).toEqual({ api_key: SECRET });
   });
 
+  it("Short Brasil: removing the saved token keeps usuário e chave (API legada)", async () => {
+    const shortBrasil = { channel: "sms", provider: "short_brasil", label: "Short da casa" };
+    await save({ ...shortBrasil, credentials: { shortcode_token: "token-errado", usuario: "u", chave: SECRET } });
+    await save({ ...shortBrasil, credentials: {}, clearCredentials: ["shortcode_token"] });
+    expect(await decryptProviderCredentials(String(owned()[0].credentials_encrypted))).toEqual({
+      usuario: "u",
+      chave: SECRET,
+    });
+    const audit = tenantAudits().at(-1)!;
+    expect(audit.metadata).toMatchObject({ credentials_removed: ["shortcode_token"] });
+  });
+
+  it("Short Brasil: removing everything that gives access is refused and nothing changes", async () => {
+    const shortBrasil = { channel: "sms", provider: "short_brasil", label: "Short da casa" };
+    await save({ ...shortBrasil, credentials: { shortcode_token: SECRET } });
+    await expect(
+      save({ ...shortBrasil, credentials: {}, clearCredentials: ["shortcode_token"] }),
+    ).rejects.toThrow("Informe o token da API Short Code ou o usuário e a chave da API legada.");
+    expect(await decryptProviderCredentials(String(owned()[0].credentials_encrypted))).toEqual({
+      shortcode_token: SECRET,
+    });
+  });
+
+  it("a field typed again is never cleared", async () => {
+    const shortBrasil = { channel: "sms", provider: "short_brasil", label: "Short da casa" };
+    await save({ ...shortBrasil, credentials: { shortcode_token: "velho" } });
+    await save({ ...shortBrasil, credentials: { shortcode_token: "novo" }, clearCredentials: ["shortcode_token"] });
+    expect(await decryptProviderCredentials(String(owned()[0].credentials_encrypted))).toEqual({
+      shortcode_token: "novo",
+    });
+  });
+
   it("switching the provider of an existing account is refused", async () => {
     await save(infobipSms);
     await expect(

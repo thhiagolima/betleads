@@ -382,7 +382,13 @@ export async function saveOwnProviderAccountFor(
     throw new Error("Não é possível trocar o provedor de uma conta existente.");
   }
 
-  const stored = existing ? await storedCredentials(existing) : {};
+  const stored: Record<string, string> = existing ? { ...(await storedCredentials(existing)) } : {};
+  // Apagar só vale para a Short Brasil e só para o que não foi digitado de novo.
+  const cleared =
+    data.provider === "short_brasil"
+      ? (data.clearCredentials ?? []).filter((key) => key in stored && !data.credentials[key])
+      : [];
+  for (const key of cleared) delete stored[key];
   // Short Brasil de conta própria não aceita URL nenhuma (usa sempre os
   // endereços padrão do código): nada do config entra.
   const { config, credentialsEncrypted, credentialKeys } = await buildAccountPayload(
@@ -458,13 +464,17 @@ export async function saveOwnProviderAccountFor(
       own_unit_cost: ownUnitCost,
       credentials_set: credentialKeys,
     },
-    metadata: { created: !existing, credentials_changed: credentialsChanged },
+    metadata: {
+      created: !existing,
+      credentials_changed: credentialsChanged,
+      ...(cleared.length ? { credentials_removed: cleared } : {}),
+    },
   });
   await notifyOtherHouseAdmins(
     ctx,
     data.channel,
     existing
-      ? credentialsChanged.length
+      ? credentialsChanged.length || cleared.length
         ? "trocou as credenciais da conta própria"
         : "alterou a conta própria"
       : "cadastrou a conta própria",

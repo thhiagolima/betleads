@@ -306,11 +306,13 @@ export function CredentialsStepView({
   config,
   credentials,
   credentialsSet,
+  cleared = [],
   ownUnitCost,
   password,
   saving,
   onConfigChange,
   onCredentialsChange,
+  onToggleClear,
   onOwnUnitCostChange,
   onPasswordChange,
   onSubmit,
@@ -320,11 +322,14 @@ export function CredentialsStepView({
   config: Record<string, string>;
   credentials: Record<string, string>;
   credentialsSet: string[];
+  /** Credenciais salvas marcadas para apagar ao salvar (só Short Brasil). */
+  cleared?: string[];
   ownUnitCost: string;
   password: string;
   saving: boolean;
   onConfigChange: (key: string, value: string) => void;
   onCredentialsChange: (key: string, value: string) => void;
+  onToggleClear?: (key: string) => void;
   onOwnUnitCostChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onSubmit: () => void;
@@ -349,20 +354,44 @@ export function CredentialsStepView({
           />
         </div>
       ))}
-      {OWN_CREDENTIAL_FIELDS[provider].map((field) => (
-        <div key={field.key} className="space-y-1">
-          <Label htmlFor={`own-cred-${field.key}`}>{field.label}</Label>
-          <Input
-            id={`own-cred-${field.key}`}
-            type="password"
-            autoComplete="off"
-            value={credentials[field.key] ?? ""}
-            onChange={(e) => onCredentialsChange(field.key, e.target.value)}
-            placeholder={credentialHint(field.key, credentialsSet)}
-            className="font-mono text-meta"
-          />
-        </div>
-      ))}
+      {OWN_CREDENTIAL_FIELDS[provider].map((field) => {
+        const removable =
+          provider === "short_brasil" && onToggleClear && credentialsSet.includes(field.key);
+        const removing = removable && cleared.includes(field.key);
+        return (
+          <div key={field.key} className="space-y-1">
+            <Label htmlFor={`own-cred-${field.key}`}>{field.label}</Label>
+            <div className="flex gap-2">
+              <Input
+                id={`own-cred-${field.key}`}
+                type="password"
+                autoComplete="off"
+                value={removing ? "" : (credentials[field.key] ?? "")}
+                onChange={(e) => onCredentialsChange(field.key, e.target.value)}
+                placeholder={removing ? "Será apagado ao salvar" : credentialHint(field.key, credentialsSet)}
+                disabled={Boolean(removing)}
+                className="font-mono text-meta"
+              />
+              {removable && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onToggleClear?.(field.key)}
+                >
+                  {removing ? "Manter" : "Remover"}
+                </Button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {provider === "short_brasil" && (
+        <p className="text-meta text-muted-foreground">
+          Com o token da API Short Code preenchido, ele é usado no lugar do usuário e da chave.
+          Para usar só a API legada, remova o token.
+        </p>
+      )}
       {channel === "sms" && (
         <div className="space-y-1">
           <Label htmlFor="own-unit-cost">Custo por SMS na sua conta (R$)</Label>
@@ -553,6 +582,7 @@ export function OwnProviderWizard({
     voice_from: account?.voiceFrom ?? "",
   });
   const [credentials, setCredentials] = useState<Record<string, string>>({});
+  const [cleared, setCleared] = useState<string[]>([]);
   const [ownUnitCost, setOwnUnitCost] = useState(
     account?.ownUnitCost != null ? String(account.ownUnitCost) : "",
   );
@@ -574,6 +604,9 @@ export function OwnProviderWizard({
           label,
           config: provider === "short_brasil" ? {} : config,
           credentials,
+          clearCredentials: cleared.length
+            ? (cleared as Array<"shortcode_token" | "usuario" | "chave">)
+            : undefined,
           ownUnitCost: cost === null ? undefined : cost,
           password: savePassword,
         },
@@ -587,6 +620,7 @@ export function OwnProviderWizard({
       );
       setSavePassword("");
       setCredentials({});
+      setCleared([]);
       setStep("webhook");
     },
     onError: (error) => toast.error(errorMessage(error)),
@@ -636,6 +670,13 @@ export function OwnProviderWizard({
           config={config}
           credentials={credentials}
           credentialsSet={account?.credentialsSet ?? []}
+          cleared={cleared}
+          onToggleClear={(key) => {
+            setCleared((prev) =>
+              prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+            );
+            setCredentials((prev) => ({ ...prev, [key]: "" }));
+          }}
           ownUnitCost={ownUnitCost}
           password={savePassword}
           saving={save.isPending}

@@ -667,3 +667,58 @@ describe("etapas clicáveis no topo do assistente", () => {
     expect(html).toMatch(/<button[^>]*>Credenciais<\/button>/);
   });
 });
+
+describe("Remover credencial salva (Short Brasil)", () => {
+  const base = {
+    channel: "sms" as const,
+    config: {},
+    credentials: {},
+    ownUnitCost: "",
+    password: "",
+    saving: false,
+    onConfigChange: () => {},
+    onCredentialsChange: () => {},
+    onOwnUnitCostChange: () => {},
+    onPasswordChange: () => {},
+    onSubmit: () => {},
+  };
+
+  it("mostra Remover só nos campos salvos da Short Brasil", () => {
+    const html = renderToStaticMarkup(
+      <CredentialsStepView
+        {...base}
+        provider="short_brasil"
+        credentialsSet={["shortcode_token", "usuario", "chave"]}
+        onToggleClear={() => {}}
+      />,
+    );
+    expect(html.match(/>Remover</g)?.length).toBe(3);
+    expect(html).toContain("Para usar só a API legada, remova o token.");
+  });
+
+  it("campo marcado: vazio, travado e com Manter", () => {
+    const html = renderToStaticMarkup(
+      <CredentialsStepView
+        {...base}
+        provider="short_brasil"
+        credentialsSet={["shortcode_token", "usuario", "chave"]}
+        cleared={["shortcode_token"]}
+        onToggleClear={() => {}}
+      />,
+    );
+    expect(html).toContain("Será apagado ao salvar");
+    expect(html).toContain(">Manter<");
+  });
+
+  it("Infobip: sem Remover (a API key é obrigatória)", () => {
+    const html = renderToStaticMarkup(
+      <CredentialsStepView
+        {...base}
+        provider="infobip"
+        credentialsSet={["api_key"]}
+        onToggleClear={() => {}}
+      />,
+    );
+    expect(html).not.toContain(">Remover<");
+  });
+});

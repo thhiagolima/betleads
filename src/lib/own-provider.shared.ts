@@ -84,6 +84,12 @@ export const saveOwnProviderAccountInput = z.object({
       api_key: optionalText,
     })
     .prefault({}),
+  /**
+   * Short Brasil: credenciais salvas que a casa quer apagar (ex.: o token
+   * Short Code, para usar só usuário e chave da API legada). O que sobrar
+   * ainda precisa formar um acesso válido.
+   */
+  clearCredentials: z.array(z.enum(["shortcode_token", "usuario", "chave"])).max(3).optional(),
   /** R$ por unidade do canal; ausente mantém o valor gravado. */
   ownUnitCost: z.number().min(0).max(1_000_000).nullable().optional(),
   password,
