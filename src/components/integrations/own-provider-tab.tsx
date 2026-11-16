@@ -25,7 +25,12 @@ import {
   type OwnProviderChannel,
 } from "@/lib/own-provider.shared";
 import type { OwnProviderChannelState } from "@/lib/own-provider.server";
-import { errorMessage, OwnProviderWizard } from "./own-provider-wizard";
+import {
+  errorMessage,
+  OwnProviderWizard,
+  WIZARD_MODE_TITLES,
+  type WizardMode,
+} from "./own-provider-wizard";
 
 export const OWN_PROVIDER_QUERY_KEY = ["own-provider", "channels"] as const;
 
@@ -78,12 +83,27 @@ export function OwnProviderChannelCard({
   deactivating,
 }: {
   state: OwnProviderChannelState;
-  onOpenWizard: () => void;
+  /** Sem modo = "configurar" (fluxo completo). */
+  onOpenWizard: (mode?: WizardMode) => void;
   onDeactivate: () => void;
   deactivating: boolean;
 }) {
   const channelLabel = OWN_PROVIDER_CHANNEL_LABEL[state.channel];
   const account = state.account;
+  // Conta cadastrada e ativa: a casa troca as credenciais quando quiser e,
+  // na Short Brasil, revê a URL do webhook (na Infobip ela vai em cada envio).
+  const accountActions = account ? (
+    <div className="flex flex-wrap gap-2">
+      <Button type="button" variant="outline" onClick={() => onOpenWizard("editar")}>
+        Editar credenciais
+      </Button>
+      {account.provider === "short_brasil" && (
+        <Button type="button" variant="outline" onClick={() => onOpenWizard("webhook")}>
+          Ver URL do webhook
+        </Button>
+      )}
+    </div>
+  ) : null;
 
   if (state.revoked) {
     return (
@@ -118,7 +138,7 @@ export function OwnProviderChannelCard({
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">Provedor: Plataforma BetLeads</p>
-          <Button type="button" onClick={onOpenWizard} {...tourAnchor("webhooks.canais.usar-minha-conta")}>
+          <Button type="button" onClick={() => onOpenWizard()} {...tourAnchor("webhooks.canais.usar-minha-conta")}>
             Usar minha conta
           </Button>
         </CardContent>
@@ -162,6 +182,7 @@ export function OwnProviderChannelCard({
         <CardContent className="space-y-3">
           <p className="text-sm">{OWN_PROVIDER_LABEL[account.provider]}</p>
           <p className="text-sm text-muted-foreground">{lastCallbackLabel(account.lastCallbackAt)}</p>
+          {accountActions}
           <Button
             type="button"
             variant="outline"
@@ -184,9 +205,10 @@ export function OwnProviderChannelCard({
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">Provedor: Plataforma BetLeads</p>
-        <Button type="button" onClick={onOpenWizard} {...tourAnchor("webhooks.canais.usar-minha-conta")}>
+        <Button type="button" onClick={() => onOpenWizard()} {...tourAnchor("webhooks.canais.usar-minha-conta")}>
           Usar minha conta
         </Button>
+        {accountActions}
       </CardContent>
     </Card>
   );
@@ -199,7 +221,9 @@ export function OwnProviderTab() {
   const { data, isLoading } = useOwnProviderChannels();
   const qc = useQueryClient();
   const deactivateFn = useServerFn(deactivateOwnProvider);
-  const [wizardChannel, setWizardChannel] = useState<OwnProviderChannel | null>(null);
+  const [wizard, setWizard] = useState<{ channel: OwnProviderChannel; mode: WizardMode } | null>(
+    null,
+  );
 
   const deactivate = useMutation({
     mutationFn: (channel: OwnProviderChannel) => deactivateFn({ data: { channel } }),
@@ -211,7 +235,7 @@ export function OwnProviderTab() {
   });
 
   const states = data ?? [];
-  const wizardState = states.find((s) => s.channel === wizardChannel) ?? null;
+  const wizardState = states.find((s) => s.channel === wizard?.channel) ?? null;
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Carregando…</p>;
@@ -233,22 +257,26 @@ export function OwnProviderTab() {
           <OwnProviderChannelCard
             key={state.channel}
             state={state}
-            onOpenWizard={() => setWizardChannel(state.channel)}
+            onOpenWizard={(mode = "configurar") => setWizard({ channel: state.channel, mode })}
             onDeactivate={() => deactivate.mutate(state.channel)}
             deactivating={deactivate.isPending}
           />
         ))}
       </div>
-      {wizardState && (
-        <Dialog open onOpenChange={(open) => !open && setWizardChannel(null)}>
+      {wizard && wizardState && (
+        <Dialog open onOpenChange={(open) => !open && setWizard(null)}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Usar minha conta — {OWN_PROVIDER_CHANNEL_LABEL[wizardState.channel]}</DialogTitle>
+              <DialogTitle>
+                {WIZARD_MODE_TITLES[wizard.mode]} — {OWN_PROVIDER_CHANNEL_LABEL[wizardState.channel]}
+              </DialogTitle>
             </DialogHeader>
             <OwnProviderWizard
+              key={`${wizard.channel}:${wizard.mode}`}
               state={wizardState}
+              mode={wizard.mode}
               onDone={() => {
-                setWizardChannel(null);
+                setWizard(null);
                 void qc.invalidateQueries({ queryKey: OWN_PROVIDER_QUERY_KEY });
               }}
             />

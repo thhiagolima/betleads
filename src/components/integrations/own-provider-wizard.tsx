@@ -60,9 +60,28 @@ export const WIZARD_STEP_LABELS: Record<WizardStep, string> = {
   ativar: "Ativar",
 };
 
+/**
+ * O que o assistente abre para fazer: "configurar" (fluxo completo),
+ * "editar" (só trocar credenciais/remetente/custo de uma conta já
+ * cadastrada) ou "webhook" (só rever a URL do webhook).
+ */
+export type WizardMode = "configurar" | "editar" | "webhook";
+
+export const WIZARD_MODE_TITLES: Record<WizardMode, string> = {
+  configurar: "Usar minha conta",
+  editar: "Editar credenciais",
+  webhook: "URL do webhook",
+};
+
 /** Etapa inicial: uma conta já cadastrada pula direto para o webhook (as
- * credenciais já estão salvas). */
-export function initialWizardStep(account: OwnAccountView | null): WizardStep {
+ * credenciais já estão salvas); "editar" abre nas credenciais e "webhook"
+ * no webhook. */
+export function initialWizardStep(
+  account: OwnAccountView | null,
+  mode: WizardMode = "configurar",
+): WizardStep {
+  if (mode === "editar" && account) return "credenciais";
+  if (mode === "webhook" && account) return "webhook";
   return account ? "webhook" : "provedor";
 }
 
@@ -353,10 +372,12 @@ export function CredentialsStepView({
 export function WebhookStepView({
   provider,
   callbackUrl,
+  nextLabel = "Continuar",
   onNext,
 }: {
   provider: OwnProvider;
   callbackUrl: string | null;
+  nextLabel?: string;
   onNext: () => void;
 }) {
   const webhook = webhookStepContent(provider, callbackUrl);
@@ -380,7 +401,7 @@ export function WebhookStepView({
       )}
       {webhook.note && <p className="text-sm text-muted-foreground">{webhook.note}</p>}
       <Button type="button" onClick={onNext}>
-        Continuar
+        {nextLabel}
       </Button>
     </div>
   );
@@ -483,15 +504,20 @@ export function ActivateStepView({
 
 export function OwnProviderWizard({
   state,
+  mode = "configurar",
   onDone,
 }: {
   state: OwnProviderChannelState;
+  mode?: WizardMode;
   onDone: () => void;
 }) {
   const { channel, account, monthlyFeeCents, callbackUrl } = state;
   const providers = OWN_PROVIDERS_BY_CHANNEL[channel];
+  // Editar uma conta já em uso / só rever o webhook: termina no webhook,
+  // sem testar nem ativar de novo.
+  const endsAtWebhook = mode === "webhook" || (mode === "editar" && state.usingOwnAccount);
 
-  const [step, setStep] = useState<WizardStep>(initialWizardStep(account));
+  const [step, setStep] = useState<WizardStep>(initialWizardStep(account, mode));
   const [provider, setProvider] = useState<OwnProvider>(account?.provider ?? providers[0]);
   const [label, setLabel] = useState(account?.label ?? "");
   const [config, setConfig] = useState<Record<string, string>>({
@@ -527,7 +553,11 @@ export function OwnProviderWizard({
       });
     },
     onSuccess: () => {
-      toast.success("Conta salva");
+      toast.success(
+        mode === "editar" && state.usingOwnAccount
+          ? "Credenciais atualizadas. Os próximos envios já usam os dados novos."
+          : "Conta salva",
+      );
       setSavePassword("");
       setCredentials({});
       setStep("webhook");
@@ -555,7 +585,7 @@ export function OwnProviderWizard({
 
   return (
     <div className="space-y-5">
-      <StepIndicator step={step} />
+      {mode === "configurar" && <StepIndicator step={step} />}
 
       {step === "provedor" && (
         <ProviderStepView
@@ -594,7 +624,8 @@ export function OwnProviderWizard({
         <WebhookStepView
           provider={provider}
           callbackUrl={callbackUrl}
-          onNext={() => setStep("testar")}
+          nextLabel={endsAtWebhook ? "Concluir" : undefined}
+          onNext={endsAtWebhook ? onDone : () => setStep("testar")}
         />
       )}
 

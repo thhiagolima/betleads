@@ -38,6 +38,7 @@ import {
   showOwnProviderTab,
 } from "./own-provider-tab";
 import {
+  OwnProviderWizard,
   ActivateStepView,
   CredentialsStepView,
   OWN_CREDENTIAL_FIELDS,
@@ -249,6 +250,12 @@ describe("initialWizardStep / nextStep / previousStep", () => {
   it("sem conta começa em provedor; com conta começa em webhook", () => {
     expect(initialWizardStep(null)).toBe("provedor");
     expect(initialWizardStep(account())).toBe("webhook");
+  });
+
+  it('"editar" abre nas credenciais e "webhook" no webhook (só com conta)', () => {
+    expect(initialWizardStep(account(), "editar")).toBe("credenciais");
+    expect(initialWizardStep(account(), "webhook")).toBe("webhook");
+    expect(initialWizardStep(null, "editar")).toBe("provedor");
   });
 
   it("avança e volta na ordem fixa", () => {
@@ -525,5 +532,100 @@ describe("ActivateStepView (etapa 5 — ativar com senha)", () => {
 describe("OwnProviderTab", () => {
   it("renderiza sem quebrar quando não há canais (estado de carregamento mockado)", () => {
     expect(() => renderToStaticMarkup(<OwnProviderTab />)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Editar credenciais / rever o webhook
+
+describe("Editar credenciais e Ver URL do webhook", () => {
+  const shortBrasil = account({ provider: "short_brasil", label: "SMS da casa", credentialsSet: ["usuario", "chave"] });
+
+  it("conta em uso: card mostra Editar credenciais e Ver URL do webhook (Short Brasil)", () => {
+    const html = renderToStaticMarkup(
+      <OwnProviderChannelCard
+        state={channelState({ account: shortBrasil, usingOwnAccount: true })}
+        onOpenWizard={() => {}}
+        onDeactivate={() => {}}
+        deactivating={false}
+      />,
+    );
+    expect(html).toContain("Editar credenciais");
+    expect(html).toContain("Ver URL do webhook");
+    expect(html).toContain("Voltar para a rota da BetLeads");
+  });
+
+  it("Infobip: Editar credenciais sem Ver URL do webhook", () => {
+    const html = renderToStaticMarkup(
+      <OwnProviderChannelCard
+        state={channelState({ account: account(), usingOwnAccount: true })}
+        onOpenWizard={() => {}}
+        onDeactivate={() => {}}
+        deactivating={false}
+      />,
+    );
+    expect(html).toContain("Editar credenciais");
+    expect(html).not.toContain("Ver URL do webhook");
+  });
+
+  it("conta cadastrada e ainda não ligada: Usar minha conta + Editar credenciais", () => {
+    const html = renderToStaticMarkup(
+      <OwnProviderChannelCard
+        state={channelState({ account: shortBrasil })}
+        onOpenWizard={() => {}}
+        onDeactivate={() => {}}
+        deactivating={false}
+      />,
+    );
+    expect(html).toContain("Usar minha conta");
+    expect(html).toContain("Editar credenciais");
+  });
+
+  it("sem conta, revogada ou desativada pela BetLeads: sem Editar credenciais", () => {
+    for (const state of [
+      channelState(),
+      channelState({ account: shortBrasil, revoked: true, usingOwnAccount: true }),
+      channelState({ account: account({ status: "disabled" }), usingOwnAccount: true }),
+    ]) {
+      const html = renderToStaticMarkup(
+        <OwnProviderChannelCard
+          state={state}
+          onOpenWizard={() => {}}
+          onDeactivate={() => {}}
+          deactivating={false}
+        />,
+      );
+      expect(html).not.toContain("Editar credenciais");
+    }
+  });
+
+  it('modo "editar": abre nas credenciais, sem a barra de etapas', () => {
+    const html = renderToStaticMarkup(
+      <OwnProviderWizard
+        state={channelState({ account: shortBrasil, usingOwnAccount: true })}
+        mode="editar"
+        onDone={() => {}}
+      />,
+    );
+    expect(html).toContain("Salvo — preencha só para substituir");
+    expect(html).toContain("Salvar e continuar");
+    expect(html).not.toContain("Etapas do assistente");
+  });
+
+  it('modo "webhook": mostra a URL e termina em Concluir', () => {
+    const html = renderToStaticMarkup(
+      <OwnProviderWizard
+        state={channelState({
+          account: shortBrasil,
+          usingOwnAccount: true,
+          callbackUrl: "https://betleads.io/api/public/sms-webhook/pa_x",
+        })}
+        mode="webhook"
+        onDone={() => {}}
+      />,
+    );
+    expect(html).toContain("https://betleads.io/api/public/sms-webhook/pa_x");
+    expect(html).toContain("Concluir");
+    expect(html).not.toContain("Continuar");
   });
 });
