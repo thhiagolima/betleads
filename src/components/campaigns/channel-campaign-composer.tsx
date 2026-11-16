@@ -377,6 +377,14 @@ export function ChannelCampaignComposer({
   const smsAccount = useSmsSendAccounts(smsAccountId, open && channel === "sms" && !isExpert);
   const smsAccountName = smsAccount.selectedName;
   const smsAccountError = channel === "sms" ? smsAccount.error : null;
+  // Conta própria da casa: R$ 0 por SMS, salvo quando a campanha escolhe uma
+  // conta extra da BetLeads (aí vale o preço da plataforma).
+  const smsUnitPrice =
+    smsPrice == null
+      ? null
+      : smsPrice.ownAccount && smsAccount.providerAccountId
+        ? (smsPrice.platformUnitPrice ?? smsPrice.unitPrice)
+        : smsPrice.unitPrice;
   const smsTemplatesQuery = useQuery({
     queryKey: ["sms-templates"],
     queryFn: () => listSmsTemplateFn(),
@@ -728,7 +736,7 @@ export function ChannelCampaignComposer({
       : channel === "webpush"
         ? (webpushCounts?.estimatedCost ?? 0)
         : recipients;
-  const smsCostBrl = smsPrice == null ? null : parts * smsPrice.unitPrice;
+  const smsCostBrl = smsUnitPrice == null ? null : parts * smsUnitPrice;
   // Expert: estimated cost for every channel and what the monthly cap allows.
   const expertUsageData = expertUsage.data as ExpertCampaignUsageData | undefined;
   const expertCost = isExpert
@@ -1227,7 +1235,7 @@ export function ChannelCampaignComposer({
             when,
             recipients: count,
             cost,
-            smsUnitPrice: smsPrice?.unitPrice,
+            smsUnitPrice: smsUnitPrice ?? undefined,
             smsExempt,
             webpushExempt,
           });
@@ -2092,7 +2100,7 @@ export function ChannelCampaignComposer({
                     {smsExempt
                       ? "Casa isenta"
                       : `${num(cost)} segmento${cost === 1 ? "" : "s"} · ${
-                          smsPrice == null ? "—" : brl(cost * smsPrice.unitPrice)
+                          smsUnitPrice == null ? "—" : brl(cost * smsUnitPrice)
                         }`}
                   </p>
                 </div>
@@ -2191,7 +2199,7 @@ export function ChannelCampaignComposer({
                     when,
                     recipients: sendableRecipients,
                     cost,
-                    smsUnitPrice: smsPrice?.unitPrice,
+                    smsUnitPrice: smsUnitPrice ?? undefined,
                     smsExempt,
                     webpushExempt,
                   })}

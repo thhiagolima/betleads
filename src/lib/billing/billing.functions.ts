@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { dbUuid } from "@/lib/zod-helpers";
 import { getEffectivePrices } from "./pricing.server";
+import { channelUsesOwnAccountFor } from "../provider-accounts.server";
 import { resolveOperationalTenantId, resolveTenantForBilling } from "../tenant-access.server";
 import { isBillingEnforcementEnabled, isTenantPayer, requireTenantPayer } from "./billing-state.server";
 import { billingView, type BillingRole } from "./billing-view";
@@ -65,8 +66,27 @@ export const getBillingPrices = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
-    return getEffectivePrices(tenantId);
+    const prices = await getEffectivePrices(tenantId);
+    // Conta própria da casa: o envio não é cobrado por unidade (a reserva
+    // sai R$ 0), então a estimativa da tela também mostra R$ 0.
+    for (const [item, channel] of OWN_ACCOUNT_ITEMS) {
+      if (await channelUsesOwnAccountFor(tenantId, channel)) {
+        prices[item] = {
+          ...prices[item],
+          unitPrice: 0,
+          ownAccount: true,
+          platformUnitPrice: prices[item].unitPrice,
+        };
+      }
+    }
+    return prices;
   });
+
+const OWN_ACCOUNT_ITEMS = [
+  ["sms", "sms"],
+  ["voice_30s", "voice"],
+  ["email", "email"],
+] as const;
 
 export const billingItem = z.enum(["sms", "voice_30s", "email", "webpush", "webpush_lead"]);
 

@@ -36,6 +36,13 @@ export type EffectivePrice = {
   unitPrice: number;
   freeMonthlyUnits: number;
   exempt: boolean;
+  /**
+   * Canal da casa ligado à conta própria dela: envio sem cobrança por
+   * unidade (wallet_reserve zera), então unitPrice = 0. platformUnitPrice
+   * guarda o preço da rota BetLeads (conta extra escolhida na campanha).
+   */
+  ownAccount?: boolean;
+  platformUnitPrice?: number;
 };
 
 /**

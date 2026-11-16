@@ -75,6 +75,7 @@ import { countSmsSegments, toGsm7Text } from "./sms-segments";
 import { expertNamesById } from "./expert-names.server";
 import { captureServerException } from "@/lib/observability/sentry.server";
 import { cancelSmsCampaignRow, resumePausedSmsCampaign } from "./sms-campaign-dispatch.server";
+import { ownProviderSendRefusedMessage } from "./own-provider.shared";
 import { externalListBlockedVariables, externalListVariablesError } from "./campaign-external-list";
 import {
   assertSmsSendChoice,
@@ -1288,7 +1289,7 @@ export const sendTestSms = createServerFn({ method: "POST" })
         variables = buildPlayerVariables(p, house);
       }
     }
-    return sendSmsInternal({
+    const result = await sendSmsInternal({
       to: data.to,
       content: data.content,
       playerId: data.playerId ?? null,
@@ -1299,7 +1300,22 @@ export const sendTestSms = createServerFn({ method: "POST" })
       house,
       providerAccountId: data.providerAccountId ?? null,
     });
+    // Conta própria da casa: a recusa é da conta DELA, então a casa vê o
+    // motivo (a tela mostra "Sua conta de…" sem a capa genérica).
+    if (!result.ok && !data.providerAccountId && (await channelUsesOwnAccountFor(tenantId, "sms"))) {
+      return { ...result, error: ownAccountRefusalMessage(result.error) };
+    }
+    return result;
   });
+
+/** "HTTP 403: Invalid token" -> motivo legível para a casa dona da conta. */
+export function ownAccountRefusalMessage(raw: string | null | undefined): string {
+  const reason = String(raw ?? "")
+    .replace(/^HTTP\s*\d{3}:?\s*/i, "")
+    .trim();
+  const base = ownProviderSendRefusedMessage("sms");
+  return reason ? `${base} Resposta da sua conta: "${reason.slice(0, 200)}".` : base;
+}
 
 export const listSmsLogs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
