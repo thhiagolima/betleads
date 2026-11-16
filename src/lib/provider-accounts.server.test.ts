@@ -316,6 +316,27 @@ describe("resolveChannelAccount", () => {
     });
   });
 
+  it("conta com dono da Short Brasil ignora token salvo: usa usuário + chave (API legada)", async () => {
+    state.tables.provider_accounts.push(
+      await ownSmsAccount({
+        owner_tenant_id: TENANT,
+        credentials_encrypted: await encryptProviderCredentials({
+          shortcode_token: "token-antigo",
+          usuario: "u",
+          chave: "c",
+        }),
+      }),
+    );
+    assign(TENANT, "sms", OWN_SMS);
+    expect(await resolveSmsAccount(TENANT)).toMatchObject({ shortcodeToken: "", usuario: "u", chave: "c" });
+  });
+
+  it("conta da plataforma (sem dono) continua usando o token Short Code", async () => {
+    state.tables.provider_accounts.push(await ownSmsAccount());
+    assign(TENANT, "sms", OWN_SMS);
+    expect(await resolveSmsAccount(TENANT)).toMatchObject({ shortcodeToken: "own-token" });
+  });
+
   it("conta da plataforma tem ownerTenantId null", async () => {
     const sms = await resolveSmsAccount(null);
     expect(sms.ownerTenantId).toBeNull();

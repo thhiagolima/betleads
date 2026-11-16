@@ -225,7 +225,7 @@ describe("authorization of every house function (Review Focus 2)", () => {
   it("a provider the channel does not support is refused", async () => {
     grant("email");
     await expect(
-      save({ channel: "email", provider: "short_brasil", label: "x", credentials: { shortcode_token: "t" } }),
+      save({ channel: "email", provider: "short_brasil", label: "x", credentials: { usuario: "u", chave: "c" } }),
     ).rejects.toThrow(/não atende/);
   });
 });
@@ -279,42 +279,32 @@ describe("saveOwnProviderAccountFor", () => {
     expect(await decryptProviderCredentials(String(row.credentials_encrypted))).toEqual({ api_key: SECRET });
   });
 
-  it("Short Brasil: removing the saved token keeps usuário e chave (API legada)", async () => {
+  it("Short Brasil: own account only takes usuário + chave", async () => {
+    await expect(
+      save({ channel: "sms", provider: "short_brasil", label: "Short da casa", credentials: { usuario: "u" } }),
+    ).rejects.toThrow("Informe o usuário e a chave da API da Short Brasil.");
+    expect(owned()).toHaveLength(0);
+  });
+
+  it("Short Brasil: a token saved before is dropped on the next save", async () => {
     const shortBrasil = { channel: "sms", provider: "short_brasil", label: "Short da casa" };
-    await save({ ...shortBrasil, credentials: { shortcode_token: "token-errado", usuario: "u", chave: SECRET } });
-    await save({ ...shortBrasil, credentials: {}, clearCredentials: ["shortcode_token"] });
+    await save({ ...shortBrasil, credentials: { usuario: "u", chave: SECRET } });
+    // Conta antiga com token gravado (antes de a conta própria ser só legada).
+    const [row] = owned();
+    const { encryptProviderCredentials } = await import("./secret-box.server");
+    row.credentials_encrypted = await encryptProviderCredentials({ shortcode_token: "velho", usuario: "u", chave: SECRET });
+    await save({ ...shortBrasil, credentials: {} });
     expect(await decryptProviderCredentials(String(owned()[0].credentials_encrypted))).toEqual({
       usuario: "u",
       chave: SECRET,
     });
-    const audit = tenantAudits().at(-1)!;
-    expect(audit.metadata).toMatchObject({ credentials_removed: ["shortcode_token"] });
-  });
-
-  it("Short Brasil: removing everything that gives access is refused and nothing changes", async () => {
-    const shortBrasil = { channel: "sms", provider: "short_brasil", label: "Short da casa" };
-    await save({ ...shortBrasil, credentials: { shortcode_token: SECRET } });
-    await expect(
-      save({ ...shortBrasil, credentials: {}, clearCredentials: ["shortcode_token"] }),
-    ).rejects.toThrow("Informe o token da API Short Code ou o usuário e a chave da API legada.");
-    expect(await decryptProviderCredentials(String(owned()[0].credentials_encrypted))).toEqual({
-      shortcode_token: SECRET,
-    });
-  });
-
-  it("a field typed again is never cleared", async () => {
-    const shortBrasil = { channel: "sms", provider: "short_brasil", label: "Short da casa" };
-    await save({ ...shortBrasil, credentials: { shortcode_token: "velho" } });
-    await save({ ...shortBrasil, credentials: { shortcode_token: "novo" }, clearCredentials: ["shortcode_token"] });
-    expect(await decryptProviderCredentials(String(owned()[0].credentials_encrypted))).toEqual({
-      shortcode_token: "novo",
-    });
+    expect(tenantAudits().at(-1)!.metadata).toMatchObject({ credentials_removed: ["shortcode_token"] });
   });
 
   it("switching the provider of an existing account is refused", async () => {
     await save(infobipSms);
     await expect(
-      save({ channel: "sms", provider: "short_brasil", label: "x", credentials: { shortcode_token: "t" } }),
+      save({ channel: "sms", provider: "short_brasil", label: "x", credentials: { usuario: "u", chave: "c" } }),
     ).rejects.toThrow("Não é possível trocar o provedor de uma conta existente.");
     expect(owned()[0].provider).toBe("infobip");
   });
@@ -325,7 +315,7 @@ describe("saveOwnProviderAccountFor", () => {
       provider: "short_brasil",
       label: "Short da casa",
       config: { shortcode_url: "https://evil.example.com" },
-      credentials: { shortcode_token: SECRET },
+      credentials: { usuario: "u", chave: SECRET },
     });
     expect(owned()[0].config).toEqual({});
     const [state] = await getOwnProviderStateFor(ctx());
@@ -334,7 +324,7 @@ describe("saveOwnProviderAccountFor", () => {
     expect(state.callbackUrl).toBe(
       `https://app.betleads.io/api/public/sms-webhook/${encodeURIComponent(token)}`,
     );
-    expect(state.account!.credentialsSet).toEqual(["shortcode_token"]);
+    expect(state.account!.credentialsSet).toEqual(["usuario", "chave"]);
     expect(JSON.stringify(state)).not.toContain(SECRET);
   });
 

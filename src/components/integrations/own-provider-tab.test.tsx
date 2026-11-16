@@ -668,57 +668,28 @@ describe("etapas clicáveis no topo do assistente", () => {
   });
 });
 
-describe("Remover credencial salva (Short Brasil)", () => {
-  const base = {
-    channel: "sms" as const,
-    config: {},
-    credentials: {},
-    ownUnitCost: "",
-    password: "",
-    saving: false,
-    onConfigChange: () => {},
-    onCredentialsChange: () => {},
-    onOwnUnitCostChange: () => {},
-    onPasswordChange: () => {},
-    onSubmit: () => {},
-  };
-
-  it("mostra Remover só nos campos salvos da Short Brasil", () => {
+describe("Short Brasil da conta própria: só usuário e chave", () => {
+  it("sem campo de token", () => {
     const html = renderToStaticMarkup(
       <CredentialsStepView
-        {...base}
+        channel="sms"
         provider="short_brasil"
-        credentialsSet={["shortcode_token", "usuario", "chave"]}
-        onToggleClear={() => {}}
+        config={{}}
+        credentials={{}}
+        credentialsSet={["usuario", "chave"]}
+        ownUnitCost=""
+        password=""
+        saving={false}
+        onConfigChange={() => {}}
+        onCredentialsChange={() => {}}
+        onOwnUnitCostChange={() => {}}
+        onPasswordChange={() => {}}
+        onSubmit={() => {}}
       />,
     );
-    expect(html.match(/>Remover</g)?.length).toBe(3);
-    expect(html).toContain("Para usar só a API legada, remova o token.");
-  });
-
-  it("campo marcado: vazio, travado e com Manter", () => {
-    const html = renderToStaticMarkup(
-      <CredentialsStepView
-        {...base}
-        provider="short_brasil"
-        credentialsSet={["shortcode_token", "usuario", "chave"]}
-        cleared={["shortcode_token"]}
-        onToggleClear={() => {}}
-      />,
-    );
-    expect(html).toContain("Será apagado ao salvar");
-    expect(html).toContain(">Manter<");
-  });
-
-  it("Infobip: sem Remover (a API key é obrigatória)", () => {
-    const html = renderToStaticMarkup(
-      <CredentialsStepView
-        {...base}
-        provider="infobip"
-        credentialsSet={["api_key"]}
-        onToggleClear={() => {}}
-      />,
-    );
-    expect(html).not.toContain(">Remover<");
+    expect(html).not.toContain("own-cred-shortcode_token");
+    expect(html).not.toContain("Token");
+    expect(html).toContain('id="own-cred-usuario"');
+    expect(html).toContain('id="own-cred-chave"');
   });
 });

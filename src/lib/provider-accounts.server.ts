@@ -367,7 +367,9 @@ async function buildDbAccount(row: AccountRow): Promise<AnyProviderAccount> {
       provider: "short_brasil",
       label: row.label,
       ownerTenantId,
-      shortcodeToken: cleanCredential(creds.shortcode_token),
+      // Conta própria: só a API legada (usuário + chave); token salvo antes
+      // é ignorado.
+      shortcodeToken: owned ? "" : cleanCredential(creds.shortcode_token),
       shortcodeUrl: owned
         ? OWNED_SHORT_BRASIL_URLS.shortcodeUrl
         : configString(config, "shortcode_url") ?? DEFAULT_SHORTCODE_MESSAGES_URL,

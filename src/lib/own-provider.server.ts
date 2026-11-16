@@ -383,12 +383,15 @@ export async function saveOwnProviderAccountFor(
   }
 
   const stored: Record<string, string> = existing ? { ...(await storedCredentials(existing)) } : {};
-  // Apagar só vale para a Short Brasil e só para o que não foi digitado de novo.
-  const cleared =
-    data.provider === "short_brasil"
-      ? (data.clearCredentials ?? []).filter((key) => key in stored && !data.credentials[key])
-      : [];
-  for (const key of cleared) delete stored[key];
+  // Short Brasil de conta própria: só a API legada (usuário + chave). Um
+  // token Short Code salvo antes é descartado neste salvamento.
+  const droppedToken = data.provider === "short_brasil" && "shortcode_token" in stored;
+  if (data.provider === "short_brasil") {
+    delete stored.shortcode_token;
+    if (!(data.credentials.usuario || stored.usuario) || !(data.credentials.chave || stored.chave)) {
+      throw new Error("Informe o usuário e a chave da API da Short Brasil.");
+    }
+  }
   // Short Brasil de conta própria não aceita URL nenhuma (usa sempre os
   // endereços padrão do código): nada do config entra.
   const { config, credentialsEncrypted, credentialKeys } = await buildAccountPayload(
@@ -467,14 +470,14 @@ export async function saveOwnProviderAccountFor(
     metadata: {
       created: !existing,
       credentials_changed: credentialsChanged,
-      ...(cleared.length ? { credentials_removed: cleared } : {}),
+      ...(droppedToken ? { credentials_removed: ["shortcode_token"] } : {}),
     },
   });
   await notifyOtherHouseAdmins(
     ctx,
     data.channel,
     existing
-      ? credentialsChanged.length || cleared.length
+      ? credentialsChanged.length || droppedToken
         ? "trocou as credenciais da conta própria"
         : "alterou a conta própria"
       : "cadastrou a conta própria",
