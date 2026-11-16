@@ -197,20 +197,47 @@ export function copyToClipboard(text: string, message: string) {
 // ---------------------------------------------------------------------------
 // Indicador de etapas
 
-export function StepIndicator({ step }: { step: WizardStep }) {
+/**
+ * Etapas em que dá para clicar no topo: com a conta já salva, qualquer uma
+ * (dá para voltar às credenciais); sem conta, só as já passadas — avançar
+ * pularia o "Salvar".
+ */
+export function canJumpToStep(target: WizardStep, current: WizardStep, hasAccount: boolean): boolean {
+  if (target === current) return false;
+  return hasAccount || WIZARD_STEPS.indexOf(target) < WIZARD_STEPS.indexOf(current);
+}
+
+export function StepIndicator({
+  step,
+  hasAccount = false,
+  onSelect,
+}: {
+  step: WizardStep;
+  hasAccount?: boolean;
+  onSelect?: (step: WizardStep) => void;
+}) {
   return (
     <nav aria-label="Etapas do assistente" className="flex flex-wrap items-center gap-2">
-      {WIZARD_STEPS.map((s) => (
-        <span
-          key={s}
-          className={cn(
-            "rounded-full px-3 py-1 text-xs font-semibold",
-            s === step ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
-          )}
-        >
-          {WIZARD_STEP_LABELS[s]}
-        </span>
-      ))}
+      {WIZARD_STEPS.map((s) => {
+        const className = cn(
+          "rounded-full px-3 py-1 text-xs font-semibold",
+          s === step ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+        );
+        return onSelect && canJumpToStep(s, step, hasAccount) ? (
+          <button
+            key={s}
+            type="button"
+            className={cn(className, "transition-colors hover:bg-muted/70 hover:text-foreground")}
+            onClick={() => onSelect(s)}
+          >
+            {WIZARD_STEP_LABELS[s]}
+          </button>
+        ) : (
+          <span key={s} className={className} aria-current={s === step ? "step" : undefined}>
+            {WIZARD_STEP_LABELS[s]}
+          </span>
+        );
+      })}
     </nav>
   );
 }
@@ -585,7 +612,9 @@ export function OwnProviderWizard({
 
   return (
     <div className="space-y-5">
-      {mode === "configurar" && <StepIndicator step={step} />}
+      {mode === "configurar" && (
+        <StepIndicator step={step} hasAccount={Boolean(account)} onSelect={setStep} />
+      )}
 
       {step === "provedor" && (
         <ProviderStepView

@@ -39,6 +39,8 @@ import {
 } from "./own-provider-tab";
 import {
   OwnProviderWizard,
+  StepIndicator,
+  canJumpToStep,
   ActivateStepView,
   CredentialsStepView,
   OWN_CREDENTIAL_FIELDS,
@@ -627,5 +629,41 @@ describe("Editar credenciais e Ver URL do webhook", () => {
     expect(html).toContain("https://betleads.io/api/public/sms-webhook/pa_x");
     expect(html).toContain("Concluir");
     expect(html).not.toContain("Continuar");
+  });
+});
+
+describe("etapas clicáveis no topo do assistente", () => {
+  it("com conta salva, qualquer etapa (menos a atual)", () => {
+    expect(canJumpToStep("credenciais", "webhook", true)).toBe(true);
+    expect(canJumpToStep("provedor", "webhook", true)).toBe(true);
+    expect(canJumpToStep("ativar", "webhook", true)).toBe(true);
+    expect(canJumpToStep("webhook", "webhook", true)).toBe(false);
+  });
+
+  it("sem conta, só volta (avançar pularia o Salvar)", () => {
+    expect(canJumpToStep("provedor", "credenciais", false)).toBe(true);
+    expect(canJumpToStep("webhook", "credenciais", false)).toBe(false);
+    expect(canJumpToStep("ativar", "provedor", false)).toBe(false);
+  });
+
+  it("renderiza botões só nas etapas permitidas", () => {
+    const withAccount = renderToStaticMarkup(
+      <StepIndicator step="webhook" hasAccount onSelect={() => {}} />,
+    );
+    expect(withAccount.match(/<button/g)?.length).toBe(4);
+    const noAccount = renderToStaticMarkup(<StepIndicator step="credenciais" onSelect={() => {}} />);
+    expect(noAccount.match(/<button/g)?.length).toBe(1);
+    const readOnly = renderToStaticMarkup(<StepIndicator step="webhook" hasAccount />);
+    expect(readOnly).not.toContain("<button");
+  });
+
+  it("conta cadastrada abre no Webhook com Credenciais clicável", () => {
+    const html = renderToStaticMarkup(
+      <OwnProviderWizard
+        state={channelState({ account: account({ provider: "short_brasil" }) })}
+        onDone={() => {}}
+      />,
+    );
+    expect(html).toMatch(/<button[^>]*>Credenciais<\/button>/);
   });
 });
