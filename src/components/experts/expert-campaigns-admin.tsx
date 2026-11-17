@@ -424,7 +424,7 @@ export function ExpertCampaignReviewBody({
           <CampaignContentPreview detail={detail} />
           {decidable && (
             <p className="text-xs text-muted-foreground">
-              Ao aprovar, o público, os links e o teto do expert são conferidos de novo, e a
+              Ao aprovar, o público e o teto do expert são conferidos de novo, e a
               contagem e o custo podem mudar.
             </p>
           )}

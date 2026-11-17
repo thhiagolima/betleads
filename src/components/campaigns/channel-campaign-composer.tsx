@@ -334,7 +334,7 @@ export function ChannelCampaignComposer({
   const [scheduledAt, setScheduledAt] = useState("");
   const trackLinks = true;
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  /** Expert: the server's last refusal (link policy, cap…), shown inline. */
+  /** Expert: the server's last refusal (cap, audience…), shown inline. */
   const [serverError, setServerError] = useState<string | null>(null);
   const [smsTemplateDialogOpen, setSmsTemplateDialogOpen] = useState(false);
   const [emailTemplateDialogOpen, setEmailTemplateDialogOpen] = useState(false);
@@ -1016,7 +1016,7 @@ export function ChannelCampaignComposer({
 
       if (isExpert) {
         // The expert sends the audience criteria; the server re-resolves it
-        // inside the expert's scope, checks the cap and the link policy, and
+        // inside the expert's scope, checks the cap, and
         // queues the campaign (pending approval in "aprovacao" mode).
         if (expertCapBlock) throw new Error(expertCapBlock);
         const criteria = (audienceCriteria ?? {}) as unknown as Record<string, unknown>;
@@ -1193,7 +1193,7 @@ export function ChannelCampaignComposer({
       onOpenChange(false);
     },
     onError: (error: Error) => {
-      // Expert: the server's own message (link policy, cap, audience) stays on
+      // Expert: the server's own message (cap, audience) stays on
       // screen next to the other notices, not only in a toast.
       if (isExpert) setServerError(error.message);
       toast.error(tenantSafeChannelError(error));

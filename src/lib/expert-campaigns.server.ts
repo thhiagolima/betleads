@@ -29,7 +29,6 @@ import {
   normalizeAffiliateIds,
   type ExpertScope,
 } from "@/lib/expert-campaign-scope.server";
-import { assertExpertContentLinksAllowed } from "@/lib/expert-content-policy.server";
 import { conversionFunnelSnapshot } from "@/lib/conversion-funnel";
 import { resolveCampaignRecipients, type CampaignDb } from "@/lib/campaign-recipients.server";
 import {
@@ -520,7 +519,6 @@ export async function saveExpertSmsCampaignFor(
   await assertTenantNotDemoForSend(expert.tenantId);
   await assertChannelEnabled(expert.tenantId, "sms");
   const scheduled = parseSchedule(data.scheduledAt);
-  await assertExpertContentLinksAllowed(expert.tenantId, data.content);
   const { criteria, resolution, estimatedCost } = await prepareAudience(
     scope,
     "sms",
@@ -651,7 +649,6 @@ export async function saveExpertEmailCampaignFor(
   if (submit) await assertChannelEnabled(expert.tenantId, "email");
   const scheduled = submit ? parseSchedule(data.agendadoPara) : null;
   const snapshot = await emailSnapshot(expert.tenantId, data);
-  await assertExpertContentLinksAllowed(expert.tenantId, snapshot.subject, snapshot.body_html, snapshot.preheader);
   const criteria = await buildExpertCampaignCriteria(scope, data.audienceCriteria, data.playerIds);
   let totalCount = 0;
   let estimatedCost = 0;
@@ -1232,18 +1229,13 @@ export async function listExpertCampaignsForAdminCore(
   return { items: items.map((i) => ({ ...i, expertNome: names.get(i.expertId) ?? "" })) };
 }
 
-/** Re-validation on approve/resume: owner active, links, audience and cap. */
+/** Re-validation on approve/resume: owner active, audience and cap. */
 async function revalidateForApproval(tenantId: string, channel: ExpertChannel, row: Record<string, any>) {
   const scope = await loadExpertScope(row.expert_id, tenantId);
   if (!scope || !scope.ativo) throw new Error(EXPERT_INACTIVE_CANNOT_APPROVE);
   const criteria = normalizeSmsAudienceCriteria(
     channel === "email" ? (row.audience_filter?.audience_criteria ?? {}) : row.audience_criteria,
   );
-  if (channel === "sms") await assertExpertContentLinksAllowed(tenantId, row.content);
-  if (channel === "email") {
-    const snap = (row.template_snapshot ?? {}) as Record<string, any>;
-    await assertExpertContentLinksAllowed(tenantId, snap.subject, snap.body_html, snap.preheader);
-  }
   const resolution = await resolveScopedAudience(scope, criteria, channel);
   if (resolution.eligibleTotal === 0) throw new Error(EXPERT_NO_RECIPIENTS);
   const voiceSeconds =

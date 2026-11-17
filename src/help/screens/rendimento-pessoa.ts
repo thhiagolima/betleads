@@ -187,7 +187,7 @@ const screen: HelpScreen = {
         },
         {
           label: "Aprovar",
-          what: 'Aprova a campanha pendente: o CRM confere de novo o público, os links e o teto mensal da pessoa antes de liberar — a contagem de destinatários e o custo podem mudar em relação ao que foi visto antes. Toast "Campanha aprovada: N destinatários, custo estimado R$ X."',
+          what: 'Aprova a campanha pendente: o CRM confere de novo o público e o teto mensal da pessoa antes de liberar — a contagem de destinatários e o custo podem mudar em relação ao que foi visto antes. Toast "Campanha aprovada: N destinatários, custo estimado R$ X."',
           notes:
             'Erros possíveis: "Esta campanha não está aguardando aprovação." (alguém já decidiu), "A campanha mudou depois que você abriu. Recarregue e confira antes de aprovar." (o conteúdo foi editado depois que o diálogo abriu), "O expert está desativado: a campanha não pode ser aprovada.", "Nenhum jogador do seu público pode receber esta campanha." (ninguém elegível depois de reconferir) e o aviso de teto ("Esta campanha custaria cerca de R$ X, mas restam R$ Y do seu teto mensal de R$ Z. Reduza o público ou peça ao admin para aumentar o teto." — o texto fala "seu" porque é o mesmo aviso mostrado ao expert ao tentar enviar; aqui é o admin quem vê, ao tentar aprovar). Desabilitado na casa demo.',
         },

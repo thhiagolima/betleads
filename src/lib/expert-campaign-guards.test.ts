@@ -29,10 +29,6 @@ import {
   resolveAudienceForTenant,
   type SelectionDb,
 } from "@/lib/sms-audience-selection.server";
-import {
-  assertExpertContentLinksAllowed,
-  extractContentUrls,
-} from "@/lib/expert-content-policy.server";
 import { campaignAudienceCriteriaInput } from "@/lib/sms-audience-criteria";
 
 const TENANT = "00000000-0000-4000-8000-0000000000a1";
@@ -251,38 +247,6 @@ describe("resolvedor de público com escopo do expert", () => {
 
   it("lista de jogadores no critério de campanha (forma de lista externa) é recusada", () => {
     expect(campaignAudienceCriteriaInput.safeParse({ timing: "selection", playerIds: [pid(1)] }).success).toBe(false);
-  });
-});
-
-describe("links no conteúdo do expert", () => {
-  beforeEach(() => {
-    fake.admin.rows("tenants").push({ id: TENANT, site_url: "https://www.casa.bet" });
-    fake.admin.rows("shortio_settings").push({ tenant_id: TENANT, enabled: true, allowed_destination_hosts: ["parceiro.com"] });
-  });
-
-  it("aceita site/subdomínio da casa e hosts liberados; recusa o resto (inclusive encurtador)", async () => {
-    await expect(
-      assertExpertContentLinksAllowed(TENANT, "Veja https://casa.bet/x e https://app.casa.bet e https://parceiro.com/a e www.casa.bet."),
-    ).resolves.toBeUndefined();
-    await expect(assertExpertContentLinksAllowed(TENANT, "https://bit.ly/abc")).rejects.toThrow(/bit.ly/);
-    await expect(assertExpertContentLinksAllowed(TENANT, "golpe www.evil.com/x")).rejects.toThrow(
-      /Link não permitido: www.evil.com/,
-    );
-    await expect(assertExpertContentLinksAllowed(TENANT, '<img src="https://cdn.evil.com/a.png">')).rejects.toThrow();
-  });
-
-  it("sem nenhum domínio da casa, nada passa (fecha por padrão)", async () => {
-    fake.admin.reset();
-    await expect(assertExpertContentLinksAllowed(TENANT, "https://casa.bet")).rejects.toThrow();
-    await expect(assertExpertContentLinksAllowed(TENANT, "texto sem link {link_cadastro}")).resolves.toBeUndefined();
-  });
-
-  it("extrai URLs de texto e HTML", () => {
-    expect(extractContentUrls('Oi https://a.com/x. <a href="https://b.com">b</a> www.c.com')).toEqual([
-      "https://a.com/x",
-      "https://b.com",
-      "www.c.com",
-    ]);
   });
 });
 

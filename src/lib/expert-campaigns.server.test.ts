@@ -353,11 +353,10 @@ describe("campanha de SMS do expert", () => {
     expect(r).toMatchObject({ status: "aguardando_aprovacao", approvalStatus: "pendente" });
   });
 
-  it("link fora da casa é recusado", async () => {
-    await expect(
-      saveExpertSmsCampaignFor(CTX, { campaignName: "P", content: "veja https://evil.com/x", audienceCriteria: rulesCriteria }),
-    ).rejects.toThrow(/Link não permitido: evil.com/);
-    expect(fake.admin.rows("sms_campaigns")).toHaveLength(0);
+  it("link externo é aceito", async () => {
+    await saveExpertSmsCampaignFor(CTX, { campaignName: "P", content: "veja https://parceiro.com/x", audienceCriteria: rulesCriteria });
+    expect(fake.admin.rows("sms_campaigns")).toHaveLength(1);
+    expect(fake.admin.rows("sms_campaigns")[0].content).toBe("veja https://parceiro.com/x");
   });
 
   it("sem destinatário no escopo: recusa", async () => {
@@ -541,16 +540,15 @@ describe("campanha de e-mail do expert", () => {
     expect((row.template_snapshot as Row).body_html).toContain("casa.bet");
   });
 
-  it("link externo no HTML é recusado", async () => {
-    await expect(
-      saveExpertEmailCampaignFor(CTX, {
-        nome: "News",
-        assunto: "Oi",
-        html: '<a href="https://evil.com">x</a>',
-        audienceCriteria: rulesCriteria,
-        status: "agendada",
-      }),
-    ).rejects.toThrow(/Link não permitido/);
+  it("link externo no HTML é aceito", async () => {
+    await saveExpertEmailCampaignFor(CTX, {
+      nome: "News",
+      assunto: "Oi",
+      html: '<a href="https://parceiro.com">x</a>',
+      audienceCriteria: rulesCriteria,
+      status: "agendada",
+    });
+    expect((fake.admin.rows("email_campaigns")[0].template_snapshot as Row).body_html).toContain("parceiro.com");
   });
 
   it("canal de e-mail desligado para a casa recusa ao agendar (rascunho continua permitido)", async () => {
@@ -693,11 +691,10 @@ describe("rascunhos do expert", () => {
     expect(fake.admin.rows("campaign_drafts").map((d) => d.status)).toEqual(["draft", "draft"]);
   });
 
-  it("rascunho com link fora da casa não é enviado e continua rascunho", async () => {
-    const d = await saveExpertCampaignDraftFor(CTX, draft({ content: "https://evil.com" }));
-    await expect(submitExpertCampaignDraftFor(CTX, { id: d.id })).rejects.toThrow(/Link não permitido/);
-    expect(fake.admin.rows("campaign_drafts")[0].status).toBe("draft");
-    expect(fake.admin.rows("sms_campaigns")).toHaveLength(0);
+  it("rascunho com link externo é enviado", async () => {
+    const d = await saveExpertCampaignDraftFor(CTX, draft({ content: "https://parceiro.com" }));
+    await submitExpertCampaignDraftFor(CTX, { id: d.id });
+    expect(fake.admin.rows("sms_campaigns")).toHaveLength(1);
   });
 
   it("rascunho de e-mail vira campanha de e-mail do expert", async () => {
