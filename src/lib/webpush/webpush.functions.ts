@@ -116,18 +116,34 @@ export const verifyWebpushWorkerFn = createServerFn({ method: "POST" })
   });
 
 const saveWebpushPromptInput = z.object({
+  // The house the form was loaded for. The active house lives in
+  // localStorage, shared by every tab: a tab still showing house A saves
+  // into house B once another tab switches to B — that put one house's
+  // logo on another's prompt. A mismatch is refused, never saved.
+  tenantId: dbUuid(),
   promptText: z.string().min(1).max(90),
   acceptLabel: z.string().min(1).max(15),
   cancelLabel: z.string().min(1).max(15),
   iconUrl: z.string().url().nullable().optional(),
 });
 
-export const saveWebpushPromptFn = createServerFn({ method: "POST" })
+/** Refuses a save whose form was loaded for another house than the active one. */
+export function assertSameHouse(loadedTenantId: string, activeTenantId: string): void {
+  if (loadedTenantId !== activeTenantId) {
+    throw new Error(
+      "A casa ativa mudou em outra aba. Recarregue a página e confira a casa antes de salvar o convite.",
+    );
+  }
+}
+
+export const saveWebpushPromptFn =createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v: unknown) => saveWebpushPromptInput.parse(v))
   .handler(async ({ data, context }) => {
     const tenantId = await requireHouseAdmin(context);
-    return saveWebpushPrompt(supabaseAdmin, { tenantId, ...data });
+    const { tenantId: loadedTenantId, ...prompt } = data;
+    assertSameHouse(loadedTenantId, tenantId);
+    return saveWebpushPrompt(supabaseAdmin, { tenantId, ...prompt });
   });
 
 export const listRecentWebpushSubscriptionsFn = createServerFn({ method: "GET" })

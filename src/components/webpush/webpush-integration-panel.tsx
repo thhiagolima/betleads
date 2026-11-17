@@ -141,7 +141,14 @@ export function WebpushIntegrationPanel() {
 
       {innerTab === "convite" && (
         <DataCard title="Convite" description="Texto e aparência do pedido de permissão.">
-          <WebpushPromptForm prompt={data.prompt} canEdit={data.canEdit} />
+          {/* Keyed by house: a refetch for another house remounts the form
+              instead of keeping the previous house's draft. */}
+          <WebpushPromptForm
+            key={data.tenantId}
+            tenantId={data.tenantId}
+            prompt={data.prompt}
+            canEdit={data.canEdit}
+          />
         </DataCard>
       )}
     </div>
