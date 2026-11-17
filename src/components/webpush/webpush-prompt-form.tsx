@@ -42,9 +42,12 @@ export function WebpushPromptPreview({ prompt }: { prompt: PromptConfig }) {
 }
 
 export function WebpushPromptForm({
+  tenantId,
   prompt,
   canEdit,
 }: {
+  /** House the prompt was loaded for — the save is refused for any other. */
+  tenantId: string;
   prompt: PromptConfig;
   canEdit: boolean;
 }) {
@@ -65,6 +68,7 @@ export function WebpushPromptForm({
     mutationFn: () =>
       saveFn({
         data: {
+          tenantId,
           promptText: draft.promptText,
           acceptLabel: draft.acceptLabel,
           cancelLabel: draft.cancelLabel,
