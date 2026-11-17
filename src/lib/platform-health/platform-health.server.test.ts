@@ -191,6 +191,33 @@ describe("adminPlatformHealthFor", () => {
     ]);
   });
 
+  it("no 'saldo zerado' for a house whose SMS runs on its own active account", async () => {
+    pushHouses();
+    registerFinanceAndActivity();
+    registerNoOpObservability();
+    fake.admin.onRpc("billing_tenant_exempt", () => ({ data: false, error: null }));
+    fake.admin
+      .rows("tenant_wallets")
+      .push({ tenant_id: HOUSE_A, balance: 0 }, { tenant_id: HOUSE_B, balance: 0 });
+    fake.admin
+      .rows("tenant_channel_providers")
+      .push(
+        { tenant_id: HOUSE_A, channel: "sms", provider_account_id: "acc-a" },
+        { tenant_id: HOUSE_B, channel: "sms", provider_account_id: "acc-b" },
+      );
+    fake.admin
+      .rows("provider_accounts")
+      .push(
+        { id: "acc-a", owner_tenant_id: HOUSE_A, status: "active" },
+        { id: "acc-b", owner_tenant_id: HOUSE_B, status: "disabled" },
+      );
+
+    const result = await adminPlatformHealthFor(ctxFor(SUPER_ADMIN));
+
+    const zero = result.alerts.filter((a) => a.key.endsWith(":zero"));
+    expect(zero.map((a) => a.key)).toEqual([`runway:${HOUSE_B}:zero`]);
+  });
+
   it("finance_days failure: no house table (housesUnavailable), not a false 'sem movimento'", async () => {
     pushHouses();
     registerFinanceAndActivity();

@@ -247,9 +247,50 @@ async function fetchZeroBalanceHouses(
       return res.data === true;
     }),
   );
-  return zeroIds
-    .filter((_, i) => !exempt[i])
+  const billedIds = zeroIds.filter((_, i) => !exempt[i]);
+  const ownSms = await fetchOwnSmsHouses(billedIds);
+  return billedIds
+    .filter((tenantId) => !ownSms.has(tenantId))
     .map((tenantId) => ({ tenantId, name: names.get(tenantId) as string }));
+}
+
+/**
+ * Houses (of the given ids) whose SMS is linked to their own active provider
+ * account: `wallet_reserve` charges 0 there, so a zero balance stops nothing.
+ */
+async function fetchOwnSmsHouses(tenantIds: string[]): Promise<Set<string>> {
+  if (tenantIds.length === 0) return new Set();
+  const links = await db()
+    .from("tenant_channel_providers")
+    .select("tenant_id,provider_account_id")
+    .in("tenant_id", tenantIds)
+    .eq("channel", "sms");
+  if (links.error) throw new Error(errorText(links.error));
+  const linkRows = (
+    (links.data ?? []) as Array<{
+      tenant_id: string;
+      provider_account_id: string | null;
+    }>
+  ).filter((row) => row.provider_account_id);
+  if (linkRows.length === 0) return new Set();
+  const accounts = await db()
+    .from("provider_accounts")
+    .select("id,owner_tenant_id,status")
+    .in(
+      "id",
+      linkRows.map((row) => row.provider_account_id as string),
+    );
+  if (accounts.error) throw new Error(errorText(accounts.error));
+  const owners = new Map(
+    ((accounts.data ?? []) as Array<{ id: string; owner_tenant_id: string | null; status: string }>)
+      .filter((account) => account.status === "active")
+      .map((account) => [account.id, account.owner_tenant_id]),
+  );
+  return new Set(
+    linkRows
+      .filter((row) => owners.get(row.provider_account_id as string) === row.tenant_id)
+      .map((row) => row.tenant_id),
+  );
 }
 
 type HouseWebhookStats = Omit<WebhookStats, "hasMovement">;
