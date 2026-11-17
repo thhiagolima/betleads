@@ -600,7 +600,7 @@ async function fetchTeamReport(
   return (data ?? []) as TeamReportDbRow[];
 }
 
-async function fetchHouseDepositTotals(
+export async function fetchHouseDepositTotals(
   tenantId: string,
   range: { from: string; to: string },
 ): Promise<{ depositado: number; ftds: number }> {
@@ -614,14 +614,14 @@ async function fetchHouseDepositTotals(
   return { depositado: Number(row?.depositado ?? 0), ftds: Number(row?.ftds ?? 0) };
 }
 
-type TeamExpert = { id: string; nome: string; ativo: boolean; tipoLabel: string };
+export type TeamExpert = { id: string; nome: string; ativo: boolean; tipoLabel: string };
 
 /**
  * Os perfis da casa (inclusive inativos), por nome, com o rótulo de tipo:
  * uma leitura de experts + uma de user_roles dos vinculados. Sem contagem de
  * leads nem usuário de auth (o ranking não usa).
  */
-async function listTeamExperts(tenantId: string): Promise<TeamExpert[]> {
+export async function listTeamExperts(tenantId: string): Promise<TeamExpert[]> {
   const { data, error } = await db()
     .from("experts")
     .select("id,nome,tipo,ativo,user_id")

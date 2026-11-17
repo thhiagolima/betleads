@@ -14,6 +14,14 @@
 // schema inside createPreview, so its errors come back in pt-BR. An absent
 // optional field stays absent in the action input ("keeps the value"), and
 // `null` passes through ("clears it"), as in the panel.
+//
+// MCP do grupo (docs/superpowers/specs/2026-11-17-mcp-grupo-design.md §4.3,
+// §6): the server is "betleads" and has two areas. Finance tools are
+// registered only when the identity has `financeiro`, operação tools
+// (./ops/registry.server OPS_TOOLS, all read-only) only with `operacao`, so
+// Claude never even sees what it can't use; each handler still asserts the
+// area. `listar_escopos` is always there. Every call logs its args (secrets
+// redacted, cut at 4 KB) and its scope.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
@@ -22,11 +30,13 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { GOAL_METRICS } from "@/lib/finance/finance-data.server";
 
-import { resolveBearer, type McpIdentity } from "./access.server";
-import { CONFIRM_TOOL, checkRateLimit, logCall } from "./call-log.server";
+import { assertArea, resolveBearer, type McpArea, type McpIdentity } from "./access.server";
+import { CONFIRM_TOOL, checkRateLimit, logCall, type CallLogScope } from "./call-log.server";
 import { MAX_DAY_ENTRIES, isMcpEnabled } from "./config.server";
 import { sha256Hex } from "./crypto.server";
 import { notFound, publicBaseUrl } from "./oauth.server";
+import { OPS_TOOLS, type OpsToolDef } from "./ops/registry.server";
+import { assertSemDadosPessoais } from "./ops/runner.server";
 import { confirmPreview, createPreview } from "./preview.server";
 import {
   listarEscopos,
@@ -231,7 +241,18 @@ const writeTools = [
 
 // ─── Handler wrapper ────────────────────────────────────────────────────────
 
-type ToolContext = { tenantId: string | null; previewCodeHash?: string };
+type ToolContext = {
+  tenantId: string | null;
+  previewCodeHash?: string;
+  /** Arguments to log (mcp_call_log.args); omit secrets such as the confirmation code. */
+  args?: unknown;
+  /** Scope to log; `casas` may be filled from the result (see scopeWithCount). */
+  scope?: CallLogScope | null;
+  /** The tool's area: asserted after the rate limit, before running. */
+  area?: McpArea;
+  /** Derives the logged scope's house count from the result. */
+  countFromResult?: boolean;
+};
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Only a well-formed id goes to mcp_call_log.tenant_id (uuid column): a bad one would drop the row. */
@@ -260,7 +281,28 @@ async function previewTenant(identity: McpIdentity, codeHash: string): Promise<s
   }
 }
 
-/** rate limit → run → log → result; errors become `isError` with the pt-BR message. */
+/** `{tipo, id}` of an escopo-shaped arg (or of a bare `casa` id), for the log. */
+function scopeOfArgs(args: Record<string, unknown>): CallLogScope | null {
+  const escopo = args.escopo;
+  if (isPlainObject(escopo) && typeof escopo.tipo === "string") {
+    return { tipo: escopo.tipo, id: typeof escopo.id === "string" ? escopo.id : null };
+  }
+  if (typeof args.casa === "string") return { tipo: "casa", id: args.casa };
+  return null;
+}
+
+/** Houses a result covered: its `casas` rows plus `casas_com_erro`, when present. */
+function housesOfResult(result: unknown): number | undefined {
+  if (!isPlainObject(result)) return undefined;
+  const ok = Array.isArray(result.casas) ? result.casas.length : undefined;
+  const failed = Array.isArray(result.casas_com_erro) ? result.casas_com_erro.length : 0;
+  return ok === undefined ? undefined : ok + failed;
+}
+
+/**
+ * rate limit → area → run → log → result; errors become `isError` with the
+ * pt-BR message.
+ */
 async function runTool(
   identity: McpIdentity,
   tool: string,
@@ -268,6 +310,7 @@ async function runTool(
   run: () => Promise<unknown>,
 ): Promise<CallToolResult> {
   const started = Date.now();
+  let scope = context.scope ?? null;
   const log = (ok: boolean, error?: string) =>
     logCall({
       identity,
@@ -277,10 +320,17 @@ async function runTool(
       error,
       durationMs: Date.now() - started,
       previewCodeHash: context.previewCodeHash,
+      args: context.args,
+      scope,
     });
   try {
     await checkRateLimit(identity, tool);
+    if (context.area) assertArea(identity, context.area);
     const result = await run();
+    if (scope && context.countFromResult) {
+      const casas = housesOfResult(result);
+      if (casas !== undefined) scope = { ...scope, casas };
+    }
     await log(true);
     return {
       content: [{ type: "text", text: JSON.stringify(result) }],
@@ -296,28 +346,25 @@ async function runTool(
 
 // ─── Server ─────────────────────────────────────────────────────────────────
 
-/** The MCP server for one request, bound to the bearer's identity. */
-export function createMcpServer(identity: McpIdentity): McpServer {
-  const server = new McpServer(
-    { name: "betleads-financeiro", version: "1.0.0" },
-    {
-      instructions:
-        "Financeiro das casas do Betleads. Comece por listar_escopos para saber as casas e grupos do usuário. " +
-        "Escritas têm duas etapas: preparar_* devolve uma prévia e um codigo_confirmacao; mostre a prévia e só chame confirmar_alteracao depois que o usuário aprovar. " +
-        MONEY_HINT,
-    },
-  );
+const INSTRUCTIONS_BASE =
+  "Betleads: CRM de casas de apostas. Comece sempre por listar_escopos: ele diz as áreas liberadas para o usuário (financeiro e/ou operacao) e os ids de casas e grupos que ele pode consultar em cada uma. ";
+const INSTRUCTIONS_FINANCE =
+  "Financeiro: resumo_financeiro, mes_da_casa e metas_da_casa leem; escritas têm duas etapas: preparar_* devolve uma prévia e um codigo_confirmacao; mostre a prévia e só chame confirmar_alteracao depois que o usuário aprovar. ";
+const INSTRUCTIONS_OPS =
+  "Operação (só leitura): números de cadastros, FTDs, depósitos, experts, afiliados, campanhas, jornadas e alertas por casa, para uma casa, um grupo ou todas as casas que o usuário vê (escopo {tipo: casa|grupo, id} ou {tipo: todas}). Cada resposta traz uma linha por casa, totais_por_moeda e casas_com_erro (casas que falharam; as outras vêm normalmente). Nada de dado individual de jogador. ";
 
-  server.registerTool(
-    "listar_escopos",
-    {
-      title: "Listar escopos",
-      description:
-        "Casas e grupos que o usuário pode consultar (id, nome, se é demo) e o nível de acesso ao MCP. Use os ids nas outras ferramentas.",
-      annotations: READ,
-    },
-    () => runTool(identity, "listar_escopos", { tenantId: null }, () => listarEscopos(identity)),
+function instructionsFor(identity: McpIdentity): string {
+  return (
+    INSTRUCTIONS_BASE +
+    (identity.areas.includes("financeiro") ? INSTRUCTIONS_FINANCE : "") +
+    (identity.areas.includes("operacao") ? INSTRUCTIONS_OPS : "") +
+    MONEY_HINT
   );
+}
+
+/** Registers the finance tools (spec 2026-10-30 §6); only called with the `financeiro` area. */
+function registerFinanceTools(server: McpServer, identity: McpIdentity) {
+  const area = "financeiro" as const;
 
   server.registerTool(
     "resumo_financeiro",
@@ -334,7 +381,12 @@ export function createMcpServer(identity: McpIdentity): McpServer {
       runTool(
         identity,
         "resumo_financeiro",
-        { tenantId: args.escopo.tipo === "casa" ? args.escopo.id : null },
+        {
+          tenantId: args.escopo.tipo === "casa" ? args.escopo.id : null,
+          area,
+          args,
+          scope: scopeOfArgs(args),
+        },
         () => resumoFinanceiro(identity, args),
       ),
   );
@@ -350,7 +402,12 @@ export function createMcpServer(identity: McpIdentity): McpServer {
       annotations: READ,
     },
     (args) =>
-      runTool(identity, "mes_da_casa", { tenantId: args.casa }, () => mesDaCasa(identity, args)),
+      runTool(
+        identity,
+        "mes_da_casa",
+        { tenantId: args.casa, area, args, scope: scopeOfArgs(args) },
+        () => mesDaCasa(identity, args),
+      ),
   );
 
   server.registerTool(
@@ -362,8 +419,11 @@ export function createMcpServer(identity: McpIdentity): McpServer {
       annotations: READ,
     },
     (args) =>
-      runTool(identity, "metas_da_casa", { tenantId: args.casa }, () =>
-        metasDaCasa(identity, args),
+      runTool(
+        identity,
+        "metas_da_casa",
+        { tenantId: args.casa, area, args, scope: scopeOfArgs(args) },
+        () => metasDaCasa(identity, args),
       ),
   );
 
@@ -378,8 +438,11 @@ export function createMcpServer(identity: McpIdentity): McpServer {
         annotations: PREPARE,
       },
       (args: Record<string, unknown>) =>
-        runTool(identity, def.name, { tenantId: asUuid(args.casa) }, () =>
-          createPreview(identity, def.action, def.toInput(args)),
+        runTool(
+          identity,
+          def.name,
+          { tenantId: asUuid(args.casa), area, args, scope: scopeOfArgs(args) },
+          () => createPreview(identity, def.action, def.toInput(args)),
         ),
     );
   }
@@ -396,13 +459,77 @@ export function createMcpServer(identity: McpIdentity): McpServer {
     },
     async ({ codigo }) => {
       const previewCodeHash = await sha256Hex(codigo);
+      const tenantId = await previewTenant(identity, previewCodeHash);
       const context: ToolContext = {
-        tenantId: await previewTenant(identity, previewCodeHash),
+        tenantId,
         previewCodeHash,
+        area,
+        // The code itself is a secret: only its hash (preview_code_hash) is logged.
+        args: {},
+        scope: tenantId ? { tipo: "casa", id: tenantId } : null,
       };
       return runTool(identity, CONFIRM_TOOL, context, () => confirmPreview(identity, codigo));
     },
   );
+}
+
+/** Registers the operação tools (OPS_TOOLS); only called with the `operacao` area. */
+function registerOpsTools(server: McpServer, identity: McpIdentity) {
+  for (const def of OPS_TOOLS as OpsToolDef[]) {
+    server.registerTool(
+      def.name,
+      {
+        title: def.title,
+        description: def.description,
+        inputSchema: def.inputSchema,
+        annotations: READ,
+      },
+      (args: Record<string, unknown>) => {
+        const scope = (def.scopeOf ? def.scopeOf(args) : null) ?? scopeOfArgs(args);
+        return runTool(
+          identity,
+          def.name,
+          {
+            tenantId: scope?.tipo === "casa" ? asUuid(scope.id) : null,
+            area: "operacao",
+            args,
+            scope,
+            countFromResult: true,
+          },
+          async () => {
+            const result = await def.run(identity, args);
+            assertSemDadosPessoais(result);
+            return result;
+          },
+        );
+      },
+    );
+  }
+}
+
+/** The MCP server for one request, bound to the bearer's identity. */
+export function createMcpServer(identity: McpIdentity): McpServer {
+  const server = new McpServer(
+    { name: "betleads", version: "2.0.0" },
+    { instructions: instructionsFor(identity) },
+  );
+
+  server.registerTool(
+    "listar_escopos",
+    {
+      title: "Listar escopos",
+      description:
+        "Áreas liberadas (financeiro, operacao), nível de acesso e os escopos do usuário: no financeiro, casas e grupos (id, nome, se é demo); em operacao, as casas (com moeda, status e grupo) e os grupos (com quantidade de casas) que ele vê. Use os ids nas outras ferramentas.",
+      annotations: READ,
+    },
+    () =>
+      runTool(identity, "listar_escopos", { tenantId: null, args: {} }, () =>
+        listarEscopos(identity),
+      ),
+  );
+
+  if (identity.areas.includes("financeiro")) registerFinanceTools(server, identity);
+  if (identity.areas.includes("operacao")) registerOpsTools(server, identity);
 
   return server;
 }

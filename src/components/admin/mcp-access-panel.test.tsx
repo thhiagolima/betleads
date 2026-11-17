@@ -17,10 +17,16 @@ vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
 vi.mock("@/lib/mcp/mcp.functions", () => ({
   adminListMcpAccess: vi.fn(),
   adminSetMcpAccess: vi.fn(),
+  adminSetMcpAreas: vi.fn(),
   adminRevokeConnection: vi.fn(),
 }));
 
-import { McpAccessPanel, createLevelChangeHandler } from "./mcp-access-panel";
+import {
+  McpAccessPanel,
+  areaCheckboxDisabled,
+  createAreaToggleHandler,
+  createLevelChangeHandler,
+} from "./mcp-access-panel";
 
 describe("McpAccessPanel", () => {
   it("shows the disabled note instead of the controls when MCP is off", () => {
@@ -35,6 +41,8 @@ describe("McpAccessPanel", () => {
         nome: "Dona da Casa",
         email: "dona@casa.com",
         level: "read",
+        areas: ["financeiro"],
+        operacaoElegivel: false,
         connections: [
           {
             id: "conn-1",
@@ -53,6 +61,9 @@ describe("McpAccessPanel", () => {
     expect(html).toContain("Leitura");
     expect(html).toContain("Claude.ai");
     expect(html).toContain("Desconectar");
+    expect(html).toContain("Financeiro");
+    expect(html).toContain("Operação");
+    expect(html).toContain("Operação: só super admin, admin de casa ou gestor de grupo.");
   });
 
   it("shows an empty message when there are no candidate users", () => {
@@ -70,5 +81,47 @@ describe("createLevelChangeHandler", () => {
     handler("write");
 
     expect(calls).toEqual([{ userId: "user-1", level: "write" }]);
+  });
+});
+
+describe("area checkboxes", () => {
+  const row = {
+    userId: "user-1",
+    level: "read" as const,
+    areas: ["financeiro" as const],
+    operacaoElegivel: true,
+  };
+
+  it("checking Operação sends both areas, in canonical order", () => {
+    const calls: unknown[] = [];
+    createAreaToggleHandler(row, "operacao", (vars) => calls.push(vars))(true);
+    expect(calls).toEqual([{ userId: "user-1", areas: ["financeiro", "operacao"] }]);
+  });
+
+  it("unchecking Financeiro with Operação on sends only operação", () => {
+    const calls: unknown[] = [];
+    createAreaToggleHandler({ ...row, areas: ["financeiro", "operacao"] }, "financeiro", (vars) =>
+      calls.push(vars),
+    )(false);
+    expect(calls).toEqual([{ userId: "user-1", areas: ["operacao"] }]);
+  });
+
+  it("never sends an empty list (unchecking the last area does nothing)", () => {
+    const calls: unknown[] = [];
+    createAreaToggleHandler(row, "financeiro", (vars) => calls.push(vars))(false);
+    expect(calls).toEqual([]);
+  });
+
+  it("disables both boxes without a level, and Operação for a non-eligible user", () => {
+    expect(areaCheckboxDisabled({ ...row, level: "none" }, "financeiro")).toBe(true);
+    expect(areaCheckboxDisabled(row, "operacao")).toBe(false);
+    expect(areaCheckboxDisabled({ ...row, operacaoElegivel: false }, "operacao")).toBe(true);
+    // Already on: stays clickable so it can be turned off.
+    expect(
+      areaCheckboxDisabled(
+        { ...row, operacaoElegivel: false, areas: ["financeiro", "operacao"] },
+        "operacao",
+      ),
+    ).toBe(false);
   });
 });

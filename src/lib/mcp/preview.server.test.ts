@@ -41,7 +41,7 @@ const identity = (
   userId: string,
   level: "read" | "write" = "write",
   connectionId = "00000000-0000-4000-8000-00000000f001",
-): McpIdentity => ({ userId, connectionId, clientId: "client-1", level });
+): McpIdentity => ({ userId, connectionId, clientId: "client-1", level, areas: ["financeiro"] });
 
 const roles = () => fake.admin.rows("user_roles");
 const hasRole = (user: unknown, tenant: unknown, role: string) =>

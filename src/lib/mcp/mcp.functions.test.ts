@@ -33,6 +33,7 @@ import {
   adminListMcpAccessFor,
   adminRevokeConnectionFor,
   adminSetMcpAccessFor,
+  adminSetMcpAreasFor,
   getMyMcpStatusFor,
   revokeMyConnectionFor,
 } from "./mcp.functions";
@@ -144,7 +145,15 @@ describe("adminListMcpAccessFor", () => {
     const rows = await adminListMcpAccessFor({ userId: SUPER });
 
     expect(rows).toEqual([
-      { userId: USER_A, nome: "Dona da Casa", email: "dono@casa.com", level: "read", connections: [] },
+      {
+        userId: USER_A,
+        nome: "Dona da Casa",
+        email: "dono@casa.com",
+        level: "read",
+        areas: ["financeiro"],
+        operacaoElegivel: true,
+        connections: [],
+      },
     ]);
   });
 });
@@ -210,6 +219,103 @@ describe("adminSetMcpAccessFor", () => {
       adminSetMcpAccessFor({ userId: USER_A }, { userId: USER_B, level: "write" }),
     ).rejects.toThrow();
     expect(fake.admin.rows("admin_audit_logs")).toHaveLength(0);
+  });
+});
+
+describe("adminListMcpAccessFor areas", () => {
+  it("shows stored areas and who may receive operação (admin, super admin, group manager; not gestor)", async () => {
+    const GESTOR = "00000000-0000-4000-8000-0000000000dd";
+    const MANAGER = "00000000-0000-4000-8000-0000000000ee";
+    fake.admin.rows("user_roles").push(
+      { user_id: USER_A, role: "admin", tenant_id: "t1" },
+      { user_id: GESTOR, role: "gestor", tenant_id: "t1" },
+      { user_id: SUPER, role: "super_admin", tenant_id: null },
+    );
+    fake.admin.rows("tenant_group_managers").push({ user_id: MANAGER, group_id: "g1" });
+    fake.admin.rows("mcp_access").push({ user_id: USER_A, level: "read", areas: ["financeiro", "operacao"] });
+
+    const rows = await adminListMcpAccessFor({ userId: SUPER });
+    const byId = new Map(rows.map((row) => [row.userId, row]));
+
+    expect(byId.get(USER_A)).toMatchObject({ areas: ["financeiro", "operacao"], operacaoElegivel: true });
+    expect(byId.get(GESTOR)).toMatchObject({ level: "none", operacaoElegivel: false });
+    expect(byId.get(MANAGER)?.operacaoElegivel).toBe(true);
+    expect(byId.get(SUPER)?.operacaoElegivel).toBe(true);
+  });
+});
+
+describe("adminSetMcpAreasFor", () => {
+  beforeEach(() => {
+    fake.admin.rows("mcp_access").push({ user_id: USER_A, level: "read", areas: ["financeiro"] });
+  });
+
+  it("rejects a non-super-admin caller and logs the attempt", async () => {
+    await expect(
+      adminSetMcpAreasFor({ userId: USER_A }, { userId: USER_A, areas: ["operacao"] }),
+    ).rejects.toThrow("Apenas o super admin pode realizar esta ação.");
+    expect(fake.admin.rows("mcp_call_log")[0]).toMatchObject({ tool: "admin.set_areas", ok: false });
+    expect(fake.admin.rows("admin_audit_logs")).toHaveLength(0);
+  });
+
+  it("turns operação on for a house admin, audits before/after and logs the call", async () => {
+    fake.admin.rows("user_roles").push({ user_id: USER_A, role: "admin", tenant_id: "t1" });
+    await adminSetMcpAreasFor({ userId: SUPER }, { userId: USER_A, areas: ["operacao", "financeiro"] });
+
+    expect(fake.admin.rows("mcp_access").find((r) => r.user_id === USER_A)?.areas).toEqual([
+      "financeiro",
+      "operacao",
+    ]);
+    expect(fake.admin.rows("admin_audit_logs")).toEqual([
+      expect.objectContaining({
+        actor_user_id: SUPER,
+        action: "mcp.areas_set",
+        target_user_id: USER_A,
+        before_data: { areas: ["financeiro"] },
+        after_data: { areas: ["financeiro", "operacao"] },
+      }),
+    ]);
+    expect(fake.admin.rows("mcp_call_log")[0]).toMatchObject({
+      user_id: SUPER,
+      connection_id: null,
+      tool: "admin.set_areas",
+      ok: true,
+    });
+  });
+
+  it("refuses operação for a user who is only gestor/member", async () => {
+    fake.admin.rows("user_roles").push({ user_id: USER_A, role: "gestor", tenant_id: "t1" });
+    await expect(
+      adminSetMcpAreasFor({ userId: SUPER }, { userId: USER_A, areas: ["financeiro", "operacao"] }),
+    ).rejects.toThrow("A área de operação só pode ser liberada");
+    expect(fake.admin.rows("mcp_access").find((r) => r.user_id === USER_A)?.areas).toEqual([
+      "financeiro",
+    ]);
+  });
+
+  it("allows operação for a group manager", async () => {
+    fake.admin.rows("tenant_group_managers").push({ user_id: USER_A, group_id: "g1" });
+    await adminSetMcpAreasFor({ userId: SUPER }, { userId: USER_A, areas: ["operacao"] });
+    expect(fake.admin.rows("mcp_access").find((r) => r.user_id === USER_A)?.areas).toEqual([
+      "operacao",
+    ]);
+  });
+
+  it("refuses an empty list and a user without a level", async () => {
+    await expect(
+      adminSetMcpAreasFor({ userId: SUPER }, { userId: USER_A, areas: [] }),
+    ).rejects.toThrow("Escolha pelo menos uma área.");
+    await expect(
+      adminSetMcpAreasFor({ userId: SUPER }, { userId: USER_B, areas: ["financeiro"] }),
+    ).rejects.toThrow("Conceda um nível de acesso antes de escolher as áreas.");
+  });
+
+  it("changing the level keeps the areas (upsert only touches the level)", async () => {
+    fake.admin.rows("mcp_access").find((r) => r.user_id === USER_A)!.areas = ["financeiro", "operacao"];
+    await adminSetMcpAccessFor({ userId: SUPER }, { userId: USER_A, level: "write" });
+    expect(fake.admin.rows("mcp_access").find((r) => r.user_id === USER_A)).toMatchObject({
+      level: "write",
+      areas: ["financeiro", "operacao"],
+    });
   });
 });
 

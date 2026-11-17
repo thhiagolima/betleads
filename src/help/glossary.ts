@@ -440,8 +440,8 @@ export const GLOSSARY: GlossaryTerm[] = [
     id: "mcp",
     term: "MCP",
     short:
-      "Sigla de \"Model Context Protocol\": o protocolo que deixa o Claude (claude.ai, Claude Desktop ou Claude Code) ler e, com acesso de escrita, agir sobre os dados financeiros desta casa, através da URL mostrada em \"Conectar ao Claude\".",
+      "Sigla de \"Model Context Protocol\": o protocolo que deixa o Claude (claude.ai, Claude Desktop ou Claude Code) ler os dados das casas a que a pessoa tem acesso e, com acesso de escrita, agir sobre o financeiro delas, através da URL mostrada em \"Conectar ao Claude\" (uma só para todo o Betleads).",
     long:
-      "O nível de acesso (leitura, ou leitura e escrita) é concedido pelo super admin por pessoa, fora desta tela. Sem nenhum nível concedido, \"Conectar ao Claude\" nem aparece no menu.",
+      "O nível de acesso (leitura, ou leitura e escrita) e as áreas (Financeiro e Operação) são concedidos pelo super admin por pessoa, fora desta tela. A área de operação é só leitura e mostra cadastros, FTDs, depósitos, experts, afiliados, campanhas, jornadas e alertas das casas que a pessoa vê. Sem nenhum nível concedido, \"Conectar ao Claude\" nem aparece no menu.",
   },
 ];

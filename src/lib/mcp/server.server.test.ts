@@ -3,6 +3,9 @@
 // covered by read-tools.server.test.ts / preview.server.test.ts); this file
 // checks what createMcpServer adds around them: the 10 tool names, the
 // mcp_call_log row per call, the DB-counted limits and error mapping.
+// MCP do grupo: OPS_TOOLS is mocked with one fake operação tool, to check the
+// area gating (registration and handler), the args/scope log and the
+// personal-data guard around every operação result.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ admin: null as unknown as ReturnType<typeof createFakeDb> }));
@@ -21,6 +24,25 @@ vi.mock("./read-tools.server", async (importOriginal) => {
     resumoFinanceiro: vi.fn(),
     mesDaCasa: vi.fn(),
     metasDaCasa: vi.fn(),
+  };
+});
+
+const ops = vi.hoisted(() => ({ run: vi.fn() }));
+
+vi.mock("./ops/registry.server", async () => {
+  const { z } = await import("zod");
+  return {
+    OPS_TOOLS: [
+      {
+        name: "visao_teste",
+        title: "Visão de teste",
+        description: "Ferramenta de operação de teste.",
+        inputSchema: z.object({
+          escopo: z.object({ tipo: z.string(), id: z.string().optional() }),
+        }),
+        run: ops.run,
+      },
+    ],
   };
 });
 
@@ -51,11 +73,16 @@ const CONN = "00000000-0000-4000-8000-00000000f001";
 const OTHER_CONN = "00000000-0000-4000-8000-00000000f002";
 const COST_1 = "00000000-0000-4000-8000-00000000c001";
 
-const identity = (userId = ADMIN_A, level: "read" | "write" = "write"): McpIdentity => ({
+const identity = (
+  userId = ADMIN_A,
+  level: "read" | "write" = "write",
+  areas: McpIdentity["areas"] = ["financeiro"],
+): McpIdentity => ({
   userId,
   connectionId: CONN,
   clientId: "client-1",
   level,
+  areas,
 });
 
 const callLog = () => fake.admin.rows("mcp_call_log");
@@ -94,6 +121,7 @@ beforeEach(() => {
   vi.mocked(metasDaCasa).mockReset();
   vi.mocked(createPreview).mockReset();
   vi.mocked(confirmPreview).mockReset();
+  ops.run.mockReset();
 });
 
 afterEach(() => {
@@ -142,6 +170,7 @@ describe("createMcpServer", () => {
       houses: [{ id: HOUSE_A, nome: "Casa A", isDemo: false, status: "active" }],
       groups: [],
       nivel: "leitura e escrita",
+      areas: ["financeiro"],
     });
     const client = await connect();
     const result = await client.callTool({ name: "listar_escopos", arguments: {} });
@@ -185,6 +214,7 @@ describe("createMcpServer", () => {
       houses: [],
       groups: [],
       nivel: "leitura",
+      areas: ["financeiro"],
     });
     const client = await connect();
     const result = await client.callTool({ name: "listar_escopos", arguments: {} });
@@ -205,6 +235,7 @@ describe("createMcpServer", () => {
       houses: [],
       groups: [],
       nivel: "leitura",
+      areas: ["financeiro"],
     });
     const client = await connect();
     const result = await client.callTool({ name: "listar_escopos", arguments: {} });
@@ -295,6 +326,7 @@ describe("createMcpServer", () => {
       houses: [],
       groups: [],
       nivel: "leitura",
+      areas: ["financeiro"],
     });
     fake.admin.failNext("mcp_call_log", "insert");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -494,13 +526,14 @@ describe("handleMcpRequest (/api/mcp)", () => {
       houses: [],
       groups: [],
       nivel: "leitura",
+      areas: ["financeiro"],
     });
 
     const init = await handleMcpRequest(post(initialize, "good"));
     expect(init.status).toBe(200);
     expect(init.headers.get("content-type")).toContain("application/json");
     expect(init.headers.get("mcp-session-id")).toBeNull();
-    expect((await init.json()).result.serverInfo.name).toBe("betleads-financeiro");
+    expect((await init.json()).result.serverInfo.name).toBe("betleads");
 
     const call = await handleMcpRequest(
       post(
@@ -543,5 +576,131 @@ describe("call log tenant id", () => {
     });
     expect(result.isError).toBe(true);
     expect(callLog().at(-1)).toMatchObject({ tool: "preparar_meta", tenant_id: null, ok: false });
+  });
+});
+
+describe("areas (MCP do grupo)", () => {
+  const FINANCE_TOOLS = [
+    "resumo_financeiro",
+    "mes_da_casa",
+    "metas_da_casa",
+    "preparar_lancamento_dias",
+    "preparar_ggr_mensal",
+    "preparar_custo",
+    "preparar_exclusao_custo",
+    "preparar_meta",
+    "confirmar_alteracao",
+  ];
+  const GROUP = "00000000-0000-4000-8000-00000000a001";
+
+  it("financeiro only: no operação tool is registered", async () => {
+    const client = await connect(identity(ADMIN_A, "write", ["financeiro"]));
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(names).not.toContain("visao_teste");
+    expect(names.sort()).toEqual(["listar_escopos", ...FINANCE_TOOLS].sort());
+  });
+
+  it("operacao only: listar_escopos plus the operação tools, read-only, no finance tool", async () => {
+    const client = await connect(identity(ADMIN_A, "read", ["operacao"]));
+    const { tools } = await client.listTools();
+    expect(tools.map((tool) => tool.name).sort()).toEqual(["listar_escopos", "visao_teste"]);
+    expect(tools.find((tool) => tool.name === "visao_teste")?.annotations?.readOnlyHint).toBe(true);
+    const instructions = client.getInstructions() ?? "";
+    expect(instructions).toContain("Operação (só leitura)");
+    expect(instructions).not.toContain("confirmar_alteracao");
+  });
+
+  it("both areas: every tool, and the instructions cover both", async () => {
+    const client = await connect(identity(ADMIN_A, "write", ["financeiro", "operacao"]));
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(names.sort()).toEqual(["listar_escopos", "visao_teste", ...FINANCE_TOOLS].sort());
+    const instructions = client.getInstructions() ?? "";
+    expect(instructions).toContain("listar_escopos");
+    expect(instructions).toContain("confirmar_alteracao");
+    expect(instructions).toContain("Operação (só leitura)");
+  });
+
+  it("an operação tool still refuses in its handler when the area is gone", async () => {
+    const id = identity(ADMIN_A, "read", ["financeiro", "operacao"]);
+    const client = await connect(id);
+    id.areas = ["financeiro"];
+    const result = await client.callTool({
+      name: "visao_teste",
+      arguments: { escopo: { tipo: "todas" } },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toBe("Seu acesso ao MCP não inclui operação.");
+    expect(ops.run).not.toHaveBeenCalled();
+    expect(callLog().at(-1)).toMatchObject({ tool: "visao_teste", ok: false });
+  });
+
+  it("a finance tool still refuses in its handler when the area is gone", async () => {
+    const id = identity(ADMIN_A, "read", ["financeiro", "operacao"]);
+    const client = await connect(id);
+    id.areas = ["operacao"];
+    const result = await client.callTool({ name: "metas_da_casa", arguments: { casa: HOUSE_A } });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toBe("Seu acesso ao MCP não inclui financeiro.");
+    expect(metasDaCasa).not.toHaveBeenCalled();
+  });
+
+  it("logs the operação call's args and scope, counting the houses of the result", async () => {
+    ops.run.mockResolvedValue({
+      rotulo: "Grupo",
+      casas: [{ id: "a" }, { id: "b" }],
+      casas_com_erro: [{ id: "c", nome: "C", erro: "x" }],
+    });
+    const client = await connect(identity(ADMIN_A, "read", ["operacao"]));
+    const args = { escopo: { tipo: "grupo", id: GROUP } };
+    const result = await client.callTool({ name: "visao_teste", arguments: args });
+    expect(result.isError).toBeFalsy();
+    expect(ops.run.mock.calls[0][1]).toEqual(args);
+    expect(callLog().at(-1)).toMatchObject({
+      tool: "visao_teste",
+      ok: true,
+      tenant_id: null,
+      args,
+      scope: { tipo: "grupo", id: GROUP, casas: 3 },
+    });
+  });
+
+  it("logs the house id for a casa scope", async () => {
+    ops.run.mockResolvedValue({ casas: [{ id: HOUSE_A }], casas_com_erro: [] });
+    const client = await connect(identity(ADMIN_A, "read", ["operacao"]));
+    await client.callTool({
+      name: "visao_teste",
+      arguments: { escopo: { tipo: "casa", id: HOUSE_A } },
+    });
+    expect(callLog().at(-1)).toMatchObject({
+      tenant_id: HOUSE_A,
+      scope: { tipo: "casa", id: HOUSE_A, casas: 1 },
+    });
+  });
+
+  it("blocks an operação result carrying player data", async () => {
+    ops.run.mockResolvedValue({ casas: [{ id: HOUSE_A, jogadores: [{ telefone: "5511" }] }] });
+    const client = await connect(identity(ADMIN_A, "read", ["operacao"]));
+    const result = await client.callTool({
+      name: "visao_teste",
+      arguments: { escopo: { tipo: "todas" } },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).not.toContain("5511");
+    expect(callLog().at(-1)).toMatchObject({ ok: false });
+  });
+
+  it("never logs the confirmation code itself", async () => {
+    vi.mocked(confirmPreview).mockResolvedValue({ ok: true, resultado: {} });
+    const client = await connect();
+    await client.callTool({ name: "confirmar_alteracao", arguments: { codigo: "segredo" } });
+    expect(JSON.stringify(callLog().at(-1)?.args)).not.toContain("segredo");
+  });
+
+  it("listar_escopos is there with either area", async () => {
+    vi.mocked(listarEscopos).mockResolvedValue({ nivel: "leitura", areas: ["operacao"] });
+    const client = await connect(identity(ADMIN_A, "read", ["operacao"]));
+    const result = await client.callTool({ name: "listar_escopos", arguments: {} });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({ areas: ["operacao"] });
   });
 });

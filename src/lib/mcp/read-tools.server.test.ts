@@ -31,6 +31,7 @@ const identity = (userId: string, level: "read" | "write" = "read"): McpIdentity
   connectionId: "conn-1",
   clientId: "client-1",
   level,
+  areas: ["financeiro"],
 });
 
 type Row = Record<string, unknown>;

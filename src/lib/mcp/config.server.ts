@@ -21,3 +21,14 @@ export const MAX_DAY_ENTRIES = 31;
 export const CALLS_PER_MINUTE = 60;
 /** Rate limit: write confirmations per hour, per user. */
 export const CONFIRMS_PER_HOUR = 30;
+
+// MCP do grupo, área de operação (docs/superpowers/specs/2026-11-17-mcp-grupo-design.md).
+/** Most houses one operação call may cover; above it the caller must narrow to a group. */
+export const MAX_OPS_TENANTS = 60;
+/** Houses queried at the same time by one operação call. */
+export const OPS_CONCURRENCY = 6;
+/** Default and maximum size of the lists returned by operação tools. */
+export const OPS_LIST_DEFAULT = 20;
+export const OPS_LIST_MAX = 100;
+/** mcp_call_log.args keeps at most this many characters of the call's JSON arguments. */
+export const LOG_ARGS_MAX_CHARS = 4096;

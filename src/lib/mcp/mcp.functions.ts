@@ -5,6 +5,11 @@
 // admin change writes one `mcp_call_log` row via `logCall`, with the super
 // admin as `user_id` and no `connection_id` (an admin action is not an MCP
 // connection).
+//
+// MCP do grupo (spec 2026-11-17 §4.3): the super admin also picks each
+// user's areas (Financeiro / Operação) — `adminSetMcpAreas`, audited as
+// `mcp.areas_set`. Operação may only go to a super admin, the admin of some
+// house or the manager of some group (`operacaoElegivel`).
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -14,7 +19,14 @@ import { auditAdminAction } from "@/lib/admin-audit.server";
 import { isSuperAdminUser } from "@/lib/billing/billing-state.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
-import { getMcpLevel, type McpLevel } from "./access.server";
+import {
+  MCP_AREAS,
+  getMcpAccess,
+  getMcpLevel,
+  parseAreas,
+  type McpArea,
+  type McpLevel,
+} from "./access.server";
 import { logCall } from "./call-log.server";
 import { isMcpEnabled } from "./config.server";
 import { publicBaseUrlFromEnv, removeMcpAccessForUser, revokeConnection } from "./oauth.server";
@@ -26,6 +38,10 @@ const db = () => supabaseAdmin as any;
 const MCP_OFF = "Conexão com o Claude indisponível neste ambiente.";
 const FORBIDDEN = "Apenas o super admin pode realizar esta ação.";
 const CONNECTION_NOT_FOUND = "Conexão não encontrada.";
+const AREAS_EMPTY = "Escolha pelo menos uma área.";
+const AREAS_NO_LEVEL = "Conceda um nível de acesso antes de escolher as áreas.";
+const OPS_NOT_ELIGIBLE =
+  "A área de operação só pode ser liberada para super admin, admin de casa ou gestor de grupo.";
 
 type ConnectionRow = {
   id: string;
@@ -168,6 +184,9 @@ export type McpAccessRow = {
   nome: string;
   email: string;
   level: McpLevel;
+  areas: McpArea[];
+  /** May receive the operação area: super admin, admin of a house or manager of a group. */
+  operacaoElegivel: boolean;
   connections: ConnectionView[];
 };
 
@@ -186,11 +205,13 @@ async function distinctUserIds(table: string, column = "user_id"): Promise<strin
 
 /**
  * Every user who could plausibly be given MCP access: super admins, any
- * admin/owner/gestor in `user_roles`, finance viewers and group managers.
- * This never grants anything — the actual level comes from `mcp_access`,
- * read separately for each candidate.
+ * admin/owner/gestor in `user_roles`, finance viewers and group managers —
+ * plus which of them may get the operação area (super admin, admin of a
+ * house, group manager: the same people `mcp_ops_tenant_ids` gives houses
+ * to). This never grants anything — the actual level and areas come from
+ * `mcp_access`, read separately for each candidate.
  */
-async function candidateUserIds(): Promise<string[]> {
+async function candidateUserIds(): Promise<{ ids: string[]; opsEligible: Set<string> }> {
   const { data: roleRows, error: roleError } = await db()
     .from("user_roles")
     .select("user_id, role")
@@ -200,8 +221,33 @@ async function candidateUserIds(): Promise<string[]> {
     distinctUserIds("tenant_finance_viewers"),
     distinctUserIds("tenant_group_managers"),
   ]);
-  const roleIds = ((roleRows ?? []) as Array<{ user_id: string }>).map((row) => row.user_id);
-  return Array.from(new Set([...roleIds, ...viewerIds, ...managerIds]));
+  const roles = (roleRows ?? []) as Array<{ user_id: string; role: string }>;
+  const roleIds = roles.map((row) => row.user_id);
+  const opsEligible = new Set([
+    ...roles
+      .filter((row) => row.role === "super_admin" || row.role === "admin")
+      .map((row) => row.user_id),
+    ...managerIds,
+  ]);
+  return { ids: Array.from(new Set([...roleIds, ...viewerIds, ...managerIds])), opsEligible };
+}
+
+/** Whether `userId` may receive the operação area (see candidateUserIds). */
+async function isOpsEligible(userId: string): Promise<boolean> {
+  if (await isSuperAdminUser(userId)) return true;
+  const [roles, managers] = await Promise.all([
+    db()
+      .from("user_roles")
+      .select("user_id")
+      .eq("user_id", userId)
+      .eq("role", "admin")
+      .not("tenant_id", "is", null)
+      .limit(1),
+    db().from("tenant_group_managers").select("user_id").eq("user_id", userId).limit(1),
+  ]);
+  if (roles.error) throw new Error(roles.error.message);
+  if (managers.error) throw new Error(managers.error.message);
+  return (roles.data ?? []).length > 0 || (managers.data ?? []).length > 0;
 }
 
 function displayName(user: AuthUser | undefined, userId: string): string {
@@ -214,22 +260,21 @@ function displayName(user: AuthUser | undefined, userId: string): string {
 export async function adminListMcpAccessFor(ctx: { userId: string }): Promise<McpAccessRow[]> {
   if (!(await isSuperAdminUser(ctx.userId))) throw new Error(FORBIDDEN);
 
-  const userIds = await candidateUserIds();
+  const { ids: userIds, opsEligible } = await candidateUserIds();
   if (userIds.length === 0) return [];
 
   const [accessRows, connections, authResult] = await Promise.all([
-    db().from("mcp_access").select("user_id, level").in("user_id", userIds),
+    db().from("mcp_access").select("user_id, level, areas").in("user_id", userIds),
     connectionsByUser(userIds),
     supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
   if (accessRows.error) throw new Error(accessRows.error.message);
   if (authResult.error) throw new Error(authResult.error.message);
 
-  const levelByUser = new Map(
-    ((accessRows.data ?? []) as Array<{ user_id: string; level: McpLevel }>).map((row) => [
-      row.user_id,
-      row.level,
-    ]),
+  const accessByUser = new Map(
+    (
+      (accessRows.data ?? []) as Array<{ user_id: string; level: McpLevel; areas?: unknown }>
+    ).map((row) => [row.user_id, { level: row.level, areas: parseAreas(row.areas) }]),
   );
   const authByUser = new Map((authResult.data?.users ?? []).map((user) => [user.id, user as AuthUser]));
 
@@ -239,7 +284,9 @@ export async function adminListMcpAccessFor(ctx: { userId: string }): Promise<Mc
       userId,
       nome: displayName(authUser, userId),
       email: authUser?.email ?? "",
-      level: levelByUser.get(userId) ?? "none",
+      level: accessByUser.get(userId)?.level ?? "none",
+      areas: accessByUser.get(userId)?.areas ?? ["financeiro"],
+      operacaoElegivel: opsEligible.has(userId),
       connections: connections.get(userId) ?? [],
     };
   });
@@ -315,6 +362,75 @@ export const adminSetMcpAccess = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => adminSetMcpAccessInput.parse(data))
   .handler(async ({ data, context }) => adminSetMcpAccessFor({ userId: context.userId }, data));
+
+// ---------------------------------------------------------------------------
+// adminSetMcpAreas
+// ---------------------------------------------------------------------------
+
+const adminSetMcpAreasInput = z.object({
+  userId: dbUuid(),
+  areas: z.array(z.enum(MCP_AREAS)),
+});
+
+/**
+ * Sets which MCP areas a user with access may use. Needs an existing access
+ * level (areas live on the mcp_access row), at least one area, and operação
+ * only for an eligible user. Audited as `mcp.areas_set` with before/after,
+ * like a level change.
+ */
+export async function adminSetMcpAreasFor(
+  ctx: { userId: string },
+  data: z.infer<typeof adminSetMcpAreasInput>,
+): Promise<{ ok: true }> {
+  const start = Date.now();
+  let ok = false;
+  let errorMessage: string | undefined;
+  try {
+    if (!(await isSuperAdminUser(ctx.userId))) throw new Error(FORBIDDEN);
+    const areas = MCP_AREAS.filter((area) => data.areas.includes(area));
+    if (areas.length === 0) throw new Error(AREAS_EMPTY);
+
+    const before = await getMcpAccess(data.userId);
+    if (before.level === "none") throw new Error(AREAS_NO_LEVEL);
+    if (areas.includes("operacao") && !(await isOpsEligible(data.userId))) {
+      throw new Error(OPS_NOT_ELIGIBLE);
+    }
+
+    const { error: updateError } = await db()
+      .from("mcp_access")
+      .update({ areas, granted_by: ctx.userId, updated_at: new Date().toISOString() })
+      .eq("user_id", data.userId);
+    if (updateError) throw new Error(updateError.message);
+
+    await auditAdminAction({
+      actorUserId: ctx.userId,
+      action: "mcp.areas_set",
+      targetUserId: data.userId,
+      before: { areas: before.areas },
+      after: { areas },
+    });
+    ok = true;
+    return { ok: true };
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    await logCall({
+      identity: { userId: ctx.userId, connectionId: null },
+      tool: "admin.set_areas",
+      tenantId: null,
+      ok,
+      error: errorMessage,
+      durationMs: Date.now() - start,
+      args: data,
+    });
+  }
+}
+
+export const adminSetMcpAreas = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => adminSetMcpAreasInput.parse(data))
+  .handler(async ({ data, context }) => adminSetMcpAreasFor({ userId: context.userId }, data));
 
 // ---------------------------------------------------------------------------
 // adminRevokeConnection

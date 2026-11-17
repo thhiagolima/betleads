@@ -7,14 +7,13 @@
 // See docs/superpowers/specs/2026-10-30-mcp-financeiro-design.md §6.
 import { z } from "zod";
 
-import type { McpIdentity } from "./access.server";
+import type { McpArea, McpIdentity } from "./access.server";
 import {
   dashboardInput,
   getFinanceDashboardFor,
   type DashboardScope,
 } from "@/lib/finance-dashboard.functions";
-import { presetRange } from "@/lib/finance/calc";
-import { compareMode, isoDate, periodPreset } from "@/lib/finance/finance-data.server";
+import { compareMode } from "@/lib/finance/finance-data.server";
 import { listFinanceScopesFor, type FinanceScopes } from "@/lib/finance/finance-scopes.server";
 import {
   getTenantFinanceMonthFor,
@@ -24,32 +23,43 @@ import {
 } from "@/lib/finance.functions";
 import { dbUuid } from "@/lib/zod-helpers";
 
+import { escopoInput, periodoInput, toRangeAndPreset } from "./inputs.server";
+import { listarEscoposOps, type EscoposOps } from "./ops/scope.server";
+
 type ServerContext = { userId: string };
 const ctxFor = (identity: McpIdentity): ServerContext => ({ userId: identity.userId });
 
 // ─── listarEscopos ──────────────────────────────────────────────────────────
 
-export type ListarEscoposResult = FinanceScopes & { nivel: "leitura" | "leitura e escrita" };
+export type ListarEscoposResult = Partial<FinanceScopes> & {
+  nivel: "leitura" | "leitura e escrita";
+  areas: McpArea[];
+  operacao?: EscoposOps;
+};
 
-/** Scopes the caller may act on, plus their current MCP access level. */
+/**
+ * Scopes the caller may act on, plus their current MCP access level and
+ * areas. The finance scopes (superAdmin, houses, groups) come only with the
+ * `financeiro` area, and `operacao` (houses and groups for the operação
+ * tools, spec 2026-11-17 §5.1) only with the `operacao` area — list-only:
+ * every tool re-checks permission itself.
+ */
 export async function listarEscopos(identity: McpIdentity): Promise<ListarEscoposResult> {
-  const scopes = await listFinanceScopesFor(identity.userId);
-  return { ...scopes, nivel: identity.level === "write" ? "leitura e escrita" : "leitura" };
+  const hasFinance = identity.areas.includes("financeiro");
+  const hasOps = identity.areas.includes("operacao");
+  const [scopes, operacao] = await Promise.all([
+    hasFinance ? listFinanceScopesFor(identity.userId) : null,
+    hasOps ? listarEscoposOps(identity.userId) : null,
+  ]);
+  return {
+    ...(scopes ?? {}),
+    nivel: identity.level === "write" ? "leitura e escrita" : "leitura",
+    areas: identity.areas,
+    ...(operacao ? { operacao } : {}),
+  };
 }
 
 // ─── resumoFinanceiro ───────────────────────────────────────────────────────
-
-const escopoInput = z.discriminatedUnion("tipo", [
-  z.object({ tipo: z.literal("casa"), id: dbUuid() }),
-  z.object({ tipo: z.literal("grupo"), id: dbUuid() }),
-  z.object({ tipo: z.literal("todas") }),
-]);
-
-const periodoInput = z.object({
-  preset: periodPreset.optional(),
-  inicio: isoDate.optional(),
-  fim: isoDate.optional(),
-});
 
 export const resumoFinanceiroInput = z.object({
   escopo: escopoInput,
@@ -66,19 +76,6 @@ function toDashboardScope(escopo: z.infer<typeof escopoInput>): DashboardScope {
     case "todas":
       return { kind: "all" };
   }
-}
-
-/** The periodo's range and preset — "preset" (not "custom") maps through the
- * same `presetRange` the panel's period filter sends the server, so
- * `periodo.preset` always yields the same window. */
-function toRangeAndPreset(periodo: z.infer<typeof periodoInput>, now: Date) {
-  if (periodo.preset && periodo.preset !== "custom") {
-    return { range: presetRange(periodo.preset, now), preset: periodo.preset };
-  }
-  if (!periodo.inicio || !periodo.fim) {
-    throw new Error("Informe o período: preset, ou início e fim.");
-  }
-  return { range: { from: periodo.inicio, to: periodo.fim }, preset: "custom" as const };
 }
 
 export type ResumoFinanceiroResult = ReturnType<typeof shapeResumo>;

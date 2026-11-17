@@ -2,12 +2,19 @@
 // (super admins, admin/owner/gestor, finance viewers, group managers), their
 // current level and their active connections — with a "Desconectar" per
 // connection. Style follows src/components/billing/admin/* (Card + Table).
+//
+// MCP do grupo (spec 2026-11-17 §4.3): two checkboxes per user, Financeiro
+// and Operação, saved to mcp_access.areas (adminSetMcpAreas, audited). They
+// are off while the user has no level; Operação is off for users who can't
+// receive it (only super admin, admin of a house or group manager), unless
+// it is already on, so it can still be turned off.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Bot } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -27,6 +34,7 @@ import {
   adminListMcpAccess,
   adminRevokeConnection,
   adminSetMcpAccess,
+  adminSetMcpAreas,
   type McpAccessRow,
 } from "@/lib/mcp/mcp.functions";
 
@@ -37,6 +45,15 @@ const LEVEL_LABEL: Record<McpAccessRow["level"], string> = {
   read: "Leitura",
   write: "Leitura e escrita",
 };
+
+type McpAreaName = McpAccessRow["areas"][number];
+type SetAreasVars = { userId: string; areas: McpAreaName[] };
+
+const AREA_LABEL: Record<McpAreaName, string> = {
+  financeiro: "Financeiro",
+  operacao: "Operação",
+};
+const AREA_ORDER: McpAreaName[] = ["financeiro", "operacao"];
 
 function fmtDate(d: string | null) {
   if (!d) return "nunca";
@@ -57,13 +74,43 @@ export function createLevelChangeHandler(
   };
 }
 
+/**
+ * What an area checkbox does on change, as a plain function (same reason as
+ * createLevelChangeHandler). Never sends an empty list: unchecking the last
+ * area is ignored (the server would refuse it anyway).
+ */
+export function createAreaToggleHandler(
+  row: Pick<McpAccessRow, "userId" | "areas">,
+  area: McpAreaName,
+  setAreas: (vars: SetAreasVars) => void,
+) {
+  return (checked: boolean | "indeterminate") => {
+    const on = checked === true;
+    const areas = AREA_ORDER.filter((a) => (a === area ? on : row.areas.includes(a)));
+    if (areas.length === 0) return;
+    setAreas({ userId: row.userId, areas });
+  };
+}
+
+/** Whether an area checkbox can be clicked for this row. */
+export function areaCheckboxDisabled(
+  row: Pick<McpAccessRow, "level" | "areas" | "operacaoElegivel">,
+  area: McpAreaName,
+): boolean {
+  if (row.level === "none") return true;
+  if (area === "operacao" && !row.operacaoElegivel && !row.areas.includes("operacao")) return true;
+  return false;
+}
+
 function McpAccessRowView({
   row,
   onSetAccess,
+  onSetAreas,
   onRevokeConnection,
 }: {
   row: McpAccessRow;
   onSetAccess: (vars: { userId: string; level: McpAccessRow["level"] }) => void;
+  onSetAreas: (vars: SetAreasVars) => void;
   onRevokeConnection: (connectionId: string) => void;
 }) {
   return (
@@ -83,6 +130,29 @@ function McpAccessRowView({
             <SelectItem value="write">{LEVEL_LABEL.write}</SelectItem>
           </SelectContent>
         </Select>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col gap-1.5">
+          {AREA_ORDER.map((area) => {
+            const id = `mcp-area-${row.userId}-${area}`;
+            return (
+              <label key={area} htmlFor={id} className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  id={id}
+                  checked={row.level !== "none" && row.areas.includes(area)}
+                  disabled={areaCheckboxDisabled(row, area)}
+                  onCheckedChange={createAreaToggleHandler(row, area, onSetAreas)}
+                />
+                {AREA_LABEL[area]}
+              </label>
+            );
+          })}
+          {!row.operacaoElegivel && (
+            <span className="text-meta text-muted-foreground">
+              Operação: só super admin, admin de casa ou gestor de grupo.
+            </span>
+          )}
+        </div>
       </TableCell>
       <TableCell>
         {row.connections.length === 0 ? (
@@ -118,6 +188,7 @@ export function McpAccessPanel({ mcpEnabled }: { mcpEnabled: boolean }) {
   const qc = useQueryClient();
   const listFn = useServerFn(adminListMcpAccess);
   const setAccessFn = useServerFn(adminSetMcpAccess);
+  const setAreasFn = useServerFn(adminSetMcpAreas);
   const revokeFn = useServerFn(adminRevokeConnection);
 
   const { data, isLoading } = useQuery({
@@ -130,6 +201,9 @@ export function McpAccessPanel({ mcpEnabled }: { mcpEnabled: boolean }) {
 
   const setAccess = (vars: { userId: string; level: McpAccessRow["level"] }) => {
     void setAccessFn({ data: vars }).then(invalidate);
+  };
+  const setAreas = (vars: SetAreasVars) => {
+    void setAreasFn({ data: vars }).then(invalidate);
   };
   const revokeConn = (connectionId: string) => {
     void revokeFn({ data: { connectionId } }).then(invalidate);
@@ -165,6 +239,7 @@ export function McpAccessPanel({ mcpEnabled }: { mcpEnabled: boolean }) {
             <TableRow>
               <TableHead>Usuário</TableHead>
               <TableHead>Nível</TableHead>
+              <TableHead>Áreas</TableHead>
               <TableHead>Conexões</TableHead>
             </TableRow>
           </TableHeader>
@@ -174,12 +249,13 @@ export function McpAccessPanel({ mcpEnabled }: { mcpEnabled: boolean }) {
                 key={row.userId}
                 row={row}
                 onSetAccess={setAccess}
+                onSetAreas={setAreas}
                 onRevokeConnection={revokeConn}
               />
             ))}
             {rows.length === 0 && !isLoading && (
               <TableRow>
-                <TableCell colSpan={3} className="text-center text-sm text-muted-foreground">
+                <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
                   Nenhum candidato a acesso MCP encontrado.
                 </TableCell>
               </TableRow>

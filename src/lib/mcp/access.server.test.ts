@@ -10,7 +10,7 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   return { supabaseAdmin: fake.admin.client };
 });
 
-import { getMcpLevel, resolveBearer } from "./access.server";
+import { assertArea, getMcpAccess, getMcpLevel, parseAreas, resolveBearer } from "./access.server";
 import { isMcpEnabled } from "./config.server";
 import { sha256Hex } from "./crypto.server";
 import { createFakeDb } from "../sms-bulk.test-support";
@@ -64,6 +64,30 @@ describe("isMcpEnabled", () => {
   });
 });
 
+describe("areas", () => {
+  it("getMcpAccess returns level and areas, defaulting areas to financeiro", async () => {
+    expect(await getMcpAccess(USER)).toEqual({ level: "none", areas: ["financeiro"] });
+    fake.admin.rows("mcp_access").push({ user_id: USER, level: "read" });
+    expect(await getMcpAccess(USER)).toEqual({ level: "read", areas: ["financeiro"] });
+  });
+
+  it("parseAreas keeps only known areas, in canonical order, never empty", () => {
+    expect(parseAreas(["operacao", "financeiro", "x"])).toEqual(["financeiro", "operacao"]);
+    expect(parseAreas([])).toEqual(["financeiro"]);
+    expect(parseAreas(null)).toEqual(["financeiro"]);
+  });
+
+  it("assertArea throws the pt-BR message for a missing area", () => {
+    expect(() => assertArea({ areas: ["financeiro"] }, "operacao")).toThrow(
+      "Seu acesso ao MCP não inclui operação.",
+    );
+    expect(() => assertArea({ areas: ["operacao"] }, "financeiro")).toThrow(
+      "Seu acesso ao MCP não inclui financeiro.",
+    );
+    expect(() => assertArea({ areas: ["operacao"] }, "operacao")).not.toThrow();
+  });
+});
+
 describe("getMcpLevel", () => {
   it("returns \"none\" when there is no mcp_access row", async () => {
     expect(await getMcpLevel(USER)).toBe("none");
@@ -112,7 +136,17 @@ describe("resolveBearer", () => {
       connectionId: CONNECTION,
       clientId: CLIENT,
       level: "write",
+      areas: ["financeiro"],
     });
+  });
+
+  it("reads the areas from mcp_access on every call (operacao turned on, then off)", async () => {
+    const access = fake.admin.rows("mcp_access").find((r) => r.user_id === USER)!;
+    access.areas = ["financeiro", "operacao"];
+    await seedToken("tok-areas");
+    expect((await resolveBearer("tok-areas"))?.areas).toEqual(["financeiro", "operacao"]);
+    access.areas = ["operacao"];
+    expect((await resolveBearer("tok-areas"))?.areas).toEqual(["operacao"]);
   });
 
   it("bumps mcp_connections.last_used_at on success", async () => {

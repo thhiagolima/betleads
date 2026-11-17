@@ -85,7 +85,7 @@ type DashboardQuery<T = unknown> = PromiseLike<DbResult<T>> & {
   maybeSingle: () => PromiseLike<DbResult<T>>;
 };
 
-type DashboardDb = {
+export type DashboardDb = {
   rpc: <T = unknown>(name: string, args: Record<string, unknown>) => PromiseLike<DbResult<T>>;
   from: <T = unknown>(table: string) => DashboardQuery<T>;
 };
@@ -281,6 +281,39 @@ export function mapDashboardRpc(value: DashboardRpc, periodDays: number) {
   };
 }
 
+/**
+ * The raw `dashboard_summary_v2` payload of one house: reads the house's
+ * `dashboard_settings.reset_at` and calls the RPC with the bounds of
+ * `dashboardPeriodBounds`. Shared by the home (with the user's RLS client)
+ * and the MCP `visao_geral` tool (with the service client, after its own
+ * permission gate), so both read the very same numbers.
+ */
+export async function fetchDashboardSummaryRpc(
+  supabase: DashboardDb,
+  tenantId: string,
+  bounds: { startDate: Date; endDate: Date; prevFrom: string; prevTo: string },
+): Promise<DashboardRpc> {
+  const { data: settings, error: settingsError } = await supabase
+    .from("dashboard_settings")
+    .select("reset_at")
+    .eq("tenant_id", tenantId)
+    .eq("id", "global")
+    .maybeSingle();
+  if (settingsError) throw new Error(settingsError.message);
+
+  const { data: raw, error } = await supabase.rpc("dashboard_summary_v2", {
+    _tenant: tenantId,
+    _from: bounds.startDate.toISOString(),
+    _to: bounds.endDate.toISOString(),
+    _prev_from: bounds.prevFrom,
+    _prev_to: bounds.prevTo,
+    _reset_at: (settings as { reset_at?: string } | null)?.reset_at ?? "1970-01-01T00:00:00Z",
+  });
+  if (error) throw new Error(error.message);
+  if (!raw) throw new Error("Sem acesso aos dados desta conta.");
+  return raw as DashboardRpc;
+}
+
 export const getDashboardSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => inputSchema.parse(input))
@@ -301,28 +334,12 @@ export const getDashboardSummary = createServerFn({ method: "POST" })
     return withServerResultCache(cacheKey, ttlMs, () =>
       withTimeout(
         (async () => {
-          const supabase = context.supabase as unknown as DashboardDb;
-          const { data: settings, error: settingsError } = await supabase
-            .from("dashboard_settings")
-            .select("reset_at")
-            .eq("tenant_id", tenantId)
-            .eq("id", "global")
-            .maybeSingle();
-          if (settingsError) throw new Error(settingsError.message);
-
-          const { data: raw, error } = await supabase.rpc("dashboard_summary_v2", {
-            _tenant: tenantId,
-            _from: startDate.toISOString(),
-            _to: endDate.toISOString(),
-            _prev_from: prevFrom,
-            _prev_to: prevTo,
-            _reset_at:
-              (settings as { reset_at?: string } | null)?.reset_at ?? "1970-01-01T00:00:00Z",
-          });
-          if (error) throw new Error(error.message);
-          if (!raw) throw new Error("Sem acesso aos dados desta conta.");
-
-          return mapDashboardRpc(raw as DashboardRpc, periodDays);
+          const raw = await fetchDashboardSummaryRpc(
+            context.supabase as unknown as DashboardDb,
+            tenantId,
+            { startDate, endDate, prevFrom, prevTo },
+          );
+          return mapDashboardRpc(raw, periodDays);
         })(),
         DASHBOARD_REQUEST_TIMEOUT_MS,
         "O painel demorou mais que o esperado para responder. Tente novamente.",

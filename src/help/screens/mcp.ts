@@ -1,5 +1,6 @@
-// Help article for "Conectar ao Claude" (/mcp): a URL própria de conexão
-// MCP e as instruções para ligar claude.ai, Claude Desktop e Claude Code a
+// Help article for "Conectar ao Claude" (/mcp): a URL de conexão MCP (uma
+// só para todo o Betleads; o que cada pessoa vê depende do acesso dela, não
+// da URL), as áreas (financeiro e operação) e as instruções para ligar claude.ai, Claude Desktop e Claude Code a
 // ela, mais as conexões ativas e o botão de desconectar cada uma. A tela só
 // aparece no menu para quem tem algum nível de acesso ao MCP concedido pelo
 // super admin (fora desta tela) — mas uma visita direta à URL sempre
@@ -14,7 +15,7 @@ const screen: HelpScreen = {
   route: "/mcp",
   title: "Conectar ao Claude",
   purpose:
-    "A URL própria desta casa para ligar o Claude (claude.ai, Claude Desktop ou Claude Code) aos dados financeiros dela via MCP, mais as conexões já feitas e como desconectar cada uma.",
+    "A URL de conexão do Betleads para ligar o Claude (claude.ai, Claude Desktop ou Claude Code) via MCP, mais as conexões já feitas e como desconectar cada uma. A URL é uma só para todos; o que o Claude vê depende do acesso de cada pessoa: a área de financeiro (resumo, mês e metas das casas, com escritas confirmadas) e, quando liberada, a área de operação (só leitura: cadastros, FTDs, depósitos, experts, afiliados, campanhas, jornadas e alertas das casas que a pessoa vê, de uma casa, de um grupo ou de todas de uma vez).",
   roles: ["admin", "gestor", "member"],
   terms: ["mcp"],
   sections: [
@@ -22,12 +23,12 @@ const screen: HelpScreen = {
       id: "conexao",
       title: "URL de conexão",
       intro:
-        'Subtítulo da tela: "Nível de acesso: {Leitura / Leitura e escrita}." — o nível é concedido por pessoa pelo super admin, fora desta tela; aqui só se usa o que já foi concedido.',
+        'Subtítulo da tela: "Nível de acesso: {Leitura / Leitura e escrita}." — o nível e as áreas (Financeiro e Operação) são concedidos por pessoa pelo super admin, fora desta tela; aqui só se usa o que já foi concedido. A área de operação só pode ser liberada para super admin, admin de casa ou gestor de grupo: o admin vê a operação da casa dele, o gestor do grupo vê as casas do grupo e o super admin vê todas.',
       items: [
         {
           anchor: "mcp.url.card",
           label: "URL de conexão",
-          what: "O endereço que identifica esta casa para o MCP — o mesmo endereço entra em claude.ai, Claude Desktop e no comando do Claude Code, mais abaixo.",
+          what: "O endereço do MCP do Betleads — o mesmo para todas as casas e todas as pessoas; quem se conecta só vê as casas e as áreas a que tem acesso. Esse endereço entra em claude.ai, Claude Desktop e no comando do Claude Code, mais abaixo.",
         },
         {
           anchor: "mcp.url.copiar",
@@ -109,7 +110,7 @@ const screen: HelpScreen = {
       {
         anchor: "mcp.url.card",
         title: "URL de conexão",
-        body: "O endereço que liga o Claude aos dados financeiros desta casa — a mesma URL entra nos três clientes abaixo.",
+        body: "O endereço que liga o Claude ao Betleads — uma URL só, que entra nos três clientes abaixo. O Claude vê só as casas e as áreas (financeiro, operação) liberadas para você.",
         articleSection: "conexao",
       },
       {
@@ -127,7 +128,7 @@ const screen: HelpScreen = {
       {
         anchor: "mcp.code.card",
         title: "Claude Code",
-        body: "Um comando pronto para colar no terminal, já com a URL desta casa.",
+        body: "Um comando pronto para colar no terminal, já com a URL de conexão.",
         articleSection: "instrucoes",
       },
       {

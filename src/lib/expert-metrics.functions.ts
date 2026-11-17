@@ -77,7 +77,7 @@ export type ExpertMetrics = {
   contatos: number;
 };
 
-type MetricsDbRow = {
+export type MetricsDbRow = {
   expert_id: string;
   depositado: number | string;
   depositado_clique: number | string;
@@ -115,7 +115,7 @@ function zeroMetrics(expertId: string): ExpertMetrics {
   };
 }
 
-function mapMetricsRow(row: MetricsDbRow): ExpertMetrics {
+export function mapMetricsRow(row: MetricsDbRow): ExpertMetrics {
   return {
     expertId: row.expert_id,
     depositado: Number(row.depositado),
@@ -131,7 +131,7 @@ function mapMetricsRow(row: MetricsDbRow): ExpertMetrics {
   };
 }
 
-async function fetchExpertMetrics(tenantId: string, from: string, to: string) {
+export async function fetchExpertMetrics(tenantId: string, from: string, to: string) {
   const { data, error } = await db().rpc("expert_metrics", {
     _tenant: tenantId,
     _from: from,

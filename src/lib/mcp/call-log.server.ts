@@ -7,10 +7,14 @@
 //   slows down.
 // - Confirmations: ok `confirmar_alteracao` rows of the user in the last hour
 //   (failed confirmations wrote nothing, so they don't count).
+//
+// MCP do grupo (spec 2026-11-17 §6): each row also keeps the call's `args`
+// (JSON, cut at LOG_ARGS_MAX_CHARS; tools never take player data) and the
+// resolved `scope` ({tipo, id, casas}).
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 import type { McpIdentity } from "./access.server";
-import { CALLS_PER_MINUTE, CONFIRMS_PER_HOUR } from "./config.server";
+import { CALLS_PER_MINUTE, CONFIRMS_PER_HOUR, LOG_ARGS_MAX_CHARS } from "./config.server";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- loose client typing, same pattern as access.server.ts's db(). */
 const db = () => supabaseAdmin as any;
@@ -62,6 +66,9 @@ export async function checkRateLimit(identity: McpIdentity, tool: string): Promi
  */
 export type CallLogIdentity = McpIdentity | { userId: string; connectionId: null };
 
+/** Scope of a call as logged in mcp_call_log.scope. */
+export type CallLogScope = { tipo: string; id?: string | null; casas?: number };
+
 export type CallLogEntry = {
   identity: CallLogIdentity;
   tool: string;
@@ -70,7 +77,27 @@ export type CallLogEntry = {
   error?: string;
   durationMs: number;
   previewCodeHash?: string;
+  /** The call's arguments (already free of secrets — the caller redacts). */
+  args?: unknown;
+  scope?: CallLogScope | null;
 };
+
+/**
+ * The arguments as stored in mcp_call_log.args: as is when their JSON fits in
+ * LOG_ARGS_MAX_CHARS, else `{truncado: true, json: <first chars>}` (a jsonb
+ * column needs valid JSON, so the cut text goes inside a string).
+ */
+export function argsForLog(args: unknown): unknown {
+  if (args === undefined) return null;
+  let json: string;
+  try {
+    json = JSON.stringify(args) ?? "null";
+  } catch {
+    return { truncado: true, json: "" };
+  }
+  if (json.length <= LOG_ARGS_MAX_CHARS) return JSON.parse(json);
+  return { truncado: true, json: json.slice(0, LOG_ARGS_MAX_CHARS) };
+}
 
 /** Inserts the call's log row. Never throws: a log failure must not fail the call. */
 export async function logCall(entry: CallLogEntry): Promise<void> {
@@ -86,6 +113,8 @@ export async function logCall(entry: CallLogEntry): Promise<void> {
         error: entry.error ? entry.error.slice(0, 1000) : null,
         duration_ms: Math.max(0, Math.round(entry.durationMs)),
         preview_code_hash: entry.previewCodeHash ?? null,
+        args: argsForLog(entry.args),
+        scope: entry.scope ?? null,
       });
     if (error) console.error("[mcp-call-log]", error.message);
   } catch (error) {
