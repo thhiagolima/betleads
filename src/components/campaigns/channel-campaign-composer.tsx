@@ -79,6 +79,7 @@ import {
 } from "@/lib/email.functions";
 import { brl, num } from "@/lib/format";
 import { getBillingPrices } from "@/lib/billing/billing.functions";
+import { previewTrackedText, smsHasLink } from "@/lib/link-tracking-preview";
 import { countSmsSegments, toGsm7Text } from "@/lib/sms-segments";
 import { unknownMessageVariables } from "@/lib/message-variables";
 import { listJourneyVoiceAssets } from "@/lib/journey-voice-assets.functions";
@@ -728,7 +729,16 @@ export function ChannelCampaignComposer({
   });
   const smsPreview = channel === "sms" ? smsRecipientPreview.data : undefined;
   const sendableRecipients = smsPreview ? smsPreview.resolved : recipients;
-  const smsSegmentInfo = countSmsSegments(toGsm7Text(smsContent));
+  // Links are always shortened on send, so count the message the player gets:
+  // each URL becomes https://<domínio escolhido>/xxxxxx (bmkt.click when the
+  // house has no verified domain), same as the individual/test send preview.
+  const smsShortHost =
+    (shortDomainId ? shortDomains.find((d) => d.id === shortDomainId) : undefined)?.hostname ??
+    (shortDomains.find((d) => d.isDefault) ?? shortDomains[0])?.hostname ??
+    null;
+  const smsSentText = previewTrackedText(smsContent, trackLinks, smsShortHost);
+  const smsSegmentInfo = countSmsSegments(toGsm7Text(smsSentText));
+  const smsMissingLink = channel === "sms" && !smsHasLink(smsContent);
   const parts = smsSegmentInfo.segments;
   const cost =
     channel === "sms"
@@ -1225,6 +1235,16 @@ export function ChannelCampaignComposer({
       (channel === "webpush" && webpushCountQuery.isFetching)
     )
       return;
+    if (validationIssues.length === 0 && smsMissingLink) {
+      const proceed = await requestConfirmation({
+        title: when === "schedule" ? "Agendar SMS sem link?" : "Enviar SMS sem link?",
+        description:
+          "A mensagem não tem nenhum link. O jogador não terá onde tocar para entrar na casa e a campanha não vai registrar cliques. Para incluir, use o botão de links ou escreva a URL no texto.",
+        confirmLabel: when === "schedule" ? "Agendar sem link" : "Enviar sem link",
+        cancelLabel: "Voltar e incluir link",
+      });
+      if (!proceed) return;
+    }
     let confirmedCount: number | undefined;
     if (validationIssues.length === 0 && requiresTypedConfirmation(sendableRecipients)) {
       const count = sendableRecipients;
@@ -1692,7 +1712,9 @@ export function ChannelCampaignComposer({
                       />
                     </div>
                     <p className="text-meta text-muted-foreground">
-                      {Array.from(smsContent).length} caracteres · {smsSegmentInfo.encoding} ·{" "}
+                      {Array.from(smsSentText).length} caracteres
+                      {smsSentText !== smsContent ? " com o link encurtado" : ""} ·{" "}
+                      {smsSegmentInfo.encoding} ·{" "}
                       {parts} segmento{parts === 1 ? "" : "s"} ·{" "}
                       {isExpert
                         ? expertOptions.data
@@ -1704,6 +1726,12 @@ export function ChannelCampaignComposer({
                             ? "—"
                             : `${brl(smsCostBrl)} por jogador`}
                     </p>
+                    {smsMissingLink ? (
+                      <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-[12.5px] text-warning">
+                        Esta mensagem está sem link. O jogador não terá onde tocar para entrar na
+                        casa e não haverá cliques para medir.
+                      </p>
+                    ) : null}
                   </div>
                   {isExpert ? null : (
                     <div className="space-y-2">

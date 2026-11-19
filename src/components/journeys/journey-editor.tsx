@@ -36,6 +36,7 @@ import {
   ShortenerFallbackNotice,
 } from "@/components/house-config/composer-notices";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { smsHasLink } from "@/lib/link-tracking-preview";
 import { Term } from "@/components/help/term";
 import { tourAnchor } from "@/help/anchor";
 import { supabase } from "@/integrations/supabase/client";
@@ -685,8 +686,34 @@ export function JourneyEditor({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // SMS texts with no link: a warning, not a block (some steps are reminders).
+  const confirmSmsLinks = async (action: "save" | "activate") => {
+    const missing = steps.flatMap((s, index) =>
+      s.kind !== "sms"
+        ? []
+        : (s.variants ?? [s.content]).some((text) => !smsHasLink(text))
+          ? [index + 1]
+          : [],
+    );
+    if (missing.length === 0) return true;
+    const where =
+      missing.length === 1 ? `A etapa ${missing[0]}` : `As etapas ${missing.join(", ")}`;
+    return requestConfirmation({
+      title: action === "activate" ? "Ativar com SMS sem link?" : "Salvar SMS sem link?",
+      description: `${where} ${missing.length === 1 ? "tem" : "têm"} SMS sem nenhum link. O jogador não terá onde tocar para entrar na casa e a jornada não vai registrar cliques nesse envio.`,
+      confirmLabel: action === "activate" ? "Ativar sem link" : "Salvar sem link",
+      cancelLabel: "Voltar e incluir link",
+    });
+  };
+  const saveWithLinkCheck = async () => {
+    if (!(await confirmSmsLinks("save"))) return;
+    mutation.mutate(signature);
+  };
+
   const activate = async () => {
     if (!id) return;
+    // "Ativar versão salva" below activates what is stored, not the screen.
+    if (!(dirty && savedStatus !== "draft") && !(await confirmSmsLinks("activate"))) return;
     if (dirty && savedStatus === "draft") {
       try {
         await mutation.mutateAsync(signature);
@@ -762,7 +789,7 @@ export function JourneyEditor({
     <Button
       className="h-11 md:h-9"
       disabled={mutation.isPending}
-      onClick={() => mutation.mutate(signature)}
+      onClick={() => void saveWithLinkCheck()}
       {...tourAnchor("jornada.rodape.salvar")}
     >
       <Save className="mr-1 h-4 w-4" aria-hidden="true" />
@@ -1269,6 +1296,7 @@ export function JourneyEditor({
                             }
                             placeholder={`Texto ${n + 1} do SMS`}
                           />
+                          {!smsHasLink(text) && <SmsNoLinkNotice />}
                         </div>
                       ))}
                       {s.variants.length < 20 && (
@@ -1326,6 +1354,7 @@ export function JourneyEditor({
                         }
                         placeholder="Texto do SMS"
                       />
+                      {!smsHasLink(s.content) && <SmsNoLinkNotice />}
                     </>
                   )}
                   <ShortenerFallbackNotice
@@ -1664,5 +1693,14 @@ export function JourneyEditor({
       </div>
       {statusControl.dialogs}
     </Page>
+  );
+}
+
+function SmsNoLinkNotice() {
+  return (
+    <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-[12.5px] text-warning">
+      Este SMS está sem link. O jogador não terá onde tocar para entrar na casa e não haverá
+      cliques para medir.
+    </p>
   );
 }

@@ -1,6 +1,11 @@
 const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
 
-export const LINK_TRACKING_PREVIEW_URL = "bmkt.click/abc123";
+/** Short.io returns `https://<domínio>/<6 caracteres>`; the preview keeps that shape. */
+export const LINK_TRACKING_PREVIEW_URL = "https://bmkt.click/abc123";
+
+export function trackedPreviewUrl(hostname?: string | null) {
+  return hostname ? `https://${hostname}/abc123` : LINK_TRACKING_PREVIEW_URL;
+}
 
 export function messageUrls(value: string) {
   return Array.from(value.matchAll(URL_PATTERN), (match) =>
@@ -12,9 +17,9 @@ export function messageUrls(value: string) {
  * Uses a deterministic placeholder only in the editor. Real Short.io links are
  * created at dispatch time, per recipient, so drafts never create orphan links.
  */
-export function previewTrackedText(value: string, enabled: boolean) {
+export function previewTrackedText(value: string, enabled: boolean, hostname?: string | null) {
   if (!enabled) return value;
-  return value.replace(URL_PATTERN, LINK_TRACKING_PREVIEW_URL);
+  return value.replace(URL_PATTERN, trackedPreviewUrl(hostname));
 }
 
 export function smsPartsForLength(length: number) {
@@ -37,4 +42,16 @@ export function estimateSms(value: string): SmsEstimate {
   const concatenated = encoding === "GSM-7" ? 153 : 67;
   const parts = units === 0 ? 0 : units <= single ? 1 : Math.ceil(units / concatenated);
   return { encoding, characters, units, parts, credits: parts };
+}
+
+const LINK_VARIABLE_PATTERN = /\{link(?:_[a-zA-Z0-9_]+)?\}/;
+
+/**
+ * Whether an SMS text carries a link the player can tap: a written URL or one of
+ * the link variables ({link}, {link_login}, {link_deposito}, {link_<atalho>}).
+ * Empty text is not flagged; the editors already require a message.
+ */
+export function smsHasLink(value: string) {
+  if (!value.trim()) return true;
+  return messageUrls(value).length > 0 || LINK_VARIABLE_PATTERN.test(value);
 }
