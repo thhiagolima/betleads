@@ -34,10 +34,10 @@ function RealtimeIndicator() {
       role="status"
       aria-label={`Tempo real: ${meta.label}`}
       {...tourAnchor("shell.header.indicador-tempo-real")}
-      className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-border px-3 text-xs text-foreground/80"
+      className="hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border px-3 text-xs text-foreground/80 md:flex"
     >
       <span className={cn("size-1.5 rounded-full", meta.dot)} aria-hidden="true" />
-      <span className="hidden sm:inline">{meta.label}</span>
+      <span>{meta.label}</span>
     </span>
   );
 }
@@ -119,7 +119,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
         <main
           aria-label={meta.title}
-          className="flex-1 overflow-x-hidden p-4 pb-[calc(76px+env(safe-area-inset-bottom))] animate-fade-in sm:p-6 sm:pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-6"
+          className="flex-1 overflow-x-clip p-4 pb-[calc(76px+env(safe-area-inset-bottom))] animate-fade-in sm:p-6 sm:pb-[calc(76px+env(safe-area-inset-bottom))] md:pb-6"
         >
           {contentState === "render" ? <TenantStatusGate>{children}</TenantStatusGate> : null}
         </main>

@@ -79,9 +79,9 @@ export function ProvidersPausedBanner({ channel }: { channel: DispatchChannel })
     if (confirmed) mut.mutate(false);
   }
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-body text-warning">
+    <div className="flex flex-wrap items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-body text-warning">
       <Pause className="h-4 w-4 mt-0.5 shrink-0" />
-      <div className="flex-1 space-y-1">
+      <div className="min-w-0 flex-1 basis-56 space-y-1">
         <div className="font-medium">Disparos de {LABEL[channel]} pausados</div>
         {reasonLabel && <div className="text-meta">Motivo: {reasonLabel}</div>}
         <div className="text-meta opacity-80">

@@ -125,7 +125,10 @@ function PlayerDetailPage() {
 
   async function copyExternalId() {
     if (!externalId) return;
-    await copyToClipboard(externalId);
+    if (!(await copyToClipboard(externalId))) {
+      toast.error("Não foi possível copiar.");
+      return;
+    }
     setIdCopied(true);
     window.setTimeout(() => setIdCopied(false), 1500);
     toast.success("ID copiado.");

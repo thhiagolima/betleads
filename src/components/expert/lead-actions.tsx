@@ -36,17 +36,9 @@ import { listExpertTemplates, renderExpertMessage } from "@/lib/expert-templates
 import { normalizeBrazilianPhone } from "@/lib/phone-normalization";
 
 import { actionErrorMessage } from "./sheet-format";
+import { copyToClipboard } from "@/lib/clipboard";
 
 const MESSAGE_MAX = 1000;
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function ActionCard({
   title,
@@ -98,7 +90,7 @@ export function LeadActions({
 
   async function copyLink() {
     if (!link) return;
-    if (await copyText(link.sentUrl)) {
+    if (await copyToClipboard(link.sentUrl)) {
       setLinkCopied(true);
       window.setTimeout(() => setLinkCopied(false), 1500);
       toast.success("Link copiado.");
@@ -177,9 +169,14 @@ export function LeadActions({
   async function copyMessage() {
     if (!messageReady) return;
     try {
-      const { texto } = await render.mutateAsync();
-      if (await copyText(texto)) toast.success("Texto copiado.");
-      else toast.error("Não foi possível copiar.");
+      // The copy starts during the tap with the text still on its way from
+      // the server — iOS refuses a copy made after awaiting the network.
+      const texto = render.mutateAsync().then((r) => r.texto);
+      if (await copyToClipboard(texto)) toast.success("Texto copiado.");
+      else {
+        await texto; // a server error reports itself below
+        toast.error("Não foi possível copiar.");
+      }
     } catch (error) {
       toast.error(actionErrorMessage(error));
     }

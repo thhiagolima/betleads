@@ -103,6 +103,7 @@ import {
   Wallet,
   RadioTower,
 } from "lucide-react";
+import { copyToClipboard } from "@/lib/clipboard";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -344,9 +345,10 @@ function AdminIntegrationsTab() {
                       variant="outline"
                       label="Copiar callback"
                       icon={<Copy className="h-4 w-4" />}
-                      onClick={() => {
-                        navigator.clipboard.writeText(item.callbackUrl);
-                        toast.success("Callback copiado");
+                      onClick={async () => {
+                        if (await copyToClipboard(item.callbackUrl))
+                          toast.success("Callback copiado");
+                        else toast.error("Não foi possível copiar.");
                       }}
                     />
                   </div>
@@ -728,9 +730,9 @@ function ImpersonateButton({ userId, email }: { userId: string; email: string })
                 <Button
                   variant="outline"
                   className="gap-2"
-                  onClick={() => {
-                    navigator.clipboard.writeText(link);
-                    toast.success("Link copiado");
+                  onClick={async () => {
+                    if (await copyToClipboard(link)) toast.success("Link copiado");
+                    else toast.error("Não foi possível copiar.");
                   }}
                 >
                   <Copy className="h-4 w-4" /> Copiar

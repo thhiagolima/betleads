@@ -30,17 +30,17 @@ export function DataCard({
       {(title || actions) && (
         <div
           className={cn(
-            "flex items-start justify-between gap-4 px-4 pt-4 sm:px-5 sm:pt-5",
+            "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-4 pt-4 sm:px-5 sm:pt-5",
             children == null && "pb-4 sm:pb-5",
           )}
         >
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1 basis-48">
             {title && <h2 className="text-section">{title}</h2>}
             {description && (
               <p className="mt-0.5 text-label text-muted-foreground">{description}</p>
             )}
           </div>
-          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+          {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </div>
       )}
       {children != null && <div className={cn("p-4 sm:p-5", bodyClassName)}>{children}</div>}

@@ -1338,7 +1338,7 @@ export function ChannelCampaignComposer({
         else onOpenChange(next);
       }}
     >
-      <DialogContent className="flex h-dvh max-h-dvh w-full max-w-none flex-col gap-0 overflow-hidden p-0 sm:h-auto sm:max-h-[92dvh] sm:w-[calc(100vw-2rem)] sm:max-w-4xl sm:rounded-2xl">
+      <DialogContent className="flex h-dvh max-h-dvh w-full max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 sm:h-auto sm:max-h-[92dvh] sm:w-[calc(100vw-2rem)] sm:max-w-4xl sm:rounded-2xl">
         <DialogHeader className="shrink-0 space-y-1 border-b border-border px-4 py-4 pr-12 text-left sm:px-6">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <DialogTitle className="text-section">Nova campanha</DialogTitle>
@@ -1419,216 +1419,221 @@ export function ChannelCampaignComposer({
                 />
               </div>
               {channel !== "webpush" && (
-              <div className="space-y-2">
-                <Label id={fieldIds.audienceLabel}>Público</Label>
-                <Select
-                  value={audienceId}
-                  onValueChange={(value) => {
-                    setAudienceId(value);
-                    setAudience(null);
-                    if (value === EXTERNAL_LIST_ID || value === EXTERNAL_EMAIL_LIST_ID)
-                      setAudienceCriteria(null);
-                    const selected = audienceOptions.find((item) => item.id === value);
-                    if (selected) {
-                      setAudienceCriteria(selected.criteria);
-                      audienceMutation.mutate({ criteria: selected.criteria, channel });
-                    }
-                  }}
-                >
-                  <SelectTrigger
-                    id={fieldIds.audience}
-                    aria-labelledby={fieldIds.audienceLabel}
-                    aria-describedby={fieldIds.validation}
-                    aria-invalid={
-                      submitAttempted &&
-                      (isListAudience
-                        ? recipients === 0
-                        : Boolean(!audience && !audienceMutation.isPending))
-                    }
-                    {...tourAnchor("campanhas.compositor.publico")}
+                <div className="space-y-2">
+                  <Label id={fieldIds.audienceLabel}>Público</Label>
+                  <Select
+                    value={audienceId}
+                    onValueChange={(value) => {
+                      setAudienceId(value);
+                      setAudience(null);
+                      if (value === EXTERNAL_LIST_ID || value === EXTERNAL_EMAIL_LIST_ID)
+                        setAudienceCriteria(null);
+                      const selected = audienceOptions.find((item) => item.id === value);
+                      if (selected) {
+                        setAudienceCriteria(selected.criteria);
+                        audienceMutation.mutate({ criteria: selected.criteria, channel });
+                      }
+                    }}
                   >
-                    <SelectValue placeholder="Selecione um público salvo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {channel === "sms" && !isExpert ? (
-                      <SelectItem value={EXTERNAL_LIST_ID}>
-                        Lista de números · quem ainda não é jogador
-                      </SelectItem>
-                    ) : null}
-                    {channel === "voice" && !isExpert ? (
-                      <SelectItem value={EXTERNAL_LIST_ID}>Lista de números</SelectItem>
-                    ) : null}
-                    {channel === "email" && !isExpert ? (
-                      <SelectItem value={EXTERNAL_EMAIL_LIST_ID}>Lista de e-mails</SelectItem>
-                    ) : null}
-                    {audienceOptions.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {audienceOptionLabel(item, isExpert)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {isExpert ? (
-                  <p className="text-meta text-muted-foreground">
-                    Só os seus leads entram no envio, mesmo nos públicos da casa.
-                  </p>
-                ) : null}
-                {audienceMutation.isPending ? (
-                  <p className="text-meta text-muted-foreground" aria-live="polite">
-                    Calculando o público…
-                  </p>
-                ) : null}
-                {isPhoneList ? (
-                  <div className="space-y-2">
-                    <Textarea
-                      name="external-phone-list"
-                      rows={4}
-                      value={externalText}
-                      onChange={(event) => setExternalText(event.target.value)}
-                      placeholder="Cole os números: um por linha ou separados por vírgula ou ponto e vírgula"
-                      aria-label="Números da lista"
-                      {...tourAnchor("campanhas.compositor.lista-numeros")}
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        ref={externalFileRef}
-                        type="file"
-                        accept={PHONE_LIST_FILE_ACCEPT}
-                        className="hidden"
-                        onChange={async (event) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = "";
-                          if (!file) return;
-                          setExternalFileLoading(true);
-                          try {
-                            setExternalFile({
-                              name: file.name,
-                              text: await readPhoneListFile(file),
-                            });
-                          } catch (error) {
-                            toast.error(
-                              error instanceof Error
-                                ? error.message
-                                : "Não foi possível ler o arquivo.",
-                            );
-                          } finally {
-                            setExternalFileLoading(false);
-                          }
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={externalFileLoading}
-                        onClick={() => externalFileRef.current?.click()}
-                        {...tourAnchor("campanhas.compositor.lista-arquivo")}
-                      >
-                        <Upload className="mr-1.5 size-3.5" aria-hidden="true" />
-                        {externalFileLoading ? "Lendo arquivo…" : "Enviar arquivo (CSV, TXT, XLS)"}
-                      </Button>
-                      {externalFile ? (
-                        <Badge variant="secondary" className="gap-1">
-                          {externalFile.name}
-                          <button
-                            type="button"
-                            aria-label="Remover arquivo"
-                            onClick={() => setExternalFile(null)}
-                          >
-                            <X className="size-3" aria-hidden="true" />
-                          </button>
-                        </Badge>
+                    <SelectTrigger
+                      id={fieldIds.audience}
+                      aria-labelledby={fieldIds.audienceLabel}
+                      aria-describedby={fieldIds.validation}
+                      aria-invalid={
+                        submitAttempted &&
+                        (isListAudience
+                          ? recipients === 0
+                          : Boolean(!audience && !audienceMutation.isPending))
+                      }
+                      {...tourAnchor("campanhas.compositor.publico")}
+                    >
+                      <SelectValue placeholder="Selecione um público salvo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {channel === "sms" && !isExpert ? (
+                        <SelectItem value={EXTERNAL_LIST_ID}>
+                          Lista de números · quem ainda não é jogador
+                        </SelectItem>
                       ) : null}
-                    </div>
-                    {channel === "sms" ? (
-                      <p className="text-meta text-muted-foreground">
-                        {num(externalList.phones.length)} número(s) válido(s). Os números não são
-                        salvos como jogadores e quem já é jogador da casa fica de fora. Se a pessoa
-                        clicar no link e se cadastrar com o mesmo telefone, o cadastro e os
-                        depósitos entram no relatório da campanha.
-                      </p>
-                    ) : (
-                      <p className="text-meta text-muted-foreground">
-                        {num(externalList.phones.length)} número(s) válido(s). Os números não são
-                        salvos como jogadores e quem revogou o consentimento para ligações não
-                        recebe.
-                      </p>
-                    )}
-                  </div>
-                ) : null}
-                {isEmailList ? (
-                  <div className="space-y-2">
-                    <Textarea
-                      name="external-email-list"
-                      rows={4}
-                      value={emailListText}
-                      onChange={(event) => setEmailListText(event.target.value)}
-                      placeholder="Cole os e-mails: um por linha ou separados por vírgula ou ponto e vírgula"
-                      aria-label="E-mails da lista"
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        ref={emailListFileRef}
-                        type="file"
-                        accept={PHONE_LIST_FILE_ACCEPT}
-                        className="hidden"
-                        onChange={async (event) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = "";
-                          if (!file) return;
-                          setEmailListFileLoading(true);
-                          try {
-                            setEmailListFile({
-                              name: file.name,
-                              text: await readPhoneListFile(file),
-                            });
-                          } catch (error) {
-                            toast.error(
-                              error instanceof Error
-                                ? error.message
-                                : "Não foi possível ler o arquivo.",
-                            );
-                          } finally {
-                            setEmailListFileLoading(false);
-                          }
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={emailListFileLoading}
-                        onClick={() => emailListFileRef.current?.click()}
-                      >
-                        <Upload className="mr-1.5 size-3.5" aria-hidden="true" />
-                        {emailListFileLoading ? "Lendo arquivo…" : "Enviar arquivo (CSV, TXT, XLS)"}
-                      </Button>
-                      {emailListFile ? (
-                        <Badge variant="secondary" className="gap-1">
-                          {emailListFile.name}
-                          <button
-                            type="button"
-                            aria-label="Remover arquivo"
-                            onClick={() => setEmailListFile(null)}
-                          >
-                            <X className="size-3" aria-hidden="true" />
-                          </button>
-                        </Badge>
+                      {channel === "voice" && !isExpert ? (
+                        <SelectItem value={EXTERNAL_LIST_ID}>Lista de números</SelectItem>
                       ) : null}
-                    </div>
+                      {channel === "email" && !isExpert ? (
+                        <SelectItem value={EXTERNAL_EMAIL_LIST_ID}>Lista de e-mails</SelectItem>
+                      ) : null}
+                      {audienceOptions.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {audienceOptionLabel(item, isExpert)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {isExpert ? (
                     <p className="text-meta text-muted-foreground">
-                      {num(emailList.emails.length)} e-mail(s) válido(s). Os e-mails não são
-                      salvos como jogadores e endereços descadastrados ou bloqueados ficam de fora.
+                      Só os seus leads entram no envio, mesmo nos públicos da casa.
                     </p>
-                  </div>
-                ) : null}
-                {channel === "sms" && when === "schedule" && audienceCriteria ? (
-                  <p className="text-meta text-muted-foreground">
-                    No horário agendado o público é recalculado: entra quem passou a se enquadrar e
-                    sai quem deixou de se enquadrar.
-                  </p>
-                ) : null}
-              </div>
+                  ) : null}
+                  {audienceMutation.isPending ? (
+                    <p className="text-meta text-muted-foreground" aria-live="polite">
+                      Calculando o público…
+                    </p>
+                  ) : null}
+                  {isPhoneList ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        name="external-phone-list"
+                        rows={4}
+                        value={externalText}
+                        onChange={(event) => setExternalText(event.target.value)}
+                        placeholder="Cole os números: um por linha ou separados por vírgula ou ponto e vírgula"
+                        aria-label="Números da lista"
+                        {...tourAnchor("campanhas.compositor.lista-numeros")}
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          ref={externalFileRef}
+                          type="file"
+                          accept={PHONE_LIST_FILE_ACCEPT}
+                          className="hidden"
+                          onChange={async (event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (!file) return;
+                            setExternalFileLoading(true);
+                            try {
+                              setExternalFile({
+                                name: file.name,
+                                text: await readPhoneListFile(file),
+                              });
+                            } catch (error) {
+                              toast.error(
+                                error instanceof Error
+                                  ? error.message
+                                  : "Não foi possível ler o arquivo.",
+                              );
+                            } finally {
+                              setExternalFileLoading(false);
+                            }
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={externalFileLoading}
+                          onClick={() => externalFileRef.current?.click()}
+                          {...tourAnchor("campanhas.compositor.lista-arquivo")}
+                        >
+                          <Upload className="mr-1.5 size-3.5" aria-hidden="true" />
+                          {externalFileLoading
+                            ? "Lendo arquivo…"
+                            : "Enviar arquivo (CSV, TXT, XLS)"}
+                        </Button>
+                        {externalFile ? (
+                          <Badge variant="secondary" className="gap-1">
+                            {externalFile.name}
+                            <button
+                              type="button"
+                              aria-label="Remover arquivo"
+                              onClick={() => setExternalFile(null)}
+                            >
+                              <X className="size-3" aria-hidden="true" />
+                            </button>
+                          </Badge>
+                        ) : null}
+                      </div>
+                      {channel === "sms" ? (
+                        <p className="text-meta text-muted-foreground">
+                          {num(externalList.phones.length)} número(s) válido(s). Os números não são
+                          salvos como jogadores e quem já é jogador da casa fica de fora. Se a
+                          pessoa clicar no link e se cadastrar com o mesmo telefone, o cadastro e os
+                          depósitos entram no relatório da campanha.
+                        </p>
+                      ) : (
+                        <p className="text-meta text-muted-foreground">
+                          {num(externalList.phones.length)} número(s) válido(s). Os números não são
+                          salvos como jogadores e quem revogou o consentimento para ligações não
+                          recebe.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                  {isEmailList ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        name="external-email-list"
+                        rows={4}
+                        value={emailListText}
+                        onChange={(event) => setEmailListText(event.target.value)}
+                        placeholder="Cole os e-mails: um por linha ou separados por vírgula ou ponto e vírgula"
+                        aria-label="E-mails da lista"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          ref={emailListFileRef}
+                          type="file"
+                          accept={PHONE_LIST_FILE_ACCEPT}
+                          className="hidden"
+                          onChange={async (event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (!file) return;
+                            setEmailListFileLoading(true);
+                            try {
+                              setEmailListFile({
+                                name: file.name,
+                                text: await readPhoneListFile(file),
+                              });
+                            } catch (error) {
+                              toast.error(
+                                error instanceof Error
+                                  ? error.message
+                                  : "Não foi possível ler o arquivo.",
+                              );
+                            } finally {
+                              setEmailListFileLoading(false);
+                            }
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={emailListFileLoading}
+                          onClick={() => emailListFileRef.current?.click()}
+                        >
+                          <Upload className="mr-1.5 size-3.5" aria-hidden="true" />
+                          {emailListFileLoading
+                            ? "Lendo arquivo…"
+                            : "Enviar arquivo (CSV, TXT, XLS)"}
+                        </Button>
+                        {emailListFile ? (
+                          <Badge variant="secondary" className="gap-1">
+                            {emailListFile.name}
+                            <button
+                              type="button"
+                              aria-label="Remover arquivo"
+                              onClick={() => setEmailListFile(null)}
+                            >
+                              <X className="size-3" aria-hidden="true" />
+                            </button>
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="text-meta text-muted-foreground">
+                        {num(emailList.emails.length)} e-mail(s) válido(s). Os e-mails não são
+                        salvos como jogadores e endereços descadastrados ou bloqueados ficam de
+                        fora.
+                      </p>
+                    </div>
+                  ) : null}
+                  {channel === "sms" && when === "schedule" && audienceCriteria ? (
+                    <p className="text-meta text-muted-foreground">
+                      No horário agendado o público é recalculado: entra quem passou a se enquadrar
+                      e sai quem deixou de se enquadrar.
+                    </p>
+                  ) : null}
+                </div>
               )}
               {channel !== "voice" ? (
                 <p className="text-meta text-muted-foreground">
@@ -1714,8 +1719,7 @@ export function ChannelCampaignComposer({
                     <p className="text-meta text-muted-foreground">
                       {Array.from(smsSentText).length} caracteres
                       {smsSentText !== smsContent ? " com o link encurtado" : ""} ·{" "}
-                      {smsSegmentInfo.encoding} ·{" "}
-                      {parts} segmento{parts === 1 ? "" : "s"} ·{" "}
+                      {smsSegmentInfo.encoding} · {parts} segmento{parts === 1 ? "" : "s"} ·{" "}
                       {isExpert
                         ? expertOptions.data
                           ? `${brl(parts * expertOptions.data.prices.sms)} por lead`
@@ -2072,7 +2076,11 @@ export function ChannelCampaignComposer({
               <div>
                 <p className="text-meta text-muted-foreground">Destinatários</p>
                 <p className="text-kpi-sm tabular-nums" aria-live="polite">
-                  {(channel === "webpush" ? webpushCountQuery.isFetching : audienceMutation.isPending)
+                  {(
+                    channel === "webpush"
+                      ? webpushCountQuery.isFetching
+                      : audienceMutation.isPending
+                  )
                     ? "…"
                     : num(sendableRecipients)}
                 </p>
@@ -2137,11 +2145,7 @@ export function ChannelCampaignComposer({
                 <div>
                   <p className="text-meta text-muted-foreground">Custo estimado</p>
                   <p className="font-medium tabular-nums">
-                    {webpushCountQuery.isFetching
-                      ? "—"
-                      : webpushExempt
-                        ? "Isento"
-                        : brl(cost)}
+                    {webpushCountQuery.isFetching ? "—" : webpushExempt ? "Isento" : brl(cost)}
                   </p>
                 </div>
               ) : null}
@@ -2156,12 +2160,12 @@ export function ChannelCampaignComposer({
                       ? (assets.find((item) => item.id === voiceSourceId)?.name ??
                         "Selecione um áudio")
                       : isExpert && channel === "email" && activeEmailTemplate
-                      ? `${activeEmailTemplate.nome ?? activeEmailTemplate.name ?? ""}${
-                          activeEmailTemplate.subject
-                            ? ` · Assunto: ${activeEmailTemplate.subject}`
-                            : ""
-                        }`
-                      : previewContent || "Selecione o conteúdo para visualizar"}
+                        ? `${activeEmailTemplate.nome ?? activeEmailTemplate.name ?? ""}${
+                            activeEmailTemplate.subject
+                              ? ` · Assunto: ${activeEmailTemplate.subject}`
+                              : ""
+                          }`
+                        : previewContent || "Selecione o conteúdo para visualizar"}
                 </p>
               </div>
               {approvalMode ? (

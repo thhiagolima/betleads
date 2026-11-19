@@ -97,7 +97,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (state.status === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-dvh flex items-center justify-center bg-background">
         <div className="text-sm text-muted-foreground">Carregando…</div>
       </div>
     );
@@ -105,7 +105,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (state.status === "error") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="min-h-dvh flex items-center justify-center bg-background p-4">
         <Card className="w-full max-w-sm border-border/60 bg-card/80 backdrop-blur">
           <CardHeader>
             <CardTitle className="text-lg">Não foi possível entrar</CardTitle>
@@ -210,7 +210,7 @@ function InitialPasswordScreen({
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="min-h-dvh flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Crie sua nova senha</CardTitle>

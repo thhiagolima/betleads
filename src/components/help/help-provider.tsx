@@ -293,8 +293,10 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       return loadTourRunner().then(({ runTour, stopActiveTour }) =>
         runTour(steps, {
           onFinish: (result) => writeProgress(key, result),
+          // Reading the explanation is not giving up on the tour: nothing is
+          // recorded, so it can still be finished later.
           onLearnMore: (step) => {
-            stopActiveTour({ record: true });
+            stopActiveTour();
             openPanel(step.articleSection);
           },
         }),
@@ -314,7 +316,6 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     },
     [currentScreen, currentTab, runSteps],
   );
-
 
   // A highlight ("mostrar na tela", a guide's "Ir para esta etapa") on a
   // screen: that visit's auto-start must not replace it (tour-logic.ts).
@@ -526,9 +527,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       setPanelOpen(false);
       const stepLocation = helpTabLocation(step.route, step.tab);
       if (step.anchor) {
-        suppressAutoStartAt(
-          resolveHelpScreen(step.route, stepLocation.hash, stepLocation.search),
-        );
+        suppressAutoStartAt(resolveHelpScreen(step.route, stepLocation.hash, stepLocation.search));
       }
       const href = stepLocation.href;
       void navigate({ href }).then(() => {

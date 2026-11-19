@@ -63,6 +63,17 @@ export type RunTourOptions = {
 
 const LEARN_MORE_CLASS = "tour-learn-more-btn";
 const SKIP_TOUR_CLASS = "tour-skip-btn";
+const AUX_CLASS = "tour-aux";
+const DOCK_TOP_CLASS = "tour-dock-top";
+
+/** Phones dock the balloon to the bottom of the screen (tour.css); when the
+ * highlighted element sits in the lower half (e.g. the tab bar) the balloon
+ * goes to the top instead, so it never covers what it is pointing at. */
+function placeOnPhone(popover: HTMLElement, element: Element | undefined): void {
+  const rect = element?.getBoundingClientRect();
+  const lowerHalf = !!rect && rect.top + rect.height / 2 > window.innerHeight / 2;
+  popover.classList.toggle(DOCK_TOP_CLASS, lowerHalf);
+}
 
 /** Runs a guided tour over `steps`, skipping any step whose anchor isn't
  * currently visible (constraints.md "Tour"). Does nothing if that leaves no
@@ -98,6 +109,8 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): boolean {
   // visible text there) — it does not make "Pular tour" visible to sighted
   // users, so a real footer button is added below via `onPopoverRender`,
   // alongside "Saiba mais". The × keeps its aria-label for screen readers.
+  // Both go in their own group next to the progress text, not among
+  // Voltar/Próximo: four buttons in one row don't fit a phone (tour.css).
   const instance = driver({
     steps: driveSteps,
     showProgress: true,
@@ -111,26 +124,30 @@ export function runTour(steps: TourStep[], opts: RunTourOptions): boolean {
       const activeIndex = hookOpts.state.activeIndex ?? 0;
       const activeStep = available[activeIndex];
 
-      popover.footerButtons.querySelector(`.${LEARN_MORE_CLASS}`)?.remove();
-      popover.footerButtons.querySelector(`.${SKIP_TOUR_CLASS}`)?.remove();
+      popover.footer.querySelector(`.${AUX_CLASS}`)?.remove();
+      placeOnPhone(popover.wrapper, hookOpts.state.activeElement);
+
+      const aux = document.createElement("div");
+      aux.className = AUX_CLASS;
+      popover.footer.insertBefore(aux, popover.footerButtons);
 
       const skipBtn = document.createElement("button");
       skipBtn.type = "button";
-      skipBtn.className = `driver-popover-footer-btn ${SKIP_TOUR_CLASS}`;
+      skipBtn.className = `tour-aux-btn ${SKIP_TOUR_CLASS}`;
       skipBtn.textContent = "Pular tour";
       skipBtn.addEventListener("click", () => {
         finish("skipped");
         endByUser();
       });
-      popover.footerButtons.insertBefore(skipBtn, popover.footerButtons.firstChild);
+      aux.appendChild(skipBtn);
 
       if (!activeStep) return;
       const learnMoreBtn = document.createElement("button");
       learnMoreBtn.type = "button";
-      learnMoreBtn.className = `driver-popover-footer-btn ${LEARN_MORE_CLASS}`;
+      learnMoreBtn.className = `tour-aux-btn ${LEARN_MORE_CLASS}`;
       learnMoreBtn.textContent = "Saiba mais";
       learnMoreBtn.addEventListener("click", () => opts.onLearnMore(activeStep));
-      popover.footerButtons.insertBefore(learnMoreBtn, popover.footerButtons.firstChild);
+      aux.insertBefore(learnMoreBtn, aux.firstChild);
     },
     onDestroyStarted: (_element, _step, hookOpts) => {
       finish(tourResultFromReason(hookOpts.reason));

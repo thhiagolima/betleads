@@ -133,7 +133,7 @@ const P = "mb-4 text-sm leading-relaxed";
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-6 font-sans text-zinc-900">
+    <div className="flex min-h-dvh items-center justify-center bg-zinc-50 p-6 font-sans text-zinc-900">
       <div className="w-full max-w-[440px] rounded-xl border border-zinc-200 bg-white p-8 shadow-sm">
         {children}
       </div>

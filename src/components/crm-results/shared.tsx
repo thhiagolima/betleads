@@ -16,7 +16,7 @@ export function InfoTip({ text }: { text: string }) {
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="inline-flex align-middle text-muted-foreground hover:text-foreground"
+            className="-m-1.5 inline-flex size-7 items-center justify-center align-middle text-muted-foreground hover:text-foreground"
             aria-label={text}
           >
             <Info className="h-3.5 w-3.5" aria-hidden="true" />

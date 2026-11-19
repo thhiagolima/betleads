@@ -22,6 +22,7 @@ import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { Term } from "@/components/help/term";
 import { tourAnchor } from "@/help/anchor";
 import { getMyMcpStatus, revokeMyConnection } from "@/lib/mcp/mcp.functions";
+import { copyToClipboard } from "@/lib/clipboard";
 
 export const Route = createFileRoute("/mcp")({
   component: McpPage,
@@ -72,9 +73,9 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleString("pt-BR");
 }
 
-function copiar(texto: string, aviso: string) {
-  navigator.clipboard.writeText(texto);
-  toast.success(aviso);
+async function copiar(texto: string, aviso: string) {
+  if (await copyToClipboard(texto)) toast.success(aviso);
+  else toast.error("Não foi possível copiar. Selecione o texto e copie à mão.");
 }
 
 function Passo({
@@ -180,9 +181,9 @@ function McpPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Depois de conectar, você pergunta ao Claude sobre as suas casas em português, como
-            numa conversa, e ele responde com os mesmos números do Betleads. Leva uns 5 minutos e
-            só precisa ser feito uma vez. Funciona no site claude.ai e no app Claude Desktop.
+            Depois de conectar, você pergunta ao Claude sobre as suas casas em português, como numa
+            conversa, e ele responde com os mesmos números do Betleads. Leva uns 5 minutos e só
+            precisa ser feito uma vez. Funciona no site claude.ai e no app Claude Desktop.
           </p>
           <ol className="space-y-4">
             <Passo numero={1} titulo="Copie o endereço do Betleads" feito={conectado}>
@@ -192,7 +193,7 @@ function McpPage() {
                 size="sm"
                 className="gap-2"
                 {...tourAnchor("mcp.passos.copiar")}
-                onClick={() => copiar(data.mcpUrl, "URL copiada")}
+                onClick={() => void copiar(data.mcpUrl, "URL copiada")}
               >
                 <Copy className="h-4 w-4" /> Copiar endereço
               </Button>
@@ -205,8 +206,8 @@ function McpPage() {
               </p>
               <p>
                 Clique em <strong>Adicionar conector personalizado</strong>. Em nome, escreva{" "}
-                <strong>Betleads</strong>. No campo de URL, cole o endereço copiado (Ctrl+V).
-                Clique em <strong>Adicionar</strong>.
+                <strong>Betleads</strong>. No campo de URL, cole o endereço copiado (Ctrl+V). Clique
+                em <strong>Adicionar</strong>.
               </p>
             </Passo>
             <Passo numero={3} titulo="Autorize o acesso" feito={conectado}>
@@ -241,9 +242,8 @@ function McpPage() {
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           <p className="text-muted-foreground">
-            Escreva como falaria com uma pessoa. Diga a casa, o grupo ou "todas as minhas casas" e
-            o período (ontem, últimos 7 dias, este mês, outubro…). Clique numa pergunta para
-            copiar.
+            Escreva como falaria com uma pessoa. Diga a casa, o grupo ou "todas as minhas casas" e o
+            período (ontem, últimos 7 dias, este mês, outubro…). Clique numa pergunta para copiar.
           </p>
           {exemplos.map((grupo) => (
             <div key={grupo.titulo} className="space-y-1.5">
@@ -254,7 +254,7 @@ function McpPage() {
                     <button
                       type="button"
                       className="flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left hover:bg-muted/40"
-                      onClick={() => copiar(pergunta, "Pergunta copiada")}
+                      onClick={() => void copiar(pergunta, "Pergunta copiada")}
                     >
                       <Copy className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       <span>{pergunta}</span>
@@ -276,9 +276,7 @@ function McpPage() {
             <p>O Claude nunca grava nada direto. Toda alteração tem duas etapas:</p>
             <ol className="list-decimal space-y-1 pl-5">
               <li>Você pede (ex.: "lance o GGR de outubro da casa X").</li>
-              <li>
-                O Claude mostra uma prévia do que vai mudar: o valor de antes e o de depois.
-              </li>
+              <li>O Claude mostra uma prévia do que vai mudar: o valor de antes e o de depois.</li>
               <li>
                 Só quando você responde algo como <strong>"pode confirmar"</strong> ele grava. Se
                 algo estiver errado, diga o que corrigir e ele faz uma nova prévia.
@@ -303,14 +301,14 @@ function McpPage() {
             <li>
               Nenhum dado de jogador: nada de nome, telefone, e-mail ou CPF. Só números somados.
             </li>
-            {temOperacao ? <li>A parte de operação é só leitura: o Claude não altera nada nela.</li> : null}
+            {temOperacao ? (
+              <li>A parte de operação é só leitura: o Claude não altera nada nela.</li>
+            ) : null}
             <li>
               Os números vêm do mesmo lugar do painel, mas o Claude pode se confundir ao explicar.
               Antes de uma decisão importante, confira no Betleads.
             </li>
-            <li>
-              Perdeu o computador ou não usa mais? Clique em Desconectar, no fim desta tela.
-            </li>
+            <li>Perdeu o computador ou não usa mais? Clique em Desconectar, no fim desta tela.</li>
           </ul>
         </CardContent>
       </Card>
@@ -367,7 +365,7 @@ function McpPage() {
               variant="outline"
               className="gap-2"
               {...tourAnchor("mcp.url.copiar")}
-              onClick={() => copiar(data.mcpUrl, "URL copiada")}
+              onClick={() => void copiar(data.mcpUrl, "URL copiada")}
             >
               <Copy className="h-4 w-4" /> Copiar
             </Button>
@@ -389,8 +387,8 @@ function McpPage() {
           <CardTitle>Claude Desktop</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          Mesmo caminho: Configurações → Conectores → Adicionar conector personalizado → colar a
-          URL acima.
+          Mesmo caminho: Configurações → Conectores → Adicionar conector personalizado → colar a URL
+          acima.
         </CardContent>
       </Card>
 
@@ -409,7 +407,7 @@ function McpPage() {
               variant="outline"
               className="gap-2"
               {...tourAnchor("mcp.code.copiar")}
-              onClick={() => copiar(claudeCodeCommand, "Comando copiado")}
+              onClick={() => void copiar(claudeCodeCommand, "Comando copiado")}
             >
               <Copy className="h-4 w-4" /> Copiar
             </Button>
@@ -426,7 +424,10 @@ function McpPage() {
             <p className="text-sm text-muted-foreground">Nenhuma conexão ativa.</p>
           )}
           {data.connections.map((conn, index) => (
-            <div key={conn.id} className="flex items-center justify-between gap-2 border-b border-border/40 pb-2 last:border-0 last:pb-0">
+            <div
+              key={conn.id}
+              className="flex items-center justify-between gap-2 border-b border-border/40 pb-2 last:border-0 last:pb-0"
+            >
               <div>
                 <div className="text-sm font-medium">{conn.clientName}</div>
                 <div className="text-meta text-muted-foreground">

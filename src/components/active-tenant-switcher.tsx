@@ -82,7 +82,12 @@ export function ActiveTenantSwitcher({ compact = false }: { compact?: boolean })
       ) : (
         <Building2 className="size-4 shrink-0 text-primary" aria-hidden="true" />
       )}
-      <span className={cn("truncate font-medium", compact ? "max-w-[120px]" : "max-w-[180px]")}>
+      <span
+        className={cn(
+          "truncate font-medium",
+          compact ? "max-w-[72px] min-[400px]:max-w-[110px]" : "max-w-[180px]",
+        )}
+      >
         {currentLabel}
       </span>
       {!compact && !onGroupRoute && active && (

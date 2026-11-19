@@ -57,6 +57,7 @@ import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { useEnabledChannels } from "@/hooks/use-enabled-channels";
+import { copyToClipboard } from "@/lib/clipboard";
 
 export const Route = createFileRoute("/webhooks")({
   component: IntegrationsPage,
@@ -279,16 +280,19 @@ function PlatformSection() {
     if (confirmed) enforceHmac.mutate(false);
   }
 
-  function copy(text: string, message = "Endereço copiado") {
-    navigator.clipboard.writeText(text);
+  async function copy(text: string, message = "Endereço copiado") {
+    if (!(await copyToClipboard(text))) {
+      toast.error("Não foi possível copiar.");
+      return;
+    }
     setCopiedUrl(text);
     toast.success(message);
     setTimeout(() => setCopiedUrl((c) => (c === text ? null : c)), 1800);
   }
 
-  function copyPayload(payload: unknown) {
-    navigator.clipboard.writeText(prettyJson(payload));
-    toast.success("Dados copiados");
+  async function copyPayload(payload: unknown) {
+    if (await copyToClipboard(prettyJson(payload))) toast.success("Dados copiados");
+    else toast.error("Não foi possível copiar.");
   }
 
   if (!accessLoading && access && !access.canManage) {
@@ -414,7 +418,7 @@ function PlatformSection() {
                     )
                   }
                   className={cn("shrink-0", baseCopied && "border-success/40 text-success")}
-                  onClick={() => baseUrl && copy(baseUrl)}
+                  onClick={() => baseUrl && void copy(baseUrl)}
                   disabled={!baseUrl}
                 />
               </div>
@@ -471,7 +475,7 @@ function PlatformSection() {
                               "shrink-0 transition-all",
                               copied && "border-success/40 text-success",
                             )}
-                            onClick={() => url && copy(url)}
+                            onClick={() => url && void copy(url)}
                             disabled={!url}
                           />
                         </div>
@@ -638,7 +642,7 @@ function PlatformSection() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => copy(provisionedSecret, "Chave copiada")}
+                onClick={() => void copy(provisionedSecret, "Chave copiada")}
               >
                 <Copy className="mr-1 h-3.5 w-3.5" /> Copiar
               </Button>
@@ -700,7 +704,7 @@ function PlatformSection() {
                       variant="outline"
                       size="sm"
                       className="h-8 gap-2"
-                      onClick={() => copyPayload(selectedLog.payload)}
+                      onClick={() => void copyPayload(selectedLog.payload)}
                     >
                       <Copy className="h-3.5 w-3.5" />
                       Copiar

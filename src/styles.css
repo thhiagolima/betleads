@@ -210,8 +210,11 @@
       box-shadow: 0 0 0 6px oklch(0.74 0.2 145 / 0);
     }
   }
+  /* `backwards`, not `both`: a transform left on the element after the
+   * animation would make it the containing block of every position:fixed
+   * descendant (overlays, gates) and break sticky bars. */
   .animate-fade-in {
-    animation: fade-in 280ms ease-out both;
+    animation: fade-in 280ms ease-out backwards;
   }
   @keyframes fade-in {
     from {
@@ -261,5 +264,27 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+  }
+}
+
+/*
+ * iOS Safari zooms the page when a text field under 16px gets focus. Many
+ * screens shrink their fields (text-xs/text-meta on mono inputs, editors), so
+ * on phones every text-entry field is held at 16px. Unlayered on purpose: it
+ * must beat Tailwind's layered text-* utilities.
+ */
+@media (width < 48rem) {
+  input:not(
+    [type="checkbox"],
+    [type="radio"],
+    [type="range"],
+    [type="color"],
+    [type="file"],
+    [type="button"],
+    [type="submit"]
+  ),
+  textarea,
+  select {
+    font-size: 16px;
   }
 }

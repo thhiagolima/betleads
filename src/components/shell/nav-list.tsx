@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const itemBase =
-  "relative flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring sb-collapsed:justify-center sb-collapsed:px-0";
+  "relative flex h-10 w-full items-center md:h-9 gap-2.5 rounded-lg px-2.5 text-[13.5px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring sb-collapsed:justify-center sb-collapsed:px-0";
 const itemIdle = "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground";
 const itemActive = "bg-primary/[0.12] text-foreground [&_svg]:text-primary";
 

@@ -29,7 +29,7 @@ export function MobileTabBar({
       {tabs.map((tab, i) => {
         const Icon = tab.icon;
         const classes =
-          "flex h-[60px] flex-1 flex-col items-center justify-center gap-1 text-[10.5px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring";
+          "flex h-[60px] flex-1 flex-col items-center justify-center gap-1 text-[12px] leading-none font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring";
         if (!tab.to) {
           return (
             <button

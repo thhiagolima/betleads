@@ -4,11 +4,12 @@ import type { DateRange } from "react-day-picker";
 
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { PERIOD_PRESETS, periodRange, type PeriodPreset } from "@/lib/home-dashboard";
 import { cn } from "@/lib/utils";
 
 const segment =
-  "h-9 shrink-0 rounded-lg px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
+  "h-10 shrink-0 rounded-lg px-3 md:h-9 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
 
 export function PeriodPicker({
   preset,
@@ -20,12 +21,13 @@ export function PeriodPicker({
   onChange: (preset: PeriodPreset, range: DateRange | undefined) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   return (
     <div
       role="group"
       aria-label="Período"
-      className="flex max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+      className="flex max-w-full flex-wrap gap-0.5 rounded-xl border border-border bg-card p-[3px] md:flex-nowrap md:overflow-x-auto md:[scrollbar-width:none]"
     >
       {PERIOD_PRESETS.map((option) => {
         const active = preset === option.value;
@@ -73,7 +75,7 @@ export function PeriodPicker({
               // Close once a real span is picked; a single day keeps it open for the second click.
               if (next.to && next.to.getTime() !== next.from.getTime()) setOpen(false);
             }}
-            numberOfMonths={2}
+            numberOfMonths={isMobile ? 1 : 2}
             initialFocus
           />
         </PopoverContent>

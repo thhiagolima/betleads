@@ -4,6 +4,7 @@ import { type DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export type DashboardRange = { from: Date; to: Date };
 
@@ -19,6 +20,7 @@ export function DashboardDateRangePicker({
   onChange: (r: DashboardRange) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const isMobile = useIsMobile();
   const value: DateRange = { from: range.from, to: range.to };
   const sameDay = range.from.toDateString() === range.to.toDateString();
 
@@ -62,7 +64,7 @@ export function DashboardDateRangePicker({
               onChange({ from: r.from, to: r.to ?? r.from });
             }
           }}
-          numberOfMonths={2}
+          numberOfMonths={isMobile ? 1 : 2}
           initialFocus
           className="pointer-events-auto"
         />

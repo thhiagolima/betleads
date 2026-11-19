@@ -126,7 +126,9 @@ function AutorizarPage() {
           {info.data.opsHouses ? (
             <li>
               Operação (só ler):{" "}
-              {info.data.opsHouses.length ? info.data.opsHouses.join(", ") : "nenhuma casa no momento"}
+              {info.data.opsHouses.length
+                ? info.data.opsHouses.join(", ")
+                : "nenhuma casa no momento"}
             </li>
           ) : null}
         </ul>
@@ -146,7 +148,7 @@ function AutorizarPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="flex min-h-dvh items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Conectar o Claude ao Betleads</CardTitle>

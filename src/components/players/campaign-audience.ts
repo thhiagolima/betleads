@@ -48,24 +48,5 @@ export async function openCampaignWithAudience(args: {
   }
 }
 
-/** Copies text, with a textarea fallback for browsers without the async clipboard. */
-export async function copyToClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    try {
-      document.execCommand("copy");
-    } catch {
-      // navegador antigo bloqueou o fallback de cópia
-    }
-    document.body.removeChild(ta);
-    return true;
-  }
-}
+/** Copies text (see lib/clipboard); kept as an export for the players screens. */
+export { copyToClipboard } from "@/lib/clipboard";

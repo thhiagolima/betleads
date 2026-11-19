@@ -1165,7 +1165,10 @@ function PlayersPage() {
       toast.error("Este jogador não tem ID da plataforma.");
       return;
     }
-    await copyToClipboard(v);
+    if (!(await copyToClipboard(v))) {
+      toast.error("Não foi possível copiar.");
+      return;
+    }
     if (playerId) {
       setCopiedId(playerId);
       setTimeout(() => setCopiedId((cur) => (cur === playerId ? null : cur)), 1500);
@@ -1181,7 +1184,10 @@ function PlayersPage() {
       toast.error("Nenhum ID da plataforma entre os selecionados.");
       return;
     }
-    await copyToClipboard(ids.join("\n"));
+    if (!(await copyToClipboard(ids.join("\n")))) {
+      toast.error("Não foi possível copiar.");
+      return;
+    }
     toast.success(
       missing > 0
         ? `${ids.length} IDs copiados. ${missing} jogadores sem ID da plataforma ficaram de fora.`
@@ -1204,7 +1210,10 @@ function PlayersPage() {
           toast.error("Nenhum ID da plataforma neste filtro.");
           return;
         }
-        await copyToClipboard(ids.join("\n"));
+        if (!(await copyToClipboard(ids.join("\n")))) {
+          toast.error("Não foi possível copiar.");
+          return;
+        }
         toast.success(
           missing > 0
             ? `${ids.length} IDs copiados. ${missing} jogadores sem ID da plataforma ficaram de fora.`
@@ -1231,7 +1240,10 @@ function PlayersPage() {
         toast.error("Nenhum ID da plataforma neste filtro.");
         return;
       }
-      await copyToClipboard(res.ids.join("\n"));
+      if (!(await copyToClipboard(res.ids.join("\n")))) {
+        toast.error("Não foi possível copiar.");
+        return;
+      }
       toast.success(
         res.missing > 0
           ? `${res.ids.length} IDs copiados. ${res.missing} jogadores sem ID da plataforma ficaram de fora.`

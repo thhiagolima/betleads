@@ -18,13 +18,17 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-9 px-4 py-2",
+        // Phones: at least a 40px touch target. A min-height (not a height)
+        // so a screen's own h-* still wins on desktop and is never shrunk.
+        default: "h-9 px-4 py-2 max-sm:min-h-10",
         // Redesign: no 32px buttons; "sm" only tightens the padding and the text.
-        sm: "h-9 rounded-lg px-3 text-[13px]",
-        lg: "h-10 rounded-lg px-6",
-        icon: "h-9 w-9",
+        sm: "h-9 rounded-lg px-3 text-[13px] max-sm:min-h-10",
+        lg: "h-10 rounded-lg px-6 max-sm:min-h-11",
+        icon: "h-9 w-9 max-sm:min-h-10 max-sm:min-w-10",
       },
     },
+    // An inline text link must not grow the line it sits in.
+    compoundVariants: [{ variant: "link", class: "max-sm:min-h-0" }],
     defaultVariants: {
       variant: "default",
       size: "default",

@@ -63,6 +63,7 @@ import { brtDayKey } from "@/lib/tz";
 import { tourAnchor } from "@/help/anchor";
 
 import { StatusBadge } from "./status-badge";
+import { copyToClipboard } from "@/lib/clipboard";
 
 const CHANNEL_LABEL: Record<ChannelKey, string> = {
   sms: "SMS",
@@ -649,9 +650,10 @@ export function HistoryShell({
                     variant="outline"
                     size="sm"
                     className="gap-1"
-                    onClick={() => {
-                      navigator.clipboard.writeText(openRow.message ?? "");
-                      toast.success("Mensagem copiada");
+                    onClick={async () => {
+                      if (await copyToClipboard(openRow.message ?? ""))
+                        toast.success("Mensagem copiada");
+                      else toast.error("Não foi possível copiar.");
                     }}
                   >
                     <Copy className="h-3.5 w-3.5" /> Copiar mensagem
@@ -662,9 +664,9 @@ export function HistoryShell({
                     variant="outline"
                     size="sm"
                     className="gap-1"
-                    onClick={() => {
-                      navigator.clipboard.writeText(openRow.error ?? "");
-                      toast.success("Erro copiado");
+                    onClick={async () => {
+                      if (await copyToClipboard(openRow.error ?? "")) toast.success("Erro copiado");
+                      else toast.error("Não foi possível copiar.");
                     }}
                   >
                     <Copy className="h-3.5 w-3.5" /> Copiar erro

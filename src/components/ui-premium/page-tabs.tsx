@@ -1,11 +1,11 @@
-import { useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 
 import { cn } from "@/lib/utils";
 
 export type PageTabItem<T extends string = string> = { value: T; label: string };
 
 const segment =
-  "h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
+  "h-10 shrink-0 whitespace-nowrap rounded-lg md:h-9 px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
 
 /**
  * Visible page tabs with the PeriodPicker look (segmented control). Controlled:
@@ -26,6 +26,15 @@ export function PageTabs<T extends string>({
   className?: string;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+
+  // On a phone the strip scrolls sideways with no scrollbar: keep the active
+  // tab in view (e.g. opened through a #hash pointing at the 6th tab).
+  useEffect(() => {
+    const active = listRef.current?.querySelector<HTMLElement>(
+      '[role="tab"][aria-selected="true"]',
+    );
+    active?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [value]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
