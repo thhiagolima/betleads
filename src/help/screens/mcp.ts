@@ -1,4 +1,7 @@
-// Help article for "Conectar ao Claude" (/mcp): a URL de conexão MCP (uma
+// Help article for "Conectar ao Claude" (/mcp): o passo a passo para quem não
+// é técnico (copiar, adicionar o conector, autorizar, primeira pergunta), os
+// exemplos de perguntas, como funcionam as alterações, o que o Claude vê e os
+// problemas comuns; depois a URL de conexão MCP (uma
 // só para todo o Betleads; o que cada pessoa vê depende do acesso dela, não
 // da URL), as áreas (financeiro e operação) e as instruções para ligar claude.ai, Claude Desktop e Claude Code a
 // ela, mais as conexões ativas e o botão de desconectar cada uma. A tela só
@@ -19,6 +22,78 @@ const screen: HelpScreen = {
   roles: ["admin", "gestor", "member"],
   terms: ["mcp"],
   sections: [
+    {
+      id: "passos",
+      title: "Passo a passo",
+      intro:
+        "O caminho completo para quem nunca usou um conector no Claude. Cada passo ganha um ✓ sozinho: os três primeiros quando aparece uma conexão em \"Conexões ativas\", o quarto quando o Claude usa o Betleads pela primeira vez.",
+      items: [
+        {
+          anchor: "mcp.passos.card",
+          label: "Passo a passo",
+          what: "1. Copie o endereço do Betleads. 2. No Claude (claude.ai ou Claude Desktop): seu nome, no canto de baixo à esquerda → Configurações → Conectores → Adicionar conector personalizado; nome Betleads, cole o endereço e clique em Adicionar. 3. Clique em Conectar ao lado do Betleads; abre a página de autorização do Betleads, que lista as áreas e as casas liberadas; clique em Permitir. 4. Numa conversa nova, confira no botão + do campo de mensagem que o Betleads está ligado e faça uma pergunta.",
+          when: "Na primeira vez, ou ao conectar outro computador ou outra conta do Claude.",
+          notes:
+            "Na página de autorização, confira que o endereço é o do Betleads antes de clicar em Permitir, e só clique se você acabou de pedir a conexão. Na primeira pergunta, o Claude pede licença para usar o Betleads: clique em Permitir (ou Sempre permitir).",
+        },
+        {
+          anchor: "mcp.passos.copiar",
+          label: "Copiar endereço",
+          what: 'Copia a URL de conexão para colar no Claude. Toast "URL copiada".',
+        },
+      ],
+    },
+    {
+      id: "exemplos",
+      title: "O que perguntar",
+      intro:
+        "Perguntas prontas, separadas pelas áreas liberadas para você: Financeiro, Alterações no financeiro (só com nível Leitura e escrita) e Operação. Clicar numa pergunta copia o texto (toast \"Pergunta copiada\").",
+      items: [
+        {
+          anchor: "mcp.exemplos.card",
+          label: "O que perguntar",
+          what: 'Exemplos: "Como está o financeiro das minhas casas neste mês?", "Quais experts trouxeram mais depósito em outubro?", "O que o afiliado 4512 trouxe neste mês?", "Tem alguma coisa nas minhas casas que precisa de atenção hoje?".',
+          when: "Diga sempre a casa, o grupo ou \"todas as minhas casas\" e o período (ontem, últimos 7 dias, este mês, um mês pelo nome).",
+          notes: "Nos exemplos de alteração, troque {nome da casa} pelo nome de uma casa sua.",
+        },
+      ],
+    },
+    {
+      id: "alteracoes",
+      title: "Como o Claude altera o financeiro",
+      intro: "Só aparece para quem tem nível Leitura e escrita no financeiro.",
+      items: [
+        {
+          anchor: "mcp.alteracoes.card",
+          label: "Alterações em duas etapas",
+          what: 'O Claude nunca grava direto: primeiro mostra uma prévia com o valor de antes e o de depois; só grava quando você responde algo como "pode confirmar". Dá para alterar lançamento de anúncios e GGR por dia, GGR do mês, outros custos (criar, editar, excluir) e metas diárias.',
+          notes:
+            "A prévia vale 10 minutos. A alteração fica registrada com o seu usuário, como no painel. Casas suspensas ou bloqueadas não aceitam alteração. A operação é só leitura.",
+        },
+      ],
+    },
+    {
+      id: "seguranca",
+      title: "O que o Claude vê",
+      items: [
+        {
+          anchor: "mcp.seguranca.card",
+          label: "O que o Claude vê",
+          what: "Só as casas e as áreas liberadas para você. Nenhum dado de jogador (nome, telefone, e-mail, CPF): só números somados. Os números são os do painel, mas confira no Betleads antes de uma decisão importante.",
+        },
+      ],
+    },
+    {
+      id: "problemas",
+      title: "Problemas comuns",
+      items: [
+        {
+          anchor: "mcp.problemas.card",
+          label: "Problemas comuns",
+          what: 'Perguntas que abrem a resposta ao clicar: não aparece "Adicionar conector personalizado" (em contas Team/Enterprise do Claude só o dono adiciona); "Seu usuário não tem acesso ao MCP" (peça ao super admin); o Claude responde sem usar o Betleads (ligue o conector no botão +); sem acesso a uma casa ou à operação (peça ao super admin); parou de funcionar (após 30 dias sem uso a conexão expira: desconecte e conecte de novo no Claude).',
+        },
+      ],
+    },
     {
       id: "conexao",
       title: "URL de conexão",
@@ -55,7 +130,7 @@ const screen: HelpScreen = {
         {
           anchor: "mcp.code.card",
           label: "Claude Code",
-          what: 'O comando pronto para colar no terminal: "claude mcp add --transport http financeiro {URL de conexão}".',
+          what: 'Para quem usa o terminal: o comando pronto "claude mcp add --transport http betleads {URL de conexão}".',
         },
         {
           anchor: "mcp.code.copiar",
@@ -108,22 +183,34 @@ const screen: HelpScreen = {
   tours: {
     default: [
       {
+        anchor: "mcp.passos.card",
+        title: "Passo a passo",
+        body: "Quatro passos para ligar o Claude ao Betleads. Cada um ganha um ✓ quando estiver feito.",
+        articleSection: "passos",
+      },
+      {
+        anchor: "mcp.exemplos.card",
+        title: "O que perguntar",
+        body: "Perguntas prontas para as áreas liberadas para você. Clique numa para copiar e colar no Claude.",
+        articleSection: "exemplos",
+      },
+      {
+        anchor: "mcp.seguranca.card",
+        title: "O que o Claude vê",
+        body: "Só as suas casas e nenhum dado de jogador. Antes de uma decisão importante, confira no painel.",
+        articleSection: "seguranca",
+      },
+      {
+        anchor: "mcp.problemas.card",
+        title: "Problemas comuns",
+        body: "Se algo travar, a resposta provavelmente está aqui.",
+        articleSection: "problemas",
+      },
+      {
         anchor: "mcp.url.card",
         title: "URL de conexão",
         body: "O endereço que liga o Claude ao Betleads — uma URL só, que entra nos três clientes abaixo. O Claude vê só as casas e as áreas (financeiro, operação) liberadas para você.",
         articleSection: "conexao",
-      },
-      {
-        anchor: "mcp.claudeai.card",
-        title: "claude.ai",
-        body: "Configurações → Conectores → Adicionar conector personalizado → colar a URL.",
-        articleSection: "instrucoes",
-      },
-      {
-        anchor: "mcp.desktop.card",
-        title: "Claude Desktop",
-        body: "O mesmo caminho de claude.ai: Configurações → Conectores → Adicionar conector personalizado.",
-        articleSection: "instrucoes",
       },
       {
         anchor: "mcp.code.card",

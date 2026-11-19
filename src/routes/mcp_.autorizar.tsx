@@ -114,9 +114,22 @@ function AutorizarPage() {
     body = (
       <div className="space-y-3 text-sm">
         <p>
-          <strong>{info.data.recipient}</strong> quer acessar o financeiro de:{" "}
-          {scopeList(info.data.scopes)}
+          <strong>{info.data.recipient}</strong> quer acessar o Betleads com o seu usuário:
         </p>
+        <ul className="list-disc space-y-1 pl-5">
+          {info.data.areas.includes("financeiro") ? (
+            <li>
+              Financeiro ({info.data.level === "write" ? "ler e alterar" : "só ler"}):{" "}
+              {scopeList(info.data.scopes)}
+            </li>
+          ) : null}
+          {info.data.opsHouses ? (
+            <li>
+              Operação (só ler):{" "}
+              {info.data.opsHouses.length ? info.data.opsHouses.join(", ") : "nenhuma casa no momento"}
+            </li>
+          ) : null}
+        </ul>
         <p className="text-muted-foreground">
           {info.data.level === "write" ? "Nível: leitura e escrita" : "Nível: leitura"}
         </p>
@@ -136,7 +149,7 @@ function AutorizarPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Conectar o Claude ao financeiro</CardTitle>
+          <CardTitle>Conectar o Claude ao Betleads</CardTitle>
         </CardHeader>
         <CardContent>{body}</CardContent>
         {ready ? (

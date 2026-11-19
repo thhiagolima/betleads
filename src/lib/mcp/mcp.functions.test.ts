@@ -87,9 +87,25 @@ describe("getMyMcpStatusFor", () => {
     expect(status).toEqual({
       enabled: false,
       level: "none",
+      areas: [],
       mcpUrl: expect.stringContaining("/api/mcp"),
       connections: [],
+      hasUsedTools: false,
     });
+  });
+
+  it("reports the areas and whether a Claude connection already called a tool", async () => {
+    fake.admin.rows("mcp_access").push({ user_id: USER_A, level: "read", areas: ["operacao"] });
+    seedConnection();
+    // An admin action (no connection) does not count as using the MCP.
+    fake.admin.rows("mcp_call_log").push({ id: 1, user_id: USER_A, connection_id: null, tool: "admin.set_access" });
+    let status = await getMyMcpStatusFor({ userId: USER_A });
+    expect(status.areas).toEqual(["operacao"]);
+    expect(status.hasUsedTools).toBe(false);
+
+    fake.admin.rows("mcp_call_log").push({ id: 2, user_id: USER_A, connection_id: CONNECTION, tool: "listar_escopos" });
+    status = await getMyMcpStatusFor({ userId: USER_A });
+    expect(status.hasUsedTools).toBe(true);
   });
 
   it("returns the user's level and own non-revoked connections, with the client name", async () => {

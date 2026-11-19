@@ -65,10 +65,16 @@ describe("consent page", () => {
         recipient: "Claude (claude.ai)",
         clientName: "Banco Oficial — confirme aqui",
         level: "read",
+        areas: ["financeiro", "operacao"],
         scopes: { houses: ["Casa Um"], groups: [] },
+        opsHouses: ["Casa Um", "Casa Dois"],
       },
     });
-    expect(html).toContain("<strong>Claude (claude.ai)</strong> quer acessar o financeiro de:");
+    expect(html).toContain(
+      "<strong>Claude (claude.ai)</strong> quer acessar o Betleads com o seu usuário:",
+    );
+    expect(html).toContain("Financeiro (só ler): Casa Um");
+    expect(html).toContain("Operação (só ler): Casa Um, Casa Dois");
     expect(html).toContain(
       "Só clique em Permitir se você acabou de pedir esta conexão no seu Claude.",
     );

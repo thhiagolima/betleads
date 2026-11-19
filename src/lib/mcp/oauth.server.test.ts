@@ -18,6 +18,13 @@ vi.mock("@/lib/finance/finance-scopes.server", () => ({
   })),
 }));
 
+vi.mock("./ops/scope.server", () => ({
+  listarEscoposOps: vi.fn(async () => ({
+    casas: [{ id: "h2", nome: "Casa Dois", moeda: "BRL", status: "active", isDemo: false, grupo: null }],
+    grupos: [],
+  })),
+}));
+
 import { resolveBearer } from "./access.server";
 import { randomToken } from "./crypto.server";
 import {
@@ -327,8 +334,22 @@ describe("consent screen cores", () => {
       recipient: "Claude (claude.ai)",
       clientName: "Claude",
       level: "read",
+      areas: ["financeiro"],
       scopes: { houses: ["Casa Um"], groups: ["Grupo A"] },
+      opsHouses: null,
     });
+  });
+
+  it("getMcpAuthorizationInfoFor lists the operação houses only with that area", async () => {
+    fake.admin.rows("mcp_access")[0].areas = ["operacao"];
+    const client = await registerClient({ client_name: "Claude", redirect_uris: [REDIRECT] });
+    const info = await getMcpAuthorizationInfoFor(
+      { userId: USER },
+      { clientId: client.client_id, redirectUri: REDIRECT },
+    );
+    expect(info.areas).toEqual(["operacao"]);
+    expect(info.scopes).toEqual({ houses: [], groups: [] });
+    expect(info.opsHouses).toEqual(["Casa Dois"]);
   });
 
   it("getMcpAuthorizationInfoFor refuses an unregistered redirect URI", async () => {

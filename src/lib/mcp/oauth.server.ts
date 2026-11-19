@@ -9,9 +9,10 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { listFinanceScopesFor } from "@/lib/finance/finance-scopes.server";
 
-import { getMcpLevel } from "./access.server";
+import { getMcpAccess, getMcpLevel, type McpArea } from "./access.server";
 import { ACCESS_TOKEN_TTL_S, AUTH_CODE_TTL_S, REFRESH_TOKEN_TTL_S } from "./config.server";
 import { randomToken, sha256Hex, verifyPkceS256 } from "./crypto.server";
+import { listarEscoposOps } from "./ops/scope.server";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- loose client typing, same pattern as access.server.ts. */
 const db = () => supabaseAdmin as any;
@@ -477,7 +478,12 @@ export type McpAuthorizationInfo = {
   /** Free-text DCR client_name (secondary text only: client-controlled). */
   clientName: string;
   level: "read" | "write";
+  /** Areas granted to the user, so the screen says what the connection opens. */
+  areas: McpArea[];
+  /** Finance scope (houses and groups); empty when the user lacks the financeiro area. */
   scopes: { houses: string[]; groups: string[] };
+  /** Houses whose operação the user sees; null without the operacao area. */
+  opsHouses: string[] | null;
 };
 
 /**
@@ -493,17 +499,22 @@ export async function getMcpAuthorizationInfoFor(
   const client = await findClientForRedirect(data.clientId, data.redirectUri);
   if (!client)
     throw new Error("Pedido de conexão inválido: cliente ou endereço de retorno desconhecido.");
-  const level = await getMcpLevel(ctx.userId);
+  const { level, areas } = await getMcpAccess(ctx.userId);
   if (level === "none") throw new Error(NO_MCP_ACCESS_MESSAGE);
-  const scopes = await listFinanceScopesFor(ctx.userId);
+  const [scopes, ops] = await Promise.all([
+    areas.includes("financeiro") ? listFinanceScopesFor(ctx.userId) : null,
+    areas.includes("operacao") ? listarEscoposOps(ctx.userId) : null,
+  ]);
   return {
     recipient: redirectRecipientLabel(data.redirectUri),
     clientName: client.client_name || "Claude",
     level,
+    areas,
     scopes: {
-      houses: scopes.houses.map((h) => h.nome),
-      groups: scopes.groups.map((g) => g.nome),
+      houses: scopes?.houses.map((h) => h.nome) ?? [],
+      groups: scopes?.groups.map((g) => g.nome) ?? [],
     },
+    opsHouses: ops ? ops.casas.map((c) => c.nome) : null,
   };
 }
 

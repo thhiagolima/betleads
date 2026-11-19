@@ -128,18 +128,51 @@ function mcpUrl(): string {
 export type MyMcpStatus = {
   enabled: boolean;
   level: McpLevel;
+  /** Areas granted (financeiro / operacao); drives the example questions on /mcp. */
+  areas: McpArea[];
   mcpUrl: string;
   connections: ConnectionView[];
+  /** True once any Claude connection of this user has called a tool (the tutorial's last step). */
+  hasUsedTools: boolean;
 };
+
+/** Whether the user ever called a tool through a Claude connection (admin.* rows have no connection). */
+async function hasUsedTools(userId: string): Promise<boolean> {
+  const { data, error } = await db()
+    .from("mcp_call_log")
+    .select("id")
+    .eq("user_id", userId)
+    .not("connection_id", "is", null)
+    .limit(1);
+  if (error) return false;
+  return (data ?? []).length > 0;
+}
 
 export async function getMyMcpStatusFor(ctx: { userId: string }): Promise<MyMcpStatus> {
   const enabled = isMcpEnabled();
   if (!enabled) {
-    return { enabled, level: "none", mcpUrl: mcpUrl(), connections: [] };
+    return {
+      enabled,
+      level: "none",
+      areas: [],
+      mcpUrl: mcpUrl(),
+      connections: [],
+      hasUsedTools: false,
+    };
   }
-  const level = await getMcpLevel(ctx.userId);
-  const connections = await connectionsOf(ctx.userId);
-  return { enabled, level, mcpUrl: mcpUrl(), connections };
+  const [{ level, areas }, connections, used] = await Promise.all([
+    getMcpAccess(ctx.userId),
+    connectionsOf(ctx.userId),
+    hasUsedTools(ctx.userId),
+  ]);
+  return {
+    enabled,
+    level,
+    areas: level === "none" ? [] : areas,
+    mcpUrl: mcpUrl(),
+    connections,
+    hasUsedTools: used,
+  };
 }
 
 export const getMyMcpStatus = createServerFn({ method: "GET" })
