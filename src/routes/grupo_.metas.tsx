@@ -1,8 +1,7 @@
 // /grupo/metas (spec §7): goals editor, one table per house.
 import { createFileRoute } from "@tanstack/react-router";
-import { Target } from "lucide-react";
 
-import { PageHeader } from "@/components/ui-premium";
+import { Page, PageHeader } from "@/components/ui-premium";
 import { GroupGoalsEditor } from "@/components/group/group-goals-editor";
 import { useActiveGroup } from "@/hooks/use-active-group";
 
@@ -12,7 +11,12 @@ function GrupoMetasPage() {
   const { groups, active } = useActiveGroup();
 
   if (!groups.length) {
-    return <p className="text-sm text-muted-foreground">Você não gerencia nenhum grupo.</p>;
+    return (
+      <Page className="max-w-5xl">
+        <PageHeader title="Metas" />
+        <p className="text-sm text-muted-foreground">Você não gerencia nenhum grupo.</p>
+      </Page>
+    );
   }
 
   if (!active) {
@@ -20,13 +24,12 @@ function GrupoMetasPage() {
   }
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <Page className="max-w-5xl">
       <PageHeader
         title={`Metas — ${active.nome}`}
         subtitle="Uma meta por métrica e por casa. Vale a partir da data escolhida."
-        icon={<Target className="h-5 w-5 text-primary-foreground" />}
       />
       <GroupGoalsEditor groupId={active.id} />
-    </div>
+    </Page>
   );
 }

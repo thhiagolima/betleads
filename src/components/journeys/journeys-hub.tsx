@@ -48,6 +48,7 @@ import {
   parseDeadLeadThreshold,
 } from "@/lib/dead-leads.shared";
 import { EmptyState } from "@/components/ui-premium/empty-state";
+import { LoadError } from "./load-error";
 import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { HomeCard, KpiCard } from "@/components/home/home-cards";
@@ -329,6 +330,11 @@ export function JourneysHub() {
   });
   const openContactSettings = async () => {
     const result = await contactLimits.refetch();
+    // Opening with empty fields after a failed load would erase the saved limits on Salvar.
+    if (result.isError || !result.data) {
+      toast.error("Não foi possível carregar os limites de contato. Tente de novo.");
+      return;
+    }
     setDailyMessageLimit(result.data?.max24h?.toString() ?? "");
     setWeeklyMessageLimit(result.data?.max7d?.toString() ?? "");
     setDeadLeadEnabled(result.data?.deadLeadEnabled === true);
@@ -493,8 +499,8 @@ export function JourneysHub() {
                   onClick={() => setFilter(item.value)}
                   className={
                     filter === item.value
-                      ? "h-9 shrink-0 rounded-lg bg-secondary px-3 text-[13px] font-medium text-foreground"
-                      : "h-9 shrink-0 rounded-lg px-3 text-[13px] font-medium text-muted-foreground hover:text-foreground"
+                      ? "h-10 shrink-0 rounded-lg bg-secondary px-3 text-body font-medium text-foreground sm:h-9"
+                      : "h-10 shrink-0 rounded-lg px-3 text-body font-medium text-muted-foreground hover:text-foreground sm:h-9"
                   }
                 >
                   {item.label}
@@ -530,6 +536,14 @@ export function JourneysHub() {
               <p className="py-8 text-center text-body text-muted-foreground">
                 Carregando jornadas…
               </p>
+            ) : journeys.isError && !journeys.data ? (
+              <LoadError
+                className="m-4 sm:m-5"
+                title="Não foi possível carregar as jornadas"
+                message="As jornadas continuam funcionando; só a lista não carregou. Verifique a conexão e tente de novo."
+                onRetry={() => void journeys.refetch()}
+                retrying={journeys.isFetching}
+              />
             ) : rows.length === 0 ? (
               <EmptyState
                 icon={<Inbox />}
@@ -591,7 +605,7 @@ export function JourneysHub() {
                 {operationItems.length.toLocaleString("pt-BR")} registro(s)
               </span>
             </div>
-            <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+            <p className="mt-0.5 text-meta text-muted-foreground">
               {view === "queue"
                 ? "Jogadores dentro de uma jornada, aguardando a próxima etapa."
                 : view === "conflicts"
@@ -601,6 +615,20 @@ export function JourneysHub() {
           </div>
           {operations.isLoading ? (
             <p className="py-8 text-center text-body text-muted-foreground">Carregando…</p>
+          ) : operations.isError && !operations.data ? (
+            <LoadError
+              className="m-4 sm:m-5"
+              title={
+                view === "queue"
+                  ? "Não foi possível carregar a fila de envio"
+                  : view === "conflicts"
+                    ? "Não foi possível carregar os conflitos"
+                    : "Não foi possível carregar as falhas"
+              }
+              message="Verifique a conexão e tente de novo."
+              onRetry={() => void operations.refetch()}
+              retrying={operations.isFetching}
+            />
           ) : operationItems.length === 0 ? (
             <EmptyState
               icon={<Inbox />}
@@ -630,7 +658,15 @@ export function JourneysHub() {
       )}
       {view === "dead" && <DeadLeadsPanel onOpenSettings={() => void openContactSettings()} />}
       {view === "flows" && isEnabled("voice") && <FlowsTab />}
-      {view === "map" && (
+      {view === "map" && journeys.isError && !journeys.data && (
+        <LoadError
+          title="Não foi possível carregar o mapa das jornadas"
+          message="Verifique a conexão e tente de novo."
+          onRetry={() => void journeys.refetch()}
+          retrying={journeys.isFetching}
+        />
+      )}
+      {view === "map" && !(journeys.isError && !journeys.data) && (
         <JourneyMapCard
           journeys={allJourneys.map((journey) => ({
             ...journey,
@@ -645,7 +681,7 @@ export function JourneysHub() {
               <h2 className="text-section">Automações legadas</h2>
               <Badge variant="outline">Compatibilidade temporária</Badge>
             </div>
-            <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+            <p className="mt-0.5 text-meta text-muted-foreground">
               Converta, revise o rascunho, ative a jornada e só então desative a origem. Novas
               automações são criadas sempre como jornadas.
             </p>
@@ -685,7 +721,7 @@ export function JourneysHub() {
                         </Badge>
                       )}
                     </div>
-                    <p className="mt-1 text-[12.5px] text-muted-foreground">
+                    <p className="mt-1 text-meta text-muted-foreground">
                       {item.channel === "sms" ? "SMS" : "E-mail"} · entrada {item.trigger}
                     </p>
                   </div>
@@ -808,7 +844,7 @@ export function JourneysHub() {
               />
             </div>
           </div>
-          <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+          <p className="text-meta leading-relaxed text-muted-foreground">
             A contagem inclui os SMS e e-mails já enviados pela casa em cada canal. Mensagens ainda
             agendadas não entram no limite.
           </p>
@@ -818,7 +854,7 @@ export function JourneysHub() {
                 <Label htmlFor="dead-lead-enabled" className="text-sm font-semibold">
                   Leads mortos
                 </Label>
-                <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+                <p className="text-meta leading-relaxed text-muted-foreground">
                   {DEAD_LEAD_RULE_TEXT}
                 </p>
               </div>
@@ -840,7 +876,7 @@ export function JourneysHub() {
                 onChange={(event) => setDeadLeadThreshold(event.target.value)}
               />
               <p
-                className={`text-[12px] ${parsedDeadLeadThreshold == null ? "text-danger" : "text-muted-foreground"}`}
+                className={`text-meta ${parsedDeadLeadThreshold == null ? "text-danger" : "text-muted-foreground"}`}
               >
                 Entre {DEAD_LEAD_THRESHOLD_MIN} e {DEAD_LEAD_THRESHOLD_MAX}. Padrão:{" "}
                 {DEAD_LEAD_THRESHOLD_DEFAULT}. Jornadas de envio imediato disparadas pela ação do
@@ -848,7 +884,7 @@ export function JourneysHub() {
               </p>
             </div>
             {deadLeadEnabled && contactLimits.data?.deadLeadEnabled !== true && (
-              <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+              <p className="text-meta leading-relaxed text-muted-foreground">
                 Ao salvar, você vai para a aba Leads mortos para avaliar a base atual.
               </p>
             )}
@@ -963,7 +999,7 @@ function JourneyRow({
             </Badge>
           )}
         </div>
-        <p className="mt-1 truncate text-[12.5px] text-muted-foreground">
+        <p className="mt-1 truncate text-meta text-muted-foreground">
           {journeyTriggerLabel(journey.trigger_type, journey.trigger_config)}
         </p>
         <JourneyStepSummary steps={steps} />
@@ -1083,7 +1119,7 @@ function OperationRow({
   const pauseReason = priorityPauseReasonLabel(item.priority_pause_reason);
   return (
     <li
-      className="px-4 py-3 text-[13.5px] sm:px-5"
+      className="px-4 py-3 text-body sm:px-5"
       {...(isFirst && view === "queue" ? tourAnchor("automacoes.fila.linha") : {})}
       {...(isFirst && view === "failures" ? tourAnchor("automacoes.falhas.linha") : {})}
       {...(isFirst && view === "conflicts" ? tourAnchor("automacoes.conflitos.linha") : {})}
@@ -1095,7 +1131,7 @@ function OperationRow({
           · {item.journeys?.name ?? "Jornada"}
         </span>
       </p>
-      <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+      <p className="mt-0.5 text-meta text-muted-foreground">
         Etapa {item.current_position + 1}
         {statusLabel && item.status !== "failed" && item.status !== "paused_by_priority"
           ? ` · ${statusLabel}`
@@ -1104,14 +1140,14 @@ function OperationRow({
       </p>
       {reason && (
         <p
-          className={`mt-0.5 text-[12.5px] ${item.status === "failed" ? "text-danger" : "text-muted-foreground"}`}
+          className={`mt-0.5 text-meta ${item.status === "failed" ? "text-danger" : "text-muted-foreground"}`}
         >
           {item.status === "failed" ? "Motivo da falha: " : "Motivo: "}
           {reason}
         </p>
       )}
       {item.status === "paused_by_priority" && (
-        <p className="mt-0.5 text-[12.5px] text-warning">
+        <p className="mt-0.5 text-meta text-warning">
           Pausada por prioridade
           {item.priority_paused_by_journey_name
             ? `: “${item.priority_paused_by_journey_name}” tem prioridade`
@@ -1150,7 +1186,7 @@ const STEP_SEQUENCE_MAX = 10;
 function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
   const sends = steps.filter((step) => step.step_type !== "wait");
   if (sends.length === 0) {
-    return <p className="mt-2 text-[12.5px] text-muted-foreground">Sem etapas configuradas</p>;
+    return <p className="mt-2 text-meta text-muted-foreground">Sem etapas configuradas</p>;
   }
   const byChannel = sends.reduce<Record<string, number>>((acc, step) => {
     acc[step.step_type] = (acc[step.step_type] ?? 0) + 1;
@@ -1180,7 +1216,7 @@ function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
           </span>
         ))}
         {totalWaitSeconds > 0 && (
-          <span className="text-xs text-muted-foreground">em {formatWait(totalWaitSeconds)}</span>
+          <span className="text-meta text-muted-foreground">em {formatWait(totalWaitSeconds)}</span>
         )}
       </div>
       <div
@@ -1200,7 +1236,7 @@ function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
             />
           ),
         )}
-        {hidden > 0 && <span className="text-xs text-muted-foreground">+{hidden}</span>}
+        {hidden > 0 && <span className="text-meta text-muted-foreground">+{hidden}</span>}
       </div>
     </div>
   );
@@ -1248,7 +1284,8 @@ function JourneyMetric({
                 <button
                   type="button"
                   aria-label={`Sobre ${label}: ${hint}`}
-                  className="rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  // 40px tap area on phones without moving the label (negative margin).
+                  className="-my-3 -ml-2 -mr-3 inline-flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:-m-1.5 sm:size-7"
                 >
                   <Info className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>

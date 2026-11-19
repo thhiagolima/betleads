@@ -16,6 +16,7 @@ import { buildRecommendations } from "@/lib/crm-recommendations";
 import { isComparable } from "@/lib/crm-results";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
+import { formatMoney } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import {
   CHART_COLORS,
@@ -23,6 +24,8 @@ import {
   chartGridProps,
   chartLegendProps,
   chartTooltipProps,
+  moneyAxisProps,
+  useCompactCharts,
 } from "@/lib/chart-theme";
 import { tourAnchor } from "@/help/anchor";
 import { Term } from "@/components/help/term";
@@ -329,6 +332,7 @@ function DailyChart({ data }: { data: Data }) {
   const { currency, money } = useMoney();
   // Fora de BRL, custo (BRL) e recuperado (moeda da casa) ganham eixos separados.
   const crossCurrency = isCrossCurrency(currency);
+  const compactCharts = useCompactCharts();
   if (data.days === 1)
     return (
       <EmptyCard>
@@ -360,13 +364,19 @@ function DailyChart({ data }: { data: Data }) {
             <YAxis
               yAxisId="cost"
               {...chartAxisProps}
-              width={80}
-              tickFormatter={(value) => brl(Number(value))}
+              {...moneyAxisProps(
+                (value, options) => formatMoney(value, "BRL", options),
+                compactCharts,
+                80,
+              )}
             />
+            {/* On phones the second axis would eat the plot: the tooltip still
+                shows both values. */}
             {crossCurrency && (
               <YAxis
                 yAxisId="revenue"
                 orientation="right"
+                hide={compactCharts}
                 {...chartAxisProps}
                 width={90}
                 tickFormatter={(value) => money(Number(value), { compact: true })}

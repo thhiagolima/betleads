@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Workflow, Layers, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { deleteCallFlow, listCallFlows, toggleCallFlow } from "@/lib/call-flows.functions";
@@ -49,7 +50,7 @@ export function FlowsTab() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <CardTitle className="flex items-center gap-2">
             <Workflow className="h-5 w-5 text-primary" />
@@ -108,10 +109,10 @@ export function FlowsTab() {
               return (
                 <div
                   key={f.id}
-                  className="flex items-center gap-4 rounded-lg border border-border bg-card/40 p-4 transition-colors hover:bg-card/60"
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card/40 p-4 transition-colors hover:bg-card/60"
                   {...(isFirst ? tourAnchor("automacoes.fluxos.linha") : {})}
                 >
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">
                     <div className="mb-1 flex items-center gap-2">
                       <p className="truncate font-medium text-foreground">{f.name}</p>
                       {f.is_active ? (
@@ -141,26 +142,24 @@ export function FlowsTab() {
                   </div>
 
                   <Switch
+                    aria-label={`Fluxo ${f.name} ativo`}
                     checked={!!f.is_active}
                     onCheckedChange={(c) => toggleMut.mutate({ id: f.id, is_active: c })}
                     {...(isFirst ? tourAnchor("automacoes.fluxos.ativo") : {})}
                   />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Editar fluxo ${f.name}`}
+                  <IconButton
+                    label={`Editar fluxo ${f.name}`}
+                    icon={<Pencil className="h-4 w-4" />}
+                    className="ml-auto"
                     onClick={() => {
                       setEditing(f);
                       setDialogOpen(true);
                     }}
                     {...(isFirst ? tourAnchor("automacoes.fluxos.editar") : {})}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Excluir fluxo ${f.name}`}
+                  />
+                  <IconButton
+                    label={`Excluir fluxo ${f.name}`}
+                    icon={<Trash2 className="h-4 w-4 text-destructive" />}
                     {...(isFirst ? tourAnchor("automacoes.fluxos.excluir") : {})}
                     onClick={async () => {
                       const confirmed = await requestConfirmation({
@@ -172,9 +171,7 @@ export function FlowsTab() {
                       });
                       if (confirmed) delMut.mutate(f.id);
                     }}
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  />
                 </div>
               );
             })}

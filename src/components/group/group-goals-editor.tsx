@@ -24,8 +24,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FINANCE_TERMS } from "@/components/finance/definitions";
+import { QueryErrorState } from "@/components/finance/query-error-state";
 import { getTenantGoals, setTenantGoal, type TenantGoalCurrent } from "@/lib/finance.functions";
 import type { GoalDirection, GoalMetric } from "@/lib/finance/types";
 import { getGroupPeople } from "@/lib/groups.functions";
@@ -56,6 +56,12 @@ function formatDateBR(iso: string) {
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
 }
+
+// One grid for both layouts: a card per metric on phones, a table-like row
+// from md up (the header row only shows from md). A single tree keeps the
+// row's draft state in one place.
+const ROW_GRID =
+  "md:grid md:grid-cols-[minmax(0,1.4fr)_5.5rem_minmax(0,1.3fr)_minmax(0,1.2fr)_auto] md:items-start md:gap-3";
 
 function GoalRow({
   tenantId,
@@ -93,55 +99,78 @@ function GoalRow({
     onError: (error: Error) => toast.error(error.message),
   });
 
+  const metricLabel = `${METRIC_LABEL[row.metric]}${isPercentGoal(row.metric) ? " (%)" : ""}`;
+  const idBase = `goal-${tenantId}-${row.metric}`;
+
   return (
-    <TableRow>
-      <TableCell>
-        {METRIC_LABEL[row.metric]}
-        {isPercentGoal(row.metric) && " (%)"}
-      </TableCell>
-      <TableCell>
-        <Select value={direction} onValueChange={(v) => setDirection(v as GoalDirection)}>
-          <SelectTrigger className="w-20">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="gte">≥</SelectItem>
-            <SelectItem value="lte">≤</SelectItem>
-          </SelectContent>
-        </Select>
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-1">
-          <Input
-            type="number"
-            step="0.01"
-            inputMode="decimal"
-            placeholder="sem meta"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            className="h-8 w-28"
-          />
-          {isPercentGoal(row.metric) && <span className="text-xs text-muted-foreground">%</span>}
+    <li
+      className={`space-y-3 border-b border-border/40 p-3 last:border-0 md:space-y-0 md:px-3 md:py-2 ${ROW_GRID}`}
+    >
+      <div className="text-sm font-medium md:pt-2.5 md:font-normal">{metricLabel}</div>
+      <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 md:contents">
+        <div className="space-y-1">
+          <label htmlFor={`${idBase}-dir`} className="text-meta text-muted-foreground md:sr-only">
+            Direção
+          </label>
+          <Select value={direction} onValueChange={(v) => setDirection(v as GoalDirection)}>
+            <SelectTrigger id={`${idBase}-dir`} className="w-full" aria-label="Direção">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="gte">≥</SelectItem>
+              <SelectItem value="lte">≤</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          {row.validFrom ? `vigente desde ${formatDateBR(row.validFrom)}` : "sem meta atual"}
-        </p>
-      </TableCell>
-      <TableCell>
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={`${idBase}-val`} className="text-meta text-muted-foreground md:sr-only">
+            Valor diário
+          </label>
+          <div className="flex items-center gap-1">
+            <Input
+              id={`${idBase}-val`}
+              type="number"
+              step="0.01"
+              inputMode="decimal"
+              placeholder="sem meta"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              className="min-w-0 flex-1"
+            />
+            {isPercentGoal(row.metric) && (
+              <span className="text-meta text-muted-foreground">%</span>
+            )}
+          </div>
+          <p className="text-meta text-muted-foreground">
+            {row.validFrom ? `vigente desde ${formatDateBR(row.validFrom)}` : "sem meta atual"}
+          </p>
+        </div>
+      </div>
+      <div className="min-w-0 space-y-1">
+        <label htmlFor={`${idBase}-from`} className="text-meta text-muted-foreground md:sr-only">
+          Vale a partir de
+        </label>
         <Input
+          id={`${idBase}-from`}
           type="date"
           min={today}
           value={validFrom}
           onChange={(e) => setValidFrom(e.target.value)}
-          className="h-8 w-40"
+          className="w-full min-w-0"
         />
-      </TableCell>
-      <TableCell className="text-right">
-        <Button size="sm" disabled={mut.isPending} onClick={() => mut.mutate()}>
-          Salvar
+      </div>
+      <div className="md:text-right">
+        <Button
+          size="sm"
+          className="w-full md:w-auto"
+          disabled={mut.isPending}
+          onClick={() => mut.mutate()}
+          aria-label={`Salvar meta de ${metricLabel}`}
+        >
+          {mut.isPending ? "Salvando…" : "Salvar"}
         </Button>
-      </TableCell>
-    </TableRow>
+      </div>
+    </li>
   );
 }
 
@@ -153,35 +182,47 @@ function TenantGoalsTable({ tenant }: { tenant: { id: string; nome: string } }) 
     queryFn: () => getGoals({ data: { tenantId: tenant.id } }),
   });
 
-  if (query.isLoading || !query.data) {
+  if (query.isLoading) {
     return <div className="h-32 animate-pulse rounded-lg border border-border/40" />;
+  }
+
+  if (query.isError || !query.data) {
+    return (
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold">{tenant.nome}</h3>
+        <QueryErrorState
+          title={`Não foi possível carregar as metas de ${tenant.nome}.`}
+          retrying={query.isFetching}
+          onRetry={() => void query.refetch()}
+        />
+      </div>
+    );
   }
 
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-semibold">{tenant.nome}</h3>
-      <div className="overflow-x-auto rounded-lg border border-border/40">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Métrica</TableHead>
-              <TableHead>Direção</TableHead>
-              <TableHead>Valor diário</TableHead>
-              <TableHead>Vale a partir de</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {query.data.map((row) => (
-              <GoalRow
-                key={row.metric}
-                tenantId={tenant.id}
-                row={row}
-                onSaved={() => qc.invalidateQueries({ queryKey: ["tenant-goals", tenant.id] })}
-              />
-            ))}
-          </TableBody>
-        </Table>
+      <div className="rounded-lg border border-border/40">
+        <div
+          aria-hidden="true"
+          className={`hidden border-b border-border/40 px-3 py-2 text-meta font-medium text-muted-foreground ${ROW_GRID}`}
+        >
+          <span>Métrica</span>
+          <span>Direção</span>
+          <span>Valor diário</span>
+          <span>Vale a partir de</span>
+          <span />
+        </div>
+        <ul>
+          {query.data.map((row) => (
+            <GoalRow
+              key={row.metric}
+              tenantId={tenant.id}
+              row={row}
+              onSaved={() => qc.invalidateQueries({ queryKey: ["tenant-goals", tenant.id] })}
+            />
+          ))}
+        </ul>
       </div>
     </div>
   );
@@ -194,8 +235,18 @@ export function GroupGoalsEditor({ groupId }: { groupId: string }) {
     queryFn: () => getPeople({ data: { groupId } }),
   });
 
-  if (query.isLoading || !query.data) {
+  if (query.isLoading) {
     return <div className="h-64 animate-pulse rounded-lg border border-border/40" />;
+  }
+
+  if (query.isError || !query.data) {
+    return (
+      <QueryErrorState
+        title="Não foi possível carregar as casas do grupo."
+        retrying={query.isFetching}
+        onRetry={() => void query.refetch()}
+      />
+    );
   }
 
   if (!query.data.tenants.length) {

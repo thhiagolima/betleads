@@ -152,7 +152,7 @@ export function SmsTemplatesPanel() {
 
       {editing && (
         <HomeCard key={editing.id || "new"} className="p-4 sm:p-5">
-          <h2 className="text-[15px] font-semibold">
+          <h2 className="text-section">
             {editing.id ? "Editar template" : "Novo template"}
           </h2>
           <form
@@ -270,7 +270,7 @@ export function SmsTemplatesPanel() {
               {...(index === 0 ? tourAnchor("sms.templates.card") : {})}
             >
               <div className="flex items-start justify-between gap-2">
-                <h3 className="min-w-0 truncate text-[15px] font-semibold">{item.name}</h3>
+                <h3 className="min-w-0 truncate text-section">{item.name}</h3>
                 <span className="shrink-0 text-xs text-muted-foreground">
                   {item.isActive ? `v${item.version}` : "arquivado"}
                 </span>

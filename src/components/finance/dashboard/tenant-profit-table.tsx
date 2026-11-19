@@ -88,7 +88,7 @@ function ProfitChange({ row }: { row: TenantProfitRow }) {
   const change = numericValue(row, "profitChange");
   if (change === null) return <span className="text-muted-foreground">—</span>;
   return (
-    <span className={change >= 0 ? "text-emerald-400" : "text-rose-400"}>
+    <span className={change >= 0 ? "text-success" : "text-danger"}>
       {change >= 0 ? "▲" : "▼"} {formatPct(Math.abs(change))}
     </span>
   );
@@ -126,11 +126,21 @@ export function TenantProfitTable({
     <div className="overflow-x-auto rounded-lg border border-border/40">
       <table className="w-full min-w-[42rem] text-sm">
         <thead>
-          <tr className="border-b border-border/40 text-xs uppercase text-muted-foreground">
+          <tr className="border-b border-border/40 text-meta uppercase text-muted-foreground">
             {columns.map((column) => (
               <th
                 key={column.key}
-                className={cn("px-3 py-2", column.key === "nome" ? "text-left" : "text-right")}
+                className={cn(
+                  "px-3 py-2",
+                  column.key === "nome" ? "sticky left-0 z-10 bg-card text-left" : "text-right",
+                )}
+                aria-sort={
+                  sort?.column === column.key
+                    ? sort.direction === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
               >
                 <button
                   type="button"
@@ -153,7 +163,7 @@ export function TenantProfitTable({
               )}
               onClick={() => onOpenTenant?.(row.id)}
             >
-              <td className="px-3 py-2 font-medium">
+              <td className="sticky left-0 z-10 max-w-[10rem] bg-card px-3 py-2 font-medium sm:max-w-none">
                 <button
                   type="button"
                   className="rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -164,7 +174,7 @@ export function TenantProfitTable({
                 >
                   {row.nome}
                   {row.moeda && row.moeda !== "BRL" && (
-                    <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                    <span className="ml-1.5 text-meta font-normal text-muted-foreground">
                       {row.moeda}
                     </span>
                   )}
@@ -181,7 +191,7 @@ export function TenantProfitTable({
                 <td
                   className={cn(
                     "whitespace-nowrap px-3 py-2 text-right",
-                    row.current.cashResult < 0 && "text-rose-400",
+                    row.current.cashResult < 0 && "text-danger",
                   )}
                 >
                   {formatMoneyIn(row.current.cashResult, row.moeda)}

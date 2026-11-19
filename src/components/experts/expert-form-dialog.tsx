@@ -166,6 +166,16 @@ export function ExpertFormDialog({
     !prazoHint &&
     affiliateIds.length <= AFFILIATE_IDS_MAX_COUNT;
 
+  // An ID typed but not yet added (no Enter/Adicionar) still counts on save:
+  // on phones people type and tap Salvar, and the expert would get no leads.
+  const pendingAffiliateId = affiliateInput.trim().slice(0, AFFILIATE_ID_MAX_LENGTH);
+  const affiliateIdsToSave =
+    pendingAffiliateId &&
+    !affiliateIds.includes(pendingAffiliateId) &&
+    affiliateIds.length < AFFILIATE_IDS_MAX_COUNT
+      ? [...affiliateIds, pendingAffiliateId]
+      : affiliateIds;
+
   const save = useMutation({
     mutationFn: async () => {
       const teto = parseBrlInput(tetoMensal);
@@ -175,7 +185,7 @@ export function ExpertFormDialog({
           id: expert?.id,
           nome: nome.trim(),
           tipo,
-          affiliateIds,
+          affiliateIds: affiliateIdsToSave,
           envioModo,
           tetoMensal: teto,
           assumirPrazoDias: prazo,
@@ -296,30 +306,50 @@ export function ExpertFormDialog({
                     type="button"
                     aria-label={`Remover ID ${id}`}
                     onClick={() => removeAffiliateId(id)}
-                    className="text-muted-foreground hover:text-foreground"
+                    className="-my-1 -mr-1.5 inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:text-foreground max-sm:size-9"
                   >
-                    <X className="h-3 w-3" />
+                    <X className="h-3.5 w-3.5" />
                   </button>
                 </span>
               ))}
             </div>
-            <Input
-              id={ids.affiliate}
-              value={affiliateInput}
-              onChange={(e) => {
-                setAffiliateInput(e.target.value.slice(0, AFFILIATE_ID_MAX_LENGTH));
-                setAffiliateHint(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addAffiliateId(affiliateInput);
-                }
-              }}
-              placeholder="digite o ID e pressione Enter"
-              maxLength={AFFILIATE_ID_MAX_LENGTH}
-              disabled={affiliateIds.length >= AFFILIATE_IDS_MAX_COUNT}
-            />
+            <div className="flex gap-2">
+              <Input
+                id={ids.affiliate}
+                value={affiliateInput}
+                onChange={(e) => {
+                  setAffiliateInput(e.target.value.slice(0, AFFILIATE_ID_MAX_LENGTH));
+                  setAffiliateHint(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addAffiliateId(affiliateInput);
+                  }
+                }}
+                onBlur={(e) => {
+                  // Tapping a suggestion adds that one; the typed text was only a filter.
+                  if (
+                    e.relatedTarget instanceof HTMLElement &&
+                    e.relatedTarget.dataset.affiliateSuggestion
+                  )
+                    return;
+                  if (affiliateInput.trim()) addAffiliateId(affiliateInput);
+                }}
+                placeholder="digite o ID e toque em Adicionar"
+                maxLength={AFFILIATE_ID_MAX_LENGTH}
+                disabled={affiliateIds.length >= AFFILIATE_IDS_MAX_COUNT}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                disabled={!affiliateInput.trim() || affiliateIds.length >= AFFILIATE_IDS_MAX_COUNT}
+                onClick={() => addAffiliateId(affiliateInput)}
+              >
+                Adicionar
+              </Button>
+            </div>
             {affiliateHint ? (
               <p className="text-xs text-destructive">{affiliateHint}</p>
             ) : (
@@ -333,8 +363,9 @@ export function ExpertFormDialog({
                   <button
                     key={s.affiliateId}
                     type="button"
+                    data-affiliate-suggestion="true"
                     onClick={() => addAffiliateId(s.affiliateId)}
-                    className="rounded-md border border-dashed border-border/60 px-2 py-1 font-mono text-xs text-muted-foreground hover:border-border hover:text-foreground"
+                    className="rounded-md border border-dashed border-border/60 px-2 py-1 font-mono text-xs max-sm:min-h-9 text-muted-foreground hover:border-border hover:text-foreground"
                   >
                     {s.affiliateId} · {s.leads} leads
                   </button>

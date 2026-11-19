@@ -35,7 +35,13 @@ import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import type { LeadScopedDashboard, mapDashboardRpc } from "@/lib/dashboard.functions";
 import { brl, num, timeAgo } from "@/lib/format";
 import { fmtPct, trendDisplay } from "@/lib/home-dashboard";
-import { chartAxisProps, chartGridProps, chartTooltipStyle } from "@/lib/chart-theme";
+import {
+  chartAxisProps,
+  chartGridProps,
+  chartTooltipStyle,
+  moneyAxisProps,
+  useCompactCharts,
+} from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
 
 /** Números do Início que dependem só dos jogadores (casa inteira ou leads do expert). */
@@ -96,8 +102,8 @@ export function HomeHeader({
   return (
     <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-[26px]">{title}</h1>
-        <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted-foreground">
+        <h1 className="text-2xl font-bold tracking-tight sm:text-title">{title}</h1>
+        <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-body text-muted-foreground">
           {meta && (
             <>
               {meta}
@@ -176,7 +182,7 @@ export function HomeKpiCards({
         detail={comparison}
       />
       <KpiCard
-        className="col-span-2 sm:col-span-1"
+        className="col-span-2 xl:col-span-1"
         title={
           <>
             Conversão cadastro → <Term id="ftd">FTD</Term>
@@ -226,10 +232,11 @@ export function CashflowCrmRow({
  */
 export function CashflowChart({ data }: { data: HomeDashboardData }) {
   const { money } = useMoney();
+  const compactCharts = useCompactCharts();
   return (
     <HomeCard className="flex h-full flex-col p-4 sm:p-5" {...tourAnchor("inicio.fluxo.grafico")}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-[15px] font-semibold">Depósitos e saques</h2>
+        <h2 className="text-section font-semibold">Depósitos e saques</h2>
         {/* Só os nomes: os totais já estão nos indicadores e em "Líquido". */}
         <div className="flex gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
@@ -253,7 +260,7 @@ export function CashflowChart({ data }: { data: HomeDashboardData }) {
             </defs>
             <CartesianGrid {...chartGridProps} />
             <XAxis dataKey="label" {...chartAxisProps} minTickGap={16} />
-            <YAxis {...chartAxisProps} tickFormatter={(v) => money(Number(v))} width={78} />
+            <YAxis {...chartAxisProps} {...moneyAxisProps(money, compactCharts)} />
             <Tooltip
               contentStyle={chartTooltipStyle}
               formatter={(value: number, name: string) => [
@@ -349,12 +356,12 @@ export function CrmCard({ data, house }: { data: HomeDashboardData; house?: Hous
   const { money } = useMoney();
   return (
     <HomeCard className="flex h-full flex-col border-success/30 p-4 sm:p-5">
-      <h2 className="text-[12.5px] font-semibold text-success">Recuperado pelo CRM</h2>
-      <p className="mt-1.5 text-[28px] font-semibold tracking-[-0.03em] tabular-nums sm:text-[32px]">
+      <h2 className="text-label font-semibold text-success">Recuperado pelo CRM</h2>
+      <p className="mt-1.5 min-w-0 break-words text-2xl font-semibold tracking-[-0.03em] tabular-nums sm:text-[32px]">
         {money(data.recoveredAmount)}
       </p>
       {/* A regra dos 7 dias fica na nota do rodapé e na ajuda. */}
-      <p className="mt-1.5 text-[12.5px] text-muted-foreground">
+      <p className="mt-1.5 text-label text-muted-foreground">
         {formatCount(data.recoveredPlayers, "jogador recuperado", "jogadores recuperados")}
       </p>
       {house ? (
@@ -426,15 +433,20 @@ export function SecondaryMetrics({ data }: { data: HomeDashboardData }) {
         <div
           key={index}
           className={cn(
-            "border-border/70 p-4 sm:px-5",
+            "min-w-0 border-border/70 p-4 sm:px-5",
             // Hairlines between cells (2x2 below xl, one row on xl) without doubling them up.
             index < 2 && "max-xl:border-b",
             index % 2 === 0 && "max-xl:border-r",
             index < cells.length - 1 && "xl:border-r",
           )}
         >
-          <p className="text-[12.5px] text-muted-foreground">{cell.label}</p>
-          <p className={cn("mt-1 text-xl font-semibold tabular-nums", cell.valueClassName)}>
+          <p className="break-words text-label text-muted-foreground">{cell.label}</p>
+          <p
+            className={cn(
+              "mt-1 min-w-0 break-words text-lg font-semibold tabular-nums sm:text-xl",
+              cell.valueClassName,
+            )}
+          >
             {cell.value}
           </p>
           <p className="mt-1 flex flex-wrap gap-x-1.5 text-xs text-muted-foreground">
@@ -479,11 +491,11 @@ export function LiveFeed({
   return (
     <HomeCard className="p-4 sm:px-5">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-[15px] font-semibold">Ao vivo</h2>
+        <h2 className="text-section font-semibold">Ao vivo</h2>
         {showAllEventsLink && (
           <Link
             to="/eventos"
-            className="text-[12.5px] text-primary hover:underline"
+            className="text-label text-primary hover:underline"
             {...tourAnchor("inicio.ao-vivo.ver-todos")}
           >
             Ver todos os eventos
@@ -523,7 +535,7 @@ export function LiveFeed({
                   <Icon className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13.5px] font-semibold">
+                  <p className="truncate text-body font-semibold">
                     {event.playerId ? (
                       playerLink === "expert" ? (
                         <Link
@@ -554,7 +566,7 @@ export function LiveFeed({
                 {hasAmount && (
                   <strong
                     className={cn(
-                      "shrink-0 text-[13.5px] font-semibold tabular-nums",
+                      "shrink-0 text-body font-semibold tabular-nums",
                       event.tone === "green" && "text-success",
                     )}
                   >

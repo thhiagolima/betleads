@@ -74,10 +74,7 @@ export function CurrencyTotals({ rows, sends }: { rows: CurrencyTotalRow[]; send
                       className={cn(
                         "whitespace-nowrap px-3 py-2 text-right tabular-nums",
                         value === null && "text-muted-foreground",
-                        value !== null &&
-                          column.key === "cashResult" &&
-                          value < 0 &&
-                          "text-rose-400",
+                        value !== null && column.key === "cashResult" && value < 0 && "text-danger",
                       )}
                     >
                       {value === null ? "—" : formatMoneyIn(value, row.currency)}
@@ -92,9 +89,7 @@ export function CurrencyTotals({ rows, sends }: { rows: CurrencyTotalRow[]; send
       <p className="text-sm">
         <span className="text-muted-foreground">Envios de todas as casas (BRL): </span>
         <span className="font-medium tabular-nums">{formatBRL(sendCost)}</span>
-        {partial && (
-          <span className="ml-1 text-xs text-amber-500 dark:text-amber-300">parcial</span>
-        )}
+        {partial && <span className="ml-1 text-xs text-warning">parcial</span>}
       </p>
       {foreign.map((row) => (
         <p key={row.currency} className="text-xs text-muted-foreground">

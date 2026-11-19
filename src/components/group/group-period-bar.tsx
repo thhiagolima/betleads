@@ -48,7 +48,7 @@ const dateToIso = (date: Date) =>
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70">
+      <span className="text-meta font-semibold uppercase tracking-[0.06em] text-muted-foreground/70">
         {label}
       </span>
       {children}
@@ -65,7 +65,7 @@ function FieldText({ name, dates }: { name: string; dates: string | null }) {
     <>
       <span className="min-w-0 truncate">
         <span className="font-semibold">{name}</span>
-        {dates && <span className="text-[12.5px] text-muted-foreground"> · {dates}</span>}
+        {dates && <span className="text-label text-muted-foreground"> · {dates}</span>}
       </span>
       <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/70" aria-hidden />
     </>
@@ -121,7 +121,7 @@ function RangeCalendar({
         onSelect={(_, day) => pick(dateToIso(day))}
         className="p-2 sm:p-3"
       />
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 pt-2.5 pb-1 text-[12.5px] text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 pt-2.5 pb-1 text-label text-muted-foreground">
         <span>
           {complete ? calendarFooter(complete) : `${fullDate(draft.from)} a …`}
           {tooLong && <span className="text-destructive"> · máximo {MAX_RANGE_DAYS} dias</span>}
@@ -208,7 +208,7 @@ function PeriodPicker({
           <div className="w-[190px] shrink-0 border-r border-border p-2">
             {SHORTCUT_GROUPS.map((group) => (
               <div key={group.label}>
-                <p className="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70">
+                <p className="px-2 pt-2 pb-1 text-meta font-semibold uppercase tracking-[0.06em] text-muted-foreground/70">
                   {group.label}
                 </p>
                 {group.shortcuts.map((shortcut) => {
@@ -218,7 +218,7 @@ function PeriodPicker({
                       key={shortcut}
                       type="button"
                       className={cn(
-                        "flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-accent",
+                        "flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-body transition-colors hover:bg-accent",
                         value.shortcut === shortcut &&
                           "bg-primary/15 text-primary hover:bg-primary/20",
                       )}
@@ -271,13 +271,13 @@ function PeriodPicker({
                   key={shortcut}
                   type="button"
                   className={cn(
-                    "min-w-0 rounded-[10px] border border-border px-2.5 py-2.5 text-left text-[13px]",
+                    "min-w-0 rounded-[10px] border border-border px-2.5 py-2.5 text-left text-body",
                     value.shortcut === shortcut && "border-primary bg-primary/15 text-primary",
                   )}
                   onClick={() => applyShortcut(shortcut)}
                 >
                   {SHORTCUT_LABELS[shortcut]}
-                  <span className="block truncate text-[11.5px] text-muted-foreground">
+                  <span className="block truncate text-meta text-muted-foreground">
                     {formatRange(shortcutRange(shortcut, today), today)}
                   </span>
                 </button>
@@ -285,13 +285,13 @@ function PeriodPicker({
               <button
                 type="button"
                 className={cn(
-                  "min-w-0 rounded-[10px] border border-border px-2.5 py-2.5 text-left text-[13px]",
+                  "min-w-0 rounded-[10px] border border-border px-2.5 py-2.5 text-left text-body",
                   value.shortcut === null && "border-primary bg-primary/15 text-primary",
                 )}
                 onClick={() => setSheetCalendar(true)}
               >
                 Escolher datas…
-                <span className="block text-[11.5px] text-muted-foreground">calendário</span>
+                <span className="block text-meta text-muted-foreground">calendário</span>
               </button>
             </div>
           )}
@@ -329,7 +329,7 @@ function ComparePicker({
             key={option.mode}
             type="button"
             className={cn(
-              "flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left text-[13px] transition-colors hover:bg-accent",
+              "flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left text-body transition-colors hover:bg-accent",
               option.mode === current.mode && "bg-primary/15 text-primary hover:bg-primary/20",
             )}
             onClick={() => {
@@ -376,7 +376,7 @@ export function GroupPeriodBar({
               type="button"
               aria-pressed={active}
               className={cn(
-                "rounded-full border px-3 py-1 text-[12.5px] transition-colors",
+                "min-h-9 rounded-full border px-3 py-1 text-label transition-colors sm:min-h-0",
                 active
                   ? "border-primary bg-primary font-semibold text-primary-foreground"
                   : "border-border text-muted-foreground hover:text-foreground",

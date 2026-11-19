@@ -7,6 +7,7 @@ import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { ExpertCampaignsQueue, ExpertUsageBar } from "@/components/experts/expert-campaigns-admin";
@@ -22,7 +23,8 @@ export type ExpertDetailTab = "rendimento" | "campanhas";
 
 const tabClass = (active: boolean) =>
   cn(
-    "inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+    // min-h-11: a full-size tap target on phones.
+    "inline-flex min-h-11 items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium transition-colors sm:min-h-10",
     active
       ? "border-primary text-foreground"
       : "border-transparent text-muted-foreground hover:text-foreground",
@@ -141,10 +143,15 @@ export function ExpertCampaignsAdminView({ expertId }: { expertId: string }) {
           <CardContent className="space-y-2">
             {usage ? (
               <ExpertUsageBar usage={usage} />
+            ) : usageQuery.isError ? (
+              <div className="flex flex-wrap items-center gap-2" role="alert">
+                <p className="text-sm text-destructive">Não foi possível carregar o uso.</p>
+                <Button variant="outline" size="sm" onClick={() => void usageQuery.refetch()}>
+                  Tentar novamente
+                </Button>
+              </div>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                {usageQuery.isError ? "Não foi possível carregar o uso." : "Carregando…"}
-              </p>
+              <p className="text-sm text-muted-foreground">Carregando…</p>
             )}
             {usage && usage.pendentes > 0 && (
               <p className="text-xs text-muted-foreground">

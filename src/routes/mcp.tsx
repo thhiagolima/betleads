@@ -11,18 +11,22 @@
 // granted area, how write confirmations work, what Claude never sees and the
 // common problems. Help article: src/help/screens/mcp.ts.
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Bot, Check, Copy } from "lucide-react";
+import { Bot, Check, Copy, Monitor, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui-premium/empty-state";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { Term } from "@/components/help/term";
 import { tourAnchor } from "@/help/anchor";
 import { getMyMcpStatus, revokeMyConnection } from "@/lib/mcp/mcp.functions";
 import { copyToClipboard } from "@/lib/clipboard";
+import { requestConfirmation } from "@/components/system-dialog-host";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export const Route = createFileRoute("/mcp")({
   component: McpPage,
@@ -114,15 +118,62 @@ function McpPage() {
   const statusFn = useServerFn(getMyMcpStatus);
   const revokeFn = useServerFn(revokeMyConnection);
 
-  const { data, isLoading } = useQuery({
+  const isMobile = useIsMobile();
+
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["mcp", "my-status"],
     queryFn: () => statusFn(),
   });
 
-  if (isLoading || !data) {
+  const revoke = useMutation({
+    mutationFn: (connectionId: string) => revokeFn({ data: { connectionId } }),
+    onSuccess: () => {
+      toast.success("Conexão desconectada");
+      void qc.invalidateQueries({ queryKey: ["mcp", "my-status"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error && error.message
+          ? `Não foi possível desconectar: ${error.message}`
+          : "Não foi possível desconectar. Tente de novo.",
+      );
+    },
+  });
+
+  async function desconectar(connectionId: string, clientName: string) {
+    const confirmed = await requestConfirmation({
+      title: "Desconectar do Claude?",
+      description: `${clientName} perde o acesso ao Betleads na hora. Para usar de novo, será preciso conectar outra vez.`,
+      confirmLabel: "Desconectar",
+      destructive: true,
+    });
+    if (confirmed) revoke.mutate(connectionId);
+  }
+
+  if (isLoading) {
     return (
       <Page>
         <PageHeader title="Conectar ao Claude" subtitle="Carregando…" />
+      </Page>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <Page>
+        <PageHeader title="Conectar ao Claude" />
+        <Card>
+          <EmptyState
+            title="Não foi possível carregar a sua conexão com o Claude"
+            description="Confira a internet e tente de novo."
+            action={
+              <Button variant="outline" disabled={isFetching} onClick={() => void refetch()}>
+                <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+                Tentar novamente
+              </Button>
+            }
+          />
+        </Card>
       </Page>
     );
   }
@@ -180,6 +231,15 @@ function McpPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {isMobile ? (
+            <div className="flex items-start gap-2 rounded-md border border-info/40 bg-info/10 px-3 py-2 text-sm">
+              <Monitor className="mt-0.5 size-4 shrink-0 text-info" aria-hidden="true" />
+              <p>
+                Estes passos são feitos no computador, no site claude.ai ou no app Claude Desktop.
+                Abra esta tela no computador para seguir junto.
+              </p>
+            </div>
+          ) : null}
           <p className="text-sm text-muted-foreground">
             Depois de conectar, você pergunta ao Claude sobre as suas casas em português, como numa
             conversa, e ele responde com os mesmos números do Betleads. Leva uns 5 minutos e só
@@ -356,10 +416,11 @@ function McpPage() {
         </CardHeader>
         <CardContent className="space-y-2">
           <div className="flex gap-2">
-            <input
+            <Input
               readOnly
+              aria-label="URL de conexão"
               value={data.mcpUrl}
-              className="w-full h-9 text-sm px-3 rounded-md border bg-muted/30 font-mono"
+              className="min-w-0 flex-1 bg-muted/30 font-mono"
             />
             <Button
               variant="outline"
@@ -398,10 +459,11 @@ function McpPage() {
         </CardHeader>
         <CardContent className="space-y-2">
           <div className="flex gap-2">
-            <input
+            <Input
               readOnly
+              aria-label="Comando do Claude Code"
               value={claudeCodeCommand}
-              className="w-full h-9 text-sm px-3 rounded-md border bg-muted/30 font-mono"
+              className="min-w-0 flex-1 bg-muted/30 font-mono"
             />
             <Button
               variant="outline"
@@ -428,8 +490,8 @@ function McpPage() {
               key={conn.id}
               className="flex items-center justify-between gap-2 border-b border-border/40 pb-2 last:border-0 last:pb-0"
             >
-              <div>
-                <div className="text-sm font-medium">{conn.clientName}</div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{conn.clientName}</div>
                 <div className="text-meta text-muted-foreground">
                   criada em {fmtDate(conn.createdAt)} · último uso: {fmtDate(conn.lastUsedAt)}
                 </div>
@@ -438,15 +500,14 @@ function McpPage() {
                 type="button"
                 size="sm"
                 variant="outline"
+                className="shrink-0"
                 {...(index === 0 ? tourAnchor("mcp.conexoes.desconectar") : {})}
-                onClick={() => {
-                  void revokeFn({ data: { connectionId: conn.id } }).then(() => {
-                    toast.success("Conexão desconectada");
-                    qc.invalidateQueries({ queryKey: ["mcp", "my-status"] });
-                  });
-                }}
+                disabled={revoke.isPending && revoke.variables === conn.id}
+                onClick={() => void desconectar(conn.id, conn.clientName)}
               >
-                Desconectar
+                {revoke.isPending && revoke.variables === conn.id
+                  ? "Desconectando…"
+                  : "Desconectar"}
               </Button>
             </div>
           ))}

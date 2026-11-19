@@ -16,11 +16,11 @@ import type { TenantCurrency } from "@/lib/currency";
 import type { FinanceDay, SendUsage } from "@/lib/finance/types";
 import { cn } from "@/lib/utils";
 
-const MISSING_CLASS = "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400";
+const MISSING_CLASS = "border-warning/40 bg-warning/10 text-warning";
 
 const STATUS_CLASS: Record<DayStatus, string> = {
-  completo: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  estimado: "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  completo: "border-success/40 bg-success/10 text-success",
+  estimado: "border-info/40 bg-info/10 text-info",
   "falta anúncios": MISSING_CLASS,
   "falta GGR": MISSING_CLASS,
   "falta anúncios e GGR": MISSING_CLASS,
@@ -32,7 +32,7 @@ export function DayStatusChip({ status }: { status: DayStatus }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[11px]",
+        "inline-flex items-center whitespace-nowrap rounded-md border px-1.5 py-0.5 text-meta",
         STATUS_CLASS[status],
       )}
     >
@@ -80,7 +80,7 @@ export function DayList({
     >
       <div
         className={cn(
-          "hidden gap-3 border-b border-border/40 px-3 py-2 text-xs text-muted-foreground sm:grid",
+          "hidden gap-3 border-b border-border/40 px-3 py-2 text-meta text-muted-foreground sm:grid",
           ROW_GRID,
         )}
       >
@@ -117,13 +117,13 @@ export function DayList({
                 data-date={day.date}
                 onClick={() => onOpen(day.date)}
                 className={cn(
-                  "grid w-full grid-cols-3 gap-x-3 gap-y-1 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
+                  "grid w-full grid-cols-2 gap-x-3 gap-y-1.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
                   ROW_GRID,
                   day.date === focusDate && "bg-primary/10 ring-2 ring-inset ring-primary",
                 )}
                 {...(index === 0 ? tourAnchor("financeiro.lancamentos.dia-linha") : {})}
               >
-                <span className="col-span-3 flex min-w-0 items-center gap-2 sm:col-span-1">
+                <span className="col-span-2 flex min-w-0 flex-wrap items-center gap-2 sm:col-span-1">
                   <span className="font-medium tabular-nums">{dayLabel(day.date)}</span>
                   <DayStatusChip status={dayStatus(day, usingMonthlyGgr)} />
                 </span>
@@ -174,10 +174,12 @@ function DayFigure({
 }) {
   return (
     <span className="min-w-0 sm:text-right">
-      <span className="block truncate text-[11px] text-muted-foreground sm:hidden">{label}</span>
+      <span className="block text-meta text-muted-foreground sm:hidden">{label}</span>
       <span
         className={cn(
-          "block truncate tabular-nums",
+          // Two columns on a phone so the full amount fits; truncate only in the
+          // desktop table, where the header names the column.
+          "block break-words tabular-nums sm:truncate",
           strong && "font-medium",
           negative && "text-destructive",
         )}

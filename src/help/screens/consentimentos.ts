@@ -141,7 +141,7 @@ const screen: HelpScreen = {
         {
           anchor: "consentimentos.historico.lista",
           label: "Lista do histórico",
-          what: "Uma linha por alteração: Data, Canal, Destinatário, Alteração (a situação anterior — ou \"Novo\", na primeira decisão para aquele contato — seguida da nova situação), Motivo e Origem.",
+          what: "Uma linha por alteração: Data, Canal, Destinatário, Alteração (a situação anterior — ou \"Novo\", na primeira decisão para aquele contato — seguida da nova situação), Motivo e Origem. No celular, cada alteração vira um cartão com as mesmas informações.",
           notes:
             'Uma importação em lote aparece com a Origem "Importação" junto do nome de quem importou (prefixo "import:" na origem original), uma linha por contato importado.',
         },

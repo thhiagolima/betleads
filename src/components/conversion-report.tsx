@@ -47,6 +47,8 @@ import {
   ReportNotice,
   ReportSectionHeader,
   StatCell,
+  DisabledReason,
+  ExpandableText,
   TechnicalDetails,
   WindowCaption,
 } from "@/components/reports/report-parts";
@@ -604,18 +606,20 @@ function CampaignReport({
           title="Funil e destinatários"
           description="Escolha uma etapa para ver quem chegou nela"
           actions={
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!data.canViewSensitive}
-              title={
-                data.canViewSensitive ? undefined : "Disponível para administradores da operação"
-              }
-              onClick={() => void downloadRecipients(sourceId)}
-              {...tourAnchor("campanha-relatorio.funil.csv")}
-            >
-              <Download className="mr-1.5 size-4" aria-hidden="true" /> Baixar CSV
-            </Button>
+            <>
+              {data.canViewSensitive ? null : (
+                <DisabledReason>Só administradores da operação baixam o CSV</DisabledReason>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!data.canViewSensitive}
+                onClick={() => void downloadRecipients(sourceId)}
+                {...tourAnchor("campanha-relatorio.funil.csv")}
+              >
+                <Download className="mr-1.5 size-4" aria-hidden="true" /> Baixar CSV
+              </Button>
+            </>
           }
           className="mb-3"
         />
@@ -737,24 +741,28 @@ function UnresolvedRecipientsCard({
           }
           description="Estes destinatários ficaram fora da campanha; os demais receberam normalmente"
           actions={
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!canExport || exporting}
-              title={canExport ? undefined : "Disponível para administradores da operação"}
-              onClick={async () => {
-                setExporting(true);
-                try {
-                  await downloadUnresolved(sourceId);
-                } finally {
-                  setExporting(false);
-                }
-              }}
-              {...tourAnchor("campanha-relatorio.nao-enviados.csv")}
-            >
-              <Download className="mr-1.5 size-4" aria-hidden="true" />
-              {exporting ? "Gerando…" : "Baixar CSV"}
-            </Button>
+            <>
+              {canExport ? null : (
+                <DisabledReason>Só administradores da operação baixam o CSV</DisabledReason>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!canExport || exporting}
+                onClick={async () => {
+                  setExporting(true);
+                  try {
+                    await downloadUnresolved(sourceId);
+                  } finally {
+                    setExporting(false);
+                  }
+                }}
+                {...tourAnchor("campanha-relatorio.nao-enviados.csv")}
+              >
+                <Download className="mr-1.5 size-4" aria-hidden="true" />
+                {exporting ? "Gerando…" : "Baixar CSV"}
+              </Button>
+            </>
           }
           className="mb-2"
         />
@@ -1208,11 +1216,9 @@ function JourneyCopyTable({
         <tbody className="divide-y divide-border/50 tabular-nums">
           {rows.map((row) => (
             <tr key={row.key}>
-              <td className="max-w-[320px] px-3 py-2">
+              <td className="px-3 py-2">
                 <div className="font-medium">{row.name}</div>
-                <div className="truncate text-meta text-muted-foreground" title={row.text}>
-                  {row.text}
-                </div>
+                <ExpandableText text={row.text} className="text-meta text-muted-foreground" />
               </td>
               <td className="px-3 py-2 text-right">{number(row.sent)}</td>
               <td className="px-3 py-2 text-right">{number(row.clicked)}</td>

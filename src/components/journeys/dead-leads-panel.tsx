@@ -19,6 +19,7 @@ import { useMoney } from "@/hooks/use-tenant-currency";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { tourAnchor } from "@/help/anchor";
 import { Term } from "@/components/help/term";
+import { LoadError } from "./load-error";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { HomeCard, KpiCard } from "@/components/home/home-cards";
 import { Badge } from "@/components/ui/badge";
@@ -191,7 +192,7 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
       {summary && !enabled && (
         <HomeCard className="flex flex-col gap-3 border-dashed p-4 sm:flex-row sm:items-center sm:p-5">
           <Info className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <div className="min-w-0 flex-1 text-[13px] leading-relaxed text-muted-foreground">
+          <div className="min-w-0 flex-1 text-body leading-relaxed text-muted-foreground">
             <p className="font-medium text-foreground">A regra de leads mortos está desligada.</p>
             <p>
               Quando ligada, quem recebe várias mensagens seguidas de jornada (SMS, e-mail ou voz)
@@ -213,7 +214,7 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
 
       {summary && enabled && (
         <HomeCard className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:p-5">
-          <div className="min-w-0 flex-1 text-[13px] leading-relaxed text-muted-foreground">
+          <div className="min-w-0 flex-1 text-body leading-relaxed text-muted-foreground">
             <p className="font-medium text-foreground">Avaliar a base atual</p>
             <p>
               A regra vale para as próximas mensagens. Para marcar agora quem já recebeu{" "}
@@ -259,8 +260,8 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
               }}
               className={
                 status === item.value
-                  ? "h-9 shrink-0 rounded-lg bg-secondary px-3 text-[13px] font-medium text-foreground"
-                  : "h-9 shrink-0 rounded-lg px-3 text-[13px] font-medium text-muted-foreground hover:text-foreground"
+                  ? "h-10 shrink-0 rounded-lg bg-secondary px-3 text-body font-medium text-foreground sm:h-9"
+                  : "h-10 shrink-0 rounded-lg px-3 text-body font-medium text-muted-foreground hover:text-foreground sm:h-9"
               }
             >
               {item.label}
@@ -296,9 +297,9 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
               {total.toLocaleString("pt-BR")} lead(s)
             </span>
           </div>
-          <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+          <p className="mt-0.5 text-meta text-muted-foreground">
             Para falar com eles em uma campanha, escolha o público “{DEAD_LEADS_AUDIENCE_LABEL}” (
-            <code className="text-[11.5px]">{DEAD_LEADS_AUDIENCE_ID}</code>) em{" "}
+            <code className="text-meta">{DEAD_LEADS_AUDIENCE_ID}</code>) em{" "}
             <Link to="/campanhas" className="underline underline-offset-2 hover:text-foreground">
               Campanhas
             </Link>
@@ -311,9 +312,13 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
         {list.isLoading ? (
           <p className="py-8 text-center text-body text-muted-foreground">Carregando…</p>
         ) : list.isError ? (
-          <p className="py-8 text-center text-body text-danger">
-            Não foi possível carregar os leads mortos.
-          </p>
+          <LoadError
+            className="m-4 sm:m-5"
+            title="Não foi possível carregar os leads mortos"
+            message="Verifique a conexão e tente de novo."
+            onRetry={() => void list.refetch()}
+            retrying={list.isFetching}
+          />
         ) : rows.length === 0 ? (
           <EmptyState
             icon={search ? <Inbox /> : <Skull />}
@@ -333,8 +338,22 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
             }
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[960px] text-left text-[13px]">
+          <>
+          {/* Phones: one card per lead, with Reativar always visible. */}
+          <ul className="divide-y divide-border md:hidden">
+            {rows.map((row, i) => (
+              <DeadLeadCard
+                key={row.playerId}
+                row={row}
+                status={status}
+                isFirst={i === 0}
+                reviveBusy={revive.isPending}
+                onRevive={() => void confirmRevive(row)}
+              />
+            ))}
+          </ul>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[960px] text-left text-body">
               <thead className="border-b border-border text-meta text-muted-foreground">
                 <tr>
                   <th scope="col" className="px-4 py-2 font-normal sm:px-5">
@@ -379,6 +398,7 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
               </tbody>
             </table>
           </div>
+          </>
         )}
         {pageCount > 1 && (
           <div
@@ -413,19 +433,138 @@ export function DeadLeadsPanel({ onOpenSettings }: { onOpenSettings: () => void 
   );
 }
 
+type DeadLeadRowProps = {
+  row: DeadLeadRow;
+  status: DeadLeadStatus;
+  isFirst: boolean;
+  reviveBusy: boolean;
+  onRevive: () => void;
+};
+
+/** Phone layout of a lead: same data as the table row, stacked. */
+function DeadLeadCard({ row, status, isFirst, reviveBusy, onRevive }: DeadLeadRowProps) {
+  const { money } = useMoney();
+  const contact = [row.telefone, row.email].filter(Boolean).join(" · ");
+  const revivedReason = deadLeadRevivedReasonLabel(row.revivedReason);
+  return (
+    <li className="space-y-3 px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Link
+              to="/players/$playerId"
+              params={{ playerId: row.playerId }}
+              search={{ id: undefined, focus: undefined }}
+              className="font-medium hover:underline"
+            >
+              {row.nome ?? "Jogador"}
+            </Link>
+            {row.vip && (
+              <Badge variant="outline" className="border-warning/30 bg-warning/15 text-warning">
+                VIP
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 break-words text-meta text-muted-foreground">
+            {contact || "Sem contato"}
+          </p>
+          {row.externalId && (
+            <p className="break-all text-meta text-muted-foreground">ID {row.externalId}</p>
+          )}
+        </div>
+        {status === "dead" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-11 shrink-0"
+            disabled={reviveBusy}
+            onClick={onRevive}
+            aria-label={`Reativar ${row.nome ?? "jogador"}`}
+            {...(isFirst ? tourAnchor("automacoes.leads-mortos.reativar") : {})}
+          >
+            <RotateCcw className="mr-1 h-4 w-4" aria-hidden="true" /> Reativar
+          </Button>
+        )}
+      </div>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-body">
+        <div>
+          <dt className="text-meta text-muted-foreground">Mensagens sem ação</dt>
+          <dd className="tabular-nums">
+            {row.messagesCount.toLocaleString("pt-BR")}
+            <span className="block text-meta text-muted-foreground">
+              saiu de {row.exitedEnrollments.toLocaleString("pt-BR")} jornada(s)
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-meta text-muted-foreground">Última ação</dt>
+          <dd>
+            {row.lastActionType ? (
+              <>
+                {deadLeadActionLabel(row.lastActionType)}
+                <span className="block text-meta text-muted-foreground">
+                  <RelativeDate value={row.lastActionAt} />
+                </span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">Nunca agiu</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-meta text-muted-foreground">Depósitos</dt>
+          <dd>
+            <span className="tabular-nums">{money(row.totalDepositado, { decimals: 0 })}</span>
+            <span className="block text-meta text-muted-foreground">
+              {row.hasFtd ? "Com FTD" : "Sem FTD"}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-meta text-muted-foreground">Último login</dt>
+          <dd>
+            <RelativeDate value={row.ultimoLogin} empty="Nunca" />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-meta text-muted-foreground">Última jornada</dt>
+          <dd className="min-w-0 break-words">
+            {row.lastJourneyId ? (
+              <Link
+                to="/jornadas/$journeyId"
+                params={{ journeyId: row.lastJourneyId }}
+                className="hover:underline"
+              >
+                {row.lastJourneyName ?? "Jornada"}
+              </Link>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-meta text-muted-foreground">
+            {status === "dead" ? "Marcado" : "Reativado"}
+          </dt>
+          <dd>
+            <RelativeDate value={status === "dead" ? row.markedAt : row.revivedAt} />
+            {status !== "dead" && revivedReason && (
+              <span className="block text-meta text-muted-foreground">{revivedReason}</span>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </li>
+  );
+}
+
 function DeadLeadTableRow({
   row,
   status,
   isFirst,
   reviveBusy,
   onRevive,
-}: {
-  row: DeadLeadRow;
-  status: DeadLeadStatus;
-  isFirst: boolean;
-  reviveBusy: boolean;
-  onRevive: () => void;
-}) {
+}: DeadLeadRowProps) {
   const { money } = useMoney();
   const contact = [row.telefone, row.email].filter(Boolean).join(" · ");
   const revivedReason = deadLeadRevivedReasonLabel(row.revivedReason);
@@ -447,12 +586,12 @@ function DeadLeadTableRow({
             </Badge>
           )}
         </div>
-        <p className="mt-0.5 text-[12px] text-muted-foreground">{contact || "Sem contato"}</p>
-        {row.externalId && <p className="text-[12px] text-muted-foreground">ID {row.externalId}</p>}
+        <p className="mt-0.5 text-meta text-muted-foreground">{contact || "Sem contato"}</p>
+        {row.externalId && <p className="text-meta text-muted-foreground">ID {row.externalId}</p>}
       </td>
       <td className="px-3 py-3 tabular-nums">
         {row.messagesCount.toLocaleString("pt-BR")}
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-meta text-muted-foreground">
           saiu de {row.exitedEnrollments.toLocaleString("pt-BR")} jornada(s)
         </p>
       </td>
@@ -460,7 +599,7 @@ function DeadLeadTableRow({
         {row.lastActionType ? (
           <>
             {deadLeadActionLabel(row.lastActionType)}
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               <RelativeDate value={row.lastActionAt} />
             </p>
           </>
@@ -483,7 +622,7 @@ function DeadLeadTableRow({
       </td>
       <td className="px-3 py-3">
         <span className="tabular-nums">{money(row.totalDepositado, { decimals: 0 })}</span>
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-meta text-muted-foreground">
           {row.hasFtd ? <Term id="ftd">Com FTD</Term> : "Sem FTD"}
           {row.ultimoDeposito ? (
             <>
@@ -502,7 +641,7 @@ function DeadLeadTableRow({
         ) : (
           <>
             <RelativeDate value={row.revivedAt} />
-            {revivedReason && <p className="text-[12px] text-muted-foreground">{revivedReason}</p>}
+            {revivedReason && <p className="text-meta text-muted-foreground">{revivedReason}</p>}
           </>
         )}
       </td>

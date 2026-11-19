@@ -34,6 +34,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EditorPaneTabs, EMAIL_EDITOR_DIALOG_CLASS, type EditorPane } from "./editor-pane-tabs";
 import { LinkTrackingToggle } from "@/components/link-tracking-toggle";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
@@ -137,6 +138,7 @@ export function TemplateEditorDialog({
   const [modelo, setModelo] = useState<ModeloId>("simples");
   const [advanced, setAdvanced] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
+  const [pane, setPane] = useState<EditorPane>("editar");
   const [aiOpen, setAiOpen] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);
 
@@ -289,20 +291,27 @@ export function TemplateEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[1200px] w-[95vw] max-h-[92vh] overflow-hidden p-0">
-        <DialogHeader className="px-6 py-4 border-b border-border/50">
+      <DialogContent className={EMAIL_EDITOR_DIALOG_CLASS}>
+        <DialogHeader className="shrink-0 px-4 sm:px-6 py-4 pr-12 border-b border-border/50">
           <DialogTitle className="flex items-center gap-2">
             <LayoutTemplate className="h-4 w-4 text-primary" />
             Editor de Template
           </DialogTitle>
           <DialogDescription>
-            Monte visualmente com objetivo, modelo e campos rápidos — preview ao vivo à direita.
+            Monte visualmente com objetivo, modelo e campos rápidos — a prévia ao vivo fica ao lado (no celular, na aba Prévia).
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-12 gap-0 max-h-[calc(92vh-150px)] overflow-hidden">
+        <EditorPaneTabs pane={pane} onChange={setPane} />
+
+        <div className="grid min-h-0 flex-1 grid-cols-12 grid-rows-[minmax(0,1fr)] gap-0 overflow-hidden">
           {/* ============== ESQUERDA (form) ============== */}
-          <div className="col-span-12 lg:col-span-7 overflow-y-auto p-6 space-y-5">
+          <div
+            className={cn(
+              "col-span-12 lg:col-span-7 overflow-y-auto p-4 sm:p-6 space-y-5",
+              pane !== "editar" && "hidden lg:block",
+            )}
+          >
             {/* Toolbar topo */}
             <div className="flex flex-wrap items-center gap-2">
               <Button
@@ -646,7 +655,12 @@ export function TemplateEditorDialog({
           </div>
 
           {/* ============== DIREITA (preview) ============== */}
-          <div className="col-span-12 lg:col-span-5 border-l border-border/50 bg-muted/20 overflow-hidden flex flex-col">
+          <div
+            className={cn(
+              "col-span-12 lg:col-span-5 lg:border-l border-border/50 bg-muted/20 overflow-hidden flex-col",
+              pane !== "previa" ? "hidden lg:flex" : "flex",
+            )}
+          >
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Eye className="h-3.5 w-3.5" /> Preview ao vivo
@@ -711,7 +725,7 @@ export function TemplateEditorDialog({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-6 py-3 border-t border-border/50 bg-background/60">
+        <div className="shrink-0 flex items-center justify-end gap-2 px-4 sm:px-6 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-3 border-t border-border/50 bg-background/60">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
@@ -1068,7 +1082,7 @@ function AiDialog({
               onChange={(e) => setBeneficio(e.target.value)}
             />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-meta text-muted-foreground">Tom da mensagem</Label>
               <Select value={tom} onValueChange={(v) => setTom(v as any)}>

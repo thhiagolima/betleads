@@ -1,7 +1,8 @@
 // Área do Expert (Fase 2, Task 7): ficha do lead — à esquerda o cabeçalho,
 // os números, os benefícios e a linha do tempo; à direita as ações (link,
-// mensagem, IA, contato, retorno e assumir). No mobile vira uma coluna só,
-// com as ações primeiro. Depois de cada ação, a ficha é recarregada.
+// mensagem, IA, contato, retorno e assumir). No mobile vira uma coluna só:
+// os números do lead primeiro (compactos), depois as ações, depois benefícios
+// e linha do tempo. Depois de cada ação, a ficha é recarregada.
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -69,15 +70,19 @@ function ExpertLeadSheetPage() {
     <Page>
       <LeadSheetHeader sheet={sheet} />
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)]">
-        <div className="min-w-0 space-y-3 lg:col-start-1 lg:row-start-1">
+      {/* Phones: stats, actions, then the rest. Desktop: actions span both rows
+          of the right column; row 1 is sized by the stats (auto). */}
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)] lg:grid-rows-[auto_1fr]">
+        <div className="min-w-0 lg:col-start-1 lg:row-start-1">
           <LeadSheetStats lead={sheet.lead} />
-          <LeadBenefits beneficios={sheet.beneficios} />
-          <LeadTimeline items={sheet.timeline} />
         </div>
-        <div className="order-first min-w-0 space-y-3 lg:order-none lg:col-start-2 lg:row-start-1">
+        <div className="min-w-0 space-y-3 lg:col-start-2 lg:row-span-2 lg:row-start-1">
           <LeadActions key={sheet.lead.id} sheet={sheet} onChanged={refreshSheet} />
           <LeadContactPanel key={sheet.lead.id} sheet={sheet} onChanged={refreshSheet} />
+        </div>
+        <div className="min-w-0 space-y-3 lg:col-start-1 lg:row-start-2 lg:self-start">
+          <LeadBenefits beneficios={sheet.beneficios} />
+          <LeadTimeline items={sheet.timeline} />
         </div>
       </div>
     </Page>

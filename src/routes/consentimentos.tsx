@@ -487,7 +487,30 @@ function ConsentPage() {
             ) : audit.length === 0 ? (
               <EmptyState title="Nenhuma alteração ainda" />
             ) : (
-              <div className="overflow-x-auto" {...tourAnchor("consentimentos.historico.lista")}>
+              <div {...tourAnchor("consentimentos.historico.lista")}>
+                {/* Phones: one card per change; the table is md+ only. */}
+                <ul className="space-y-2 md:hidden">
+                  {audit.map((row) => (
+                    <li key={row.id} className="rounded-lg border border-border p-3 text-body">
+                      <div className="flex items-center justify-between gap-2 text-meta text-muted-foreground">
+                        <span>{channelName[row.channel]}</span>
+                        <span>{dateTime(row.created_at)}</span>
+                      </div>
+                      <p className="mt-1 break-all font-mono">{row.subject}</p>
+                      <p className="mt-1 font-medium">
+                        {row.previous_status
+                          ? humanize(STATUS_LABEL, row.previous_status)
+                          : "Novo"}{" "}
+                        → {humanize(STATUS_LABEL, row.new_status)}
+                      </p>
+                      <p className="mt-1 text-meta text-muted-foreground">
+                        Motivo: {humanize(REASON_LABEL, row.reason)} · Origem:{" "}
+                        {humanize(SOURCE_LABEL, row.source)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                <div className="hidden overflow-x-auto md:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -519,6 +542,7 @@ function ConsentPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               </div>
             )}
           </DataCard>

@@ -207,6 +207,8 @@ const screen: HelpScreen = {
           anchor: "email.rapido.preview",
           label: "Prévia ao vivo",
           what: 'Mostra o e-mail montado em tempo real, com o alternador Desktop/Mobile mudando a largura da prévia. Acima da prévia aparece o assunto e, junto, o nome do remetente e o preheader, como apareceriam na caixa de entrada.',
+          notes:
+            'No celular e em telas estreitas, o formulário e a prévia não cabem lado a lado: use as abas "Editar" e "Prévia" no topo do editor para alternar entre eles. O mesmo vale para o Editor Avançado.',
         },
         {
           anchor: "email.rapido.avancado",

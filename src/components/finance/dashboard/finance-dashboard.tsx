@@ -62,7 +62,7 @@ function Section({
       {title && (
         <div className="mb-3.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 className="text-lg font-semibold leading-tight">{title}</h2>
-          {aside && <span className="text-[13px] text-muted-foreground">{aside}</span>}
+          {aside && <span className="text-body text-muted-foreground">{aside}</span>}
         </div>
       )}
       {children}

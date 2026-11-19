@@ -40,7 +40,7 @@ export function PrecallTab() {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle className="flex items-center gap-2"><Phone className="h-4 w-4" /> Pré-ligação</CardTitle>
             <p className="text-xs text-muted-foreground mt-1">
@@ -55,7 +55,29 @@ export function PrecallTab() {
               {isDemo ? DEMO_EMPTY_STATE_TEXT : "Nenhuma campanha ainda. Clique em \"Nova campanha\" pra começar."}
             </p>
           ) : (
-            <Table>
+            <>
+            {/* Phones: one card per campaign; the table is md+ only. */}
+            <ul className="space-y-2 md:hidden">
+              {data!.campaigns.map((c: any) => (
+                <li key={c.id} className="rounded-lg border border-border bg-card/40 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate font-medium">{c.nome}</span>
+                    <Badge variant="outline">{c.status}</Badge>
+                  </div>
+                  <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-meta">
+                    <dt className="text-muted-foreground">Leads</dt><dd className="text-right">{c.total_leads}</dd>
+                    <dt className="text-muted-foreground">Enviados</dt><dd className="text-right">{c.enviados}</dd>
+                    <dt className="text-muted-foreground">Responderam</dt>
+                    <dd className={`text-right ${c.respondidos > 0 ? "text-success font-semibold" : ""}`}>{c.respondidos}</dd>
+                    <dt className="text-muted-foreground">Ligadas</dt><dd className="text-right">{c.ligacoes_feitas}</dd>
+                  </dl>
+                  <div className="mt-2 flex justify-end">
+                    <CampaignActions campaign={c} onChange={() => refetch()} onOpen={() => setOpenId(c.id)} isDemo={isDemo} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <Table className="hidden md:table">
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome</TableHead>
@@ -74,7 +96,7 @@ export function PrecallTab() {
                     <TableCell><Badge variant="outline">{c.status}</Badge></TableCell>
                     <TableCell>{c.total_leads}</TableCell>
                     <TableCell>{c.enviados}</TableCell>
-                    <TableCell className={c.respondidos > 0 ? "text-emerald-400 font-semibold" : ""}>{c.respondidos}</TableCell>
+                    <TableCell className={c.respondidos > 0 ? "text-success font-semibold" : ""}>{c.respondidos}</TableCell>
                     <TableCell>{c.ligacoes_feitas}</TableCell>
                     <TableCell className="text-right">
                       <CampaignActions campaign={c} onChange={() => refetch()} onOpen={() => setOpenId(c.id)} isDemo={isDemo} />
@@ -83,6 +105,7 @@ export function PrecallTab() {
                 ))}
               </TableBody>
             </Table>
+            </>
           )}
         </CardContent>
       </Card>
@@ -199,7 +222,7 @@ function NewCampaignDialog({ onCreated, isDemo }: { onCreated: () => void; isDem
             <Label>Nome</Label>
             <Input value={nome} onChange={(e) => setNome(e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label>Filtro de público</Label>
               <Select value={filtro} onValueChange={setFiltro}>
@@ -232,7 +255,7 @@ function NewCampaignDialog({ onCreated, isDemo }: { onCreated: () => void; isDem
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label>Delay mínimo (s)</Label>
               <Input type="number" value={delayMin} onChange={(e) => setDelayMin(Number(e.target.value) || 60)} />
@@ -291,18 +314,70 @@ function CampaignDetailDialog({ id, onClose }: { id: string; onClose: () => void
     { label: "Ligadas", value: leads.filter((l) => l.status === "ligado").length },
   ];
 
+  type Lead = (typeof leads)[number];
+  const statusBadge = (status: string) =>
+    status === "ligar_agora" ? (
+      <Badge className="bg-success text-background">Ligar agora</Badge>
+    ) : (
+      <Badge variant="outline">{status}</Badge>
+    );
+  const leadActions = (l: Lead) => (
+    <>
+      {(l.status === "ligar_agora" || l.status === "respondido") && (
+        <Button asChild size="sm" variant="default">
+          <a href={`tel:+${l.telefone_e164.replace(/\D/g, "")}`}><Phone className="h-3 w-3 mr-1" /> Ligar</a>
+        </Button>
+      )}
+      {l.status !== "ligado" && l.status !== "pendente" && (
+        <Button size="sm" variant="ghost" onClick={() => m.mutate(l.id)} disabled={m.isPending}>
+          Marcar ligado
+        </Button>
+      )}
+      {l.player_id && (
+        <Button asChild size="sm" variant="ghost">
+          <a href={`/players?id=${l.player_id}`} aria-label="Abrir ficha do jogador" title="Abrir ficha do jogador"><ExternalLink className="h-3 w-3" /></a>
+        </Button>
+      )}
+    </>
+  );
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{c?.nome ?? "Campanha"} <Badge className="ml-2" variant="outline">{c?.status}</Badge></DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-4">
           {cards.map((k) => (
             <MetricCard key={k.label} label={k.label} value={String(k.value)} accent="primary" icon={<MessageCircle className="h-4 w-4" />} />
           ))}
         </div>
-        <Table>
+        {/* Phones: one card per lead; the table is md+ only. */}
+        <ul className="space-y-2 md:hidden">
+          {leads.map((l) => (
+            <li
+              key={l.id}
+              className={`rounded-lg border border-border p-3 ${l.status === "ligar_agora" ? "bg-success/10" : "bg-card/40"}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate font-medium">{l.nome ?? "—"}</span>
+                {statusBadge(l.status)}
+              </div>
+              <p className="mt-1 font-mono text-meta text-muted-foreground">{l.telefone_e164}</p>
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-meta">
+                <dt className="text-muted-foreground">Categoria</dt><dd className="text-right">{l.categoria}</dd>
+                <dt className="text-muted-foreground">Dias sem login</dt><dd className="text-right">{l.dias_sem_login ?? "—"}</dd>
+                <dt className="text-muted-foreground">Enviado</dt>
+                <dd className="text-right">{l.sent_at ? new Date(l.sent_at).toLocaleTimeString("pt-BR") : "—"}</dd>
+              </dl>
+              {l.resposta_texto && (
+                <p className="mt-2 break-words rounded-md bg-muted/40 p-2 text-meta">{l.resposta_texto}</p>
+              )}
+              <div className="mt-2 flex flex-wrap justify-end gap-1">{leadActions(l)}</div>
+            </li>
+          ))}
+        </ul>
+        <Table className="hidden md:table">
           <TableHeader>
             <TableRow>
               <TableHead>Lead</TableHead>
@@ -317,40 +392,18 @@ function CampaignDetailDialog({ id, onClose }: { id: string; onClose: () => void
           </TableHeader>
           <TableBody>
             {leads.map((l) => (
-              <TableRow key={l.id} className={l.status === "ligar_agora" ? "bg-emerald-500/10" : ""}>
+              <TableRow key={l.id} className={l.status === "ligar_agora" ? "bg-success/10" : ""}>
                 <TableCell className="font-medium">{l.nome ?? "—"}</TableCell>
                 <TableCell className="font-mono text-xs">{l.telefone_e164}</TableCell>
                 <TableCell>{l.categoria}</TableCell>
                 <TableCell>{l.dias_sem_login ?? "—"}</TableCell>
-                <TableCell>
-                  {l.status === "ligar_agora" ? (
-                    <Badge className="bg-emerald-500 text-white">Ligar agora</Badge>
-                  ) : (
-                    <Badge variant="outline">{l.status}</Badge>
-                  )}
-                </TableCell>
+                <TableCell>{statusBadge(l.status)}</TableCell>
                 <TableCell className="text-xs">{l.sent_at ? new Date(l.sent_at).toLocaleTimeString("pt-BR") : "—"}</TableCell>
                 <TableCell className="text-xs max-w-[200px] truncate" title={l.resposta_texto ?? ""}>
                   {l.resposta_texto ?? "—"}
                 </TableCell>
                 <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    {(l.status === "ligar_agora" || l.status === "respondido") && (
-                      <Button asChild size="sm" variant="default">
-                        <a href={`tel:+${l.telefone_e164.replace(/\D/g, "")}`}><Phone className="h-3 w-3 mr-1" /> Ligar</a>
-                      </Button>
-                    )}
-                    {l.status !== "ligado" && l.status !== "pendente" && (
-                      <Button size="sm" variant="ghost" onClick={() => m.mutate(l.id)} disabled={m.isPending}>
-                        Marcar ligado
-                      </Button>
-                    )}
-                    {l.player_id && (
-                      <Button asChild size="sm" variant="ghost">
-                        <a href={`/players?id=${l.player_id}`}><ExternalLink className="h-3 w-3" /></a>
-                      </Button>
-                    )}
-                  </div>
+                  <div className="flex justify-end gap-1">{leadActions(l)}</div>
                 </TableCell>
               </TableRow>
             ))}

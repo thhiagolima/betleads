@@ -145,7 +145,7 @@ function Figure({
 }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dt className="text-meta text-muted-foreground">{label}</dt>
       <dd className="truncate text-sm font-medium tabular-nums">{children}</dd>
       {detail && <dd className="truncate text-xs text-muted-foreground">{detail}</dd>}
     </div>
@@ -227,7 +227,7 @@ export function DayModalContent({
             )}
           </dl>
           <div className="rounded-md border border-border/40 px-3 py-2">
-            <p className="mb-1 text-[11px] text-muted-foreground">
+            <p className="mb-1 text-meta text-muted-foreground">
               {FINANCE_TERMS.sends.label} por canal
             </p>
             {lines.length === 0 ? (
@@ -255,7 +255,7 @@ export function DayModalContent({
         <Section title="Você lança">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="min-w-0 space-y-1">
-              <p className="text-[11px] text-muted-foreground">Anúncios</p>
+              <p className="text-meta text-muted-foreground">Anúncios</p>
               {readOnly ? (
                 <p className="text-sm font-medium tabular-nums">
                   {day.adSpend === null ? <Pending /> : money(day.adSpend)}
@@ -287,7 +287,7 @@ export function DayModalContent({
               )}
             </div>
             <div className="min-w-0 space-y-1">
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 {GGR_COLUMN_LABEL}
                 <TermTooltip term="ggr" />
               </p>
@@ -310,20 +310,18 @@ export function DayModalContent({
                 </p>
               )}
               {usingMonthlyGgr && (
-                <p className="text-[11px] italic text-muted-foreground">
-                  {MONTHLY_GGR_COLUMN_NOTE}
-                </p>
+                <p className="text-meta italic text-muted-foreground">{MONTHLY_GGR_COLUMN_NOTE}</p>
               )}
             </div>
           </div>
 
           <div className="space-y-2 rounded-md border border-border/40 px-3 py-2">
             <div className="flex flex-wrap items-center justify-between gap-x-3">
-              <p className="text-[11px] text-muted-foreground">Outros custos deste dia</p>
+              <p className="text-meta text-muted-foreground">Outros custos deste dia</p>
               {!readOnly && onEditCosts && (
                 <button
                   type="button"
-                  className="text-[11px] text-primary underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
+                  className="text-meta text-primary underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
                   // A save in flight (e.g. before a move) must finish first.
                   disabled={saving}
                   onClick={onEditCosts}
@@ -443,7 +441,7 @@ export function MiniWaterfall({
                   className={cn(
                     "block h-full rounded-full",
                     step.kind === "down"
-                      ? "bg-amber-500/60"
+                      ? "bg-warning/60"
                       : step.kind === "total" && step.end < 0
                         ? "bg-destructive/70"
                         : "bg-primary/70",

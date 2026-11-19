@@ -1,20 +1,15 @@
 // Presentational card for a single tenant domain (shortener or email):
-// status badge, DNS records table with a per-row copy button, and the
+// status badge, DNS records list with copy buttons for each name and value, and the
 // action buttons from the design's domain mockup. Pure/dumb on purpose —
 // DomainsSection owns the mutations, confirmation dialog (with
 // getHouseDomainUsages) and the "send instructions" dialog; this component
-// only renders state and forwards clicks.
+// only renders state and forwards clicks (copying a DNS name/value is local).
 import { Copy } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { IconButton } from "@/components/ui/icon-button";
+import { copyToClipboard } from "@/lib/clipboard";
+import { toast } from "sonner";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { tourAnchor } from "@/help/anchor";
 import { nextDomainCheckAt, type DnsRecord, type DomainStatus } from "@/lib/house-config";
@@ -75,12 +70,51 @@ export function formatNextAutoCheck(next: Date, now: Date): string {
   return `${next.toLocaleDateString("pt-BR")} às ${time}`;
 }
 
+const DNS_GRID =
+  "sm:grid sm:grid-cols-[3.5rem_minmax(0,1fr)_minmax(0,1.4fr)_5.5rem] sm:items-center sm:gap-3";
+
+async function copyDnsText(text: string, what: string) {
+  if (await copyToClipboard(text)) toast.success(`${what} copiado`);
+  else toast.error("Não foi possível copiar. Selecione o texto e copie à mão.");
+}
+
+/** A DNS name or value: monospace, wraps anywhere, with its own copy button. */
+function DnsField({
+  label,
+  text,
+  copyLabel,
+  anchorAttrs,
+}: {
+  label: string;
+  text: string;
+  copyLabel: string;
+  anchorAttrs?: { "data-tour": string };
+}) {
+  return (
+    <div className="min-w-0">
+      <span className="block text-meta text-muted-foreground sm:hidden">{label}</span>
+      <div className="flex items-start gap-1">
+        <span className="min-w-0 flex-1 break-all pt-2 font-mono text-meta sm:pt-0 sm:self-center sm:text-sm">
+          {text}
+        </span>
+        <IconButton
+          type="button"
+          label={copyLabel}
+          icon={<Copy className="h-4 w-4" />}
+          className="shrink-0 sm:size-8"
+          onClick={() => void copyDnsText(text, label)}
+          {...anchorAttrs}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function DomainDetail({
   domain,
   canEdit,
   verifying,
   isDemo = false,
-  onCopyRecord,
   onVerifyNow,
   onSendInstructions,
   onSetDefault,
@@ -93,7 +127,6 @@ export function DomainDetail({
    * `DemoDisabledTooltip` + disabled pattern as the rest of the house-config
    * write controls. */
   isDemo?: boolean;
-  onCopyRecord?: (record: DnsRecord) => void;
   onVerifyNow?: () => void;
   onSendInstructions?: () => void;
   onSetDefault?: () => void;
@@ -106,7 +139,11 @@ export function DomainDetail({
   const notVerifiedYet = !isDemo && domain.status !== "verified";
   const setDefaultReasonId = `domain-${domain.id}-set-default-reason`;
   const nextCheckAt = nextDomainCheckAt(
-    { status: domain.status, created_at: domain.created_at, last_checked_at: domain.last_checked_at },
+    {
+      status: domain.status,
+      created_at: domain.created_at,
+      last_checked_at: domain.last_checked_at,
+    },
     new Date(),
   );
 
@@ -140,39 +177,47 @@ export function DomainDetail({
           : `Próxima verificação automática: ${formatNextAutoCheck(nextCheckAt, new Date())}`}
       </p>
 
-      <Table {...tourAnchor("casa.dominio.dns-table")}>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Tipo</TableHead>
-            <TableHead>Nome</TableHead>
-            <TableHead>Valor</TableHead>
-            <TableHead>Situação</TableHead>
-            <TableHead className="w-10" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+      {/* One list for both layouts: a card per record on a phone (Nome and
+          Valor stacked, each with its own copy button) and a table-like grid
+          from sm up. A single tree keeps every tour anchor unique. */}
+      <div className="rounded-md border border-border/40" {...tourAnchor("casa.dominio.dns-table")}>
+        <div
+          aria-hidden="true"
+          className={`hidden border-b border-border/40 px-3 py-2 text-meta font-medium text-muted-foreground ${DNS_GRID}`}
+        >
+          <span>Tipo</span>
+          <span>Nome</span>
+          <span>Valor</span>
+          <span>Situação</span>
+        </div>
+        <ul className="divide-y divide-border/40">
           {domain.dns_records.map((record, index) => (
-            <TableRow key={`${record.type}-${record.name}-${index}`}>
-              <TableCell>{record.type}</TableCell>
-              <TableCell className="font-mono">{record.name}</TableCell>
-              <TableCell className="font-mono break-all">{record.value}</TableCell>
-              <TableCell>{dnsRecordStatusLabel(record.verified)}</TableCell>
-              <TableCell>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Copiar valor de ${record.name}`}
-                  onClick={() => onCopyRecord?.(record)}
-                  {...(index === 0 ? tourAnchor("casa.dominio.copy") : {})}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </TableCell>
-            </TableRow>
+            <li
+              key={`${record.type}-${record.name}-${index}`}
+              className={`space-y-2 px-3 py-3 text-sm sm:space-y-0 sm:py-2 ${DNS_GRID}`}
+            >
+              <div className="flex items-center justify-between gap-2 sm:contents">
+                <span className="font-medium sm:font-normal">{record.type}</span>
+                <span className="text-meta text-muted-foreground sm:hidden">
+                  {dnsRecordStatusLabel(record.verified)}
+                </span>
+              </div>
+              <DnsField
+                label="Nome"
+                text={record.name}
+                copyLabel={`Copiar nome de ${record.name}`}
+              />
+              <DnsField
+                label="Valor"
+                text={record.value}
+                copyLabel={`Copiar valor de ${record.name}`}
+                anchorAttrs={index === 0 ? tourAnchor("casa.dominio.copy") : undefined}
+              />
+              <span className="hidden sm:block">{dnsRecordStatusLabel(record.verified)}</span>
+            </li>
           ))}
-        </TableBody>
-      </Table>
+        </ul>
+      </div>
 
       {canEdit && (
         <div className="flex flex-wrap gap-2">

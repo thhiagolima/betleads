@@ -57,7 +57,9 @@ export function TermTooltip({ term }: { term: TermKey }) {
           onPointerLeave={() => {
             hovered.current = false;
           }}
-          className="ml-1 inline-flex align-middle text-muted-foreground outline-none hover:text-foreground"
+          // The icon is 12px; an invisible ::before grows the hit area to ~40px
+          // on touch screens (and a little on desktop) without moving the layout.
+          className="relative ml-1 inline-flex rounded-sm align-middle text-muted-foreground outline-none before:absolute before:-inset-3.5 before:content-[''] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring sm:before:-inset-1.5"
           aria-label="Como calculamos"
           onClick={(event) => {
             event.stopPropagation();

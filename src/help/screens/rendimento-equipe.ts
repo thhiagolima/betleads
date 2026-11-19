@@ -39,7 +39,8 @@ const screen: HelpScreen = {
           anchor: "equipe.csv",
           label: "Exportar CSV",
           what: 'Baixa o ranking inteiro do período (todas as colunas da tabela) num arquivo "equipe-{de}-a-{até}.csv".',
-          notes: 'Mostra "Exportando…" enquanto gera; ao terminar aparece o toast "CSV exportado." e o download começa sozinho.',
+          notes:
+            'Mostra "Exportando…" enquanto gera; ao terminar, o download começa sozinho (no celular, abre o menu de compartilhar do aparelho para salvar ou enviar o arquivo) e aparece o toast "Arquivo gerado."',
         },
       ],
     },
@@ -61,15 +62,16 @@ const screen: HelpScreen = {
         {
           anchor: "equipe.ranking",
           label: "Ranking",
-          what: "Uma linha por perfil da casa (expert ou equipe), inclusive os inativos (com o badge \"Inativo\" ao lado do nome). Colunas: Pessoa (nome, link para o relatório individual), Tipo (\"Expert restrito\", \"Expert total\" ou \"Equipe (Admin/Gestor/Membro)\"), Creditado, Variação vs período anterior, FTD, Redepósitos, Reativados, Clique→depósito (%) e Ticket médio.",
+          what: 'Uma linha por perfil da casa (expert ou equipe), inclusive os inativos (com o badge "Inativo" ao lado do nome). Colunas: Pessoa (nome, link para o relatório individual), Tipo ("Expert restrito", "Expert total" ou "Equipe (Admin/Gestor/Membro)"), Creditado, Variação vs período anterior, FTD, Redepósitos, Reativados, Clique→depósito (%) e Ticket médio.',
           notes:
-            '"Clique→depósito" é a fração de leads que clicaram no período e depositaram por clique dentro da janela (mesma definição do funil do relatório individual — passe o mouse sobre o número para ver o texto completo); "—" sem nenhum clique no período. "Ticket médio" é o valor creditado total dividido pela quantidade de depósitos creditados; "—" sem nenhum depósito.',
+            '"Clique→depósito" é a fração de leads que clicaram no período e depositaram por clique dentro da janela (mesma definição do funil do relatório individual — toque ou passe o mouse no ícone (i) ao lado do título da coluna para ver o texto completo); "—" sem nenhum clique no período. "Ticket médio" é o valor creditado total dividido pela quantidade de depósitos creditados; "—" sem nenhum depósito.',
         },
         {
           anchor: "equipe.ranking.ordenar",
           label: "Cabeçalhos da tabela (ordenar)",
-          what: 'Clicar num cabeçalho ordena a tabela por aquela coluna; clicar de novo inverte a direção (a seta ao lado mostra crescente/decrescente). Padrão: Creditado, do maior para o menor.',
-          notes: "A ordenação é só na tela (sobre as linhas já carregadas), sem nova chamada ao servidor.",
+          what: "Clicar num cabeçalho ordena a tabela por aquela coluna; clicar de novo inverte a direção (a seta ao lado mostra crescente/decrescente). Padrão: Creditado, do maior para o menor.",
+          notes:
+            "A ordenação é só na tela (sobre as linhas já carregadas), sem nova chamada ao servidor.",
         },
         {
           label: "Sem nenhum perfil",
@@ -91,7 +93,8 @@ const screen: HelpScreen = {
         {
           label: "Salvar / Cancelar",
           what: 'Salvar grava a nova janela (toast "Janela de clique atualizada.") e atualiza os relatórios (individual e da equipe) e a lista de experts. Cancelar fecha sem salvar.',
-          notes: "O campo começa desabilitado, mostrando \"Carregando…\", até a janela salva da casa chegar do servidor.",
+          notes:
+            'O campo começa desabilitado, mostrando "Carregando…", até a janela salva da casa chegar do servidor.',
         },
       ],
     },

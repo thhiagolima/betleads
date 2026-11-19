@@ -14,6 +14,10 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
         outline: "text-foreground",
+        // Status badges on the design tokens (instead of hand-made amber/emerald pills).
+        success: "border-success/30 bg-success/15 text-success",
+        warning: "border-warning/30 bg-warning/15 text-warning",
+        danger: "border-danger/30 bg-danger/15 text-danger",
       },
     },
     defaultVariants: {

@@ -96,7 +96,7 @@ export function LowBalanceThresholdCard({
               Salvar
             </Button>
             {parsed == null && (
-              <p className="w-full text-xs text-red-400">
+              <p className="w-full text-xs text-danger">
                 Informe um valor entre R$ 0 e R$ 100.000 (0 desliga o alerta).
               </p>
             )}

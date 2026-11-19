@@ -67,7 +67,7 @@ export function PlayerContactHistoryDialog({
             {items.map((it, i) => (
               <li
                 key={i}
-                className="flex items-start gap-3 rounded-md border border-white/5 bg-muted/30 p-3"
+                className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-3"
               >
                 <IdentityIcon tone={CHANNEL_IDENTITY[KIND[it.channel]]} size="sm" />
                 <div className="flex-1 min-w-0">

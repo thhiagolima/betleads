@@ -70,7 +70,12 @@ export function StatCell({
       ) : (
         <p className="text-meta text-muted-foreground">{label}</p>
       )}
-      <p className={cn("mt-0.5 text-kpi-sm tabular-nums", tone === "success" && "text-success")}>
+      <p
+        className={cn(
+          "mt-0.5 min-w-0 break-words text-kpi-sm tabular-nums",
+          tone === "success" && "text-success",
+        )}
+      >
         {value}
       </p>
     </div>
@@ -177,4 +182,47 @@ export function CopyMessageButton({ text }: { text: string | null | undefined })
       Copiar mensagem
     </Button>
   );
+}
+
+/**
+ * Long text clamped to two lines inside a table cell. Tapping it shows the
+ * whole text (a `title` alone never shows on touch screens).
+ */
+export function ExpandableText({
+  text,
+  className,
+  maxWidthClassName = "max-w-[320px]",
+}: {
+  text: string;
+  className?: string;
+  /** Width cap on the wrapper: `max-w` on a `<td>` itself is ignored by tables. */
+  maxWidthClassName?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      title={open ? undefined : text}
+      onClick={(event) => {
+        // Rows can be clickable: opening the text must not open the row.
+        event.stopPropagation();
+        setOpen((value) => !value);
+      }}
+      onKeyDown={(event) => event.stopPropagation()}
+      className={cn(
+        "block w-full min-w-0 break-words text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm",
+        maxWidthClassName,
+        !open && "line-clamp-2",
+        className,
+      )}
+    >
+      {text}
+    </button>
+  );
+}
+
+/** Reason a disabled action is unavailable, as visible text (a `title` never shows on touch). */
+export function DisabledReason({ children }: { children: ReactNode }) {
+  return <span className="text-meta text-muted-foreground">{children}</span>;
 }

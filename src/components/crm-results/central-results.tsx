@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { BookOpen, Download } from "lucide-react";
 
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useTenantCurrency } from "@/hooks/use-tenant-currency";
 import { getCrmResults } from "@/lib/crm-results.functions";
 import { getComparisonAccess } from "@/lib/tenant-comparison.functions";
@@ -43,8 +44,11 @@ export function CentralResults() {
 
   const currency = useTenantCurrency();
   const load = useServerFn(getCrmResults);
+  // The active house is in the key so switching houses never shows the
+  // previous house's numbers while the new ones load.
+  const tenantId = useActiveTenant().data?.activeTenantId ?? null;
   const query = useQuery({
-    queryKey: ["crm-results", period.key],
+    queryKey: ["crm-results", tenantId, period.key],
     queryFn: () => load({ data: { days: period.days, endOffset: period.endOffset } }),
     staleTime: 60_000,
   });

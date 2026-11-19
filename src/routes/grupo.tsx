@@ -4,10 +4,9 @@
 // the "Ver:" picker (all houses / any group / any house); outside the active
 // group a row click moves the picker to that house instead (tenantClickAction).
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Trophy } from "lucide-react";
 
 import { FinanceDashboardView } from "@/components/finance/dashboard/finance-dashboard";
-import { PageHeader } from "@/components/ui-premium";
+import { Page, PageHeader } from "@/components/ui-premium";
 import { useActiveGroup } from "@/hooks/use-active-group";
 import { useIsSuperAdmin } from "@/hooks/use-is-super-admin";
 
@@ -19,7 +18,12 @@ function GrupoFinanceiroPage() {
   const navigate = useNavigate();
 
   if (!groups.length) {
-    return <p className="text-sm text-muted-foreground">Você não gerencia nenhum grupo.</p>;
+    return (
+      <Page className="max-w-6xl">
+        <PageHeader title="Grupo" />
+        <p className="text-sm text-muted-foreground">Você não gerencia nenhum grupo.</p>
+      </Page>
+    );
   }
 
   if (!active) {
@@ -27,11 +31,10 @@ function GrupoFinanceiroPage() {
   }
 
   return (
-    <div className="max-w-6xl space-y-6">
+    <Page className="max-w-6xl">
       <PageHeader
         title={`Grupo ${active.nome}`}
         subtitle="Resultado consolidado do grupo e de cada casa."
-        icon={<Trophy className="h-5 w-5 text-primary-foreground" />}
       />
       {/* Keyed by the group: switching it in the header resets scope and period. */}
       <FinanceDashboardView
@@ -42,6 +45,6 @@ function GrupoFinanceiroPage() {
           void navigate({ to: "/grupo/casa", search: { tenant: tenantId } })
         }
       />
-    </div>
+    </Page>
   );
 }

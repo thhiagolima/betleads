@@ -11,7 +11,9 @@ import {
   Check,
   CheckCheck,
   Clock,
+  ArrowLeft,
 } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import { Input } from "@/components/ui/input";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { Button } from "@/components/ui/button";
@@ -231,6 +233,10 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
   const [draft, setDraft] = useState("");
   const [tab, setTab] = useState<"chats" | "groups">("chats");
   const [sessionFilter, setSessionFilter] = useState<string>("all");
+  // Phones show list OR chat (master-detail). The first chat is auto-selected
+  // for desktop, so the phone view tracks "chat opened by the user" separately.
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!activeId && chats.length > 0) setActiveId(chats[0].id);
@@ -240,12 +246,26 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
   useEffect(() => {
     if (openChatId && chats.some((c) => c.id === openChatId)) {
       setActiveId(openChatId);
+      setMobileChatOpen(true);
       const chat = chats.find((c) => c.id === openChatId);
       if (chat) setTab(chat.is_group ? "groups" : "chats");
     }
   }, [openChatId, chats]);
 
   const activeChat = chats.find((c) => c.id === activeId) ?? null;
+  const showChatOnMobile = mobileChatOpen && !!activeChat;
+
+  const backToList = () => {
+    setMobileChatOpen(false);
+    if (openChatId) {
+      navigate({
+        to: "/whatsapp",
+        search: (prev: { tab?: string }) => ({ tab: prev.tab, chat: undefined }),
+        hash: (h) => h ?? "",
+        replace: true,
+      });
+    }
+  };
 
   const filteredChats = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -592,12 +612,16 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
     <div className="h-full overflow-hidden border-t border-border bg-card">
       <div className="grid grid-cols-1 md:grid-cols-[300px_1fr] lg:grid-cols-[320px_1fr_280px] h-full min-h-0">
         {/* Sidebar */}
-        <aside className="border-r border-border flex flex-col min-h-0 bg-background/40">
+        <aside
+          className={`border-r border-border flex-col min-h-0 bg-background/40 ${
+            showChatOnMobile ? "hidden md:flex" : "flex"
+          }`}
+        >
           <div className="p-3.5 border-b border-border space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold tracking-tight">Conversas</span>
-              <span className="flex items-center gap-1.5 text-[10px] text-emerald-400 font-medium">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400/60 animate-pulse" />
+              <span className="flex items-center gap-1.5 text-meta text-success font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_6px] shadow-success/60 animate-pulse" />
                 tempo real
               </span>
             </div>
@@ -672,7 +696,10 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                 return (
                   <button
                     key={c.id}
-                    onClick={() => setActiveId(c.id)}
+                    onClick={() => {
+                      setActiveId(c.id);
+                      setMobileChatOpen(true);
+                    }}
                     className={`relative w-full text-left px-3 py-2.5 flex gap-3 border-b border-border/40 hover:bg-muted/30 transition-colors ${
                       isActive
                         ? "bg-primary/8 before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:h-8 before:w-[3px] before:rounded-r-full before:bg-primary before:shadow-[0_0_8px] before:shadow-primary/60"
@@ -683,13 +710,13 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline gap-2">
                         <span className={`text-sm truncate ${unread > 0 ? "font-bold" : "font-semibold"}`}>{name}</span>
-                        <span className={`text-[10px] shrink-0 font-medium ${unread > 0 ? "text-emerald-400" : "text-muted-foreground"}`}>
+                        <span className={`text-meta shrink-0 font-medium ${unread > 0 ? "text-success" : "text-muted-foreground"}`}>
                           {c.last_message_at ? fmtTime(c.last_message_at) : ""}
                         </span>
                       </div>
                       {c.session_name && (
                         <span
-                          className={`inline-block mt-0.5 text-[9px] px-1.5 py-0 rounded border ${sessionChipClass(c.session_id)}`}
+                          className={`inline-block mt-0.5 text-meta px-1.5 py-0 rounded border ${sessionChipClass(c.session_id)}`}
                         >
                           {c.session_name}
                         </span>
@@ -700,7 +727,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                         </p>
                         {unread > 0 ? (
                           <Badge
-                            className="h-5 min-w-[20px] px-1.5 text-[11px] font-semibold rounded-full bg-emerald-500 hover:bg-emerald-500 text-white shrink-0 flex items-center justify-center shadow-[0_0_6px] shadow-emerald-500/50"
+                            className="h-5 min-w-[20px] px-1.5 text-meta font-semibold rounded-full bg-success hover:bg-success text-background shrink-0 flex items-center justify-center shadow-[0_0_6px] shadow-success/50"
                             title="Mensagens não lidas"
                           >
                             {unread > 99 ? "99+" : unread}
@@ -718,7 +745,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
         </aside>
 
         {/* Chat */}
-        <section className="flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-[radial-gradient(circle_at_30%_20%,rgba(16,185,129,0.04),transparent_60%),radial-gradient(circle_at_80%_80%,rgba(20,184,166,0.04),transparent_55%)]">
+        <section className={`${showChatOnMobile ? "flex" : "hidden md:flex"} flex-col h-full min-h-0 min-w-0 overflow-hidden bg-[radial-gradient(circle_at_30%_20%,rgba(16,185,129,0.04),transparent_60%),radial-gradient(circle_at_80%_80%,rgba(20,184,166,0.04),transparent_55%)]`}>
           {!activeChat ? (
             <div className="flex-1 flex items-center justify-center">
               <EmptyState
@@ -730,7 +757,17 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
           ) : (
             <>
               {/* Header */}
-              <header className="sticky top-0 z-10 px-4 py-3 border-b border-border bg-background/80 backdrop-blur-md flex items-center gap-3">
+              <header className="sticky top-0 z-10 px-3 sm:px-4 py-3 border-b border-border bg-background/80 backdrop-blur-md flex items-center gap-2 sm:gap-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={backToList}
+                  className="md:hidden -ml-1 shrink-0 gap-1 px-2"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Voltar
+                </Button>
                 <ChatAvatar
                   name={activeChat.name || activeChat.phone || activeChat.remote_jid}
                   url={activeChat.profile_pic_url}
@@ -741,17 +778,17 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                     {activeChat.name || activeChat.phone}
                   </div>
                   {!activeChat.is_group && (
-                    <div className="text-[11px] text-muted-foreground truncate">
+                    <div className="text-meta text-muted-foreground truncate">
                       {activeChat.phone ?? activeChat.remote_jid}
                     </div>
                   )}
                   {activeChat.is_group && (
-                    <div className="text-[11px] text-muted-foreground truncate">Grupo</div>
+                    <div className="text-meta text-muted-foreground truncate">Grupo</div>
                   )}
                 </div>
                 {activeChat.session_name && (
                   <span
-                    className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full border font-medium ${sessionChipClass(activeChat.session_id)}`}
+                    className={`shrink-0 text-meta px-2 py-0.5 rounded-full border font-medium ${sessionChipClass(activeChat.session_id)}`}
                   >
                     {activeChat.session_name}
                   </span>
@@ -768,7 +805,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                 {groups.map((g) => (
                   <div key={g.day} className="space-y-1.5">
                     <div className="flex justify-center">
-                      <span className="text-[10px] uppercase tracking-wider font-medium px-2.5 py-0.5 rounded-full bg-muted/60 text-muted-foreground border border-border/40">
+                      <span className="text-meta uppercase tracking-wider font-medium px-2.5 py-0.5 rounded-full bg-muted/60 text-muted-foreground border border-border/40">
                         {g.day}
                       </span>
                     </div>
@@ -811,7 +848,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
               )}
               {activeChat.session_name && (
                 <span
-                  className={`mt-2 inline-block text-[10px] px-2 py-0.5 rounded-full border font-medium ${sessionChipClass(activeChat.session_id)}`}
+                  className={`mt-2 inline-block text-meta px-2 py-0.5 rounded-full border font-medium ${sessionChipClass(activeChat.session_id)}`}
                 >
                   {activeChat.session_name}
                 </span>
@@ -819,7 +856,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">
+                <div className="text-meta uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">
                   Informações
                 </div>
                 <dl className="space-y-1.5 text-xs">
@@ -840,7 +877,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                   {activeChat.unread_count > 0 && (
                     <div className="flex justify-between gap-2">
                       <dt className="text-muted-foreground">Não lidas</dt>
-                      <dd className="font-medium text-emerald-400">{activeChat.unread_count}</dd>
+                      <dd className="font-medium text-success">{activeChat.unread_count}</dd>
                     </div>
                   )}
                 </dl>
@@ -848,7 +885,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
 
               {leadPlayer && (
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">
+                  <div className="text-meta uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">
                     Dados do lead
                   </div>
                   <dl className="space-y-1.5 text-xs">
@@ -868,18 +905,18 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                     </div>
                     <div className="flex justify-between gap-2">
                       <dt className="text-muted-foreground">Depositado</dt>
-                      <dd className="font-medium text-emerald-400">{money(leadPlayer.total_depositado)}</dd>
+                      <dd className="font-medium text-success">{money(leadPlayer.total_depositado)}</dd>
                     </div>
                     <div className="flex justify-between gap-2">
                       <dt className="text-muted-foreground">Sacado</dt>
-                      <dd className="font-medium text-rose-400">{money(leadPlayer.total_sacado)}</dd>
+                      <dd className="font-medium text-destructive">{money(leadPlayer.total_sacado)}</dd>
                     </div>
                     <div className="flex justify-between gap-2 pt-1 border-t border-border/40">
                       <dt className="text-muted-foreground">Lucro</dt>
                       <dd className={`font-semibold ${
                         Number(leadPlayer.total_depositado ?? 0) - Number(leadPlayer.total_sacado ?? 0) >= 0
-                          ? "text-emerald-300"
-                          : "text-rose-300"
+                          ? "text-success"
+                          : "text-destructive"
                       }`}>
                         {money(
                           Number(leadPlayer.total_depositado ?? 0) -
@@ -893,7 +930,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
 
               {leadTrigger && (
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">
+                  <div className="text-meta uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">
                     Último gatilho
                   </div>
                   <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-2.5">
@@ -903,11 +940,11 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                         leadTrigger.trigger_type}
                     </div>
                     {leadTrigger.rule_name && (
-                      <div className="text-[10px] text-violet-300/70 mt-0.5">
+                      <div className="text-meta text-violet-300/70 mt-0.5">
                         {TRIGGER_LABEL[leadTrigger.trigger_type] ?? leadTrigger.trigger_type}
                       </div>
                     )}
-                    <div className="text-[10px] text-muted-foreground mt-1">
+                    <div className="text-meta text-muted-foreground mt-1">
                       {new Date(leadTrigger.fired_at).toLocaleString("pt-BR")}
                     </div>
                   </div>
@@ -915,22 +952,22 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
               )}
 
               {!leadPlayer && activeChat.phone && !activeChat.is_group && (
-                <div className="text-[11px] text-muted-foreground italic">
+                <div className="text-meta text-muted-foreground italic">
                   Este número não está vinculado a nenhum player da base.
                 </div>
               )}
 
               {leadPlayer && !activeChat.is_group && (
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">
+                  <div className="text-meta uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">
                     Desfecho do contato
                   </div>
                   {hasPendingOutcome ? (
-                    <div className="mb-2 text-[10px] text-sky-300">
+                    <div className="mb-2 text-meta text-sky-300">
                       ⏳ Aguardando desfecho ({pendingAlertasForLead.length} alerta{pendingAlertasForLead.length > 1 ? "s" : ""})
                     </div>
                   ) : (
-                    <div className="mb-2 text-[10px] text-muted-foreground">
+                    <div className="mb-2 text-meta text-muted-foreground">
                       Registre o resultado da conversa.
                     </div>
                   )}
@@ -939,7 +976,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                       type="button"
                       disabled={outcomeBusy}
                       onClick={() => handleOutcome(true)}
-                      className="flex-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                      className="flex-1 rounded-md border border-success/40 bg-success/10 px-2.5 py-1.5 text-xs text-success hover:bg-success/20 disabled:opacity-50"
                     >
                       ✅ Converteu
                     </button>
@@ -947,7 +984,7 @@ export function WhatsappInbox({ openChatId }: { openChatId?: string } = {}) {
                       type="button"
                       disabled={outcomeBusy}
                       onClick={() => handleOutcome(false)}
-                      className="flex-1 rounded-md border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-xs text-rose-300 hover:bg-rose-500/20 disabled:opacity-50"
+                      className="flex-1 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive hover:bg-destructive/20 disabled:opacity-50"
                     >
                       ❌ Não converteu
                     </button>
@@ -1027,13 +1064,13 @@ function MessageBubble({ m, showSender }: { m: Msg; showSender?: boolean }) {
         }`}
       >
         {showSender && m.sender_name && (
-          <div className={`text-[11px] font-semibold mb-0.5 ${senderColor}`}>
+          <div className={`text-meta font-semibold mb-0.5 ${senderColor}`}>
             {m.sender_name}
           </div>
         )}
         <MessageBody m={m} />
         <div
-          className={`flex items-center gap-1 mt-1 text-[10px] ${
+          className={`flex items-center gap-1 mt-1 text-meta ${
             mine ? "text-emerald-200/70 justify-end" : "text-muted-foreground/70"
           }`}
         >
@@ -1119,7 +1156,7 @@ function MessageBody({ m }: { m: Msg }) {
         </div>
         <div className="min-w-0">
           <div className="text-xs font-medium truncate">{m.media_filename ?? "Documento"}</div>
-          <div className="text-[10px] opacity-70">{fmtBytes(m.media_size)}</div>
+          <div className="text-meta opacity-70">{fmtBytes(m.media_size)}</div>
         </div>
       </a>
     );
@@ -1238,7 +1275,7 @@ function WhatsappAudio({
   }
   if (!blobUrl) {
     return (
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground min-w-[200px]">
+      <div className="flex items-center gap-2 text-meta text-muted-foreground min-w-[200px]">
         <Mic className="h-3.5 w-3.5" />
         <span>Carregando áudio{durationHint ? ` (${fmtDuration(durationHint)})` : ""}…</span>
       </div>
@@ -1480,7 +1517,7 @@ function Composer({
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-xs font-medium truncate">{preview.file.name}</div>
-            <div className="text-[10px] text-muted-foreground">{fmtBytes(preview.file.size)}</div>
+            <div className="text-meta text-muted-foreground">{fmtBytes(preview.file.size)}</div>
             {(preview.kind === "image" || preview.kind === "video") && (
               <Input
                 value={caption}
@@ -1510,6 +1547,7 @@ function Composer({
           size="icon"
           onClick={() => fileInput.current?.click()}
           title="Anexar arquivo"
+              aria-label="Anexar arquivo"
         >
           <Paperclip className="h-4 w-4" />
         </Button>
@@ -1521,11 +1559,12 @@ function Composer({
               size="icon"
               onClick={cancelRecording}
               title="Cancelar gravação"
+              aria-label="Cancelar gravação"
             >
               <X className="h-4 w-4" />
             </Button>
-            <div className="flex-1 flex items-center gap-2 px-3 h-9 rounded-md bg-red-500/10 text-red-600 text-sm">
-              <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+            <div className="flex-1 flex items-center gap-2 px-3 h-9 rounded-md bg-destructive/10 text-destructive text-sm">
+              <span className="h-2 w-2 rounded-full bg-destructive animate-pulse" />
               Gravando… {String(Math.floor(recordSeconds / 60)).padStart(2, "0")}:
               {String(recordSeconds % 60).padStart(2, "0")}
             </div>
@@ -1534,6 +1573,7 @@ function Composer({
               size="icon"
               className="bg-emerald-500 hover:bg-emerald-600 text-white"
               title="Enviar áudio"
+              aria-label="Enviar áudio"
             >
               <Send className="h-4 w-4" />
             </Button>
@@ -1545,6 +1585,7 @@ function Composer({
               size="icon"
               onClick={startRecording}
               title="Gravar áudio"
+              aria-label="Gravar áudio"
             >
               <Mic className="h-4 w-4" />
             </Button>
@@ -1566,6 +1607,7 @@ function Composer({
               disabled={!draft.trim()}
               size="icon"
               className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-full"
+              aria-label="Enviar mensagem"
             >
               <Send className="h-4 w-4" />
             </Button>

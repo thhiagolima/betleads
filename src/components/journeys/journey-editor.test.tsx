@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
   useNavigate: () => vi.fn(),
+  useBlocker: vi.fn(),
   useRouterState: () => "",
 }));
 
@@ -87,5 +88,20 @@ describe("JourneyEditor — canais desligados", () => {
     enabledChannels.isEnabled = () => true;
     const html = renderToStaticMarkup(<JourneyEditor initialSteps={[]} />);
     expect(html).toContain("Ligação (voz)");
+  });
+
+  it("mostra mover para cima/baixo e adicionar abaixo em cada etapa", () => {
+    enabledChannels.isEnabled = () => true;
+    const html = renderToStaticMarkup(
+      <JourneyEditor
+        initialSteps={[
+          { step_type: "wait", config: { delay_seconds: 3600 } },
+          { step_type: "sms", config: { content: "Oi https://x.co" } },
+        ]}
+      />,
+    );
+    expect(html).toContain("Mover a etapa 1 para cima");
+    expect(html).toContain("Mover a etapa 2 para baixo");
+    expect(html).toContain("Adicionar etapa abaixo da etapa 1");
   });
 });

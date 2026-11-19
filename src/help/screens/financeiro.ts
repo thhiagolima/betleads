@@ -98,12 +98,12 @@ const screen: HelpScreen = {
         {
           anchor: "financeiro.painel.resultado-anuncios",
           label: "Anúncios",
-          what: "O total investido em anúncios no período (vem da conta de anúncios ligada à casa). Abaixo, a variação, ou \"Nenhum dia lançado\" quando a casa ainda não lançou nenhum dia no período.",
+          what: 'O total investido em anúncios no período (vem da conta de anúncios ligada à casa). Abaixo, a variação, ou "Nenhum dia lançado" quando a casa ainda não lançou nenhum dia no período.',
         },
         {
           anchor: "financeiro.painel.cascata",
           label: '"Do depósito ao lucro"',
-          what: "O gráfico em colunas que mostra, em ordem, Depósitos → Saques → Net (subtotal) → Taxa de GGR → Taxa de movimentação → Anúncios → Envios → Mensalidade → Outros custos → Lucro líquido (total). Entradas em azul-acinzentado, saídas e custos em vermelho, o subtotal (Net) em cinza e o total em verde ou vermelho conforme o sinal; o valor de cada coluna aparece acima dela (ou abaixo, quando a coluna fica sob a linha zero). A legenda e a nota \"Passos sem valor no período não aparecem.\" ficam abaixo do gráfico.",
+          what: 'O gráfico em colunas que mostra, em ordem, Depósitos → Saques → Net (subtotal) → Taxa de GGR → Taxa de movimentação → Anúncios → Envios → Mensalidade → Outros custos → Lucro líquido (total). Entradas em azul-acinzentado, saídas e custos em vermelho, o subtotal (Net) em cinza e o total em verde ou vermelho conforme o sinal; o valor de cada coluna aparece acima dela (ou abaixo, quando a coluna fica sob a linha zero). A legenda e a nota "Passos sem valor no período não aparecem." ficam abaixo do gráfico.',
           notes:
             'Fora de um mês fechado, aparece "Resultado sem a mensalidade do mês (entra no fechamento do mês)." — a mensalidade só entra quando o período é exatamente um mês já terminado. Quando algum envio do período não tem custo de provedor cadastrado, a coluna muda o nome para "Envios (parcial)" e aparece mesmo que o valor calculado seja R$ 0. Fora do BRL, a cascata para antes dos Envios, com a nota de câmbio seguida de "Envios e mensalidade (BRL) ficam fora do gráfico." Sem nenhum valor no período, aparece só "Sem dados no período."',
         },
@@ -176,7 +176,7 @@ const screen: HelpScreen = {
           anchor: "financeiro.lancamentos.dias",
           label: "Lista de dias",
           what: "Um dia por linha, com o selo de status, Net, Envios e Lucro líquido; clicar numa linha abre o modal daquele dia.",
-          notes: "Sem nenhum dia no mês, aparece só \"Nenhum dia neste mês ainda.\"",
+          notes: 'Sem nenhum dia no mês, aparece só "Nenhum dia neste mês ainda."',
         },
         {
           anchor: "financeiro.lancamentos.dia-linha",
@@ -253,13 +253,13 @@ const screen: HelpScreen = {
         {
           anchor: "financeiro.outros-custos.editar",
           label: "Editar (ícone de lápis)",
-          what: "Carrega esse custo no formulário abaixo, para alterar. Repete-se por linha; a âncora marca só a primeira.",
+          what: 'Carrega esse custo no formulário abaixo (que passa a mostrar "Editando custo"), rola a tela até ele e põe o cursor na Descrição. Repete-se por linha; a âncora marca só a primeira.',
           roles: ["admin"],
         },
         {
           anchor: "financeiro.outros-custos.excluir",
           label: "Excluir (ícone de lixeira)",
-          what: 'Remove o custo direto quando ele não se repete. Repete-se por linha; a âncora marca só a primeira.',
+          what: "Remove o custo direto quando ele não se repete. Repete-se por linha; a âncora marca só a primeira.",
           roles: ["admin"],
           notes:
             'Num custo que se repete todo mês, abre antes a confirmação "Excluir custo recorrente" ("Este custo se repete todo mês. Excluir só este mês ou encerrar a repetição?") com os botões "Excluir só este mês (continua nos próximos)", "Excluir este e encerrar a repetição" e "Cancelar". Toasts: "Custo removido", "Mês pulado" ou "Repetição encerrada". Um mês pulado passa a mostrar "pulado neste mês" no lugar do valor, sem apagar a linha da série.',
@@ -293,7 +293,7 @@ const screen: HelpScreen = {
         {
           anchor: "financeiro.outros-custos.adicionar",
           label: '"Adicionar" / "Salvar custo"',
-          what: "Grava o novo custo, ou as alterações ao editar um já existente. Enquanto edita, aparece também um botão \"Cancelar\" ao lado.",
+          what: 'Grava o novo custo, ou as alterações ao editar um já existente. Enquanto edita, aparece também um botão "Cancelar" ao lado.',
           roles: ["admin"],
           notes:
             'Erro possível: "Esse custo recorrente já tem um lançamento nesse mês" (outro lançamento da mesma série repetida já existe no mês da data escolhida). Toast de sucesso: "Custo salvo".',
@@ -318,7 +318,7 @@ const screen: HelpScreen = {
         {
           anchor: "financeiro.configuracoes.taxas-atuais",
           label: "Taxas atuais",
-          what: "Taxa de GGR e Taxa de movimentação em vigor hoje, cada uma com seu \"Como calculamos\" explicando onde entram na cascata do Painel.",
+          what: 'Taxa de GGR e Taxa de movimentação em vigor hoje, cada uma com seu "Como calculamos" explicando onde entram na cascata do Painel.',
         },
         {
           anchor: "financeiro.configuracoes.historico",
@@ -342,8 +342,7 @@ const screen: HelpScreen = {
           label: "Vale a partir de",
           what: "A partir de que dia a nova taxa passa a valer; nunca antes de hoje — o passado não é recalculado.",
           roles: ["admin"],
-          notes:
-            'Erro possível: "A data de início não pode ser no passado".',
+          notes: 'Erro possível: "A data de início não pode ser no passado".',
         },
         {
           anchor: "financeiro.configuracoes.salvar-taxas",
@@ -389,21 +388,23 @@ const screen: HelpScreen = {
     },
     {
       id: "erro-ao-carregar",
-      title: 'Não foi possível carregar o painel. / Não foi possível carregar o financeiro.',
+      title: "Não foi possível carregar o painel. / Não foi possível carregar o financeiro.",
       what: "Mostrado no lugar do Painel ou de Lançamentos quando a tela não conseguiu carregar os dados do financeiro (ex.: perda de conexão); quando o erro traz uma mensagem própria (como as duas abaixo), ela aparece no lugar deste texto padrão.",
       action: "Recarregue a tela; se persistir, tente novamente em alguns minutos.",
     },
     {
       id: "sem-permissao",
       title: "Sem permissão",
-      what: 'Mensagem de erro (no lugar do painel, da lista de dias ou ao salvar) quando o acesso ao financeiro desta casa foi revogado durante o uso — por exemplo, um administrador desligou a liberação do gestor, ou a casa ativa foi trocada para uma em que o usuário não tem mais acesso ao financeiro — entre o momento em que a tela abriu e o clique que disparou essa checagem no servidor.',
-      action: "Recarregue a tela. Se o acesso continuar negado, peça a um administrador da casa para liberar de novo em Configurações → Liberação para gestores.",
+      what: "Mensagem de erro (no lugar do painel, da lista de dias ou ao salvar) quando o acesso ao financeiro desta casa foi revogado durante o uso — por exemplo, um administrador desligou a liberação do gestor, ou a casa ativa foi trocada para uma em que o usuário não tem mais acesso ao financeiro — entre o momento em que a tela abriu e o clique que disparou essa checagem no servidor.",
+      action:
+        "Recarregue a tela. Se o acesso continuar negado, peça a um administrador da casa para liberar de novo em Configurações → Liberação para gestores.",
     },
     {
       id: "casa-nao-encontrada",
       title: "Casa não encontrada",
       what: "Mensagem de erro quando a casa ativa (lida da sessão) deixou de existir ou de estar associada à conta — por exemplo, foi removida ou a casa ativa guardada no navegador ficou desatualizada.",
-      action: "Recarregue a tela ou troque a casa ativa pelo seletor; se persistir, peça ajuda a um administrador.",
+      action:
+        "Recarregue a tela ou troque a casa ativa pelo seletor; se persistir, peça ajuda a um administrador.",
     },
     {
       id: "sem-dados-periodo",
@@ -439,7 +440,7 @@ const screen: HelpScreen = {
     {
       id: "nenhum-gestor",
       title: "Nenhum gestor nesta casa ainda.",
-      what: "Mostrado no lugar da lista de \"Liberação para gestores\", em Configurações, quando a casa não tem nenhum usuário com o papel de gestor.",
+      what: 'Mostrado no lugar da lista de "Liberação para gestores", em Configurações, quando a casa não tem nenhum usuário com o papel de gestor.',
     },
   ],
 
@@ -548,7 +549,7 @@ const screen: HelpScreen = {
       {
         anchor: "financeiro.outros-custos.descricao",
         title: "Descrição",
-        body: "O que é esse custo, por exemplo \"Designer\" ou \"Afiliado X\".",
+        body: 'O que é esse custo, por exemplo "Designer" ou "Afiliado X".',
         articleSection: "outros-custos",
       },
       {

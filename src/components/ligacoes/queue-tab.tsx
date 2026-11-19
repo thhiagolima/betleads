@@ -29,7 +29,7 @@ export function QueueTab() {
   const statusFn = useServerFn(updateCallQueueStatus);
   const dispatchFn = useServerFn(dispatchCallQueueItem);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["call-queue"],
     queryFn: () => listFn({ data: { limit: 100 } }),
     refetchInterval: 5000,
@@ -89,10 +89,59 @@ export function QueueTab() {
     onError: (e: any) => toast.error(e?.message ?? "Erro ao retentar"),
   });
 
+  const renderActions = (it: any) => (
+    <>
+      {it.status === "audio_ready" && (
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => dispatchMut.mutate(it.id)}
+          disabled={dispatchMut.isPending}
+          title="Disparar agora"
+          aria-label="Disparar agora"
+        >
+          <Phone className="h-4 w-4 text-primary" />
+        </Button>
+      )}
+      {it.status === "paused" ? (
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => statusMut.mutate({ id: it.id, status: "audio_ready" })}
+          title="Retomar"
+          aria-label="Retomar"
+        >
+          <Play className="h-4 w-4" />
+        </Button>
+      ) : (
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => statusMut.mutate({ id: it.id, status: "paused" })}
+          title="Pausar"
+          aria-label="Pausar"
+          disabled={["cancelled", "completed", "failed"].includes(it.status)}
+        >
+          <Pause className="h-4 w-4" />
+        </Button>
+      )}
+      <Button
+        size="icon"
+        variant="ghost"
+        onClick={() => cancelMut.mutate(it.id)}
+        disabled={["cancelled", "completed"].includes(it.status)}
+        title="Cancelar"
+        aria-label="Cancelar"
+      >
+        <X className="h-4 w-4 text-destructive" />
+      </Button>
+    </>
+  );
+
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <CardTitle className="flex items-center gap-2">
               <ListOrdered className="h-5 w-5 text-primary" />
@@ -119,11 +168,46 @@ export function QueueTab() {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Carregando...</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">Carregando a fila…</p>
+        ) : isError ? (
+          <div className="py-12 text-center">
+            <p className="text-sm font-medium text-foreground">
+              Não foi possível carregar a fila de ligações.
+            </p>
+            <p className="mx-auto mt-1 max-w-xl text-xs text-muted-foreground">
+              {(error as Error)?.message ?? "Erro desconhecido ao buscar a fila."}
+            </p>
+            <Button variant="outline" className="mt-4" onClick={() => refetch()}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Tentar novamente
+            </Button>
+          </div>
         ) : items.length === 0 ? (
           <p className="py-12 text-center text-sm text-muted-foreground">Nenhum item na fila.</p>
         ) : (
-          <Table>
+          <>
+          {/* Phones: one card per item; the table below is md+ only. */}
+          <ul className="space-y-2 md:hidden">
+            {items.map((it: any, i: number) => (
+              <li
+                key={it.id}
+                className="rounded-lg border border-border bg-card/40 p-3"
+                {...(i === 0 ? tourAnchor("ligacoes.fila.tabela") : {})}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <Badge variant="outline">{QUEUE_STATUS_LABEL[it.status] ?? it.status}</Badge>
+                  <span className="text-meta text-muted-foreground">
+                    {new Date(it.scheduled_at).toLocaleString("pt-BR")}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm">{it.phone_number ?? "—"}</p>
+                {it.audio_url && (
+                  <audio controls src={it.audio_url} className="mt-2 h-10 w-full" />
+                )}
+                <div className="mt-2 flex justify-end gap-1">{renderActions(it)}</div>
+              </li>
+            ))}
+          </ul>
+          <Table className="hidden md:table">
             <TableHeader>
               <TableRow>
                 <TableHead>Status</TableHead>
@@ -151,55 +235,13 @@ export function QueueTab() {
                     {new Date(it.scheduled_at).toLocaleString("pt-BR")}
                   </TableCell>
                   <TableCell className="text-right">
-                    {it.status === "audio_ready" && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => dispatchMut.mutate(it.id)}
-                        disabled={dispatchMut.isPending}
-                        title="Disparar agora"
-                        aria-label="Disparar agora"
-                      >
-                        <Phone className="h-4 w-4 text-primary" />
-                      </Button>
-                    )}
-                    {it.status === "paused" ? (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => statusMut.mutate({ id: it.id, status: "audio_ready" })}
-                        title="Retomar"
-                        aria-label="Retomar"
-                      >
-                        <Play className="h-4 w-4" />
-                      </Button>
-                    ) : (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => statusMut.mutate({ id: it.id, status: "paused" })}
-                        title="Pausar"
-                        aria-label="Pausar"
-                        disabled={["cancelled", "completed", "failed"].includes(it.status)}
-                      >
-                        <Pause className="h-4 w-4" />
-                      </Button>
-                    )}
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => cancelMut.mutate(it.id)}
-                      disabled={["cancelled", "completed"].includes(it.status)}
-                      title="Cancelar"
-                      aria-label="Cancelar"
-                    >
-                      <X className="h-4 w-4 text-destructive" />
-                    </Button>
+                    {renderActions(it)}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+          </>
         )}
       </CardContent>
     </Card>

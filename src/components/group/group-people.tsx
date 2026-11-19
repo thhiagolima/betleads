@@ -12,6 +12,7 @@ import { Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import {
   Dialog,
@@ -32,11 +33,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requestConfirmation } from "@/components/system-dialog-host";
+import { QueryErrorState } from "@/components/finance/query-error-state";
 import { setFinanceViewer } from "@/lib/finance.functions";
 import { getGroupPeople } from "@/lib/groups.functions";
-import { addUserToTenant, removeUserFromTenant, updateTenantUserRole } from "@/lib/tenants.functions";
+import {
+  addUserToTenant,
+  removeUserFromTenant,
+  updateTenantUserRole,
+} from "@/lib/tenants.functions";
 
 type Role = "admin" | "gestor" | "member";
 type Member = {
@@ -49,7 +54,11 @@ type Member = {
 type TenantGroupHouse = { id: string; nome: string; is_demo: boolean; members: Member[] };
 
 const DEMO_ACTION_PT = "Ação indisponível na demonstração";
-const DEMO_ERROR_CODES = ["GROUP_DEMO_MISMATCH", "DEMO_USER_GROUP_VIOLATION", "DEMO_ACTION_BLOCKED"];
+const DEMO_ERROR_CODES = [
+  "GROUP_DEMO_MISMATCH",
+  "DEMO_USER_GROUP_VIOLATION",
+  "DEMO_ACTION_BLOCKED",
+];
 
 function groupActionErrorText(error: Error) {
   const message = error.message || "";
@@ -64,8 +73,18 @@ export function GroupPeople({ groupId }: { groupId: string }) {
     queryFn: () => getPeople({ data: { groupId } }),
   });
 
-  if (query.isLoading || !query.data) {
+  if (query.isLoading) {
     return <div className="h-64 animate-pulse rounded-lg border border-border/40" />;
+  }
+
+  if (query.isError || !query.data) {
+    return (
+      <QueryErrorState
+        title="Não foi possível carregar as pessoas do grupo."
+        retrying={query.isFetching}
+        onRetry={() => void query.refetch()}
+      />
+    );
   }
 
   const tenants = query.data.tenants as TenantGroupHouse[];
@@ -82,38 +101,58 @@ export function GroupPeople({ groupId }: { groupId: string }) {
   );
 }
 
+// Card per person on phones; a 4-column table-like row from md up.
+const PEOPLE_GRID =
+  "md:grid md:grid-cols-[minmax(0,1.6fr)_9rem_8rem_4rem] md:items-center md:gap-3";
+
 function TenantPeopleCard({ groupId, tenant }: { groupId: string; tenant: TenantGroupHouse }) {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["group-people", groupId] });
 
   return (
     <div className="space-y-3 rounded-lg border border-border/40 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">{tenant.nome}</h3>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="min-w-0 text-sm font-semibold">{tenant.nome}</h3>
         <AddPersonDialog tenantId={tenant.id} isDemo={tenant.is_demo} onAdded={invalidate} />
       </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Usuário</TableHead>
-            <TableHead>Papel</TableHead>
-            <TableHead>Vê o financeiro</TableHead>
-            <TableHead className="text-right">Ações</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {tenant.members.map((member) => (
-            <TableRow key={member.membership_id}>
-              <TableCell>{member.email ?? member.user_id}</TableCell>
-              <TableCell>
+      <div
+        aria-hidden="true"
+        className={`hidden border-b border-border/40 pb-2 text-meta font-medium text-muted-foreground ${PEOPLE_GRID}`}
+      >
+        <span>Usuário</span>
+        <span>Papel</span>
+        <span>Vê o financeiro</span>
+        <span className="text-right">Ações</span>
+      </div>
+      <ul className="divide-y divide-border/40">
+        {tenant.members.map((member) => (
+          <li
+            key={member.membership_id}
+            className={`flex flex-col gap-2 py-3 md:py-2 ${PEOPLE_GRID}`}
+          >
+            <div className="flex min-w-0 items-center justify-between gap-2 md:contents">
+              <span className="min-w-0 break-all text-sm">{member.email ?? member.user_id}</span>
+              <div className="md:hidden">
+                <RemovePersonButton
+                  tenantId={tenant.id}
+                  member={member}
+                  isDemo={tenant.is_demo}
+                  onRemoved={invalidate}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 md:contents">
+              <div className="flex items-center gap-2">
+                <span className="text-meta text-muted-foreground md:sr-only">Papel</span>
                 <RoleSelect
                   tenantId={tenant.id}
                   member={member}
                   isDemo={tenant.is_demo}
                   onChanged={invalidate}
                 />
-              </TableCell>
-              <TableCell>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-meta text-muted-foreground md:sr-only">Vê o financeiro</span>
                 {member.role === "gestor" ? (
                   <FinanceViewerSwitch
                     tenantId={tenant.id}
@@ -122,28 +161,26 @@ function TenantPeopleCard({ groupId, tenant }: { groupId: string; tenant: Tenant
                     onChanged={invalidate}
                   />
                 ) : (
-                  <span className="text-xs text-muted-foreground">—</span>
+                  <span className="text-meta text-muted-foreground">—</span>
                 )}
-              </TableCell>
-              <TableCell className="text-right">
-                <RemovePersonButton
-                  tenantId={tenant.id}
-                  member={member}
-                  isDemo={tenant.is_demo}
-                  onRemoved={invalidate}
-                />
-              </TableCell>
-            </TableRow>
-          ))}
-          {!tenant.members.length && (
-            <TableRow>
-              <TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
-                Nenhuma pessoa nesta casa.
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
+              </div>
+            </div>
+            <div className="hidden text-right md:block">
+              <RemovePersonButton
+                tenantId={tenant.id}
+                member={member}
+                isDemo={tenant.is_demo}
+                onRemoved={invalidate}
+              />
+            </div>
+          </li>
+        ))}
+        {!tenant.members.length && (
+          <li className="py-6 text-center text-sm text-muted-foreground">
+            Nenhuma pessoa nesta casa.
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
@@ -191,13 +228,18 @@ function AddPersonDialog({
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>Email</Label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor={`add-person-email-${tenantId}`}>Email</Label>
+            <Input
+              id={`add-person-email-${tenantId}`}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </div>
           <div className="space-y-2">
-            <Label>Papel</Label>
+            <Label htmlFor={`add-person-role-${tenantId}`}>Papel</Label>
             <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-              <SelectTrigger>
+              <SelectTrigger id={`add-person-role-${tenantId}`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -234,7 +276,8 @@ function RoleSelect({
 }) {
   const fn = useServerFn(updateTenantUserRole);
   const mut = useMutation({
-    mutationFn: (role: Role) => fn({ data: { tenantId, membershipId: member.membership_id, role } }),
+    mutationFn: (role: Role) =>
+      fn({ data: { tenantId, membershipId: member.membership_id, role } }),
     onSuccess: () => {
       toast.success("Papel atualizado");
       onChanged();
@@ -245,7 +288,7 @@ function RoleSelect({
   return (
     <DemoDisabledTooltip active={isDemo}>
       <Select value={member.role} disabled={isDemo} onValueChange={(v) => mut.mutate(v as Role)}>
-        <SelectTrigger className="w-32">
+        <SelectTrigger className="w-32" aria-label={`Papel de ${member.email ?? "esta pessoa"}`}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -279,6 +322,7 @@ function FinanceViewerSwitch({
   return (
     <DemoDisabledTooltip active={isDemo}>
       <Switch
+        aria-label={`${member.email ?? "Esta pessoa"} vê o financeiro`}
         checked={member.canViewFinance}
         disabled={isDemo || mut.isPending}
         onCheckedChange={(checked) => mut.mutate(checked)}
@@ -311,11 +355,10 @@ function RemovePersonButton({
   const label = member.email ?? "esta pessoa";
   return (
     <DemoDisabledTooltip active={isDemo}>
-      <Button
-        size="sm"
-        variant="ghost"
+      <IconButton
+        label={`Remover ${label} da casa`}
+        icon={<Trash2 className="h-4 w-4 text-destructive" />}
         disabled={isDemo || mut.isPending}
-        aria-label={`Remover ${label} da casa`}
         onClick={async () => {
           const confirmed = await requestConfirmation({
             title: "Remover pessoa da casa?",
@@ -325,9 +368,7 @@ function RemovePersonButton({
           });
           if (confirmed) mut.mutate();
         }}
-      >
-        <Trash2 className="h-4 w-4 text-destructive" />
-      </Button>
+      />
     </DemoDisabledTooltip>
   );
 }

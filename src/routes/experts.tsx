@@ -29,12 +29,18 @@ import { useState } from "react";
 import { Link, Outlet, createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Plus, Settings, UserPlus } from "lucide-react";
+import { MoreHorizontal, Plus, Settings, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -73,7 +79,19 @@ import {
   ExpertUsageCell,
 } from "@/components/experts/expert-list-columns";
 import { ExpertCampaignsQueue } from "@/components/experts/expert-campaigns-admin";
+import { InfoTip } from "@/components/crm-results/shared";
+import { LoadError } from "@/components/rendimento/load-states";
 import { useExpertUsageAdmin } from "@/components/experts/use-expert-campaigns-admin";
+
+type RowAction = {
+  key: string;
+  label: string;
+  /** Tour anchor props, only on the first row that shows the action. */
+  anchor?: ReturnType<typeof tourAnchor>;
+  destructive?: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+};
 
 export const Route = createFileRoute("/experts")({
   component: ExpertsRoute,
@@ -178,6 +196,105 @@ function ExpertsPage() {
     setFormOpen(true);
   }
 
+  async function confirmUnlink(expert: ExpertAdminRow) {
+    const confirmed = await requestConfirmation({
+      title: `Desvincular o perfil ${expert.nome}?`,
+      description:
+        "O perfil deixa de medir o rendimento dessa pessoa. O acesso dela à casa não muda, e o histórico do perfil continua.",
+      confirmLabel: "Desvincular",
+      destructive: true,
+    });
+    if (confirmed) removeAccess.mutate({ expertId: expert.id, equipe: true });
+  }
+
+  async function confirmRemoveAccess(expert: ExpertAdminRow) {
+    const confirmed = await requestConfirmation({
+      title: `Remover o acesso de ${expert.nome}?`,
+      description:
+        "A pessoa perde o acesso a esta casa imediatamente. O cadastro do expert continua existindo.",
+      confirmLabel: "Remover acesso",
+      destructive: true,
+    });
+    if (confirmed) removeAccess.mutate({ expertId: expert.id, equipe: false });
+  }
+
+  async function confirmDelete(expert: ExpertAdminRow) {
+    const confirmed = await requestConfirmation({
+      title: `Excluir o expert ${expert.nome}?`,
+      description:
+        "O cadastro e os IDs de afiliado vinculados a ele deixam de existir. Esta ação não pode ser desfeita.",
+      confirmLabel: "Excluir expert",
+      destructive: true,
+    });
+    if (confirmed) remove.mutate(expert.id);
+  }
+
+  /** The row's actions, rendered as buttons (desktop) or a menu (phones). */
+  function rowActions(expert: ExpertAdminRow, index: number): RowAction[] {
+    const semAcesso = expert.acesso === "sem_acesso";
+    const equipe = expert.acesso === "equipe";
+    const actions: RowAction[] = [
+      {
+        key: "editar",
+        label: "Editar",
+        anchor: index === 0 ? tourAnchor("experts.linha.editar") : undefined,
+        onSelect: () => openEdit(expert),
+      },
+    ];
+    if (semAcesso) {
+      actions.push(
+        {
+          key: "convidar",
+          label: "Convidar",
+          anchor: index === firstSemAcesso ? tourAnchor("experts.linha.convidar") : undefined,
+          onSelect: () => setInviteExpertRow(expert),
+        },
+        {
+          key: "vincular",
+          label: "Vincular a alguém da equipe",
+          anchor: index === firstSemAcesso ? tourAnchor("experts.linha.vincular") : undefined,
+          onSelect: () => setTeamLinkExpertRow(expert),
+        },
+      );
+    }
+    if (equipe) {
+      actions.push({
+        key: "desvincular",
+        label: "Desvincular",
+        anchor: index === firstEquipe ? tourAnchor("experts.linha.desvincular") : undefined,
+        disabled: removeAccess.isPending,
+        onSelect: () => void confirmUnlink(expert),
+      });
+    }
+    if (!semAcesso && !equipe) {
+      actions.push({
+        key: "remover-acesso",
+        label: "Remover acesso",
+        anchor: index === firstComAcesso ? tourAnchor("experts.linha.remover-acesso") : undefined,
+        disabled: removeAccess.isPending,
+        onSelect: () => void confirmRemoveAccess(expert),
+      });
+    }
+    actions.push({
+      key: "ativar",
+      label: expert.ativo ? "Desativar" : "Ativar",
+      anchor: index === 0 ? tourAnchor("experts.linha.ativar") : undefined,
+      disabled: toggleActive.isPending,
+      onSelect: () => toggleActive.mutate({ expertId: expert.id, ativo: !expert.ativo }),
+    });
+    if (semAcesso) {
+      actions.push({
+        key: "excluir",
+        label: "Excluir",
+        anchor: index === firstSemAcesso ? tourAnchor("experts.linha.excluir") : undefined,
+        destructive: true,
+        disabled: remove.isPending,
+        onSelect: () => void confirmDelete(expert),
+      });
+    }
+    return actions;
+  }
+
   return (
     <Page>
       <PageHeader
@@ -229,216 +346,151 @@ function ExpertsPage() {
 
       <Card {...tourAnchor("experts.tabela.card")}>
         <CardHeader>
-          <CardTitle>Experts ({experts.length})</CardTitle>
+          <CardTitle>Experts{expertsQuery.data ? ` (${experts.length})` : ""}</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Expert</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>IDs de afiliado</TableHead>
-                <TableHead>Leads</TableHead>
-                <TableHead>Envio</TableHead>
-                <TableHead>Teto</TableHead>
-                <TableHead>Uso do mês</TableHead>
-                <TableHead>Acesso</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {experts.map((expert, index) => (
-                <TableRow key={expert.id}>
-                  <TableCell className="font-medium">
-                    <Link
-                      to="/rendimento/equipe/$expertId"
-                      params={{ expertId: expert.id }}
-                      className="hover:underline"
-                    >
-                      {expert.nome}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{TIPO_LABEL[expert.tipo]}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {expert.affiliateIds.map((id) => (
-                        <span
-                          key={id}
-                          className="rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-xs"
-                        >
-                          {id}
-                        </span>
-                      ))}
-                      {expert.affiliateIds.length === 0 && (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>{expert.leads}</TableCell>
-                  <TableCell>
-                    <ExpertEnvioCell
-                      expertId={expert.id}
-                      envioModo={expert.envioModo}
-                      pendentes={usageByExpert.get(expert.id)?.pendentes ?? 0}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <ExpertTetoCell teto={expert.tetoMensal} />
-                  </TableCell>
-                  <TableCell>
-                    <ExpertUsageCell usage={usageByExpert.get(expert.id) ?? null} />
-                  </TableCell>
-                  <TableCell>
-                    {acessoBadge(expert.acesso, expert.papelEquipe, expert.ativo)}
-                    {expert.tipo === "restrito" && expert.acesso === "equipe" && (
-                      <p
-                        className="mt-1 max-w-56 text-label text-warning"
-                        title={RESTRITO_EQUIPE_AVISO}
-                      >
-                        Vê a casa inteira: Restrito não vale para a equipe.
-                      </p>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <DemoDisabledTooltip active={isDemo}>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isDemo}
-                          {...(index === 0 ? tourAnchor("experts.linha.editar") : {})}
-                          onClick={() => openEdit(expert)}
-                        >
-                          Editar
-                        </Button>
-                      </DemoDisabledTooltip>
-
-                      {expert.acesso === "sem_acesso" && (
-                        <DemoDisabledTooltip active={isDemo}>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={isDemo}
-                            {...(index === firstSemAcesso ? tourAnchor("experts.linha.convidar") : {})}
-                            onClick={() => setInviteExpertRow(expert)}
-                          >
-                            Convidar
-                          </Button>
-                        </DemoDisabledTooltip>
-                      )}
-
-                      {expert.acesso === "sem_acesso" && (
-                        <DemoDisabledTooltip active={isDemo}>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={isDemo}
-                            {...(index === firstSemAcesso ? tourAnchor("experts.linha.vincular") : {})}
-                            onClick={() => setTeamLinkExpertRow(expert)}
-                          >
-                            Vincular a alguém da equipe
-                          </Button>
-                        </DemoDisabledTooltip>
-                      )}
-
-                      {expert.acesso === "equipe" && (
-                        <DemoDisabledTooltip active={isDemo}>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={isDemo || removeAccess.isPending}
-                            {...(index === firstEquipe ? tourAnchor("experts.linha.desvincular") : {})}
-                            onClick={async () => {
-                              const confirmed = await requestConfirmation({
-                                title: `Desvincular o perfil ${expert.nome}?`,
-                                description:
-                                  "O perfil deixa de medir o rendimento dessa pessoa. O acesso dela à casa não muda, e o histórico do perfil continua.",
-                                confirmLabel: "Desvincular",
-                                destructive: true,
-                              });
-                              if (confirmed)
-                                removeAccess.mutate({ expertId: expert.id, equipe: true });
-                            }}
-                          >
-                            Desvincular
-                          </Button>
-                        </DemoDisabledTooltip>
-                      )}
-
-                      {expert.acesso !== "sem_acesso" && expert.acesso !== "equipe" && (
-                        <DemoDisabledTooltip active={isDemo}>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={isDemo || removeAccess.isPending}
-                            {...(index === firstComAcesso ? tourAnchor("experts.linha.remover-acesso") : {})}
-                            onClick={async () => {
-                              const confirmed = await requestConfirmation({
-                                title: `Remover o acesso de ${expert.nome}?`,
-                                description:
-                                  "A pessoa perde o acesso a esta casa imediatamente. O cadastro do expert continua existindo.",
-                                confirmLabel: "Remover acesso",
-                                destructive: true,
-                              });
-                              if (confirmed)
-                                removeAccess.mutate({ expertId: expert.id, equipe: false });
-                            }}
-                          >
-                            Remover acesso
-                          </Button>
-                        </DemoDisabledTooltip>
-                      )}
-
-                      <DemoDisabledTooltip active={isDemo}>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isDemo || toggleActive.isPending}
-                          {...(index === 0 ? tourAnchor("experts.linha.ativar") : {})}
-                          onClick={() =>
-                            toggleActive.mutate({ expertId: expert.id, ativo: !expert.ativo })
-                          }
-                        >
-                          {expert.ativo ? "Desativar" : "Ativar"}
-                        </Button>
-                      </DemoDisabledTooltip>
-
-                      {expert.acesso === "sem_acesso" && (
-                        <DemoDisabledTooltip active={isDemo}>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive hover:text-destructive"
-                            disabled={isDemo || remove.isPending}
-                            {...(index === firstSemAcesso ? tourAnchor("experts.linha.excluir") : {})}
-                            onClick={async () => {
-                              const confirmed = await requestConfirmation({
-                                title: `Excluir o expert ${expert.nome}?`,
-                                description:
-                                  "O cadastro e os IDs de afiliado vinculados a ele deixam de existir. Esta ação não pode ser desfeita.",
-                                confirmLabel: "Excluir expert",
-                                destructive: true,
-                              });
-                              if (confirmed) remove.mutate(expert.id);
-                            }}
-                          >
-                            Excluir
-                          </Button>
-                        </DemoDisabledTooltip>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {experts.length === 0 && (
+          {expertsQuery.isError ? (
+            <LoadError
+              message="Não foi possível carregar os experts."
+              onRetry={() => void expertsQuery.refetch()}
+            />
+          ) : expertsQuery.isPending ? (
+            <p className="py-8 text-center text-muted-foreground">Carregando experts…</p>
+          ) : experts.length === 0 ? (
+            <p className="py-8 text-center text-muted-foreground">Nenhum expert cadastrado.</p>
+          ) : (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                    Nenhum expert cadastrado.
-                  </TableCell>
+                  {/* The name stays visible while the table scrolls sideways on phones. */}
+                  <TableHead className="sticky left-0 z-10 bg-card">Expert</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>IDs de afiliado</TableHead>
+                  <TableHead>Leads</TableHead>
+                  <TableHead>Envio</TableHead>
+                  <TableHead>Teto</TableHead>
+                  <TableHead>Uso do mês</TableHead>
+                  <TableHead>Acesso</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {experts.map((expert, index) => {
+                  const actions = rowActions(expert, index);
+                  return (
+                    <TableRow key={expert.id}>
+                      <TableCell className="sticky left-0 z-10 bg-card font-medium">
+                        <Link
+                          to="/rendimento/equipe/$expertId"
+                          params={{ expertId: expert.id }}
+                          className="inline-flex min-h-10 items-center hover:underline sm:min-h-0"
+                        >
+                          {expert.nome}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{TIPO_LABEL[expert.tipo]}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {expert.affiliateIds.map((id) => (
+                            <span
+                              key={id}
+                              className="rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-xs"
+                            >
+                              {id}
+                            </span>
+                          ))}
+                          {expert.affiliateIds.length === 0 && (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>{expert.leads}</TableCell>
+                      <TableCell>
+                        <ExpertEnvioCell
+                          expertId={expert.id}
+                          envioModo={expert.envioModo}
+                          pendentes={usageByExpert.get(expert.id)?.pendentes ?? 0}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <ExpertTetoCell teto={expert.tetoMensal} />
+                      </TableCell>
+                      <TableCell>
+                        <ExpertUsageCell usage={usageByExpert.get(expert.id) ?? null} />
+                      </TableCell>
+                      <TableCell>
+                        {acessoBadge(expert.acesso, expert.papelEquipe, expert.ativo)}
+                        {expert.tipo === "restrito" && expert.acesso === "equipe" && (
+                          <p className="mt-1 flex max-w-56 items-start gap-1.5 text-label text-warning">
+                            <span>Vê a casa inteira: Restrito não vale para a equipe.</span>
+                            {/* Full explanation by tap or hover (a `title` never shows on a phone). */}
+                            <InfoTip text={RESTRITO_EQUIPE_AVISO} />
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {/* Desktop: every action as a button. */}
+                        <div className="hidden flex-wrap items-center justify-end gap-2 md:flex">
+                          {actions.map((action) => (
+                            <DemoDisabledTooltip key={action.key} active={isDemo}>
+                              <Button
+                                size="sm"
+                                variant={action.destructive ? "ghost" : "outline"}
+                                className={
+                                  action.destructive
+                                    ? "text-destructive hover:text-destructive"
+                                    : undefined
+                                }
+                                disabled={isDemo || action.disabled}
+                                {...action.anchor}
+                                onClick={action.onSelect}
+                              >
+                                {action.label}
+                              </Button>
+                            </DemoDisabledTooltip>
+                          ))}
+                        </div>
+                        {/* Phones: up to 5 buttons don't fit, so they go into one menu. */}
+                        <div className="md:hidden">
+                          <DemoDisabledTooltip active={isDemo}>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="size-11"
+                                  disabled={isDemo}
+                                  aria-label={`Ações de ${expert.nome}`}
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {actions.map((action) => (
+                                  <DropdownMenuItem
+                                    key={action.key}
+                                    className={
+                                      action.destructive
+                                        ? "min-h-11 text-destructive focus:text-destructive"
+                                        : "min-h-11"
+                                    }
+                                    disabled={action.disabled}
+                                    onSelect={action.onSelect}
+                                  >
+                                    {action.label}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </DemoDisabledTooltip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -447,35 +499,44 @@ function ExpertsPage() {
           <CardTitle>IDs de afiliado sem expert</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
-            {unassigned.map((row, index) => (
-              <div
-                key={row.affiliateId}
-                className="flex items-center justify-between gap-3 rounded-md border border-border/60 p-3"
-              >
-                <div className="min-w-0">
-                  <div className="truncate font-mono text-xs">{row.affiliateId}</div>
-                  <div className="text-xs text-muted-foreground">{row.leads} leads</div>
+          {unassignedQuery.isError ? (
+            <LoadError
+              message="Não foi possível carregar os IDs de afiliado sem expert."
+              onRetry={() => void unassignedQuery.refetch()}
+            />
+          ) : unassignedQuery.isPending ? (
+            <p className="text-body text-muted-foreground">Carregando…</p>
+          ) : (
+            <div className="space-y-2">
+              {unassigned.map((row, index) => (
+                <div
+                  key={row.affiliateId}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border/60 p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-xs">{row.affiliateId}</div>
+                    <div className="text-xs text-muted-foreground">{row.leads} leads</div>
+                  </div>
+                  <DemoDisabledTooltip active={isDemo}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      disabled={isDemo}
+                      {...(index === 0 ? tourAnchor("experts.sem-expert.criar") : {})}
+                      onClick={() => openCreate(row.affiliateId)}
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                      Criar expert
+                    </Button>
+                  </DemoDisabledTooltip>
                 </div>
-                <DemoDisabledTooltip active={isDemo}>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5"
-                    disabled={isDemo}
-                    {...(index === 0 ? tourAnchor("experts.sem-expert.criar") : {})}
-                    onClick={() => openCreate(row.affiliateId)}
-                  >
-                    <UserPlus className="h-3.5 w-3.5" />
-                    Criar expert
-                  </Button>
-                </DemoDisabledTooltip>
-              </div>
-            ))}
-            {unassigned.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nenhum ID de afiliado sem expert.</p>
-            )}
-          </div>
+              ))}
+              {unassigned.length === 0 && (
+                <p className="text-sm text-muted-foreground">Nenhum ID de afiliado sem expert.</p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

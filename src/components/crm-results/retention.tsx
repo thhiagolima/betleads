@@ -14,6 +14,7 @@ import {
 
 import { getCrmRetention } from "@/lib/crm-results.functions";
 import { PLAYER_STATE_LABELS, RECOVERABLE_STATES } from "@/lib/crm-results";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { brl, num } from "@/lib/format";
 import { Term } from "@/components/help/term";
@@ -62,8 +63,9 @@ export function RetentionPanel() {
   const [periodKey, setPeriodKey] = useState<PeriodKey>("30");
   const period = PERIODS.find((item) => item.key === periodKey) ?? PERIODS[3];
   const load = useServerFn(getCrmRetention);
+  const tenantId = useActiveTenant().data?.activeTenantId ?? null;
   const query = useQuery({
-    queryKey: ["crm-retention", period.days, period.endOffset],
+    queryKey: ["crm-retention", tenantId, period.days, period.endOffset],
     queryFn: () => load({ data: { days: period.days, endOffset: period.endOffset } }),
     staleTime: 5 * 60_000,
   });
@@ -136,7 +138,9 @@ export function SpendByState({ data }: { data: Data }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Situação no envio</TableHead>
+              <TableHead className="sticky left-0 z-10 min-w-32 bg-card">
+                Situação no envio
+              </TableHead>
               <TableHead className="min-w-40">Parte do custo</TableHead>
               <TableHead className="text-right">Jogadores</TableHead>
               <TableHead className="text-right">Voltaram pelo link</TableHead>
@@ -152,7 +156,7 @@ export function SpendByState({ data }: { data: Data }) {
           <TableBody>
             {states.map((state) => (
               <TableRow key={state.state}>
-                <TableCell>
+                <TableCell className="sticky left-0 z-10 bg-card">
                   {state.label}
                   {!RECOVERABLE_STATES.has(state.state) && (
                     <div className="text-xs text-muted-foreground">relacionamento</div>
@@ -312,7 +316,9 @@ function Cohorts({ retention }: { retention: Retention }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Semana do 1º depósito</TableHead>
+                <TableHead className="sticky left-0 z-10 min-w-32 bg-card">
+                  Semana do 1º depósito
+                </TableHead>
                 <TableHead className="text-right">Jogadores</TableHead>
                 <TableHead className="text-right">2º depósito em 7 dias</TableHead>
                 <TableHead className="text-right">em 14 dias</TableHead>
@@ -324,7 +330,7 @@ function Cohorts({ retention }: { retention: Retention }) {
             <TableBody>
               {cohorts.map((row) => (
                 <TableRow key={row.week}>
-                  <TableCell>{dayLabel(row.week)}</TableCell>
+                  <TableCell className="sticky left-0 z-10 bg-card">{dayLabel(row.week)}</TableCell>
                   <TableCell className="text-right tabular-nums">{num(row.size)}</TableCell>
                   {[row.second7d, row.second14d, row.second30d].map((value, index) => (
                     <TableCell
@@ -411,7 +417,7 @@ function Acquisition({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Origem</TableHead>
+                <TableHead className="sticky left-0 z-10 min-w-32 bg-card">Origem</TableHead>
                 <TableHead className="text-right">Cadastros</TableHead>
                 <TableHead className="text-right">Viraram depositantes</TableHead>
                 <TableHead className="text-right">2º depósito</TableHead>
@@ -421,7 +427,9 @@ function Acquisition({
             <TableBody>
               {[...top, ...(others ? [others] : [])].map((row) => (
                 <TableRow key={row.origin}>
-                  <TableCell>{row.origin}</TableCell>
+                  <TableCell className="sticky left-0 z-10 max-w-40 break-words bg-card">
+                    {row.origin}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{num(row.signups)}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     <span className="font-medium">{percentOf(row.firstDeposit, row.signups)}</span>

@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/chart";
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { tourAnchor } from "@/help/anchor";
-import { CHART_COLORS, chartAxisProps, chartGridProps } from "@/lib/chart-theme";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { CHART_COLORS, chartAxisProps, chartGridProps, moneyAxisProps } from "@/lib/chart-theme";
 import { num } from "@/lib/format";
 
 export type ReportSeriePoint = {
@@ -37,6 +38,8 @@ function dayLabel(dia: string): string {
 
 export function ReportChart({ serie }: { serie: ReportSeriePoint[] }) {
   const { money } = useMoney();
+  // Phones: compact money ("R$ 1,2 mil") on a narrower axis, so the bars keep room.
+  const isMobile = useIsMobile();
   const empty = serie.every((d) => d.valorFtd === 0 && d.valorRedeposito === 0);
   const points = serie.map((d) => ({ ...d, label: dayLabel(d.dia) }));
 
@@ -49,21 +52,16 @@ export function ReportChart({ serie }: { serie: ReportSeriePoint[] }) {
         {empty ? (
           <p className="py-10 text-center text-muted-foreground">Nenhum crédito neste período.</p>
         ) : (
-          <ChartContainer config={CHART_CONFIG} className="aspect-auto h-72 w-full">
+          <ChartContainer config={CHART_CONFIG} className="aspect-auto h-64 w-full sm:h-72">
             <ComposedChart data={points}>
               <CartesianGrid {...chartGridProps} />
               <XAxis dataKey="label" {...chartAxisProps} />
-              <YAxis
-                yAxisId="valor"
-                {...chartAxisProps}
-                width={80}
-                tickFormatter={(value) => money(Number(value))}
-              />
+              <YAxis yAxisId="valor" {...chartAxisProps} {...moneyAxisProps(money, isMobile, 80)} />
               <YAxis
                 yAxisId="depositantes"
                 orientation="right"
                 {...chartAxisProps}
-                width={32}
+                width={isMobile ? 24 : 32}
                 allowDecimals={false}
               />
               <ChartTooltip

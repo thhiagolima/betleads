@@ -1,16 +1,8 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+// Old "Regras" page moved to Gamificação. Redirect before rendering (no blank flash).
 export const Route = createFileRoute("/regras")({
-  component: RegrasRedirect,
+  beforeLoad: () => {
+    throw redirect({ to: "/gamificacao", replace: true });
+  },
 });
-
-function RegrasRedirect() {
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    navigate({ to: "/gamificacao", replace: true });
-  }, [navigate]);
-
-  return null;
-}

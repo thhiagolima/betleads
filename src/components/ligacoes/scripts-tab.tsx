@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, FileText } from "lucide-react";
+import { Plus, Pencil, Trash2, FileText, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +34,7 @@ export function ScriptsTab() {
   const listFn = useServerFn(listCallScripts);
   const delFn = useServerFn(deleteCallScript);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["call-scripts"],
     queryFn: () => listFn(),
   });
@@ -52,7 +52,7 @@ export function ScriptsTab() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <CardTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-primary" />
@@ -75,7 +75,20 @@ export function ScriptsTab() {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Carregando...</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">Carregando roteiros…</p>
+        ) : isError ? (
+          <div className="py-12 text-center">
+            <FileText className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">
+              Não foi possível carregar os roteiros.
+            </p>
+            <p className="mx-auto mt-1 max-w-xl text-xs text-muted-foreground">
+              {(error as Error)?.message ?? "Erro desconhecido ao buscar os roteiros."}
+            </p>
+            <Button variant="outline" className="mt-4" onClick={() => refetch()}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Tentar novamente
+            </Button>
+          </div>
         ) : scripts.length === 0 ? (
           <div className="py-12 text-center">
             <FileText className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />

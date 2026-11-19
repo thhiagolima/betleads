@@ -164,7 +164,7 @@ export function ScriptFormDialog({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label>Status</Label>
               <Select
@@ -220,10 +220,10 @@ export function ScriptFormDialog({
           </div>
 
           <div
-            className="grid grid-cols-2 gap-4 rounded-lg border border-border p-4"
+            className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border border-border p-4"
             {...tourAnchor("ligacoes.roteiros.voz")}
           >
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <p className="text-sm font-medium">Ajustes de voz</p>
             </div>
             <SliderRow
@@ -249,7 +249,7 @@ export function ScriptFormDialog({
               step={0.05}
               onChange={(v) => setForm({ ...form, speed: v })}
             />
-            <div className="col-span-2 flex items-center justify-between">
+            <div className="flex sm:col-span-2 items-center justify-between">
               <Label htmlFor="speaker-boost" className="cursor-pointer text-sm">
                 <Term id="speaker-boost">Speaker boost</Term>
               </Label>

@@ -25,7 +25,7 @@ const screen: HelpScreen = {
       id: "mensalidade",
       title: "Mensalidade",
       intro:
-        'O plano da casa e a situação do pagamento. Uma casa isenta (plano "Interno") não mostra nada aqui além do selo "Plano interno — isento" — ela não paga mensalidade.',
+        'O plano da casa e a situação do pagamento. Uma casa isenta (plano "Interno") mostra só o selo "Plano interno — isento" e a frase "Esta casa usa o plano interno e não paga mensalidade." — ela não paga mensalidade.',
       items: [
         {
           anchor: "creditos.mensalidade.card",
@@ -37,7 +37,7 @@ const screen: HelpScreen = {
         {
           anchor: "creditos.mensalidade.pagar",
           label: "Pagar mensalidade (Pix)",
-          what: "Gera o Pix da fatura em aberto e abre o diálogo de pagamento (veja \"Diálogo de pagamento Pix\" abaixo).",
+          what: 'Gera o Pix da fatura em aberto e abre o diálogo de pagamento (veja "Diálogo de pagamento Pix" abaixo).',
           notes:
             'Só aparece com uma fatura em aberto e para quem pode pagar (administrador, gestor ou super admin). Quem não pode pagar (membro) vê, no lugar do botão, "Peça ao administrador da casa para pagar a mensalidade."',
         },
@@ -51,11 +51,11 @@ const screen: HelpScreen = {
       id: "pix",
       title: "Diálogo de pagamento Pix",
       intro:
-        "O mesmo diálogo abre tanto para pagar a mensalidade (\"Pagar mensalidade (Pix)\", na fatura em aberto ou na lista de Faturas) quanto para comprar créditos (\"Gerar Pix\", dentro de \"Comprar créditos\"). Ele passa por até 5 situações, uma por vez:",
+        'O mesmo diálogo abre tanto para pagar a mensalidade ("Pagar mensalidade (Pix)", na fatura em aberto ou na lista de Faturas) quanto para comprar créditos ("Gerar Pix", dentro de "Comprar créditos"). Ele passa por até 5 situações, uma por vez:',
       items: [
         {
           label: "1. Aguardando pagamento (QR Code, Pix Copia e Cola, contagem regressiva)",
-          what: 'Título "Pague com Pix" com o valor e, quando o Pix tem prazo, "— expira em M:SS" (contagem regressiva, atualizada a cada segundo). Mostra o QR Code para escanear, o campo "Pix Copia e Cola" com o código (somente leitura) e o botão de copiar (ícone), e, quando o provedor devolve um link, "Abrir página de pagamento" (abre em nova aba).',
+          what: 'Título "Pague com Pix" com o valor e, quando o Pix tem prazo, "— expira em M:SS" (contagem regressiva, atualizada a cada segundo). Mostra o QR Code para escanear, o campo "Pix Copia e Cola" com o código (somente leitura) e o botão de copiar (ícone), e, quando o provedor devolve um link, "Abrir página de pagamento" (abre em nova aba). No celular, antes do QR Code aparece um botão grande "Copiar código Pix", para colar no app do banco no mesmo aparelho.',
           notes:
             'Copiar o código mostra "Código Pix copiado"; se o navegador recusar copiar, mostra "Não foi possível copiar o código Pix". O pagamento é detectado automaticamente (o diálogo verifica a cada poucos segundos) — não precisa fechar e reabrir.',
         },
@@ -108,9 +108,9 @@ const screen: HelpScreen = {
         },
         {
           label: 'Botão desabilitado "Disponível depois de pagar a mensalidade"',
-          what: "Aparece no lugar de \"Comprar créditos (Pix)\" quando a mensalidade da casa está em atraso a ponto de bloquear a compra de créditos.",
+          what: 'Aparece no lugar de "Comprar créditos (Pix)" quando a mensalidade da casa está em atraso a ponto de bloquear a compra de créditos.',
           notes:
-            'Quem não pode comprar (não é admin/gestor) e a compra não está bloqueada pela mensalidade simplesmente não vê nenhum botão aqui — nem ativo, nem desabilitado.',
+            "Quem não pode comprar (não é admin/gestor) e a compra não está bloqueada pela mensalidade simplesmente não vê nenhum botão aqui — nem ativo, nem desabilitado.",
         },
       ],
     },
@@ -122,7 +122,7 @@ const screen: HelpScreen = {
       id: "alerta",
       title: "Alerta de saldo baixo",
       intro:
-        'Define a partir de qual saldo a casa começa a ver o aviso amarelo e a receber um e-mail por dia. Escondido para casa isenta e para a casa de demonstração.',
+        "Define a partir de qual saldo a casa começa a ver o aviso amarelo e a receber um e-mail por dia. Escondido para casa isenta e para a casa de demonstração.",
       items: [
         {
           anchor: "creditos.alerta.card",
@@ -141,7 +141,8 @@ const screen: HelpScreen = {
     {
       id: "faturas",
       title: "Faturas",
-      intro: 'Escondida por completo quando a casa nunca teve nenhuma fatura (por exemplo, uma casa isenta).',
+      intro:
+        "Escondida por completo quando a casa nunca teve nenhuma fatura (por exemplo, uma casa isenta).",
       items: [
         {
           anchor: "creditos.faturas.tabela",
@@ -150,7 +151,7 @@ const screen: HelpScreen = {
         },
         {
           label: "Pagar (por fatura em aberto)",
-          what: "Mesmo fluxo do botão \"Pagar mensalidade (Pix)\" acima, para aquela fatura específica.",
+          what: 'Mesmo fluxo do botão "Pagar mensalidade (Pix)" acima, para aquela fatura específica.',
           roles: ["admin", "gestor"],
         },
         {
@@ -185,7 +186,7 @@ const screen: HelpScreen = {
         {
           anchor: "creditos.extrato.tabela",
           label: "Extrato",
-          what: 'Colunas Data, Tipo (Compra, Ajuste, Consumo, Estorno ou Conversão de créditos), Canal, Unidades, Valor (verde quando soma saldo, vermelho quando consome) e Saldo depois.',
+          what: "Colunas Data, Tipo (Compra, Ajuste, Consumo, Estorno ou Conversão de créditos), Canal, Unidades, Valor (verde quando soma saldo, vermelho quando consome) e Saldo depois.",
           notes:
             'Sem nenhuma movimentação, mostra "Nenhuma movimentação ainda." — ou, na casa de demonstração, "Nenhum dado neste ambiente de demonstração".',
         },

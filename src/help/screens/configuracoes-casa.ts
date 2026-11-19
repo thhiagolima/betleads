@@ -33,7 +33,7 @@ const screen: HelpScreen = {
           label: "URL da casa",
           what: "O endereço do site da casa, por exemplo https://suacasa.bet.br. É usado como base para as URLs rápidas e para sugerir o domínio do encurtador.",
           notes:
-            "Aceita colar com ou sem \"https://\" — o sistema completa. Erros possíveis: \"Informe a URL do site\" (campo vazio) e \"URL inválida\" (texto que não forma um endereço válido).",
+            'Aceita colar com ou sem "https://" — o sistema completa. Erros possíveis: "Informe a URL do site" (campo vazio) e "URL inválida" (texto que não forma um endereço válido).',
         },
         {
           anchor: "casa.site.save",
@@ -41,7 +41,7 @@ const screen: HelpScreen = {
           what: "Grava a nova URL da casa.",
           roles: ["admin"],
           notes:
-            "Se a URL mudar de domínio (por exemplo de casa-antiga.bet.br para suacasa.bet.br), o CRM compara o domínio antigo com o novo por conta própria e, quando encontra jornadas, templates ou URLs rápidas que ainda usam o domínio antigo, abre sozinho o diálogo \"Trocar domínio nos links\" já com a prévia pronta — sem precisar clicar em nada.",
+            'Se a URL mudar de domínio (por exemplo de casa-antiga.bet.br para suacasa.bet.br), o CRM compara o domínio antigo com o novo por conta própria e, quando encontra jornadas, templates ou URLs rápidas que ainda usam o domínio antigo, abre sozinho o diálogo "Trocar domínio nos links" já com a prévia pronta — sem precisar clicar em nada.',
         },
         {
           anchor: "casa.site.troca-dominio",
@@ -54,21 +54,21 @@ const screen: HelpScreen = {
         {
           anchor: "casa.quick-links.add",
           label: "Adicionar (URLs rápidas)",
-          what: "Cria uma nova linha em branco para cadastrar mais um atalho (nome + caminho), como \"Depósito\" → \"/deposito\".",
+          what: 'Cria uma nova linha em branco para cadastrar mais um atalho (nome + caminho), como "Depósito" → "/deposito".',
           roles: ["admin"],
           notes:
-            "Ao abrir a aba por 1ª vez sem nenhuma URL rápida salva, o CRM já sugere algumas linhas prontas (Login, Depósito, Promoção...) como dica — elas só são gravadas de fato quando você editar e clicar em \"Salvar URLs rápidas\".",
+            'Ao abrir a aba por 1ª vez sem nenhuma URL rápida salva, o CRM já sugere algumas linhas prontas (Login, Depósito, Promoção...) como dica — elas só são gravadas de fato quando você editar e clicar em "Salvar URLs rápidas".',
         },
         {
           anchor: "casa.quick-links.label",
           label: "Nome da URL rápida",
-          what: "O nome do atalho, como \"Login\" ou \"Depósito\". É o que aparece para escolher ao montar uma campanha ou jornada.",
+          what: 'O nome do atalho, como "Login" ou "Depósito". É o que aparece para escolher ao montar uma campanha ou jornada.',
           roles: ["admin"],
         },
         {
           anchor: "casa.quick-links.path",
           label: "Caminho da URL rápida",
-          what: "O caminho depois do domínio da casa, como \"/login\". Junto com a URL da casa, forma o link completo.",
+          what: 'O caminho depois do domínio da casa, como "/login". Junto com a URL da casa, forma o link completo.',
           roles: ["admin"],
         },
         {
@@ -86,23 +86,23 @@ const screen: HelpScreen = {
             'Se alguma linha tiver só o nome ou só o caminho preenchido, a gravação é bloqueada com o erro "Preencha o nome e o caminho de todas as URLs rápidas." Uma linha deixada totalmente em branco (criada por engano) é descartada em silêncio, sem erro.',
         },
         {
-          label: "Diálogo \"Trocar domínio nos links\" — passo 1 (Domínio antigo / Domínio novo)",
+          label: 'Diálogo "Trocar domínio nos links" — passo 1 (Domínio antigo / Domínio novo)',
           what: 'Dois campos de texto, "Domínio antigo" e "Domínio novo", e o botão "Procurar", que lista tudo que a casa tem com o domínio antigo: etapas de jornada, templates de SMS, templates de e-mail, URLs rápidas e (se existir) a lista de domínios permitidos do rastreio de links.',
           notes:
             "Quando o diálogo abre sozinho (depois de salvar uma nova URL da casa), esses dois campos já vêm preenchidos e o diálogo pula direto para o passo 2 com a prévia pronta.",
         },
         {
-          label: "Diálogo \"Trocar domínio nos links\" — passo 2 (prévia e seleção)",
+          label: 'Diálogo "Trocar domínio nos links" — passo 2 (prévia e seleção)',
           what: 'A lista encontrada aparece agrupada por tipo (Jornadas, Templates de SMS, Templates de e-mail, URLs rápidas), cada item com uma caixinha marcada por padrão, um "antes → depois" do texto e, quando existir, um aviso de que a troca aumenta o número de partes do SMS (rastreio desligado) por cruzar um limite de caracteres. Um item sem caixinha (travado) tem um motivo escrito ao lado — por exemplo, está fora do alcance desta troca. Quando a casa tem uma lista de domínios permitidos para o rastreio de links, aparece também uma seção "Domínios permitidos do rastreio" com uma única caixinha (marcada por padrão) mostrando "domínios atuais → domínios novos" — ela decide se esse domínio também é adicionado à lista de domínios liberados para o rastreio, além de ser trocado nos links; desmarcá-la tira esse domínio da contagem de "Trocar N itens" (a lista de rastreio simplesmente não muda) sem afetar as outras caixinhas. Uma seção à parte, "Ainda com <domínio> (não trocados aqui)", lista campanhas agendadas, fluxos antigos e links em subdomínio que continuam com o domínio antigo mesmo depois da troca. Os botões são "Voltar" (volta ao passo 1) e "Trocar N itens" (abre a confirmação), onde N conta os itens marcados mais a caixinha do rastreio, quando marcada.',
           notes:
-            "Sem nenhum item com esse domínio, aparece só o texto \"Nenhum link com <domínio> encontrado.\"",
+            'Sem nenhum item com esse domínio, aparece só o texto "Nenhum link com <domínio> encontrado."',
         },
         {
-          label: "Confirmação \"Trocar domínio nos links\"",
+          label: 'Confirmação "Trocar domínio nos links"',
           what: 'Pergunta "Trocar o domínio em N itens? Isso não pode ser desfeito automaticamente." com os botões "Cancelar" e "Trocar".',
           roles: ["admin"],
           notes:
-            "A troca em si é imediata nos registros do CRM; não há um \"desfazer\" de um clique — para voltar atrás é preciso repetir o processo trocando o domínio novo pelo antigo de novo.",
+            'A troca em si é imediata nos registros do CRM; não há um "desfazer" de um clique — para voltar atrás é preciso repetir o processo trocando o domínio novo pelo antigo de novo.',
         },
       ],
     },
@@ -146,14 +146,14 @@ const screen: HelpScreen = {
         {
           anchor: "casa.dominio.dns-table",
           label: "Tabela de registros DNS",
-          what: 'Cada linha é um registro DNS que precisa ser colado no painel do domínio: Tipo (A ou CNAME), Nome, Valor e Situação ("ok", "pendente" ou "—" quando ainda não foi checado).',
+          what: 'Cada linha é um registro DNS que precisa ser colado no painel do domínio: Tipo (A ou CNAME), Nome, Valor e Situação ("ok", "pendente" ou "—" quando ainda não foi checado). No celular, cada registro vira um cartão com o Nome e o Valor um embaixo do outro, cada um com seu botão de copiar.',
           notes:
             'Quando o domínio é a raiz (ex.: suacasa.bet.br, sem nada na frente), o registro é do tipo A com Nome "@" — "@" é a forma padrão de dizer "o próprio domínio, sem subdomínio" num painel de DNS. Quando o domínio é um subdomínio (ex.: go.suacasa.bet.br), o registro é do tipo CNAME e o Nome é só a parte antes do domínio da casa (ex.: "go") — o painel do domínio já entende que isso é go.suacasa.bet.br.',
         },
         {
           anchor: "casa.dominio.copy",
           label: "Copiar valor (ícone)",
-          what: "Copia o valor daquele registro para a área de transferência, para colar direto no painel do domínio. Repete-se em cada linha; a âncora marca só a primeira.",
+          what: 'Copia o valor daquele registro para a área de transferência (toast "Valor copiado"), para colar direto no painel do domínio. Ao lado do Nome há um botão igual, que copia o nome ("Nome copiado"). Repete-se em cada linha; a âncora marca só a primeira.',
         },
         {
           anchor: "casa.dominio.next-check",
@@ -192,10 +192,10 @@ const screen: HelpScreen = {
           what: 'Abre a confirmação "Remover domínio", com os botões "Cancelar" e "Remover": o domínio some dos novos envios, mas continua existindo no provedor; campanhas e jornadas já agendadas passam a usar o domínio padrão da casa no lugar. Quando o domínio está em uso, a confirmação lista em quais campanhas/jornadas.',
           roles: ["admin"],
           notes:
-            "Isso não apaga o domínio do provedor (Short.io) — só para de usá-lo em envios novos. Apagar de fato no provedor é uma ação de super admin, feita a partir da lista de \"Domínios removidos\", fora desta tela.",
+            'Isso não apaga o domínio do provedor (Short.io) — só para de usá-lo em envios novos. Apagar de fato no provedor é uma ação de super admin, feita a partir da lista de "Domínios removidos", fora desta tela.',
         },
         {
-          label: "Registradores: onde colar o DNS, propagação e o que fazer com \"Falhou\"",
+          label: 'Registradores: onde colar o DNS, propagação e o que fazer com "Falhou"',
           what: 'Cada provedor de domínio chama a tela de DNS por um nome diferente, mas o caminho é parecido: Registro.br → "Painel de controle" do domínio → "DNS" ou "Editar zona", e adicionar um "novo registro" com o Tipo/Nome/Valor da tabela. Cloudflare → o domínio → aba "DNS" → "Add record"; para o CNAME do encurtador, a nuvem ao lado do registro precisa ficar cinza/desligada ("DNS only"), não laranja ("Proxied") — com o proxy ligado, a verificação nunca funciona. GoDaddy → "Meus produtos" → o domínio → "DNS" → "Adicionar" um registro. Hostinger → "Domínios" → o domínio → "DNS / Nameservers" → "Adicionar registro".',
           notes:
             'A mudança no DNS pode levar de minutos a algumas horas para valer em todo lugar ("propagação") — "Aguardando DNS" pouco depois de colar o registro é normal, não é erro. O CRM confere sozinho no calendário descrito em "Próxima verificação automática" (10 em 10 minutos nas primeiras 6 horas, de hora em hora até 72 horas, depois 1x por dia) — não precisa ficar clicando em "Verificar agora". Quando aparece "Falhou", a última checagem não encontrou o registro esperado (ou encontrou um valor diferente); confira se o registro foi colado no domínio e no "Nome" certos, sem espaços extras, e sem outro registro do mesmo tipo e nome conflitando — depois disso, a próxima checagem automática (ou "Verificar agora") resolve sozinha.',
@@ -290,7 +290,8 @@ const screen: HelpScreen = {
           label: "Remetente padrão",
           what: "Marca este remetente como o escolhido automaticamente ao criar uma campanha ou jornada de e-mail nova.",
           roles: ["admin"],
-          notes: "Marcar um remetente como padrão desmarca automaticamente o que era padrão antes — só existe um por vez.",
+          notes:
+            "Marcar um remetente como padrão desmarca automaticamente o que era padrão antes — só existe um por vez.",
         },
         {
           anchor: "casa.remetente.save",
@@ -309,7 +310,8 @@ const screen: HelpScreen = {
       id: "nao-admin",
       title: "Só o administrador da casa pode alterar estas configurações.",
       what: "Aviso mostrado no topo da tela para quem não é administrador da conta — todos os campos e botões de escrita ficam desabilitados, mas tudo continua visível para consulta.",
-      action: "Peça a um administrador da casa para fazer a alteração, ou peça para ser promovido a administrador em Configurações → Usuários.",
+      action:
+        "Peça a um administrador da casa para fazer a alteração, ou peça para ser promovido a administrador em Configurações → Usuários.",
     },
     {
       id: "sem-dominio",
@@ -321,19 +323,22 @@ const screen: HelpScreen = {
       id: "sem-remetente",
       title: "Nenhum remetente cadastrado ainda.",
       what: "Texto mostrado na aba E-mail quando a casa ainda não tem nenhum remetente cadastrado.",
-      action: 'Verifique um domínio de e-mail e depois preencha o formulário de remetente abaixo.',
+      action: "Verifique um domínio de e-mail e depois preencha o formulário de remetente abaixo.",
     },
     {
       id: "encurtador-pendente",
-      title: "Seu domínio personalizado ainda não foi verificado — os links estão saindo pelo encurtador padrão do CRM.",
-      what: 'Aviso mostrado no topo da aba Encurtador quando existe pelo menos um domínio do encurtador aguardando DNS ou com falha, e nenhum verificado ainda. Nada para de funcionar enquanto isso: os links continuam saindo, só que com o domínio padrão do CRM em vez do domínio próprio da casa.',
-      action: "Finalize a verificação do DNS do domínio personalizado (veja o item dos registradores).",
+      title:
+        "Seu domínio personalizado ainda não foi verificado — os links estão saindo pelo encurtador padrão do CRM.",
+      what: "Aviso mostrado no topo da aba Encurtador quando existe pelo menos um domínio do encurtador aguardando DNS ou com falha, e nenhum verificado ainda. Nada para de funcionar enquanto isso: os links continuam saindo, só que com o domínio padrão do CRM em vez do domínio próprio da casa.",
+      action:
+        "Finalize a verificação do DNS do domínio personalizado (veja o item dos registradores).",
     },
     {
       id: "dominio-aguardando-dns",
       title: "Aguardando DNS",
       what: "O domínio foi cadastrado, mas a última checagem ainda não encontrou o registro DNS esperado.",
-      action: "Confira se o registro foi colado certo no provedor; a verificação automática tenta de novo sozinha.",
+      action:
+        "Confira se o registro foi colado certo no provedor; a verificação automática tenta de novo sozinha.",
     },
     {
       id: "dominio-verificado",
@@ -344,17 +349,20 @@ const screen: HelpScreen = {
       id: "dominio-falhou",
       title: "Falhou",
       what: "A última checagem automática encontrou um problema no DNS (registro ausente ou com valor diferente do esperado) — o motivo exato aparece no cartão do domínio, abaixo do nome.",
-      action: 'Corrija o registro no provedor do domínio seguindo o item dos registradores e aguarde a próxima verificação (ou clique em "Verificar agora").',
+      action:
+        'Corrija o registro no provedor do domínio seguindo o item dos registradores e aguarde a próxima verificação (ou clique em "Verificar agora").',
     },
     {
       id: "remetente-dominio-nao-verificado",
       title: "Domínio ainda não verificado",
       what: "Aviso sob um remetente cujo domínio de e-mail deixou de estar verificado (ou nunca chegou a verificar). Os envios por esse remetente falham enquanto isso durar.",
-      action: "Verifique o domínio de e-mail na aba Encurtador/E-mail correspondente — o remetente volta a funcionar sozinho depois disso.",
+      action:
+        "Verifique o domínio de e-mail na aba Encurtador/E-mail correspondente — o remetente volta a funcionar sozinho depois disso.",
     },
     {
       id: "dica-criar-remetente",
-      title: "Domínio verificado. Agora crie um remetente para enviar campanhas e jornadas por e-mail.",
+      title:
+        "Domínio verificado. Agora crie um remetente para enviar campanhas e jornadas por e-mail.",
       what: "Dica mostrada quando a casa já tem um domínio de e-mail verificado, mas ainda nenhum remetente cadastrado.",
       action: "Clique na dica para ir direto ao formulário de remetente.",
     },
@@ -471,7 +479,7 @@ const screen: HelpScreen = {
       {
         anchor: "casa.remetente.local-part",
         title: "Endereço do remetente",
-        body: "A parte antes do @ do e-mail que vai enviar as campanhas, por exemplo \"promo\".",
+        body: 'A parte antes do @ do e-mail que vai enviar as campanhas, por exemplo "promo".',
         articleSection: "email",
       },
       {

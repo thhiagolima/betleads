@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
+import { InfoTip } from "./shared";
 import {
   Table,
   TableBody,
@@ -204,7 +205,7 @@ export function TenantComparison() {
         subtitle="Mesmas métricas lado a lado, apenas nas casas em que você é administrador."
         actions={
           <div
-            className="flex gap-2"
+            className="flex flex-wrap gap-2"
             role="group"
             aria-label="Período"
             {...tourAnchor("resultados-comparar.periodo")}
@@ -246,7 +247,9 @@ export function TenantComparison() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Métrica</TableHead>
+                  <TableHead className="sticky left-0 z-10 min-w-40 bg-card sm:min-w-56">
+                    Métrica
+                  </TableHead>
                   {query.data.rows.map((row) => (
                     <TableHead key={row.tenant} className="text-right">
                       {row.tenant}
@@ -262,20 +265,21 @@ export function TenantComparison() {
                         colSpan={query.data.rows.length + 1}
                         className="text-label font-semibold text-muted-foreground"
                       >
-                        <Labeled text={group.title} />
+                        <span className="sticky left-2">
+                          <Labeled text={group.title} />
+                        </span>
                       </TableCell>
                     </TableRow>
                     {group.metrics.map((metric) => {
                       const best = bestIndex(metric, query.data.rows);
                       return (
                         <TableRow key={metric.label}>
-                          <TableCell>
-                            <div className="font-medium">
+                          <TableCell className="sticky left-0 z-10 bg-card">
+                            {/* The hint sits behind an (i) so the sticky column stays narrow. */}
+                            <div className="flex items-start gap-1 font-medium">
                               <Labeled text={metric.label} />
+                              {metric.hint && <InfoTip text={metric.hint} />}
                             </div>
-                            {metric.hint && (
-                              <div className="text-xs text-muted-foreground">{metric.hint}</div>
-                            )}
                           </TableCell>
                           {query.data.rows.map((row, index) => (
                             <TableCell

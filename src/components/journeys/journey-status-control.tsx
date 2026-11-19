@@ -44,7 +44,7 @@ function ChoiceCard({
       <RadioGroupItem value={value} id={id} className="mt-0.5" />
       <Label htmlFor={id} className="cursor-pointer space-y-1 font-normal leading-snug">
         <span className="block font-medium">{title}</span>
-        <span className="block text-[13px] text-muted-foreground">{children}</span>
+        <span className="block text-body text-muted-foreground">{children}</span>
       </Label>
     </div>
   );
@@ -199,9 +199,9 @@ export function useJourneyStatusControl() {
               Jogadores que já cumprem o gatilho entram nos próximos minutos e recebem a primeira
               etapa, dentro do limite de mensagens por pessoa.
               {estimate.isLoading ? (
-                <span className="mt-1 block text-xs">Calculando o impacto…</span>
+                <span className="mt-1 block text-meta">Calculando o impacto…</span>
               ) : estimate.data?.supported && estimate.data.eligible != null ? (
-                <span className="mt-1 block text-xs font-medium text-foreground">
+                <span className="mt-1 block text-meta font-medium text-foreground">
                   ≈ {estimate.data.eligible.toLocaleString("pt-BR")} jogador(es) entram agora · 1º
                   envio ≈{" "}
                   {(estimate.data.firstSendCost ?? 0).toLocaleString("pt-BR", {
@@ -221,7 +221,7 @@ export function useJourneyStatusControl() {
                   )}
                 </span>
               ) : null}
-              <span className="mt-1 block text-xs">
+              <span className="mt-1 block text-meta">
                 A contagem já considera o público, os filtros de entrada e a idade máxima do evento.
               </span>
             </ChoiceCard>

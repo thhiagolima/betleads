@@ -208,7 +208,7 @@ const screen: HelpScreen = {
         {
           anchor: "gamificacao.regras.salvar",
           label: "Salvar / Tudo salvo",
-          what: 'Grava as faixas e as regras. O botão mostra "Salvar" enquanto há alguma alteração não salva, "Salvando…" durante a gravação, e "Tudo salvo" (desabilitado) quando o que está na tela já é igual ao que foi salvo.',
+          what: 'Grava as faixas e as regras. O botão mostra "Salvar" enquanto há alguma alteração não salva, "Salvando…" durante a gravação, e "Tudo salvo" (desabilitado) quando o que está na tela já é igual ao que foi salvo. Com alteração não salva, um segundo botão "Salvar faixas e regras" aparece no fim do cartão, para não precisar voltar ao topo no celular. Tocar em "Atualizar" no meio de uma edição não apaga o que foi digitado.',
           notes:
             'Erros possíveis ao salvar: "As faixas precisam ser crescentes: Bronze < Prata < Ouro < Diamante < Black VIP." (algum limite ficou igual ou menor que o anterior), "Esfriando precisa ser pelo menos 1 dia." e "Dormindo precisa ser maior ou igual a Esfriando." Ao salvar com sucesso aparece "Faixas e regras salvas."; se a gravação falhar por outro motivo, aparece "Não foi possível salvar as faixas." (ou a mensagem específica do erro, quando houver uma) — inclusive "A tabela de gamificacao ainda nao foi criada. Aplique as migrations antes de salvar." quando a casa ainda não tem essa configuração criada no banco (veja o estado correspondente, mais abaixo).',
         },

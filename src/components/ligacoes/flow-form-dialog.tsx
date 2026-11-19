@@ -342,7 +342,7 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
             <div className="mb-3 flex items-center gap-2 text-sm font-medium text-foreground">
               <Settings2 className="h-4 w-4 text-primary" /> Configuração
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <Label>Nome</Label>
                 <Input
@@ -468,7 +468,7 @@ export function FlowFormDialog({ open, onOpenChange, initial }: Props) {
               })}
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <Label className="text-xs">Sair se valor depositado ≥ (R$)</Label>
                 <Input
@@ -681,7 +681,7 @@ function CallBlockEditor({
 }) {
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
           <Label className="text-xs">Nome interno</Label>
           <Input
@@ -710,7 +710,7 @@ function CallBlockEditor({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
           <Label className="text-xs">Voz (opcional, sobrescreve a do roteiro)</Label>
           <Select
@@ -833,7 +833,7 @@ function SmsRow({
 
   return (
     <div className="rounded-md border border-border bg-muted/30 p-2">
-      <div className="mb-2 flex items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="font-mono text-meta">
           SMS {index + 1}
         </Badge>
@@ -841,7 +841,7 @@ function SmsRow({
           value={sms.condition}
           onValueChange={(v) => onChange({ condition: v as SmsCondition })}
         >
-          <SelectTrigger className="h-8 flex-1">
+          <SelectTrigger className="order-last h-8 basis-full sm:order-none sm:basis-auto sm:flex-1">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -865,7 +865,7 @@ function SmsRow({
             }}
           />
         )}
-        <Button size="icon" variant="ghost" aria-label="Remover SMS" onClick={onRemove}>
+        <Button size="icon" variant="ghost" aria-label="Remover SMS" onClick={onRemove} className="ml-auto sm:ml-0">
           <Trash2 className="h-3.5 w-3.5 text-destructive" />
         </Button>
       </div>

@@ -234,7 +234,7 @@ export function DashboardTab() {
                     <Link
                       to="/configuracoes/casa"
                       hash="email"
-                      className="text-[12px] font-normal underline"
+                      className="text-meta font-normal underline"
                     >
                       Configurar
                     </Link>
@@ -259,7 +259,7 @@ export function DashboardTab() {
             />
           </div>
           <div className="mt-4 md:mt-0" {...tourAnchor("email.saude.ultimos-envios")}>
-            <p className="py-2.5 text-[13.5px] text-muted-foreground">Últimos envios</p>
+            <p className="py-2.5 text-body text-muted-foreground">Últimos envios</p>
             {events.length === 0 ? (
               <p className="py-4 text-sm text-muted-foreground">
                 Quando começar a enviar, os envios aparecem aqui.
@@ -466,7 +466,7 @@ function TemplatesTab() {
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h3 className="truncate text-[15px] font-semibold">{t.nome || "Sem nome"}</h3>
+                  <h3 className="truncate text-section">{t.nome || "Sem nome"}</h3>
                   <p className="truncate text-xs text-muted-foreground">
                     {t.assunto || "(sem assunto)"}
                   </p>

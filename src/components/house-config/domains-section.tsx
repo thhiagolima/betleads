@@ -46,7 +46,7 @@ import {
   sendDnsInstructions,
   setDefaultHouseDomain,
 } from "@/lib/house-config.functions";
-import type { DnsRecord, DomainKind } from "@/lib/house-config";
+import type { DomainKind } from "@/lib/house-config";
 import {
   HOUSE_CONFIG_QUERY_KEY,
   invalidateHouseConfigQueries,
@@ -160,24 +160,14 @@ export function DomainsSection({
     enabled: !!removeDialogDomainId,
   });
 
-  function copyRecord(record: DnsRecord) {
-    if (typeof navigator === "undefined" || !navigator.clipboard) {
-      toast.error("Não foi possível copiar");
-      return;
-    }
-    navigator.clipboard.writeText(record.value).then(
-      () => toast.success("Valor copiado"),
-      () => toast.error("Não foi possível copiar"),
-    );
-  }
-
   const meta = KIND_LABEL[kind];
-  const shortenerPending = kind === "shortener" && computeShortenerPending(domains.map((d) => d.status));
+  const shortenerPending =
+    kind === "shortener" && computeShortenerPending(domains.map((d) => d.status));
 
   const content = (
     <div className="space-y-4">
       {shortenerPending && (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+        <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           Seu domínio personalizado ainda não foi verificado — os links estão saindo pelo encurtador
           padrão do CRM.
         </p>
@@ -190,7 +180,9 @@ export function DomainsSection({
             onChange={(e) => setNewHostname(e.target.value)}
             placeholder={meta.placeholder}
             className="max-w-xs"
-            {...(kind === "shortener" ? tourAnchor("casa.encurtador.hostname") : tourAnchor("casa.email.hostname"))}
+            {...(kind === "shortener"
+              ? tourAnchor("casa.encurtador.hostname")
+              : tourAnchor("casa.email.hostname"))}
           />
           <DemoDisabledTooltip active={isDemo}>
             <Button
@@ -202,7 +194,8 @@ export function DomainsSection({
                 ? tourAnchor("casa.encurtador.add-domain")
                 : tourAnchor("casa.email.add-domain"))}
             >
-              <Plus className="h-4 w-4" /> {addDomain.isPending ? "Adicionando…" : "Adicionar domínio"}
+              <Plus className="h-4 w-4" />{" "}
+              {addDomain.isPending ? "Adicionando…" : "Adicionar domínio"}
             </Button>
           </DemoDisabledTooltip>
         </div>
@@ -216,7 +209,6 @@ export function DomainsSection({
             canEdit={canEdit}
             verifying={verifyingId === d.id}
             isDemo={isDemo}
-            onCopyRecord={copyRecord}
             onVerifyNow={() => verifyNow.mutate(d.id)}
             onSendInstructions={() => setInstructionsDialogDomainId(d.id)}
             onSetDefault={() => setDefault.mutate(d.id)}
@@ -307,7 +299,8 @@ export function DomainsSection({
                   jornadas já agendadas passam a usar o padrão da casa.
                 </p>
                 {usagesQuery.data &&
-                  (usagesQuery.data.campaigns.length > 0 || usagesQuery.data.journeys.length > 0) && (
+                  (usagesQuery.data.campaigns.length > 0 ||
+                    usagesQuery.data.journeys.length > 0) && (
                     <p>
                       Em uso em:{" "}
                       {[...usagesQuery.data.campaigns, ...usagesQuery.data.journeys]
@@ -356,7 +349,10 @@ export function DomainsSection({
               disabled={!instructionsEmail.trim() || sendInstructions.isPending}
               onClick={() =>
                 instructionsDialogDomainId &&
-                sendInstructions.mutate({ domainId: instructionsDialogDomainId, to: instructionsEmail })
+                sendInstructions.mutate({
+                  domainId: instructionsDialogDomainId,
+                  to: instructionsEmail,
+                })
               }
             >
               {sendInstructions.isPending ? "Enviando…" : "Enviar"}

@@ -25,20 +25,20 @@ const screen: HelpScreen = {
       id: "cabecalho",
       title: "Cabeçalho",
       intro:
-        "O nome mostrado é o seu; o badge ao lado é o seu tipo de perfil (ex.: \"Equipe (Admin)\", \"Equipe (Gestor)\", \"Equipe (Membro)\"). Em seguida vem o nome da casa ativa e \"Atualizado às hh:mm\" (ou \"Atualizado em dd/mm às hh:mm\", fora do dia de hoje) — ou, antes do primeiro cálculo, \"Os créditos são calculados a cada 10 minutos.\"",
+        'O nome mostrado é o seu; o badge ao lado é o seu tipo de perfil (ex.: "Equipe (Admin)", "Equipe (Gestor)", "Equipe (Membro)"). Em seguida vem o nome da casa ativa e "Atualizado às hh:mm" (ou "Atualizado em dd/mm às hh:mm", fora do dia de hoje) — ou, antes do primeiro cálculo, "Os créditos são calculados a cada 10 minutos."',
       items: [
         {
           anchor: "rendimento.header.periodo",
           label: "Período",
-          what: 'Escolhe a janela do relatório: Hoje, Ontem, 7/30/90 dias, Este mês ou Mês passado. Todos os blocos da tela (cartões, funil, gráfico, leads que mais depositaram, extrato e leads do período) seguem esse período.',
-          notes: "O padrão ao abrir a tela é \"Este mês\".",
+          what: "Escolhe a janela do relatório: Hoje, Ontem, 7/30/90 dias, Este mês ou Mês passado. Todos os blocos da tela (cartões, funil, gráfico, leads que mais depositaram, extrato e leads do período) seguem esse período.",
+          notes: 'O padrão ao abrir a tela é "Este mês".',
         },
         {
           anchor: "rendimento.header.csv",
           label: "Exportar CSV",
           what: 'Baixa o extrato de créditos completo do período (o mesmo conteúdo do bloco "Extrato de créditos", sem paginação) num arquivo "extrato-{seu nome}-{de}-a-{até}.csv".',
           notes:
-            'Mostra "Exportando…" enquanto gera o arquivo. Ao terminar, aparece o toast "CSV exportado." e o download começa sozinho.',
+            'Mostra "Exportando…" enquanto gera o arquivo. Ao terminar, o download começa sozinho (no celular, abre o menu de compartilhar do aparelho para salvar ou enviar o arquivo) e aparece o toast "Arquivo gerado."',
         },
       ],
     },
@@ -46,7 +46,7 @@ const screen: HelpScreen = {
       id: "resultado",
       title: "Resultado do período",
       intro:
-        "Os quatro números do período, cada um com a variação (▲/▼) contra o período anterior de mesma duração — \"—\" quando não há período anterior para comparar, e \"0,0%\" cinza quando não houve variação.",
+        'Os quatro números do período, cada um com a variação (▲/▼) contra o período anterior de mesma duração — "—" quando não há período anterior para comparar, e "0,0%" cinza quando não houve variação.',
       items: [
         {
           anchor: "rendimento.cards",
@@ -64,13 +64,14 @@ const screen: HelpScreen = {
           label: '"Do contato ao depósito" (funil)',
           what: 'Três passos, de cima para baixo: "Links gerados" (quantos links de rastreio seus foram criados no período), "Leads que clicaram (X%)" (quantos leads clicaram nesses links, e a fração sobre os links gerados) e "Depositaram em até {janela}h (Y% dos que clicaram)" (quantos desses cliques resultaram em depósito dentro da janela de clique da casa — ver o termo). Abaixo, "Contatos registrados" conta quantas vezes você (ou a equipe) registrou um contato com um lead no período.',
           notes:
-            'As porcentagens são limitadas a 100% na tela (o cálculo pode passar disso, porque um depósito do período pode vir de um clique de antes do período) — passe o mouse sobre a linha do depósito para ver a definição completa ("Leads que depositaram por clique no período ÷ leads que clicaram no período").',
+            'As porcentagens são limitadas a 100% na tela (o cálculo pode passar disso, porque um depósito do período pode vir de um clique de antes do período) — a definição completa aparece em letra menor logo abaixo do texto da linha do depósito ("Leads que depositaram por clique no período ÷ leads que clicaram no período").',
         },
         {
           anchor: "rendimento.chart",
           label: '"Evolução por dia" (gráfico)',
-          what: 'Barras empilhadas de FTD (valor) e Redepósito (valor) creditados por dia, mais uma linha com o número de depositantes distintos daquele dia. Passar o mouse num ponto mostra os três valores do dia.',
-          notes: 'Sem nenhum crédito no período, mostra "Nenhum crédito neste período." no lugar do gráfico.',
+          what: "Barras empilhadas de FTD (valor) e Redepósito (valor) creditados por dia, mais uma linha com o número de depositantes distintos daquele dia. Passar o mouse num ponto mostra os três valores do dia.",
+          notes:
+            'Sem nenhum crédito no período, mostra "Nenhum crédito neste período." no lugar do gráfico.',
         },
       ],
     },
@@ -96,7 +97,7 @@ const screen: HelpScreen = {
           label: "Extrato de créditos",
           what: 'A base da sua comissão, linha a linha: Data, Lead, Valor, Origem (Clique/Afiliado), Oferta (o nome da oferta do link, "—" sem oferta), Clique em (quando o lead clicou, "—" sem clique registrado), Primeiro depósito (Sim/Não) e Reativação (Sim/Não). O total do topo ("Total depositado creditado") é sempre o período inteiro, não só a página visível.',
           notes:
-            'Paginado de 100 em 100 ("Página anterior"/"Próxima página"). Sem nenhum crédito, mostra "Nenhum crédito no período."',
+            'Paginado de 100 em 100 ("Página anterior"/"Próxima página"). No celular, cada crédito vira um cartão (lead, valor, data, origem e marcas). Sem nenhum crédito, mostra "Nenhum crédito no período."; se não carregar, "Não foi possível carregar o extrato." com o botão "Tentar novamente".',
         },
       ],
     },
@@ -104,7 +105,7 @@ const screen: HelpScreen = {
       id: "leads-periodo",
       title: "Leads do período",
       intro:
-        'A carteira: todo lead com crédito seu no período, com busca e filtros, 50 por página.',
+        "A carteira: todo lead com crédito seu no período, com busca e filtros, 50 por página.",
       items: [
         {
           anchor: "rendimento.portfolio.busca",
@@ -120,7 +121,8 @@ const screen: HelpScreen = {
           anchor: "rendimento.portfolio.so-reativados",
           label: "Só reativados",
           what: 'Mostra só os leads marcados como "Reativado" no período (ver o termo no glossário).',
-          notes: "Os dois filtros podem ser ligados juntos; a busca funciona com qualquer combinação deles.",
+          notes:
+            "Os dois filtros podem ser ligados juntos; a busca funciona com qualquer combinação deles.",
         },
         {
           anchor: "rendimento.portfolio.csv",
@@ -130,9 +132,9 @@ const screen: HelpScreen = {
         {
           anchor: "rendimento.portfolio",
           label: "Tabela de leads do período",
-          what: "Colunas: Lead, Creditado, Depósitos, Origem, 1º crédito, Último depósito, Último contato (resultado do contato e data, \"—\" sem contato registrado).",
+          what: 'Colunas: Lead, Creditado, Depósitos, Origem, 1º crédito, Último depósito, Último contato (resultado do contato e data, "—" sem contato registrado).',
           notes:
-            'Clicar no nome do lead abre o histórico dele com você. Carregando mostra "Carregando…"; um erro mostra a mensagem do servidor; sem nenhum resultado mostra "Nenhum lead com crédito neste período." Paginação de 50 em 50, com "Página X de Y" e os botões de página anterior/próxima — a página volta para a primeira sempre que o período, a busca ou um filtro muda, e recua sozinha se a página atual ficar vazia (o total pode cair entre uma consulta e outra, com os créditos recalculados).',
+            'Clicar no nome do lead abre o histórico dele com você (no celular, cada lead vira um cartão e tocar no cartão abre o histórico). Carregando mostra "Carregando…"; um erro mostra a mensagem do servidor e o botão "Tentar novamente"; sem nenhum resultado mostra "Nenhum lead com crédito neste período." (ou "Nenhum lead encontrado com essa busca ou filtro." quando há busca ou filtro ligado) Paginação de 50 em 50, com "Página X de Y" e os botões de página anterior/próxima — a página volta para a primeira sempre que o período, a busca ou um filtro muda, e recua sozinha se a página atual ficar vazia (o total pode cair entre uma consulta e outra, com os créditos recalculados).',
         },
       ],
     },
@@ -156,7 +158,12 @@ const screen: HelpScreen = {
     {
       id: "sem-perfil",
       title: "Sem relatório — perfil não encontrado",
-      what: 'Quando a chamada ao servidor falha (por exemplo o seu usuário não tem mais um perfil de equipe vinculado à casa ativa), a tela mostra a mensagem de erro do servidor no lugar do conteúdo, em vez dos blocos do relatório.',
+      what: 'Quando a chamada ao servidor falha (por exemplo o seu usuário não tem mais um perfil de equipe vinculado à casa ativa), a tela mostra a mensagem de erro do servidor no lugar do conteúdo, em vez dos blocos do relatório, com o botão "Tentar novamente".',
+    },
+    {
+      id: "sem-casa",
+      title: "Sem casa ativa",
+      what: 'Sem nenhuma casa escolhida no seletor do topo, a tela mostra "Escolha uma casa no seletor do topo da tela para ver os dados." no lugar do relatório.',
     },
     {
       id: "carregando",
@@ -212,7 +219,7 @@ const screen: HelpScreen = {
       {
         anchor: "rendimento.portfolio",
         title: "Leads do período",
-        body: "Todo lead com crédito seu no período, com busca, filtros \"Só FTD\"/\"Só reativados\" e exportação em CSV.",
+        body: 'Todo lead com crédito seu no período, com busca, filtros "Só FTD"/"Só reativados" e exportação em CSV.',
         articleSection: "leads-periodo",
       },
     ],

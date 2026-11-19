@@ -33,7 +33,7 @@ import {
   unsupportedVariablesMessage,
 } from "@/lib/expert-template-variables";
 import { listExpertTemplates, renderExpertMessage } from "@/lib/expert-templates.functions";
-import { normalizeBrazilianPhone } from "@/lib/phone-normalization";
+import { normalizePlayerPhone } from "@/lib/phone-normalization";
 
 import { actionErrorMessage } from "./sheet-format";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -68,7 +68,9 @@ export function LeadActions({
   onChanged: () => void;
 }) {
   const playerId = sheet.lead.id;
-  const waNumber = normalizeBrazilianPhone(sheet.lead.telefone)?.replace(/^\+/, "") ?? null;
+  // players.telefone is E.164 for leads from abroad ("+54…"), so a non-Brazil
+  // lead still gets a WhatsApp number (normalizePlayerPhone keeps it).
+  const waNumber = normalizePlayerPhone(sheet.lead.telefone)?.replace(/^\+/, "") ?? null;
 
   // ---------------------------------------------------------------- link
   const [offerUrl, setOfferUrl] = useState("");
@@ -148,13 +150,18 @@ export function LeadActions({
 
   async function openWhatsApp() {
     if (!waNumber || !messageReady) return;
-    // A aba é aberta já no clique (antes do await) para não cair no bloqueio
-    // de pop-up; depois de renderizar, ela vai para o wa.me.
-    const tab = window.open("", "_blank");
+    // Phones: no pre-opened tab (iOS leaves it blank when the app takes over);
+    // navigating this page to wa.me hands off to the WhatsApp app instead.
+    const isTouch = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    // Desktop: the tab opens during the click (before the await) so the popup
+    // blocker lets it through; after rendering, it goes to wa.me.
+    const tab = isTouch ? null : window.open("", "_blank");
     try {
       const { texto } = await render.mutateAsync();
       const url = `https://wa.me/${waNumber}?text=${encodeURIComponent(texto)}`;
-      if (tab) {
+      if (isTouch) {
+        window.location.href = url;
+      } else if (tab) {
         tab.opener = null;
         tab.location.href = url;
       } else {

@@ -115,7 +115,7 @@ export function DashboardTab() {
                 const rate = pct(script.answered, script.total);
                 return (
                   <li key={script.script_id} className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-3 text-[13.5px]">
+                    <div className="flex items-center justify-between gap-3 text-body">
                       <span className="truncate font-medium">
                         {script.name === "Script removido" ? "Roteiro excluído" : script.name}
                       </span>
@@ -145,7 +145,7 @@ export function DashboardTab() {
               {recent.map((call) => (
                 <li
                   key={call.id}
-                  className="flex items-center gap-3 border-b border-border/70 py-2.5 text-[13.5px] last:border-b-0"
+                  className="flex items-center gap-3 border-b border-border/70 py-2.5 text-body last:border-b-0"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">

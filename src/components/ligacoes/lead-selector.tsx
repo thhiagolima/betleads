@@ -69,7 +69,7 @@ export function LeadSelector({ value, onChange }: Props) {
               <ChevronsUpDown className="h-4 w-4 opacity-50" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-[380px] p-0" align="start">
+          <PopoverContent className="w-[min(380px,calc(100vw-2rem))] p-0" align="start">
             <div className="border-b border-border p-2">
               <Input
                 placeholder="Buscar por nome ou telefone..."

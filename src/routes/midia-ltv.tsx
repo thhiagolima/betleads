@@ -5,6 +5,8 @@ import {
   AlertTriangle,
   BarChart3,
   Calendar,
+  ChevronLeft,
+  ChevronRight,
   Image as ImageIcon,
   Loader2,
   RefreshCw,
@@ -26,7 +28,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -38,7 +39,14 @@ import {
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { RetentionPanel } from "@/components/crm-results/retention";
-import { CHART_COLORS, chartAxisProps, chartGridProps, chartTooltipStyle } from "@/lib/chart-theme";
+import {
+  CHART_COLORS,
+  chartAxisProps,
+  chartGridProps,
+  chartTooltipStyle,
+  useCompactCharts,
+} from "@/lib/chart-theme";
+import { formatMoney } from "@/lib/currency";
 import { DataCard } from "@/components/ui-premium/data-card";
 import { EmptyState } from "@/components/ui-premium/empty-state";
 import { MetricCard } from "@/components/ui-premium/metric-card";
@@ -154,11 +162,11 @@ function num(value: number | null | undefined) {
 }
 
 function ratio(value: number | null | undefined) {
-  return value == null ? "-" : `${value.toFixed(2).replace(".", ",")}x`;
+  return value == null ? "—" : `${value.toFixed(2).replace(".", ",")}x`;
 }
 
 function pct(value: number | null | undefined) {
-  return value == null ? "-" : `${value.toFixed(2).replace(".", ",")}%`;
+  return value == null ? "—" : `${value.toFixed(2).replace(".", ",")}%`;
 }
 
 /**
@@ -193,6 +201,16 @@ const VIEWS = [
   { value: "retencao", label: "Retenção" },
 ] as const;
 type View = (typeof VIEWS)[number]["value"];
+
+/** Views of the Mídia tab, below the KPIs. */
+const REPORT_VIEWS = [
+  { value: "creatives", label: "Por criativo" },
+  { value: "audiences", label: "Por público da Meta" },
+  { value: "campaigns", label: "Por campanha da Meta" },
+  { value: "evolution", label: "Evolução" },
+  { value: "diagnostics", label: "Diagnóstico" },
+] as const;
+type ReportView = (typeof REPORT_VIEWS)[number]["value"];
 
 function MediaLtvPage() {
   const navigate = useNavigate();
@@ -276,7 +294,12 @@ function MediaLtvPage() {
         subtitle="Cada jogador carrega o anúncio que o trouxe. Veja quem trouxe cadastro barato, quem trouxe dinheiro e quem continua depositando."
         actions={
           view === "midia" && noMetaConnection ? (
-            <Button asChild size="sm" className="gap-2" {...tourAnchor("midia.header.conectar-meta")}>
+            <Button
+              asChild
+              size="sm"
+              className="gap-2"
+              {...tourAnchor("midia.header.conectar-meta")}
+            >
               <Link to="/webhooks" hash="meta">
                 <Target className="h-3.5 w-3.5" />
                 Conectar Meta
@@ -420,9 +443,7 @@ function VisualizacaoSection({
   // Enquanto o papel carrega, nada fica bloqueado.
   const { active } = useActiveTenant();
   const readOnly = Boolean(active) && active?.role !== "admin" && active?.role !== "super_admin";
-  const [reportView, setReportView] = useState<
-    "creatives" | "audiences" | "campaigns" | "evolution" | "diagnostics"
-  >("creatives");
+  const [reportView, setReportView] = useState<ReportView>("creatives");
   const totals = data?.totals;
   const accounts = metaSummary?.accounts ?? [];
   const selectedAccounts = accounts.filter((account) => account.selected !== false);
@@ -546,7 +567,7 @@ function VisualizacaoSection({
         <div
           role="group"
           aria-label="Período"
-          className="flex max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+          className="flex max-w-full flex-wrap gap-0.5 rounded-xl border border-border bg-card p-[3px]"
         >
           {(Object.keys(periodLabels) as PeriodPreset[]).map((key, index) => (
             <button
@@ -555,7 +576,7 @@ function VisualizacaoSection({
               aria-pressed={!customRange && period === key}
               onClick={() => onPeriodChange(key)}
               className={cn(
-                "h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                "h-10 shrink-0 whitespace-nowrap rounded-lg px-3 text-body font-medium outline-none md:h-9 transition-colors focus-visible:ring-2 focus-visible:ring-ring",
                 !customRange && period === key
                   ? "bg-secondary text-foreground"
                   : "text-muted-foreground hover:text-foreground",
@@ -674,13 +695,13 @@ function VisualizacaoSection({
         />
         <Kpi
           title="Custo por 1º depósito"
-          value={totals?.cpaFtd == null ? "-" : brl2(totals.cpaFtd)}
+          value={totals?.cpaFtd == null ? "—" : brl2(totals.cpaFtd)}
           detail={`${num(totals?.paidFtd)} vindos de anúncio · ${num(totals?.ftd)} na casa`}
           {...tourAnchor("midia.kpis.custo-1o-deposito")}
         />
         <Kpi
           title="Custo por cadastro"
-          value={totals?.cacSignup == null ? "-" : brl2(totals.cacSignup)}
+          value={totals?.cacSignup == null ? "—" : brl2(totals.cacSignup)}
           detail={`${num(totals?.paidPlayers)} cadastros de anúncio · ${num(totals?.players)} na casa`}
           {...tourAnchor("midia.kpis.custo-cadastro")}
         />
@@ -712,114 +733,114 @@ function VisualizacaoSection({
         período por um anúncio (horário de Brasília).
       </p>
 
-      <Tabs value={reportView} onValueChange={(value) => setReportView(value as typeof reportView)}>
-        <TabsList className="app-scrollbar h-auto max-w-full justify-start overflow-x-auto">
-          <TabsTrigger value="creatives" {...tourAnchor("midia.subabas.tabs")}>
-            Por criativo
-          </TabsTrigger>
-          <TabsTrigger value="audiences">Por público da Meta</TabsTrigger>
-          <TabsTrigger value="campaigns">Por campanha da Meta</TabsTrigger>
-          <TabsTrigger value="evolution">Evolução</TabsTrigger>
-          <TabsTrigger value="diagnostics">Diagnóstico</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="max-w-full" {...tourAnchor("midia.subabas.tabs")}>
+        <PageTabs
+          value={reportView}
+          onValueChange={setReportView}
+          label="Visões da mídia"
+          items={REPORT_VIEWS}
+        />
+      </div>
 
-      {reportView === "creatives" && (
-        <CreativeTable
-          creatives={data?.creatives ?? []}
-          others={data?.creativesOthers}
-          totals={totals}
-          isLoading={isLoading}
-        />
-      )}
-      {reportView === "audiences" && (
-        <AudienceTable
-          rows={data?.audiences ?? []}
-          others={data?.audiencesOthers}
-          isLoading={isLoading}
-        />
-      )}
-      {reportView === "campaigns" && (
-        <CampaignTable
-          campaigns={data?.campaigns ?? []}
-          others={data?.campaignsOthers}
-          isLoading={isLoading}
-          orphanRevenue={orphanRevenue}
-        />
-      )}
-      {reportView === "evolution" && (
-        <div className="grid gap-5 xl:grid-cols-2">
-          <DailyChart
-            title="Investimento por dia"
-            subtitle={`${range.days} dias · o que foi gasto em mídia`}
-            data={data?.daily ?? []}
-            dataKey="spend"
-            color={CHART_COLORS.orange}
-            formatter={brl}
+      <div role="tabpanel" aria-labelledby={`tab-${reportView}`}>
+        {reportView === "creatives" && (
+          <CreativeTable
+            creatives={data?.creatives ?? []}
+            others={data?.creativesOthers}
+            totals={totals}
+            isLoading={isLoading}
           />
-          <DailyChart
-            title="1º depósito de anúncio por dia"
-            subtitle={`${range.days} dias`}
-            data={data?.daily ?? []}
-            dataKey="ftd"
-            color={CHART_COLORS.green}
-            formatter={num}
+        )}
+        {reportView === "audiences" && (
+          <AudienceTable
+            rows={data?.audiences ?? []}
+            others={data?.audiencesOthers}
+            isLoading={isLoading}
           />
-          <MoneyMapCard rows={data?.moneyMap ?? []} />
-        </div>
-      )}
-      {reportView === "diagnostics" && adAccountIds.length > 0 && (
-        // Com filtro, só entra tráfego atribuído às contas: a saúde da atribuição
-        // daria 100% / 0 órfãos trivialmente, então não mostramos os números.
-        <p
-          role="note"
-          className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
-        >
-          O diagnóstico de atribuição considera todo o tráfego. Limpe o filtro de BM / conta para
-          ver.
-        </p>
-      )}
-      {reportView === "diagnostics" && adAccountIds.length === 0 && (
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-            <Kpi
-              title="Cadastros"
-              value={num(data?.attributionHealth.total)}
-              detail="no período"
-              {...tourAnchor("midia.diagnostico.kpis")}
+        )}
+        {reportView === "campaigns" && (
+          <CampaignTable
+            campaigns={data?.campaigns ?? []}
+            others={data?.campaignsOthers}
+            isLoading={isLoading}
+            orphanRevenue={orphanRevenue}
+          />
+        )}
+        {reportView === "evolution" && (
+          <div className="grid gap-5 xl:grid-cols-2">
+            <DailyChart
+              title="Investimento por dia"
+              subtitle={`${range.days} dias · o que foi gasto em mídia`}
+              data={data?.daily ?? []}
+              dataKey="spend"
+              color={CHART_COLORS.orange}
+              formatter={brl}
+              axisFormatter={(value) => formatMoney(value, "BRL", { compact: true })}
             />
-            <Kpi
-              title="Com marcação"
-              value={num(data?.attributionHealth.marked)}
-              detail="chegaram com UTM ou ID"
+            <DailyChart
+              title="1º depósito de anúncio por dia"
+              subtitle={`${range.days} dias`}
+              data={data?.daily ?? []}
+              dataKey="ftd"
+              color={CHART_COLORS.green}
+              formatter={num}
             />
-            <Kpi
-              title="Ligados a anúncio"
-              value={num(data?.attributionHealth.matched)}
-              detail={`${pct(data?.attributionHealth.matchRate)} dos marcados por mídia`}
-              tone="success"
-            />
-            <Kpi
-              title="Sem anúncio correspondente"
-              value={num(
-                (data?.attributionHealth.orphan ?? 0) + (data?.attributionHealth.ambiguous ?? 0),
-              )}
-              detail={`${num(data?.attributionHealth.ambiguous)} com nome repetido em mais de um anúncio`}
-            />
-            <Kpi
-              title="Vindos do CRM"
-              value={num(data?.attributionHealth.crm)}
-              detail="link de SMS ou WhatsApp, não é mídia paga"
-            />
-            <Kpi
-              title="Sem UTM"
-              value={num(data?.attributionHealth.missingUtm)}
-              detail="não permitem atribuição"
-            />
+            <MoneyMapCard rows={data?.moneyMap ?? []} />
           </div>
-          <OrphanAttributionTable rows={orphanRows} isLoading={isLoading} />
-        </div>
-      )}
+        )}
+        {reportView === "diagnostics" && adAccountIds.length > 0 && (
+          // Com filtro, só entra tráfego atribuído às contas: a saúde da atribuição
+          // daria 100% / 0 órfãos trivialmente, então não mostramos os números.
+          <p
+            role="note"
+            className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
+          >
+            O diagnóstico de atribuição considera todo o tráfego. Limpe o filtro de BM / conta para
+            ver.
+          </p>
+        )}
+        {reportView === "diagnostics" && adAccountIds.length === 0 && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+              <Kpi
+                title="Cadastros"
+                value={num(data?.attributionHealth.total)}
+                detail="no período"
+                {...tourAnchor("midia.diagnostico.kpis")}
+              />
+              <Kpi
+                title="Com marcação"
+                value={num(data?.attributionHealth.marked)}
+                detail="chegaram com UTM ou ID"
+              />
+              <Kpi
+                title="Ligados a anúncio"
+                value={num(data?.attributionHealth.matched)}
+                detail={`${pct(data?.attributionHealth.matchRate)} dos marcados por mídia`}
+                tone="success"
+              />
+              <Kpi
+                title="Sem anúncio correspondente"
+                value={num(
+                  (data?.attributionHealth.orphan ?? 0) + (data?.attributionHealth.ambiguous ?? 0),
+                )}
+                detail={`${num(data?.attributionHealth.ambiguous)} com nome repetido em mais de um anúncio`}
+              />
+              <Kpi
+                title="Vindos do CRM"
+                value={num(data?.attributionHealth.crm)}
+                detail="link de SMS ou WhatsApp, não é mídia paga"
+              />
+              <Kpi
+                title="Sem UTM"
+                value={num(data?.attributionHealth.missingUtm)}
+                detail="não permitem atribuição"
+              />
+            </div>
+            <OrphanAttributionTable rows={orphanRows} isLoading={isLoading} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -871,6 +892,7 @@ function DailyChart({
   dataKey,
   color,
   formatter,
+  axisFormatter,
 }: {
   title: string;
   subtitle: string;
@@ -878,7 +900,11 @@ function DailyChart({
   dataKey: "spend" | "ftd";
   color: string;
   formatter: (value: number) => string;
+  /** Compact axis label for phones (e.g. "R$ 1,2 mil"); defaults to `formatter`. */
+  axisFormatter?: (value: number) => string;
 }) {
+  const compactCharts = useCompactCharts();
+  const tick = compactCharts && axisFormatter ? axisFormatter : formatter;
   return (
     <DataCard title={title} description={subtitle} bodyClassName="h-[250px] pt-3">
       <ResponsiveContainer width="100%" height="100%">
@@ -893,8 +919,8 @@ function DailyChart({
           <XAxis dataKey="label" {...chartAxisProps} />
           <YAxis
             {...chartAxisProps}
-            tickFormatter={(value) => formatter(Number(value))}
-            width={58}
+            tickFormatter={(value) => tick(Number(value))}
+            width={compactCharts ? 56 : 78}
           />
           <Tooltip
             cursor={{ stroke: color, strokeOpacity: 0.35 }}
@@ -959,23 +985,34 @@ function MoneyMapCard({ rows }: { rows: MoneyRow[] }) {
               {rows.length === 0 ? 0 : (current - 1) * pageSize + 1}–
               {Math.min(current * pageSize, rows.length)} de {num(rows.length)} criativos
             </span>
-            <div className="ml-auto flex flex-wrap gap-2">
-              {Array.from({ length: Math.min(totalPages, 10) }).map((_, index) => {
-                const n = index + 1;
-                return (
-                  <Button
-                    key={n}
-                    variant={n === current ? "default" : "outline"}
-                    size="sm"
-                    className="h-9 w-9 p-0"
-                    onClick={() => setPage(n)}
-                    {...(index === 0 ? tourAnchor("midia.evolucao.money-map-paginacao") : {})}
-                  >
-                    {n}
-                  </Button>
-                );
-              })}
-            </div>
+            {totalPages > 1 && (
+              <div
+                className="ml-auto flex flex-wrap items-center gap-2"
+                {...tourAnchor("midia.evolucao.money-map-paginacao")}
+              >
+                <span className="tabular-nums">
+                  página {current} de {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={current === 1}
+                  onClick={() => setPage(current - 1)}
+                >
+                  <ChevronLeft className="mr-1 size-4" aria-hidden="true" />
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={current === totalPages}
+                  onClick={() => setPage(current + 1)}
+                >
+                  Próxima
+                  <ChevronRight className="ml-1 size-4" aria-hidden="true" />
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1284,10 +1321,10 @@ function OrphanAttributionTable({
               <TableRow key={`${row.campaign}-${row.creative}-${row.source ?? ""}`}>
                 <TableCell className="font-semibold">{row.campaign}</TableCell>
                 <TableCell>{row.creative}</TableCell>
-                <TableCell>{row.adset ?? "-"}</TableCell>
+                <TableCell>{row.adset ?? "—"}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
-                    <span>{row.source ?? row.provider ?? "-"}</span>
+                    <span>{row.source ?? row.provider ?? "—"}</span>
                     <AttributionBadge status={row.ambiguous ? "ambiguous" : "orphan_campaign"} />
                   </div>
                 </TableCell>
@@ -1326,7 +1363,6 @@ function CreativeTable({
       title="Criativo por criativo"
       description="Do anúncio que mais devolveu para o que menos devolveu, em depósitos dos jogadores que ele trouxe"
       icon={<Target className="h-4 w-4" />}
-      bodyClassName="overflow-x-auto"
     >
       {rows.length === 0 ? (
         <EmptyState
@@ -1346,11 +1382,13 @@ function CreativeTable({
         />
       ) : (
         <div className="space-y-3">
-          <div className="max-h-[560px] overflow-auto pr-1">
+          {/* One scroll area only (the table's own, sideways): no nested
+              vertical scroller trapping the finger on phones. */}
+          <div>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Criativo</TableHead>
+                  <TableHead className="sticky left-0 z-10 bg-card">Criativo</TableHead>
                   <TableHead className="text-right">Investido</TableHead>
                   <TableHead className="text-right">Cliques no link</TableHead>
                   <TableHead className="text-right">Cadastros</TableHead>
@@ -1365,11 +1403,16 @@ function CreativeTable({
               <TableBody>
                 {rows.map((row) => (
                   <TableRow key={`${row.ad_id ?? row.creative}`}>
-                    <TableCell>
-                      <div className="flex min-w-[260px] items-center gap-3">
+                    <TableCell className="sticky left-0 z-10 bg-card">
+                      <div className="flex w-48 items-center gap-3 sm:w-[260px]">
                         <CreativeThumb src={row.thumbnail_url} label={row.creative} />
                         <div className="min-w-0">
-                          <p className="truncate font-semibold">{row.creative}</p>
+                          <p
+                            className="line-clamp-2 break-words font-semibold"
+                            title={row.creative}
+                          >
+                            {row.creative}
+                          </p>
                           <p className="truncate text-xs text-muted-foreground">
                             {row.campaign ?? "Sem campanha"}
                           </p>
@@ -1409,7 +1452,9 @@ function CreativeTable({
                 ))}
                 {othersCount > 0 && (
                   <TableRow className="text-muted-foreground">
-                    <TableCell>Outros {num(othersCount)} criativos</TableCell>
+                    <TableCell className="sticky left-0 z-10 bg-card">
+                      Outros {num(othersCount)} criativos
+                    </TableCell>
                     <TableCell className="text-right">{brl(others?.spend)}</TableCell>
                     <TableCell className="text-right">{num(others?.linkClicks)}</TableCell>
                     <TableCell className="text-right">{num(others?.players)}</TableCell>
@@ -1419,8 +1464,10 @@ function CreativeTable({
                     <TableCell className="text-right">—</TableCell>
                   </TableRow>
                 )}
-                <TableRow className="sticky bottom-0 bg-muted font-semibold">
-                  <TableCell>Total · {num(rows.length + othersCount)} criativos</TableCell>
+                <TableRow className="bg-muted font-semibold">
+                  <TableCell className="sticky left-0 z-10 bg-muted">
+                    Total · {num(rows.length + othersCount)} criativos
+                  </TableCell>
                   <TableCell className="text-right">{brl(totals?.spend)}</TableCell>
                   <TableCell className="text-right">{num(totals?.linkClicks)}</TableCell>
                   <TableCell className="text-right">{num(totals?.paidPlayers)}</TableCell>

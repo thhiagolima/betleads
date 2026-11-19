@@ -108,9 +108,9 @@ const EXTRA_COLUMNS: ColumnDef[] = [
 const ALL_COLUMNS = [...CORE_COLUMNS, ...EXTRA_COLUMNS];
 
 export const GOAL_STATUS_CLASS: Record<GoalStatus, string> = {
-  green: "bg-emerald-500/15 text-emerald-300",
-  yellow: "bg-amber-500/15 text-amber-300",
-  red: "bg-rose-500/15 text-rose-300",
+  green: "bg-success/15 text-success",
+  yellow: "bg-warning/15 text-warning",
+  red: "bg-danger/15 text-danger",
   gray: "bg-muted/40 text-muted-foreground",
 };
 
@@ -166,7 +166,7 @@ function VariationLabel({
   if (change === null) return null;
   const good = column.invert ? change <= 0 : change >= 0;
   return (
-    <span className={cn("block text-[10px]", good ? "text-emerald-400" : "text-rose-400")}>
+    <span className={cn("block text-meta", good ? "text-success" : "text-danger")}>
       {ratio ? formatPp(change) : `${change >= 0 ? "▲" : "▼"} ${formatPct(Math.abs(change))}`}
     </span>
   );
@@ -208,10 +208,20 @@ export function GroupScoreboard({
         <div className="overflow-x-auto rounded-lg border border-border/40">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border/40 text-left text-xs uppercase text-muted-foreground">
-                <th className="px-3 py-2">Casa</th>
+              <tr className="border-b border-border/40 text-left text-meta uppercase text-muted-foreground">
+                <th className="sticky left-0 z-10 bg-card px-3 py-2">Casa</th>
                 {columns.map((column) => (
-                  <th key={column.key} className="px-3 py-2 text-right">
+                  <th
+                    key={column.key}
+                    className="px-3 py-2 text-right"
+                    aria-sort={
+                      sort?.column === column.key
+                        ? sort.direction === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : "none"
+                    }
+                  >
                     {/* The sort trigger wraps only the (possibly truncated)
                       label text; a TermTooltip, when present, is a sibling
                       so this never nests a <button> inside a <button>. */}
@@ -236,15 +246,15 @@ export function GroupScoreboard({
                   key={row.id}
                   className="border-b border-border/20 last:border-0 hover:bg-foreground/[0.03]"
                 >
-                  <td className="px-3 py-2 font-medium">
+                  <td className="sticky left-0 z-10 max-w-[9rem] bg-card px-3 py-2 font-medium sm:max-w-none">
                     <button
                       type="button"
-                      className="rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="min-h-10 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
                       onClick={() => onRowClick?.(row.id)}
                     >
                       {row.nome}
                       {row.moeda && row.moeda !== "BRL" && (
-                        <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                        <span className="ml-1.5 text-meta font-normal text-muted-foreground">
                           {row.moeda}
                         </span>
                       )}
@@ -261,7 +271,7 @@ export function GroupScoreboard({
                       <td
                         key={column.key}
                         className={cn(
-                          "px-3 py-2 text-right",
+                          "whitespace-nowrap px-3 py-2 text-right",
                           goal && GOAL_STATUS_CLASS[goal.status],
                         )}
                       >
@@ -282,12 +292,14 @@ export function GroupScoreboard({
                           hasPrevious={periodHasData(row.previous)}
                         />
                         {goal && (
-                          <span className="block text-[10px] opacity-60">
+                          <span className="block whitespace-nowrap text-meta text-muted-foreground">
                             meta {formatValue(column.format, goal.target, row.moeda)}
                           </span>
                         )}
                         {!goal && column.goalMetric && (
-                          <span className="block text-[10px] opacity-60">sem meta</span>
+                          <span className="block whitespace-nowrap text-meta text-muted-foreground">
+                            sem meta
+                          </span>
                         )}
                       </td>
                     );
@@ -309,7 +321,8 @@ export function GroupScoreboard({
         </div>
         <button
           type="button"
-          className="text-xs text-muted-foreground hover:text-foreground"
+          className="min-h-10 text-meta text-muted-foreground hover:text-foreground sm:min-h-0"
+          aria-expanded={moreColumns}
           onClick={() => setMoreColumns((current) => !current)}
         >
           {moreColumns ? "menos colunas" : "mais colunas"}

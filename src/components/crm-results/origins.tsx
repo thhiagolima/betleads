@@ -8,6 +8,7 @@ import { brl, num } from "@/lib/format";
 import { firstIndexWhere, tourAnchor } from "@/help/anchor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -129,7 +130,7 @@ export function Origins({
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div
-            className="inline-flex rounded-lg bg-muted p-1 text-sm"
+            className="inline-flex w-fit rounded-lg bg-muted p-1 text-sm"
             role="group"
             aria-label="Tipo"
             {...tourAnchor("resultados.origens.tipo")}
@@ -142,8 +143,8 @@ export function Origins({
                 onClick={() => setType(filter.key)}
                 className={
                   type === filter.key
-                    ? "rounded-md bg-background px-3 py-1.5 font-medium shadow-sm"
-                    : "px-3 py-1.5 text-muted-foreground"
+                    ? "h-9 rounded-md bg-background px-3 font-medium shadow-sm md:h-8"
+                    : "h-9 rounded-md px-3 text-muted-foreground md:h-8"
                 }
               >
                 {filter.label}
@@ -152,11 +153,11 @@ export function Origins({
           </div>
           <label className="relative block">
             <Search
-              className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
             />
-            <input
-              className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm sm:w-64"
+            <Input
+              className="w-full pl-9 sm:w-64"
               value={search}
               onChange={(event) => onSearch(event.target.value)}
               placeholder="Buscar origem..."
@@ -171,7 +172,7 @@ export function Origins({
           <TableHeader>
             <TableRow>
               <TableHead
-                className="sticky left-0 z-10 min-w-56 bg-card"
+                className="sticky left-0 z-10 min-w-40 bg-card sm:min-w-56"
                 aria-sort={sort.key === "name" ? (sort.desc ? "descending" : "ascending") : "none"}
                 {...tourAnchor("resultados.origens.ordenar")}
               >
@@ -229,11 +230,13 @@ export function Origins({
                           <Button
                             size="icon"
                             variant="ghost"
-                            className="-ml-2 h-7 w-7 shrink-0"
+                            className="-ml-2 size-10 shrink-0 md:size-7"
                             aria-expanded={expanded}
                             aria-label={`${expanded ? "Fechar" : "Ver"} mensagens de ${source.name}`}
                             onClick={() => setOpen(expanded ? null : id)}
-                            {...(index === firstExpandable ? tourAnchor("resultados.origens.expandir") : {})}
+                            {...(index === firstExpandable
+                              ? tourAnchor("resultados.origens.expandir")
+                              : {})}
                           >
                             {expanded ? (
                               <ChevronDown className="h-4 w-4" />
@@ -242,7 +245,7 @@ export function Origins({
                             )}
                           </Button>
                         ) : (
-                          <span className="w-5 shrink-0" />
+                          <span className="w-5 shrink-0" aria-hidden="true" />
                         )}
                         <SourceName source={source} />
                       </div>

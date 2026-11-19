@@ -23,7 +23,8 @@ import {
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { formatBrtDate } from "@/components/expert/sheet-format";
 import { tourAnchor } from "@/help/anchor";
-import { downloadCsv } from "@/components/rendimento/download-csv";
+import { csvDeliveryMessage, downloadCsv } from "@/components/rendimento/download-csv";
+import { LoadError } from "@/components/rendimento/load-states";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { CONTATO_LABEL, type ContatoResultado } from "@/lib/expert-lead-labels";
 import type { PeriodKey } from "@/lib/expert-period";
@@ -60,7 +61,8 @@ function LeadButton({ row, onOpen }: { row: PortfolioRow; onOpen: (lead: LeadRef
   return (
     <button
       type="button"
-      className="text-left font-medium hover:underline"
+      // Phones: a 40px tap target even though it reads as a plain name.
+      className="inline-flex min-h-10 items-center text-left font-medium hover:underline sm:min-h-0"
       onClick={() => onOpen({ playerId: row.playerId, nome: row.nome })}
     >
       {row.nome}
@@ -207,9 +209,9 @@ export function PortfolioTable({
   const exportFn = useServerFn(exportExpertPortfolioCsv);
   const exportMutation = useMutation({
     mutationFn: () => exportFn({ data: filters }),
-    onSuccess: (result) => {
-      downloadCsv(result.filename, result.csv);
-      toast.success("CSV exportado.");
+    onSuccess: async (result) => {
+      const message = csvDeliveryMessage(await downloadCsv(result.filename, result.csv));
+      if (message) toast.success(message);
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -274,49 +276,86 @@ export function PortfolioTable({
           </div>
         </div>
 
-        {portfolioQuery.isLoading ? (
+        {portfolioQuery.isError ? (
+          <LoadError
+            message={portfolioQuery.error.message || "Não foi possível carregar os leads."}
+            onRetry={() => void portfolioQuery.refetch()}
+          />
+        ) : portfolioQuery.isPending ? (
           <p className="py-6 text-center text-muted-foreground">Carregando…</p>
-        ) : portfolioQuery.isError ? (
-          <p className="py-6 text-center text-muted-foreground">{portfolioQuery.error.message}</p>
         ) : rows.length === 0 ? (
           <p className="py-6 text-center text-muted-foreground">
-            Nenhum lead com crédito neste período.
+            {search || onlyFtd || onlyReativados
+              ? "Nenhum lead encontrado com essa busca ou filtro."
+              : "Nenhum lead com crédito neste período."}
           </p>
         ) : (
           <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Lead</TableHead>
-                  <TableHead>Creditado</TableHead>
-                  <TableHead>Depósitos</TableHead>
-                  <TableHead>Origem</TableHead>
-                  <TableHead>1º crédito</TableHead>
-                  <TableHead>Último depósito</TableHead>
-                  <TableHead>Último contato</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.playerId}>
-                    <TableCell>
-                      <span className="flex flex-wrap items-center gap-2">
-                        <LeadButton row={row} onOpen={onOpenLead} />
-                        <LeadMarks row={row} />
+            {/* Phones: one card per lead; tapping it opens the lead's history. */}
+            <ul className="space-y-2 md:hidden">
+              {rows.map((row) => (
+                <li key={row.playerId}>
+                  <button
+                    type="button"
+                    onClick={() => onOpenLead({ playerId: row.playerId, nome: row.nome })}
+                    className="flex min-h-11 w-full flex-col gap-0.5 rounded-lg border border-border/60 px-3 py-2.5 text-left hover:bg-muted/40"
+                  >
+                    <span className="flex w-full items-baseline justify-between gap-3">
+                      <span className="min-w-0 truncate text-body font-medium">{row.nome}</span>
+                      <span className="shrink-0 text-body font-semibold tabular-nums">
+                        {money(row.creditado)}
                       </span>
-                    </TableCell>
-                    <TableCell className="tabular-nums">{money(row.creditado)}</TableCell>
-                    <TableCell className="tabular-nums">{num(row.depositos)}</TableCell>
-                    <TableCell>{ORIGEM_LABEL[row.origem]}</TableCell>
-                    <TableCell>{formatBrtDate(row.primeiroCredito)}</TableCell>
-                    <TableCell>
+                    </span>
+                    <span className="text-label text-muted-foreground">
+                      {num(row.depositos)} {row.depositos === 1 ? "depósito" : "depósitos"} ·{" "}
+                      {ORIGEM_LABEL[row.origem]} · último{" "}
                       {row.ultimoDeposito ? formatBrtDate(row.ultimoDeposito) : "—"}
-                    </TableCell>
-                    <TableCell>{contatoText(row.ultimoContato)}</TableCell>
+                    </span>
+                    {row.ultimoContato && (
+                      <span className="text-label text-muted-foreground">
+                        Contato: {contatoText(row.ultimoContato)}
+                      </span>
+                    )}
+                    <LeadMarks row={row} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Lead</TableHead>
+                    <TableHead>Creditado</TableHead>
+                    <TableHead>Depósitos</TableHead>
+                    <TableHead>Origem</TableHead>
+                    <TableHead>1º crédito</TableHead>
+                    <TableHead>Último depósito</TableHead>
+                    <TableHead>Último contato</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow key={row.playerId}>
+                      <TableCell>
+                        <span className="flex flex-wrap items-center gap-2">
+                          <LeadButton row={row} onOpen={onOpenLead} />
+                          <LeadMarks row={row} />
+                        </span>
+                      </TableCell>
+                      <TableCell className="tabular-nums">{money(row.creditado)}</TableCell>
+                      <TableCell className="tabular-nums">{num(row.depositos)}</TableCell>
+                      <TableCell>{ORIGEM_LABEL[row.origem]}</TableCell>
+                      <TableCell>{formatBrtDate(row.primeiroCredito)}</TableCell>
+                      <TableCell>
+                        {row.ultimoDeposito ? formatBrtDate(row.ultimoDeposito) : "—"}
+                      </TableCell>
+                      <TableCell>{contatoText(row.ultimoContato)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
             {totalPages > 1 && (
               <nav
                 aria-label="Paginação dos leads do período"
@@ -327,7 +366,7 @@ export function PortfolioTable({
                 </span>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   aria-label="Página anterior"
                   onClick={() => setPage(Math.max(0, page - 1))}
                   disabled={page === 0}
@@ -336,7 +375,7 @@ export function PortfolioTable({
                 </Button>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   aria-label="Próxima página"
                   onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
                   disabled={page >= totalPages - 1}

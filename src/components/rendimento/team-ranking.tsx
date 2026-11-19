@@ -18,6 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useMoney } from "@/hooks/use-tenant-currency";
+import { InfoTip } from "@/components/crm-results/shared";
+import { cn } from "@/lib/utils";
 import { tourAnchor } from "@/help/anchor";
 import { VariationTag } from "@/components/rendimento/report-cards";
 import { CLIQUE_DEPOSITO_DEFINICAO } from "@/components/rendimento/report-funnel";
@@ -48,7 +50,9 @@ const DEFAULT_SORT: { key: SortKey; direction: SortDirection } = {
   direction: "desc",
 };
 
-const COLUMNS: { key: SortKey; label: string; align?: "right" }[] = [
+type Column = { key: SortKey; label: string; align?: "right"; info?: string };
+
+const COLUMNS: Column[] = [
   { key: "nome", label: "Pessoa" },
   { key: "tipoLabel", label: "Tipo" },
   { key: "creditado", label: "Creditado", align: "right" },
@@ -56,7 +60,13 @@ const COLUMNS: { key: SortKey; label: string; align?: "right" }[] = [
   { key: "ftds", label: "FTD", align: "right" },
   { key: "redepositos", label: "Redepósitos", align: "right" },
   { key: "reativados", label: "Reativados", align: "right" },
-  { key: "cliqueDeposito", label: "Clique→depósito (%)", align: "right" },
+  {
+    key: "cliqueDeposito",
+    label: "Clique→depósito (%)",
+    align: "right",
+    // Visible (i) instead of a cell `title`, which a phone never shows.
+    info: CLIQUE_DEPOSITO_DEFINICAO,
+  },
   { key: "ticket", label: "Ticket médio", align: "right" },
 ];
 
@@ -110,7 +120,7 @@ function SortHeader({
   onSort,
   first = false,
 }: {
-  column: { key: SortKey; label: string; align?: "right" };
+  column: Column;
   active: boolean;
   direction: SortDirection;
   onSort: (key: SortKey) => void;
@@ -119,19 +129,31 @@ function SortHeader({
 }) {
   const Icon = active ? (direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
   return (
-    <TableHead className={column.align === "right" ? "text-right" : undefined}>
-      <button
-        type="button"
-        onClick={() => onSort(column.key)}
-        className={`inline-flex items-center gap-1 ${
-          column.align === "right" ? "flex-row-reverse" : ""
-        } hover:text-foreground ${active ? "text-foreground" : "text-muted-foreground"}`}
-        aria-label={`Ordenar por ${column.label}`}
-        {...(first ? tourAnchor("equipe.ranking.ordenar") : {})}
-      >
-        {column.label}
-        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
+    <TableHead
+      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
+      className={cn(
+        column.align === "right" && "text-right",
+        // The name column stays visible while the table scrolls sideways.
+        first && "sticky left-0 z-10 bg-card",
+      )}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => onSort(column.key)}
+          className={cn(
+            "inline-flex min-h-10 items-center gap-1 hover:text-foreground",
+            column.align === "right" && "flex-row-reverse",
+            active ? "text-foreground" : "text-muted-foreground",
+          )}
+          aria-label={`Ordenar por ${column.label}`}
+          {...(first ? tourAnchor("equipe.ranking.ordenar") : {})}
+        >
+          {column.label}
+          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+        {column.info && <InfoTip text={column.info} />}
+      </span>
     </TableHead>
   );
 }
@@ -183,12 +205,12 @@ export function TeamRanking({ rows }: { rows: TeamReportRow[] }) {
             <TableBody>
               {sortedRows.map((row) => (
                 <TableRow key={row.expertId}>
-                  <TableCell className="font-medium">
+                  <TableCell className="sticky left-0 z-10 bg-card font-medium">
                     <span className="inline-flex flex-wrap items-center gap-2">
                       <Link
                         to="/rendimento/equipe/$expertId"
                         params={{ expertId: row.expertId }}
-                        className="hover:underline"
+                        className="inline-flex min-h-10 items-center hover:underline sm:min-h-0"
                       >
                         {row.nome}
                       </Link>
@@ -201,16 +223,9 @@ export function TeamRanking({ rows }: { rows: TeamReportRow[] }) {
                     <VariationTag value={row.variacao} />
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{num(row.ftds)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{num(row.redepositos)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{num(row.reativados)}</TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {num(row.redepositos)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {num(row.reativados)}
-                  </TableCell>
-                  <TableCell
-                    className="text-right tabular-nums"
-                    title={CLIQUE_DEPOSITO_DEFINICAO}
-                  >
                     {pctLabel(row.cliqueDeposito)}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">

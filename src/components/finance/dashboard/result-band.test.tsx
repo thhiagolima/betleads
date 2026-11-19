@@ -37,10 +37,10 @@ describe("ResultBand", () => {
     const profit = card(html, "cashResult");
     expect(profit).toContain("Lucro líquido");
     expect(profit).toContain("▲ 15,0%");
-    expect(profit).toContain("text-emerald-400");
-    expect(profit).toContain("xl:text-[40px]");
-    expect(profit).toContain("whitespace-nowrap");
-    expect(profit).toContain("bg-emerald-500/");
+    expect(profit).toContain("text-success");
+    expect(profit).toContain("text-[clamp(1.5rem,10cqi,2.5rem)]");
+    expect(profit).toContain("@container");
+    expect(profit).toContain("bg-success/");
 
     const margin = card(html, "margin");
     expect(margin).toContain("Margem");
@@ -50,8 +50,7 @@ describe("ResultBand", () => {
     const ads = card(html, "adSpend");
     expect(ads).toContain("Anúncios");
     expect(ads).toContain("R$ 1.000,00");
-    expect(ads).toContain("text-[22px]");
-    expect(ads).toContain("xl:text-[30px]");
+    expect(ads).toContain("text-[clamp(1.25rem,9cqi,1.875rem)]");
     expect(html).not.toContain("n.a.");
   });
 
@@ -70,9 +69,9 @@ describe("ResultBand", () => {
     // The previous period has data but no comparable profit: no fallback text.
     expect(card(html, "cashResult")).not.toContain("Sem período anterior para comparar");
     expect(card(html, "adSpend")).toContain("▲ 20,0%");
-    expect(card(html, "adSpend")).toContain("text-rose-400");
+    expect(card(html, "adSpend")).toContain("text-danger");
     expect(card(html, "cashResult")).toContain("Lucro líquido (3 casas)");
-    expect(card(html, "cashResult")).toContain("bg-rose-500/");
+    expect(card(html, "cashResult")).toContain("bg-danger/");
     expect(html).toContain("xl:grid-cols-[1.6fr_1fr_1fr_1fr]");
     expect(card(html, "cashResult")).toContain("sm:col-span-2");
   });

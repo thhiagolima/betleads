@@ -89,7 +89,7 @@ function RetornosSection({ followups }: { followups: ExpertFollowupDue[] }) {
             <Link
               to="/expert/leads/$playerId"
               params={{ playerId: followup.playerId }}
-              className="min-w-0 hover:underline"
+              className="flex min-h-11 min-w-0 flex-col justify-center hover:underline"
             >
               <span className="flex flex-wrap items-center gap-2">
                 <span className="text-body font-medium">{followup.nome}</span>
@@ -125,11 +125,11 @@ function EnteredRiskSection({ leads }: { leads: ExpertLeadEnteredRisk[] }) {
       <h3 className="mb-1.5 text-label font-medium text-muted-foreground">Entraram em risco</h3>
       <ul className="divide-y divide-border/70">
         {leads.map((lead: ExpertLeadEnteredRisk) => (
-          <li key={lead.playerId} className="py-2.5">
+          <li key={lead.playerId} className="py-1">
             <Link
               to="/expert/leads/$playerId"
               params={{ playerId: lead.playerId }}
-              className="flex items-center justify-between gap-3 hover:underline"
+              className="flex min-h-11 items-center justify-between gap-3 hover:underline"
             >
               <span className="text-body font-medium">{lead.nome}</span>
               <span className="shrink-0 text-label text-muted-foreground">
@@ -153,11 +153,11 @@ function ClickedNoDepositSection({ leads }: { leads: ExpertLeadClickedNoDeposit[
       </h3>
       <ul className="divide-y divide-border/70">
         {leads.map((lead: ExpertLeadClickedNoDeposit) => (
-          <li key={lead.playerId} className="py-2.5">
+          <li key={lead.playerId} className="py-1">
             <Link
               to="/expert/leads/$playerId"
               params={{ playerId: lead.playerId }}
-              className="flex items-center justify-between gap-3 hover:underline"
+              className="flex min-h-11 items-center justify-between gap-3 hover:underline"
             >
               <span className="min-w-0">
                 <span className="text-body font-medium">{lead.nome}</span>
@@ -195,11 +195,15 @@ function ParaChamarHojeCard() {
     queryFn: () => listClickedFn(),
   });
 
-  const loading = followupsQuery.isLoading || riskQuery.isLoading || clickedQuery.isLoading;
+  const queries = [followupsQuery, riskQuery, clickedQuery];
+  const loading = queries.some((q) => q.isLoading);
+  const failed = queries.filter((q) => q.isError);
   const followups = followupsQuery.data ?? [];
   const risk = riskQuery.data ?? [];
   const clicked = clickedQuery.data ?? [];
-  const allEmpty = !loading && followups.length === 0 && risk.length === 0 && clicked.length === 0;
+  const hasItems = followups.length > 0 || risk.length > 0 || clicked.length > 0;
+  // "Nada para hoje" only when every list really came back empty.
+  const allEmpty = !loading && failed.length === 0 && !hasItems;
 
   return (
     <Card>
@@ -208,10 +212,26 @@ function ParaChamarHojeCard() {
       </CardHeader>
       <CardContent className="space-y-5">
         {loading && <p className="py-6 text-center text-muted-foreground">Carregando…</p>}
+        {!loading && failed.length > 0 && (
+          <div className="flex flex-col items-center gap-2 py-4 text-center" role="alert">
+            <p className="text-body text-destructive">
+              {hasItems
+                ? "Parte da lista não carregou. O que aparece abaixo pode estar incompleto."
+                : "Não foi possível carregar quem chamar hoje."}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => failed.forEach((q) => void q.refetch())}
+            >
+              Tentar novamente
+            </Button>
+          </div>
+        )}
         {allEmpty && (
           <p className="py-6 text-center text-muted-foreground">Nada para hoje. Bom trabalho!</p>
         )}
-        {!loading && !allEmpty && (
+        {!loading && hasItems && (
           <>
             <RetornosSection followups={followups} />
             <EnteredRiskSection leads={risk} />
@@ -344,7 +364,7 @@ function ExpertHomePage() {
 
           <LiveFeed events={data.liveEvents} playerLink="expert" />
 
-          <p className="text-xs leading-relaxed text-muted-foreground">
+          <p className="text-meta leading-relaxed text-muted-foreground">
             Só entram os seus leads
             {tipo === "total" ? " (com acesso total, todos os jogadores da casa)" : ""}. Recuperado
             pelo CRM considera depósitos feitos em até 7 dias depois de um clique no link de
@@ -359,7 +379,7 @@ function ExpertHomePage() {
 
       <div className="flex flex-wrap gap-3 sm:gap-4">
         <HomeCard className="w-fit p-4 sm:p-5">
-          <h2 className="text-[15px] font-semibold">Seus leads: {num(totalLeads)}</h2>
+          <h2 className="text-section">Seus leads: {num(totalLeads)}</h2>
           <Button asChild className="mt-3 gap-2">
             <Link to="/expert/leads">
               Ver leads
@@ -368,8 +388,8 @@ function ExpertHomePage() {
           </Button>
         </HomeCard>
         <HomeCard className="w-fit max-w-md p-4 sm:p-5">
-          <h2 className="text-[15px] font-semibold">Seu rendimento</h2>
-          <p className="mt-1 text-[12.5px] text-muted-foreground">
+          <h2 className="text-section">Seu rendimento</h2>
+          <p className="mt-1 text-label text-muted-foreground">
             Depósitos creditados a você (clique no seu link ou seu ID de afiliado), a base da sua
             comissão.
           </p>

@@ -37,7 +37,7 @@ export function sendsBetleadsNote(rangeFrom: string, betleadsSince: string | nul
   return betleadsMissingNote(betleadsSince);
 }
 
-const AMBER = "text-xs text-amber-500 dark:text-amber-300";
+const AMBER = "text-xs text-warning";
 
 /**
  * An Envios amount that never reads as a real R$ 0 when a provider cost is
@@ -129,7 +129,7 @@ export function SendsBlock({
               {exemptHouse && (
                 <span
                   data-tag="provider-cost"
-                  className="rounded-full border border-border px-2 text-[11px] text-muted-foreground"
+                  className="rounded-full border border-border px-2 text-meta text-muted-foreground"
                 >
                   custo do provedor
                 </span>
@@ -146,7 +146,7 @@ export function SendsBlock({
           }
           value={
             line.missingCost ? (
-              <span className="text-xs text-amber-300">{MISSING_PROVIDER_COST}</span>
+              <span className="text-xs text-warning">{MISSING_PROVIDER_COST}</span>
             ) : (
               formatBRL(line.amount)
             )

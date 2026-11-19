@@ -27,7 +27,7 @@ const screen: HelpScreen = {
   tabSearchParam: "aba",
   title: "Relatório de rendimento",
   purpose:
-    "O relatório de rendimento de uma pessoa específica da equipe, visto pelo admin: os mesmos blocos de \"Meu rendimento\", mais editar os dados da pessoa, ativar/desativar e, na aba Campanhas, revisar e aprovar os envios dela.",
+    'O relatório de rendimento de uma pessoa específica da equipe, visto pelo admin: os mesmos blocos de "Meu rendimento", mais editar os dados da pessoa, ativar/desativar e, na aba Campanhas, revisar e aprovar os envios dela.',
   roles: ["admin"],
   terms: [
     "creditado",
@@ -93,7 +93,7 @@ const screen: HelpScreen = {
         },
         {
           label: "IDs de afiliado",
-          what: 'Os IDs de afiliado vinculados a esta pessoa, como chips removíveis (ícone "x" em cada um). Digite um ID e pressione Enter para adicionar; a lista de sugestões abaixo mostra IDs de afiliado da casa ainda sem expert, com a quantidade de leads de cada um.',
+          what: 'Os IDs de afiliado vinculados a esta pessoa, como chips removíveis (ícone "x" em cada um). Digite um ID e toque em "Adicionar" (ou pressione Enter); um ID digitado e não adicionado também entra ao sair do campo ou ao salvar; a lista de sugestões abaixo mostra IDs de afiliado da casa ainda sem expert, com a quantidade de leads de cada um.',
           notes:
             'Erros possíveis: "Esse ID já foi adicionado." e "Máximo de 20 IDs de afiliado." (limite de 20 por pessoa).',
         },
@@ -118,7 +118,7 @@ const screen: HelpScreen = {
           label: "Cancelar / Salvar",
           what: 'Salvar grava as alterações (toast "Expert atualizado"); enquanto salva o botão mostra "Salvando…". Cancelar fecha sem salvar.',
           notes:
-            'Fica desabilitado até o nome ser preenchido (e sem nenhum erro de validação nos outros campos).',
+            "Fica desabilitado até o nome ser preenchido (e sem nenhum erro de validação nos outros campos).",
         },
       ],
     },
@@ -141,15 +141,15 @@ const screen: HelpScreen = {
         },
         {
           anchor: "pessoa.campanhas.teto",
-          label: 'Uso do teto · {mês}',
+          label: "Uso do teto · {mês}",
           what: 'A barra de uso do teto mensal: "{usado} de {teto}" com uma barra de progresso, ou só "{usado} no mês" quando a pessoa não tem teto. O texto ao lado da barra mostra a situação: "Sem teto", "Envios bloqueados (teto R$ 0,00)", "Teto atingido" ou "X% do teto".',
           notes:
-            'Com campanhas pendentes de aprovação, aparece abaixo "N campanhas aguardando aprovação, estimadas em R$ X." (singular "1 campanha aguardando"). Texto fixo: "Soma de SMS, e-mail e voz no mês, pelo preço cobrado da casa." Enquanto carrega mostra "Carregando…"; se falhar, "Não foi possível carregar o uso."',
+            'Com campanhas pendentes de aprovação, aparece abaixo "N campanhas aguardando aprovação, estimadas em R$ X." (singular "1 campanha aguardando"). Texto fixo: "Soma de SMS, e-mail e voz no mês, pelo preço cobrado da casa." Enquanto carrega mostra "Carregando…"; se falhar, "Não foi possível carregar o uso." com o botão "Tentar novamente".',
         },
         {
           anchor: "pessoa.campanhas.fila",
           label: "Campanhas do expert (fila)",
-          what: 'A tabela de campanhas desta pessoa nos últimos 90 dias: Campanha, Canal (SMS/E-mail/Voz), Status, Destinatários, Custo estimado, Criada em e Ações. As pendentes de aprovação aparecem primeiro (as mais antigas primeiro); o resto vem depois, da mais recente para a mais antiga.',
+          what: "A tabela de campanhas desta pessoa nos últimos 90 dias: Campanha, Canal (SMS/E-mail/Voz), Status, Destinatários, Custo estimado, Criada em e Ações. As pendentes de aprovação aparecem primeiro (as mais antigas primeiro); o resto vem depois, da mais recente para a mais antiga.",
           notes:
             'Os status possíveis: Aguardando aprovação, Recusada, Rascunho, Agendada, Enfileirada, Enviando, Enviada, Concluída, Falhou, Cancelada, Pausada, Pausada pelo teto (pausada automaticamente por falta de saldo no teto) e Pausada pelo admin. Uma campanha recusada mostra o motivo abaixo do nome; uma pausada mostra o motivo da pausa. Sem nenhuma campanha, mostra "Nenhuma campanha deste expert nos últimos 90 dias."',
         },
@@ -161,7 +161,7 @@ const screen: HelpScreen = {
         },
         {
           label: "Pausar",
-          what: "Pausa uma campanha de SMS/e-mail agendada ou enviando, ou de voz enfileirada. Toast \"Campanha pausada.\"",
+          what: 'Pausa uma campanha de SMS/e-mail agendada ou enviando, ou de voz enfileirada. Toast "Campanha pausada."',
           notes:
             'Erro possível: "Esta campanha não está em andamento ou agendada." — aparece se a campanha já tiver mudado de status (por exemplo, terminou de enviar ou já foi pausada) entre a tela carregar e você clicar; recarregue a fila para ver o status atual. Desabilitado na casa demo.',
         },
@@ -183,7 +183,7 @@ const screen: HelpScreen = {
           label: "Conteúdo da campanha",
           what: 'Mostra o canal, o status, quem criou ("por {nome}"), destinatários, custo estimado, quando envia ("Ao aprovar" ou a data/hora agendada) e o público. O conteúdo em si depende do canal: SMS mostra o texto e a quantidade de segmentos; E-mail mostra o assunto, o pré-cabeçalho e uma prévia do HTML dentro de um quadro isolado (sem rodar scripts); Voz mostra o roteiro (texto lido por voz sintética) ou o nome e a duração de um áudio gravado da biblioteca.',
           notes:
-            'Numa campanha recusada, mostra o motivo da recusa; numa pausada (e não recusada), mostra o motivo da pausa.',
+            "Numa campanha recusada, mostra o motivo da recusa; numa pausada (e não recusada), mostra o motivo da pausa.",
         },
         {
           label: "Aprovar",
@@ -193,13 +193,14 @@ const screen: HelpScreen = {
         },
         {
           label: "Recusar",
-          what: 'Abre o campo do motivo da recusa (dentro do próprio diálogo, sem navegar para outro lugar).',
-          notes: 'Desabilitado na casa demo.',
+          what: "Abre o campo do motivo da recusa (dentro do próprio diálogo, sem navegar para outro lugar).",
+          notes: "Desabilitado na casa demo.",
         },
         {
           label: "Motivo da recusa",
           what: "Um texto livre, até 500 caracteres, que o expert vê e pode usar para corrigir e reenviar.",
-          notes: 'Obrigatório — erro "Informe o motivo da recusa." em branco, ou "Use até 500 caracteres." passando do limite.',
+          notes:
+            'Obrigatório — erro "Informe o motivo da recusa." em branco, ou "Use até 500 caracteres." passando do limite.',
         },
         {
           label: "Voltar / Recusar campanha",
@@ -217,7 +218,7 @@ const screen: HelpScreen = {
     {
       id: "nao-admin",
       title: "Apenas o admin da casa gerencia experts.",
-      what: 'Mensagem de erro mostrada no lugar do relatório (ou da aba Campanhas) quando quem acessa a URL não é admin da casa — mesmo que o id seja do próprio usuário.',
+      what: "Mensagem de erro mostrada no lugar do relatório (ou da aba Campanhas) quando quem acessa a URL não é admin da casa — mesmo que o id seja do próprio usuário.",
     },
     {
       id: "nao-encontrado",
@@ -292,7 +293,7 @@ const screen: HelpScreen = {
       {
         anchor: "pessoa.campanhas.envio",
         title: "Envio de campanhas",
-        body: "\"Com aprovação\": cada campanha espera você aprovar ou recusar. \"Livre\": dispara direto. Mude em Editar, na aba Rendimento ou na tela Experts.",
+        body: '"Com aprovação": cada campanha espera você aprovar ou recusar. "Livre": dispara direto. Mude em Editar, na aba Rendimento ou na tela Experts.',
         articleSection: "campanhas",
       },
       {

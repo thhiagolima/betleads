@@ -94,7 +94,7 @@ const screen: HelpScreen = {
           label: "Acesso (badge)",
           what: '"Sem acesso" (perfil cadastrado, sem login nenhum), "Convite pendente" (convite enviado, a pessoa nunca entrou), "Ativo" (tem login e já entrou pelo menos uma vez), "Inativo" (foi desativado) ou "Equipe (Admin/Gestor/Membro)" (perfil vinculado a alguém que já é admin, gestor ou membro desta casa — ver "Vincular a alguém da equipe"). Um perfil de equipe desativado mostra os dois badges juntos: "Equipe (...)" e "Inativo".',
           notes:
-            'Quando o Tipo é "Restrito" e o Acesso é "Equipe (...)", aparece abaixo o aviso "Vê a casa inteira: Restrito não vale para a equipe." — passar o mouse (ou, no teclado/leitor de tela, o título associado) mostra a explicação completa: "Restrito não limita quem é da equipe: a pessoa continua vendo a casa inteira com o papel dela. Para ela ver só os próprios leads, use Convidar em vez de vincular."',
+            'Quando o Tipo é "Restrito" e o Acesso é "Equipe (...)", aparece abaixo o aviso "Vê a casa inteira: Restrito não vale para a equipe." — o ícone (i) ao lado (tocar no celular, passar o mouse no computador) mostra a explicação completa: "Restrito não limita quem é da equipe: a pessoa continua vendo a casa inteira com o papel dela. Para ela ver só os próprios leads, use Convidar em vez de vincular."',
         },
       ],
     },
@@ -106,7 +106,7 @@ const screen: HelpScreen = {
       id: "acoes-linha",
       title: "Ações de cada linha",
       intro:
-        'Coluna "Ações", à direita da tabela. Quais botões aparecem depende do Acesso da linha; Editar e Ativar/Desativar aparecem sempre.',
+        'Coluna "Ações", à direita da tabela. Quais botões aparecem depende do Acesso da linha; Editar e Ativar/Desativar aparecem sempre. No celular, as ações de cada linha ficam juntas num botão "⋯" (menu), e a coluna Expert fica fixa à esquerda enquanto a tabela rola para o lado.',
       items: [
         {
           anchor: "experts.linha.editar",
@@ -144,7 +144,7 @@ const screen: HelpScreen = {
           label: "Ativar / Desativar",
           what: '"Desativar" quando a pessoa está ativa, "Ativar" quando está inativa. Toast "Expert ativado" ou "Expert desativado".',
           notes:
-            'Desativar não apaga nenhum crédito já registrado nem some do ranking de rendimento — só impede novos créditos e, se for um expert com acesso, o login dele. Desabilitado na casa demo.',
+            "Desativar não apaga nenhum crédito já registrado nem some do ranking de rendimento — só impede novos créditos e, se for um expert com acesso, o login dele. Desabilitado na casa demo.",
         },
         {
           anchor: "experts.linha.excluir",
@@ -201,7 +201,7 @@ const screen: HelpScreen = {
         },
         {
           label: "IDs de afiliado",
-          what: 'Os IDs vinculados, como chips removíveis (ícone "x" em cada um). Digite um ID e pressione Enter para adicionar; abaixo aparecem sugestões (até 8) dos IDs de afiliado da casa ainda sem expert, cada uma com a quantidade de leads — clicar numa sugestão adiciona o chip.',
+          what: 'Os IDs vinculados, como chips removíveis (ícone "x" em cada um). Digite um ID e toque em "Adicionar" (ou pressione Enter); um ID digitado e não adicionado também entra ao sair do campo ou ao salvar; abaixo aparecem sugestões (até 8) dos IDs de afiliado da casa ainda sem expert, cada uma com a quantidade de leads — clicar numa sugestão adiciona o chip.',
           notes:
             'Erros possíveis: "Esse ID já foi adicionado." e "Máximo de 20 IDs de afiliado." (limite de 20 por pessoa — o campo de digitar trava ao chegar no limite); no servidor, se dois experts disputarem o mesmo ID ao salvar quase ao mesmo tempo: "O ID de afiliado {id} já pertence a outro expert desta casa." (ou, sem saber qual id, "Um dos IDs de afiliado já pertence a outro expert desta casa.").',
         },
@@ -243,7 +243,8 @@ const screen: HelpScreen = {
     {
       id: "convidar",
       title: 'Diálogo "Convidar"',
-      intro: 'Aberto por "Convidar" numa linha "Sem acesso". Dá um login a um expert já cadastrado.',
+      intro:
+        'Aberto por "Convidar" numa linha "Sem acesso". Dá um login a um expert já cadastrado.',
       items: [
         {
           label: "Título e descrição",
@@ -314,7 +315,7 @@ const screen: HelpScreen = {
       items: [
         {
           label: "Janela de clique (horas)",
-          what: "Quantas horas depois do clique num link um depósito ainda conta como creditado por clique para o expert — ver o termo \"Janela de clique\" no glossário, documentado em \"Relatório de rendimento\". Ajuda fixa: \"Padrão 72h. Vale para os próximos cálculos e recalcula os últimos 8 dias.\"",
+          what: 'Quantas horas depois do clique num link um depósito ainda conta como creditado por clique para o expert — ver o termo "Janela de clique" no glossário, documentado em "Relatório de rendimento". Ajuda fixa: "Padrão 72h. Vale para os próximos cálculos e recalcula os últimos 8 dias."',
           notes:
             'Erros possíveis: "Informe a janela em horas." (vazio) e "A janela precisa ser um número inteiro entre 1 e 720 horas." (fora da faixa ou não inteiro). Enquanto a janela salva ainda não carregou, o campo mostra "Carregando…" e fica desabilitado.',
         },
@@ -352,6 +353,11 @@ const screen: HelpScreen = {
       title: "Nenhum expert cadastrado.",
       what: "Texto mostrado na tabela quando a casa ainda não tem nenhum expert cadastrado.",
       action: 'Cadastre o primeiro em "Novo expert".',
+    },
+    {
+      id: "experts-carregando",
+      title: "Carregando experts…",
+      what: 'Mostrado no lugar da tabela enquanto a lista ainda não voltou do servidor. Se a consulta falhar, aparece "Não foi possível carregar os experts." com o botão "Tentar novamente" (o mesmo vale para o card "IDs de afiliado sem expert").',
     },
     {
       id: "sem-expert-vazio",

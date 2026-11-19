@@ -353,7 +353,7 @@ export function PopupEditor({ open, popupId, playerIdSeen, canEdit, onOpenChange
                 ) : null}
 
                 {needsPlayerId && !playerIdSeen ? (
-                  <p className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-meta text-amber-200">
+                  <p className="flex gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-meta text-warning">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                     O site ainda não informou nenhum jogador logado (o trecho “Jogador logado” da instalação). Até isso
                     acontecer, este popup não aparece para ninguém.
@@ -515,7 +515,7 @@ export function PopupEditor({ open, popupId, playerIdSeen, canEdit, onOpenChange
               />
               {!readOnly ? (
                 <>
-                  {!validation.ok ? <p className="text-meta text-amber-300">{validation.error}</p> : null}
+                  {!validation.ok ? <p className="text-meta text-warning">{validation.error}</p> : null}
                   <Button
                     className="w-full"
                     disabled={!validation.ok || save.isPending || uploading}

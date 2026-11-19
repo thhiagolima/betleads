@@ -26,7 +26,7 @@ const screen: HelpScreen = {
       id: "passos",
       title: "Passo a passo",
       intro:
-        "O caminho completo para quem nunca usou um conector no Claude. Cada passo ganha um ✓ sozinho: os três primeiros quando aparece uma conexão em \"Conexões ativas\", o quarto quando o Claude usa o Betleads pela primeira vez.",
+        'O caminho completo para quem nunca usou um conector no Claude. Cada passo ganha um ✓ sozinho: os três primeiros quando aparece uma conexão em "Conexões ativas", o quarto quando o Claude usa o Betleads pela primeira vez.',
       items: [
         {
           anchor: "mcp.passos.card",
@@ -34,7 +34,7 @@ const screen: HelpScreen = {
           what: "1. Copie o endereço do Betleads. 2. No Claude (claude.ai ou Claude Desktop): seu nome, no canto de baixo à esquerda → Configurações → Conectores → Adicionar conector personalizado; nome Betleads, cole o endereço e clique em Adicionar. 3. Clique em Conectar ao lado do Betleads; abre a página de autorização do Betleads, que lista as áreas e as casas liberadas; clique em Permitir. 4. Numa conversa nova, confira no botão + do campo de mensagem que o Betleads está ligado e faça uma pergunta.",
           when: "Na primeira vez, ou ao conectar outro computador ou outra conta do Claude.",
           notes:
-            "Na página de autorização, confira que o endereço é o do Betleads antes de clicar em Permitir, e só clique se você acabou de pedir a conexão. Na primeira pergunta, o Claude pede licença para usar o Betleads: clique em Permitir (ou Sempre permitir).",
+            "Na página de autorização, confira que o endereço é o do Betleads antes de clicar em Permitir, e só clique se você acabou de pedir a conexão. Na primeira pergunta, o Claude pede licença para usar o Betleads: clique em Permitir (ou Sempre permitir). No celular, a tela mostra um aviso de que estes passos são feitos no computador.",
         },
         {
           anchor: "mcp.passos.copiar",
@@ -47,13 +47,13 @@ const screen: HelpScreen = {
       id: "exemplos",
       title: "O que perguntar",
       intro:
-        "Perguntas prontas, separadas pelas áreas liberadas para você: Financeiro, Alterações no financeiro (só com nível Leitura e escrita) e Operação. Clicar numa pergunta copia o texto (toast \"Pergunta copiada\").",
+        'Perguntas prontas, separadas pelas áreas liberadas para você: Financeiro, Alterações no financeiro (só com nível Leitura e escrita) e Operação. Clicar numa pergunta copia o texto (toast "Pergunta copiada").',
       items: [
         {
           anchor: "mcp.exemplos.card",
           label: "O que perguntar",
           what: 'Exemplos: "Como está o financeiro das minhas casas neste mês?", "Quais experts trouxeram mais depósito em outubro?", "O que o afiliado 4512 trouxe neste mês?", "Tem alguma coisa nas minhas casas que precisa de atenção hoje?".',
-          when: "Diga sempre a casa, o grupo ou \"todas as minhas casas\" e o período (ontem, últimos 7 dias, este mês, um mês pelo nome).",
+          when: 'Diga sempre a casa, o grupo ou "todas as minhas casas" e o período (ontem, últimos 7 dias, este mês, um mês pelo nome).',
           notes: "Nos exemplos de alteração, troque {nome da casa} pelo nome de uma casa sua.",
         },
       ],
@@ -142,7 +142,8 @@ const screen: HelpScreen = {
     {
       id: "conexoes",
       title: "Conexões ativas",
-      intro: "Cada cliente do Claude que já se conectou com a URL acima aparece aqui como uma linha.",
+      intro:
+        "Cada cliente do Claude que já se conectou com a URL acima aparece aqui como uma linha.",
       items: [
         {
           anchor: "mcp.conexoes.card",
@@ -153,7 +154,7 @@ const screen: HelpScreen = {
         {
           anchor: "mcp.conexoes.desconectar",
           label: "Desconectar",
-          what: 'Revoga aquela conexão: o cliente deixa de poder usar o MCP com o token que tinha. Toast "Conexão desconectada". Repete-se em cada conexão; a âncora marca só a primeira.',
+          what: 'Pede confirmação ("Desconectar do Claude?") e revoga aquela conexão: o cliente deixa de poder usar o MCP com o token que tinha. Toast "Conexão desconectada"; se falhar, mostra o erro. Repete-se em cada conexão; a âncora marca só a primeira.',
           notes:
             "Para voltar a conectar aquele cliente, é preciso configurá-lo de novo (ele gera um novo token ao se autenticar outra vez com a URL de conexão).",
         },
@@ -165,12 +166,12 @@ const screen: HelpScreen = {
     {
       id: "desligado",
       title: "MCP desligado neste ambiente.",
-      what: 'Mostrado no lugar da tela inteira quando o MCP está desligado neste ambiente (variável de ambiente), para todo mundo, independente do nível de acesso de cada um.',
+      what: "Mostrado no lugar da tela inteira quando o MCP está desligado neste ambiente (variável de ambiente), para todo mundo, independente do nível de acesso de cada um.",
     },
     {
       id: "sem-acesso",
       title: "Seu usuário não tem acesso ao MCP. Peça ao super admin.",
-      what: "Mostrado no lugar da tela inteira para quem acessa a URL diretamente sem ter nenhum nível de acesso concedido (o item \"Conectar ao Claude\" também não aparece no menu para essa pessoa).",
+      what: 'Mostrado no lugar da tela inteira para quem acessa a URL diretamente sem ter nenhum nível de acesso concedido (o item "Conectar ao Claude" também não aparece no menu para essa pessoa).',
       action: "Peça ao super admin para conceder o acesso (Leitura ou Leitura e escrita).",
     },
     {

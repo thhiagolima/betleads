@@ -489,7 +489,7 @@ function GatewayUrlNote({
 
 function TestResultLine({ result }: { result: TestResult }) {
   return (
-    <p className={`text-sm ${result.ok ? "text-emerald-600" : "text-destructive"}`} role="status">
+    <p className={`text-sm ${result.ok ? "text-success" : "text-destructive"}`} role="status">
       {result.message}
     </p>
   );

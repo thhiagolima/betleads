@@ -61,23 +61,33 @@ function semDepositarLabel(lead: ExpertLeadSheet["lead"]): string {
   return `${num(lead.diasSemDepositar)} ${lead.diasSemDepositar === 1 ? "dia" : "dias"}`;
 }
 
+// Compact on phones, where the stats come before the actions (KpiCard itself
+// already shrinks and wraps the number below sm).
+const STAT_CARD_CLASS = "p-3 sm:p-5";
+
 export function LeadSheetStats({ lead }: { lead: ExpertLeadSheet["lead"] }) {
   const { money } = useMoney();
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
-      <KpiCard title="Sem depositar" value={semDepositarLabel(lead)} />
-      <KpiCard title="Total depositado" value={money(lead.totalDepositado)} />
-      <KpiCard title="Depósitos" value={num(lead.depositos)} />
+    <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-3">
+      <KpiCard className={STAT_CARD_CLASS} title="Sem depositar" value={semDepositarLabel(lead)} />
       <KpiCard
+        className={STAT_CARD_CLASS}
+        title="Total depositado"
+        value={money(lead.totalDepositado)}
+      />
+      <KpiCard className={STAT_CARD_CLASS} title="Depósitos" value={num(lead.depositos)} />
+      <KpiCard
+        className={STAT_CARD_CLASS}
         title="Ticket médio"
         value={lead.ticketMedio == null ? "—" : money(lead.ticketMedio)}
       />
       <KpiCard
+        className={STAT_CARD_CLASS}
         title="Último depósito"
         value={lead.ultimoDeposito ? money(lead.ultimoDeposito.valor) : "—"}
         detail={lead.ultimoDeposito ? formatBrtDate(lead.ultimoDeposito.at) : undefined}
       />
-      <KpiCard title="Saques" value={money(lead.totalSacado)} />
+      <KpiCard className={STAT_CARD_CLASS} title="Saques" value={money(lead.totalSacado)} />
     </div>
   );
 }
@@ -97,7 +107,7 @@ export function LeadBenefits({ beneficios }: { beneficios: ExpertLeadSheet["bene
           {recebidos.map((b, index) => (
             <li
               key={`${b.tipo}:${b.at ?? "sem-data"}:${index}`}
-              className="flex items-center justify-between gap-3 py-2.5 text-[13.5px]"
+              className="flex items-center justify-between gap-3 py-2.5 text-body"
             >
               <span className="text-muted-foreground">
                 Cashback
@@ -109,7 +119,7 @@ export function LeadBenefits({ beneficios }: { beneficios: ExpertLeadSheet["bene
         </ul>
       )}
       {bonusAtual && (
-        <div className="mt-2 flex items-center justify-between gap-3 border-t border-border/70 pt-2.5 text-[13.5px]">
+        <div className="mt-2 flex items-center justify-between gap-3 border-t border-border/70 pt-2.5 text-body">
           <span className="text-muted-foreground">Saldo de bônus atual</span>
           <strong className="font-semibold tabular-nums">{money(bonusAtual.valor)}</strong>
         </div>

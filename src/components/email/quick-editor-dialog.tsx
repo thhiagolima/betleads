@@ -31,6 +31,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EditorPaneTabs, EMAIL_EDITOR_DIALOG_CLASS, type EditorPane } from "./editor-pane-tabs";
 import { toast } from "sonner";
 import { EMAIL_IMAGE_MAX_BYTES, uploadEmailImage } from "@/lib/email-image-upload";
 import { tourAnchor } from "@/help/anchor";
@@ -304,6 +305,7 @@ export function QuickEditorDialog({
 }) {
   const [state, setState] = useState<QuickState>(makeInitial());
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [pane, setPane] = useState<EditorPane>("editar");
 
   useEffect(() => {
     if (!open || !editing) return;
@@ -353,8 +355,8 @@ export function QuickEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[1200px] w-[95vw] max-h-[92vh] overflow-hidden p-0">
-        <DialogHeader className="px-6 py-4 border-b border-border/50">
+      <DialogContent className={EMAIL_EDITOR_DIALOG_CLASS}>
+        <DialogHeader className="shrink-0 px-4 sm:px-6 py-4 pr-12 border-b border-border/50">
           <DialogTitle className="flex items-center gap-2">
             <Zap className="h-4 w-4 text-primary" />
             Editor Rápido BETLEADS
@@ -364,9 +366,16 @@ export function QuickEditorDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-12 gap-0 max-h-[calc(92vh-150px)] overflow-hidden">
+        <EditorPaneTabs pane={pane} onChange={setPane} />
+
+        <div className="grid min-h-0 flex-1 grid-cols-12 grid-rows-[minmax(0,1fr)] gap-0 overflow-hidden">
           {/* Form */}
-          <div className="col-span-12 lg:col-span-7 overflow-y-auto p-6 space-y-6">
+          <div
+            className={cn(
+              "col-span-12 lg:col-span-7 overflow-y-auto p-4 sm:p-6 space-y-6",
+              pane !== "editar" && "hidden lg:block",
+            )}
+          >
             <Block title="1. Identificação">
               <Grid2>
                 <Field label="Nome do template">
@@ -509,7 +518,7 @@ export function QuickEditorDialog({
             </Block>
 
             <Block title="4. Blocos visíveis">
-              <div className="grid grid-cols-2 gap-3" {...tourAnchor("email.rapido.blocos")}>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" {...tourAnchor("email.rapido.blocos")}>
                 <Toggle
                   label="Card de benefício"
                   value={state.mostrarCard}
@@ -580,7 +589,10 @@ export function QuickEditorDialog({
 
           {/* Preview */}
           <div
-            className="col-span-12 lg:col-span-5 border-l border-border/50 bg-muted/20 overflow-hidden flex flex-col"
+            className={cn(
+              "col-span-12 lg:col-span-5 lg:border-l border-border/50 bg-muted/20 overflow-hidden flex-col",
+              pane !== "previa" ? "hidden lg:flex" : "flex",
+            )}
             {...tourAnchor("email.rapido.preview")}
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
@@ -640,7 +652,7 @@ export function QuickEditorDialog({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-6 py-3 border-t border-border/50 bg-background/60">
+        <div className="shrink-0 flex flex-col-reverse gap-2 px-4 sm:px-6 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-3 sm:flex-row sm:items-center sm:justify-between border-t border-border/50 bg-background/60">
           <Button
             variant="outline"
             onClick={abrirAvancado}
@@ -650,7 +662,7 @@ export function QuickEditorDialog({
           >
             <Wand2 className="h-4 w-4" /> Editar no modo avançado
           </Button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>

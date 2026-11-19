@@ -1,8 +1,7 @@
 // /grupo/pessoas (spec §4/§8): people of every house in the active group.
 import { createFileRoute } from "@tanstack/react-router";
-import { Users } from "lucide-react";
 
-import { PageHeader } from "@/components/ui-premium";
+import { Page, PageHeader } from "@/components/ui-premium";
 import { GroupPeople } from "@/components/group/group-people";
 import { useActiveGroup } from "@/hooks/use-active-group";
 
@@ -12,7 +11,12 @@ function GrupoPessoasPage() {
   const { groups, active } = useActiveGroup();
 
   if (!groups.length) {
-    return <p className="text-sm text-muted-foreground">Você não gerencia nenhum grupo.</p>;
+    return (
+      <Page className="max-w-5xl">
+        <PageHeader title="Pessoas" />
+        <p className="text-sm text-muted-foreground">Você não gerencia nenhum grupo.</p>
+      </Page>
+    );
   }
 
   if (!active) {
@@ -20,13 +24,12 @@ function GrupoPessoasPage() {
   }
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <Page className="max-w-5xl">
       <PageHeader
         title={`Pessoas — ${active.nome}`}
         subtitle="Gerencie quem acessa cada casa do grupo."
-        icon={<Users className="h-5 w-5 text-primary-foreground" />}
       />
       <GroupPeople groupId={active.id} />
-    </div>
+    </Page>
   );
 }

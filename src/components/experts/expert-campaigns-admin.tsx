@@ -424,8 +424,8 @@ export function ExpertCampaignReviewBody({
           <CampaignContentPreview detail={detail} />
           {decidable && (
             <p className="text-xs text-muted-foreground">
-              Ao aprovar, o público e o teto do expert são conferidos de novo, e a
-              contagem e o custo podem mudar.
+              Ao aprovar, o público e o teto do expert são conferidos de novo, e a contagem e o
+              custo podem mudar.
             </p>
           )}
         </div>
@@ -677,9 +677,12 @@ export function ExpertCampaignsQueue({
 
   if (query.isError) {
     return (
-      <p role="alert" className="text-sm text-destructive">
-        {errorMessage(query.error)}
-      </p>
+      <div role="alert" className="flex flex-wrap items-center gap-2">
+        <p className="text-sm text-destructive">{errorMessage(query.error)}</p>
+        <Button variant="outline" size="sm" onClick={() => void query.refetch()}>
+          Tentar novamente
+        </Button>
+      </div>
     );
   }
 

@@ -67,9 +67,9 @@ describe("GroupScoreboard", () => {
   it("renders the goal status class on the goal's cell", () => {
     const html = renderToStaticMarkup(<GroupScoreboard rows={rows} />);
 
-    expect(html).toContain("bg-emerald-500/15"); // Pixreals: FTDs green
-    expect(html).toContain("bg-rose-500/15"); // Sorte Alta: FTDs red
-    expect(html).toContain("bg-amber-500/15"); // Sorte da Bet: FTDs yellow
+    expect(html).toContain("bg-success/15"); // Pixreals: FTDs green
+    expect(html).toContain("bg-danger/15"); // Sorte Alta: FTDs red
+    expect(html).toContain("bg-warning/15"); // Sorte da Bet: FTDs yellow
     expect(html).toContain("meta 100");
   });
 

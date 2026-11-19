@@ -8,12 +8,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
-import { Network, Pencil, Plus, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
+import { Pencil, Plus, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -117,18 +118,12 @@ function GruposContent() {
   const ungroupedTenants = (data?.ungroupedTenants ?? []) as UngroupedTenant[];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Network className="h-6 w-6 text-primary" /> Grupos de casas
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Crie grupos, defina quais casas pertencem a cada um e quem os gerencia.
-          </p>
-        </div>
-        <CreateGroupDialog />
-      </div>
+    <Page>
+      <PageHeader
+        title="Grupos de casas"
+        subtitle="Crie grupos, defina quais casas pertencem a cada um e quem os gerencia."
+        actions={<CreateGroupDialog />}
+      />
 
       {isLoading && <Card className="h-32 animate-pulse" />}
 
@@ -141,7 +136,7 @@ function GruposContent() {
           <GroupCard key={group.id} group={group} ungroupedTenants={ungroupedTenants} />
         ))}
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -212,7 +207,7 @@ function GroupCard({
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div className="flex items-center gap-2">
           <CardTitle className="text-lg">{group.nome}</CardTitle>
-          {group.is_demo && <Badge className="bg-violet-500/15 text-violet-300">demo</Badge>}
+          {group.is_demo && <Badge className="bg-info/15 text-info">demo</Badge>}
         </div>
         <div className="flex gap-2">
           <RenameGroupDialog group={group} />

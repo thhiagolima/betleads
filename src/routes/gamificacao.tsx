@@ -66,6 +66,12 @@ function GamificacaoPage() {
   });
 
   const [draft, setDraft] = useState<LevelDraft>(() => defaultDraft());
+  // The saved settings the draft started from: "dirty" compares against it, not
+  // against the latest refetch.
+  const [baseline, setBaseline] = useState<LevelDraft>(() => defaultDraft());
+  const dirty = data ? !sameDraft(draft, baseline) : false;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
   const [search, setSearch] = useState("");
   const [levelFilter, setLevelFilter] = useState<"all" | LevelSlug>("all");
   const [sort, setSort] = useState<"deposit" | "stopped" | "name">("deposit");
@@ -79,8 +85,13 @@ function GamificacaoPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
+  // A refetch ("Atualizar", window focus) only rehydrates the form when there is
+  // no edit in progress; otherwise it would wipe what the user is typing.
   useEffect(() => {
-    if (data) setDraft(toDraft(data));
+    if (!data || dirtyRef.current) return;
+    const next = toDraft(data);
+    setDraft(next);
+    setBaseline(next);
   }, [data]);
 
   const mutation = useMutation({
@@ -100,14 +111,16 @@ function GamificacaoPage() {
         },
       }),
     onSuccess: (next) => {
+      const saved = toDraft(next);
+      setDraft(saved);
+      setBaseline(saved);
+      dirtyRef.current = false;
       queryClient.setQueryData(["gamification"], next);
-      setDraft(toDraft(next));
       toast.success("Faixas e regras salvas.");
     },
     onError: (error: Error) => toast.error(error?.message || "Não foi possível salvar as faixas."),
   });
 
-  const dirty = data ? JSON.stringify(draft) !== JSON.stringify(toDraft(data)) : false;
 
   // C-07: sem filtro, o ranking é o top 200 do snapshot. Com busca, nível ou
   // "só quem parou", a consulta vai à base inteira no servidor.
@@ -413,6 +426,10 @@ function defaultDraft(): LevelDraft {
     sleepingAfterDays: "7",
     vipMinLevel: "diamond",
   };
+}
+
+function sameDraft(a: LevelDraft, b: LevelDraft) {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function toDraft(data: GamificationData): LevelDraft {

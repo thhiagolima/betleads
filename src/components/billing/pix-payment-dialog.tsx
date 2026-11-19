@@ -15,12 +15,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { brl } from "@/lib/format";
-import {
-  shouldPollTopupStatus,
-  topupView,
-  type TopupStatusSnapshot,
-} from "@/lib/billing/topup";
+import { shouldPollTopupStatus, topupView, type TopupStatusSnapshot } from "@/lib/billing/topup";
 import { safeHttpsUrl, safePixImageSrc } from "@/lib/billing/pix-display";
+import { copyToClipboard } from "@/lib/clipboard";
 import { Term } from "@/components/help/term";
 
 /** The shape every Pix charge payload shares (credit top-up, invoice...). */
@@ -198,10 +195,9 @@ export function PixPaymentDialog({
 
   const copyPix = async () => {
     if (!charge?.emv) return;
-    try {
-      await navigator.clipboard.writeText(charge.emv);
+    if (await copyToClipboard(charge.emv)) {
       toast.success("Código Pix copiado");
-    } catch {
+    } else {
       toast.error("Não foi possível copiar o código Pix");
     }
   };
@@ -286,7 +282,7 @@ export function PixPaymentDialog({
                 {secondsLeft !== null && (
                   <p
                     className={`flex items-center justify-center gap-1.5 text-sm font-medium tabular-nums ${
-                      secondsLeft <= 60 ? "text-amber-500" : "text-muted-foreground"
+                      secondsLeft <= 60 ? "text-warning" : "text-muted-foreground"
                     }`}
                     aria-live="off"
                     data-testid="pix-countdown"
@@ -294,6 +290,19 @@ export function PixPaymentDialog({
                     <Clock className="h-4 w-4" />
                     Expira em {formatCountdown(secondsLeft)}
                   </p>
+                )}
+                {charge.emv && (
+                  // On a phone the payer uses the bank app on the same device:
+                  // copying the code is the main action, the QR comes second.
+                  <div className="space-y-1.5 sm:hidden">
+                    <Button type="button" size="lg" className="h-12 w-full gap-2" onClick={copyPix}>
+                      <Copy className="h-4 w-4" />
+                      Copiar código Pix
+                    </Button>
+                    <p className="text-center text-meta text-muted-foreground">
+                      Depois, abra o app do seu banco, entre em Pix Copia e Cola e cole o código.
+                    </p>
+                  </div>
                 )}
                 {qrSrc ? (
                   <div className="flex justify-center">
@@ -328,7 +337,7 @@ export function PixPaymentDialog({
                         id="pix-payment-emv"
                         readOnly
                         value={charge.emv}
-                        className="font-mono text-xs"
+                        className="min-w-0 font-mono md:text-xs"
                       />
                       <Button
                         type="button"

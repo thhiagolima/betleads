@@ -5,11 +5,9 @@
 // a gestor the admin released) — the server double-checks on every call.
 // The open tab, and the month and open day (`dia`), live in the URL.
 import { createFileRoute } from "@tanstack/react-router";
-import { Wallet } from "lucide-react";
-
 import { useActiveTenant } from "@/hooks/use-active-tenant";
-import { PageHeader } from "@/components/ui-premium";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Page, PageHeader } from "@/components/ui-premium";
+import { PageTabs } from "@/components/ui-premium/page-tabs";
 import { FinanceDashboardView } from "@/components/finance/dashboard/finance-dashboard";
 import { FinanceMonthView } from "@/components/finance/finance-month-grid";
 import { FinanceOtherCosts } from "@/components/finance/finance-other-costs";
@@ -20,6 +18,13 @@ import {
   type FinanceSearch,
   type FinanceTab,
 } from "@/lib/finance/search";
+
+const FINANCE_TAB_ITEMS: ReadonlyArray<{ value: FinanceTab; label: string }> = [
+  { value: "painel", label: "Painel" },
+  { value: "lancamentos", label: "Lançamentos" },
+  { value: "outros-custos", label: "Outros custos" },
+  { value: "configuracoes", label: "Configurações" },
+];
 
 export const Route = createFileRoute("/financeiro")({
   validateSearch: (search: Record<string, unknown>): FinanceSearch => parseFinanceSearch(search),
@@ -38,42 +43,44 @@ function FinanceiroPage() {
   const canSee = active.role === "super_admin" || active.can_view_finance === true;
   if (!canSee) {
     return (
-      <p className="text-sm text-muted-foreground">Você não tem acesso ao financeiro desta casa.</p>
+      <Page className="max-w-6xl">
+        <PageHeader title="Financeiro" />
+        <p className="text-sm text-muted-foreground">
+          Você não tem acesso ao financeiro desta casa.
+        </p>
+      </Page>
     );
   }
 
   const tab = search.tab ?? "painel";
   // Changing tab drops month/dia: they only mean something for "Lançar agora".
-  const openTab = (next: string) =>
-    void navigate({ search: next === "painel" ? {} : { tab: next as FinanceTab } });
+  const openTab = (next: FinanceTab) =>
+    void navigate({ search: next === "painel" ? {} : { tab: next } });
 
   return (
-    <div className="space-y-6 max-w-6xl">
+    <Page className="max-w-6xl">
       <PageHeader
         title="Financeiro"
         subtitle="Resultado da casa: o que entrou, o que saiu e quanto sobrou."
-        icon={<Wallet className="h-5 w-5 text-primary-foreground" />}
       />
 
-      <Tabs value={tab} onValueChange={openTab}>
-        <div className="max-w-full overflow-x-auto">
-          <TabsList>
-            <TabsTrigger value="painel">Painel</TabsTrigger>
-            <TabsTrigger value="lancamentos">Lançamentos</TabsTrigger>
-            <TabsTrigger value="outros-custos">Outros custos</TabsTrigger>
-            <TabsTrigger value="configuracoes">Configurações</TabsTrigger>
-          </TabsList>
-        </div>
+      <PageTabs
+        value={tab}
+        onValueChange={openTab}
+        label="Seções do financeiro"
+        items={FINANCE_TAB_ITEMS}
+      />
 
-        <TabsContent value="painel" className="mt-4">
+      <div role="tabpanel" aria-labelledby={`tab-${tab}`}>
+        {tab === "painel" && (
           <FinanceDashboardView
             initialScope={{ kind: "tenant", tenantId: active.id }}
             canPickScope={active.role === "super_admin"}
             onLaunchPending={(date) => void navigate({ search: launchPendingSearch(date) })}
           />
-        </TabsContent>
+        )}
 
-        <TabsContent value="lancamentos" className="mt-4">
+        {tab === "lancamentos" && (
           <FinanceMonthView
             tenantId={active.id}
             initialMonth={search.month}
@@ -89,16 +96,14 @@ function FinanceiroPage() {
               })
             }
           />
-        </TabsContent>
+        )}
 
-        <TabsContent value="outros-custos" className="mt-4">
+        {tab === "outros-custos" && (
           <FinanceOtherCosts tenantId={active.id} initialMonth={search.month} />
-        </TabsContent>
+        )}
 
-        <TabsContent value="configuracoes" className="mt-4">
-          <FinanceSettingsPanel tenantId={active.id} />
-        </TabsContent>
-      </Tabs>
-    </div>
+        {tab === "configuracoes" && <FinanceSettingsPanel tenantId={active.id} />}
+      </div>
+    </Page>
   );
 }

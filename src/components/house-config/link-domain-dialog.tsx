@@ -292,7 +292,7 @@ export function LinkDomainDialog({
                           </div>
                           {item.blockedReason && <div className="text-xs text-destructive">{item.blockedReason}</div>}
                           {item.segmentWarning && (
-                            <div className="text-xs text-amber-600">{formatSegmentWarning(item.segmentWarning)}</div>
+                            <div className="text-xs text-warning">{formatSegmentWarning(item.segmentWarning)}</div>
                           )}
                         </div>
                       </label>

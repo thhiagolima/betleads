@@ -58,7 +58,7 @@ const screen: HelpScreen = {
         {
           anchor: "exemplos.salvar",
           label: "Salvar exemplo",
-          what: "Cadastra o exemplo com a pergunta, o assunto (se preenchido) e a resposta ideal, já ligado, com a origem \"manual\". Ao salvar com sucesso, aparece o aviso \"Exemplo cadastrado\" e os três campos são limpos.",
+          what: "Cadastra o exemplo com a pergunta, o assunto (se preenchido) e a resposta ideal, já ligado, com a origem \"manual\". Ao salvar com sucesso, aparece o aviso \"Exemplo cadastrado\" e os três campos são limpos. Se falhar, os campos continuam preenchidos. Enquanto grava, o botão mostra \"Salvando…\".",
           notes:
             'Erro possível: "Preencha a pergunta e a resposta ideal." quando um dos dois campos obrigatórios está vazio. Se a gravação falhar por outro motivo, o erro mostrado é o texto que vier do banco de dados (varia caso a caso).',
         },
@@ -122,9 +122,9 @@ const screen: HelpScreen = {
         {
           anchor: "assuntos.syn.adicionar",
           label: "Adicionar (sinônimo)",
-          what: "Cadastra o novo sinônimo, já ligado.",
+          what: 'Cadastra o novo sinônimo, já ligado, e mostra o aviso "Sinônimo adicionado". Enquanto grava, o botão mostra "Adicionando…".',
           notes:
-            'Erro possível: "Preencha a palavra da casa e o termo conhecido" quando um dos dois campos está vazio.',
+            'Erro possível: "Preencha a palavra da casa e o termo conhecido" quando um dos dois campos está vazio. Se a gravação falhar, o erro aparece e os campos continuam preenchidos.',
         },
         {
           anchor: "assuntos.syn.lista",
@@ -183,7 +183,7 @@ const screen: HelpScreen = {
           label: "Criar exemplo",
           what: 'Aparece só nas avaliações ruins. Cria um rascunho de exemplo em Exemplos com a mesma pergunta, usando o motivo escrito na avaliação como resposta ideal (ou o texto "(preencher a resposta ideal)" quando não havia motivo escrito) — sempre desligado, com a origem "feedback".',
           notes:
-            'Ao criar, mostra o aviso "Rascunho criado em Exemplos — abra para editar e ativar". Se a avaliação não tiver mais a pergunta original vinculada, mostra o erro "Sem pergunta vinculada" e não cria nada.',
+            'Enquanto cria, o botão mostra "Criando…" e fica travado. Ao criar, mostra o aviso "Rascunho criado em Exemplos — abra para editar e ativar" e o botão passa a "Rascunho criado" (travado, para não duplicar). Se a avaliação não tiver mais a pergunta original vinculada, mostra o erro "Sem pergunta vinculada" e não cria nada; se a gravação falhar, mostra o erro e o botão volta a "Criar exemplo".',
         },
       ],
     },
@@ -206,6 +206,12 @@ const screen: HelpScreen = {
       title: "Nenhuma avaliação ainda. Avalie as respostas no Assistente IA (👍 ou 👎).",
       what: "Texto mostrado na aba Avaliações quando a equipe ainda não avaliou nenhuma resposta.",
       action: "Avalie as respostas do Assistente IA com 👍 ou 👎 para alimentar esta aba.",
+    },
+    {
+      id: "erro-ao-carregar",
+      title: "Não foi possível carregar os exemplos / os assuntos / os sinônimos / as avaliações",
+      what: "Aparece no lugar da lista quando a busca falhou (rede ou servidor). A lista não está vazia: só não carregou.",
+      action: 'Toque em "Tentar novamente".',
     },
   ],
 

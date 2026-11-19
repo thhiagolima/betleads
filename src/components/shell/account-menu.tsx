@@ -28,7 +28,7 @@ export function AccountMenu({ role }: { role: ShellRole | null }) {
           type="button"
           aria-label="Menu da conta"
           {...tourAnchor("shell.header.conta")}
-          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary outline-none transition-colors hover:bg-primary/25 focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-meta font-semibold text-primary outline-none transition-colors hover:bg-primary/25 focus-visible:ring-2 focus-visible:ring-ring"
         >
           {initials}
         </button>

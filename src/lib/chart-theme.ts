@@ -1,4 +1,6 @@
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+
+import type { MoneyFormatOptions } from "@/lib/currency";
 
 /**
  * One chart look for the whole app (the one the Início uses). Recharts takes CSS
@@ -42,7 +44,7 @@ export const chartTooltipProps = {
 /** Spread on <XAxis>/<YAxis>. */
 export const chartAxisProps = {
   stroke: "var(--color-muted-foreground)",
-  fontSize: 11.5,
+  fontSize: 12,
   tickLine: false,
   axisLine: false,
 } as const;
@@ -58,3 +60,33 @@ export const chartLegendProps = {
   wrapperStyle: { fontSize: 12, paddingTop: 8 },
   iconSize: 10,
 } as const;
+
+/** Phones (below Tailwind `sm`): charts get compact axes and drop secondary axes. */
+const COMPACT_CHART_QUERY = "(max-width: 639px)";
+
+export function useCompactCharts(): boolean {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia(COMPACT_CHART_QUERY);
+    const sync = () => setCompact(mql.matches);
+    sync();
+    mql.addEventListener("change", sync);
+    return () => mql.removeEventListener("change", sync);
+  }, []);
+  return compact;
+}
+
+type MoneyFormatter = (value: number | null | undefined, options?: MoneyFormatOptions) => string;
+
+/**
+ * Spread on a money <YAxis> (after `chartAxisProps`): full values on desktop,
+ * compact ("R$ 1,2 mil") and a narrower axis on phones.
+ */
+export function moneyAxisProps(money: MoneyFormatter, compact: boolean, width = 78) {
+  return {
+    tickFormatter: (value: unknown) =>
+      money(Number(value), compact ? { compact: true } : undefined),
+    width: compact ? 56 : width,
+  };
+}

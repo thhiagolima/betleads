@@ -100,19 +100,19 @@ export function waterfallBars(steps: WaterfallStep[]): WaterfallBar[] {
 }
 
 const TONE_BAR: Record<WaterfallTone, string> = {
-  in: "bg-[#5b7fa6]",
-  down: "bg-rose-400",
+  in: "bg-info",
+  down: "bg-danger",
   subtotal: "bg-slate-500",
-  positive: "bg-emerald-400",
-  negative: "bg-rose-400",
+  positive: "bg-success",
+  negative: "bg-danger",
 };
 
 const TONE_TEXT: Record<WaterfallTone, string> = {
   in: "text-foreground",
-  down: "text-rose-400",
+  down: "text-danger",
   subtotal: "text-foreground",
-  positive: "text-emerald-400",
-  negative: "text-rose-400",
+  positive: "text-success",
+  negative: "text-danger",
 };
 
 const LEGEND: { label: string; className: string }[] = [
@@ -171,7 +171,7 @@ export function WaterfallChart({
                     >
                       <span
                         className={cn(
-                          "absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-[13px] font-semibold tabular-nums",
+                          "absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-body font-semibold tabular-nums",
                           bar.labelBelow ? "top-full mt-1" : "bottom-full mb-1",
                           TONE_TEXT[bar.tone],
                         )}
@@ -185,7 +185,7 @@ export function WaterfallChart({
             </div>
           </div>
           <div
-            className="grid gap-3 pt-3 text-center text-xs sm:gap-[18px] sm:text-[13px]"
+            className="grid gap-3 pt-3 text-center text-xs sm:gap-[18px] sm:text-body"
             style={columns}
           >
             {bars.map((bar) => (

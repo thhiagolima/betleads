@@ -116,56 +116,101 @@ function ExpertLeadsPage() {
             />
           </div>
 
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nome</TableHead>
-                <TableHead>Telefone</TableHead>
-                <TableHead>Dias sem depositar</TableHead>
-                <TableHead>Total depositado</TableHead>
-                <TableHead>Último depósito</TableHead>
-                <TableHead>Risco</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className="cursor-pointer"
-                  onClick={() =>
-                    void navigate({ to: "/expert/leads/$playerId", params: { playerId: row.id } })
-                  }
-                >
-                  <TableCell className="font-medium">
+          {leadsQuery.isError && !leadsQuery.data ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-center" role="alert">
+              <p className="text-body text-destructive">Não foi possível carregar os leads.</p>
+              <Button variant="outline" size="sm" onClick={() => void leadsQuery.refetch()}>
+                Tentar novamente
+              </Button>
+            </div>
+          ) : !homeQuery.isSuccess || leadsQuery.isLoading ? (
+            <p className="py-8 text-center text-muted-foreground" aria-busy="true">
+              Carregando leads…
+            </p>
+          ) : rows.length === 0 ? (
+            <p className="py-8 text-center text-muted-foreground">{emptyMessage}</p>
+          ) : (
+            <>
+              {/* Phones: one card per lead, the whole card opens the sheet. */}
+              <ul className="space-y-2 md:hidden">
+                {rows.map((row) => (
+                  <li key={row.id}>
                     <Link
                       to="/expert/leads/$playerId"
                       params={{ playerId: row.id }}
-                      className="hover:underline"
-                      onClick={(event) => event.stopPropagation()}
+                      className="flex min-h-11 items-center gap-3 rounded-lg border border-border/60 px-3 py-2.5 hover:bg-muted/40"
                     >
-                      {row.nome}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-body font-medium">{row.nome}</span>
+                        <span className="block truncate text-label text-muted-foreground">
+                          {row.telefone ?? "Sem telefone"}
+                        </span>
+                        <span className="mt-0.5 block text-label text-muted-foreground">
+                          {money(row.totalDepositado)} depositado
+                          {row.diasSemDepositar != null &&
+                            ` · ${row.diasSemDepositar} ${row.diasSemDepositar === 1 ? "dia" : "dias"} sem depositar`}
+                        </span>
+                      </span>
+                      {row.risco && <span className="shrink-0">{riscoBadge(row.risco)}</span>}
+                      <ChevronRight
+                        className="h-4 w-4 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
                     </Link>
-                  </TableCell>
-                  <TableCell>{row.telefone ?? "—"}</TableCell>
-                  <TableCell>{row.diasSemDepositar ?? "—"}</TableCell>
-                  <TableCell>{money(row.totalDepositado)}</TableCell>
-                  <TableCell>{formatUltimoDeposito(row.ultimoDeposito)}</TableCell>
-                  <TableCell>{riscoBadge(row.risco)}</TableCell>
-                </TableRow>
-              ))}
-              {homeQuery.isSuccess && !leadsQuery.isLoading && rows.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                    {emptyMessage}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>Telefone</TableHead>
+                      <TableHead>Dias sem depositar</TableHead>
+                      <TableHead>Total depositado</TableHead>
+                      <TableHead>Último depósito</TableHead>
+                      <TableHead>Risco</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((row) => (
+                      <TableRow
+                        key={row.id}
+                        className="cursor-pointer"
+                        onClick={() =>
+                          void navigate({
+                            to: "/expert/leads/$playerId",
+                            params: { playerId: row.id },
+                          })
+                        }
+                      >
+                        <TableCell className="font-medium">
+                          <Link
+                            to="/expert/leads/$playerId"
+                            params={{ playerId: row.id }}
+                            className="hover:underline"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {row.nome}
+                          </Link>
+                        </TableCell>
+                        <TableCell>{row.telefone ?? "—"}</TableCell>
+                        <TableCell>{row.diasSemDepositar ?? "—"}</TableCell>
+                        <TableCell>{money(row.totalDepositado)}</TableCell>
+                        <TableCell>{formatUltimoDeposito(row.ultimoDeposito)}</TableCell>
+                        <TableCell>{riscoBadge(row.risco)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
 
           {total > 50 && (
             <div className="flex items-center justify-between gap-2 pt-2">
-              <span className="text-xs text-muted-foreground">
+              <span className="text-meta text-muted-foreground">
                 Página {currentPage} de {totalPages}
               </span>
               <div className="flex items-center gap-2">

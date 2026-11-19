@@ -21,7 +21,7 @@ export function Brand() {
       </span>
       <span className="min-w-0 sb-collapsed:hidden">
         <span className="block truncate text-[13.5px] font-semibold leading-none">BETLEADS</span>
-        <span className="mt-1 block truncate text-[9px] uppercase leading-none tracking-[0.15em] text-muted-foreground">
+        <span className="mt-1 block truncate text-[10px] uppercase leading-none tracking-[0.15em] text-muted-foreground">
           Player Intelligence
         </span>
       </span>

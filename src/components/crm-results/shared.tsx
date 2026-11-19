@@ -72,14 +72,16 @@ export function Kpi({
   delta?: React.ReactNode;
 }) {
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardContent className="space-y-1 p-4">
-        <p className="flex items-center gap-1.5 text-label text-muted-foreground">
+        <p className="flex min-w-0 items-center gap-1.5 break-words text-label text-muted-foreground">
           {label}
           {info && <InfoTip text={info} />}
         </p>
-        <div className="flex items-baseline gap-2">
-          <p className="text-kpi tabular-nums">{value}</p>
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <p className="min-w-0 break-words text-xl font-semibold tabular-nums sm:text-2xl lg:text-kpi">
+            {value}
+          </p>
           {delta}
         </div>
         {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
@@ -152,8 +154,8 @@ export function CentralPeriodPicker<K extends string = PeriodKey>({
   /** Presets; default `PERIODS` da Central (as telas do expert somam meses). */
   periods?: readonly { key: K; label: string }[];
   /** Passthrough for `tourAnchor(...)` (data-tour): anchoring the picker
-   * itself instead of a wrapper div keeps it shrinkable (and scrolling
-   * inside itself) as a flex item on narrow screens. */
+   * itself instead of a wrapper div keeps it shrinkable (wrapping inside
+   * itself) as a flex item on narrow screens. */
   "data-tour"?: string;
 }) {
   const items = (periods ?? PERIODS) as readonly { key: K; label: string }[];
@@ -162,7 +164,7 @@ export function CentralPeriodPicker<K extends string = PeriodKey>({
       {...rest}
       role="group"
       aria-label="Período"
-      className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-[3px] [scrollbar-width:none]"
+      className="flex w-fit max-w-full flex-wrap gap-0.5 rounded-xl border border-border bg-card p-[3px]"
     >
       {items.map((item) => (
         <button
@@ -171,7 +173,7 @@ export function CentralPeriodPicker<K extends string = PeriodKey>({
           aria-pressed={value === item.key}
           onClick={() => onChange(item.key)}
           className={cn(
-            "h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+            "h-10 shrink-0 whitespace-nowrap rounded-lg px-3 text-body font-medium md:h-9 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
             value === item.key
               ? "bg-secondary text-foreground"
               : "text-muted-foreground hover:text-foreground",

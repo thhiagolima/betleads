@@ -142,7 +142,7 @@ function BlockedTenantCard({
         role="alert"
         className="w-full max-w-xl border-border/70 bg-card/80 shadow-xl shadow-black/20"
       >
-        <CardContent className="space-y-5 p-6">
+        <CardContent className="space-y-5 p-4 sm:p-6">
           <div className="flex items-start gap-4">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-muted">
               {icon}
@@ -152,9 +152,9 @@ function BlockedTenantCard({
               <p className="text-body leading-relaxed text-muted-foreground">{description}</p>
             </div>
           </div>
-          <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-4">
-            <div className="flex items-center gap-2 text-meta text-muted-foreground">
-              <Building2 className="h-4 w-4" />
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
+            <div className="flex min-w-0 flex-1 basis-56 items-center gap-2 text-meta text-muted-foreground">
+              <Building2 className="h-4 w-4 shrink-0" />
               Gestão da conta e auditoria continuam disponíveis.
             </div>
             {action}

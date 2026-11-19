@@ -20,14 +20,15 @@ function share(part: number, base: number): string | null {
   return `${Math.min(100, Math.round((part / base) * 100)).toLocaleString("pt-BR")}%`;
 }
 
-function Step({ label, value, title }: { label: string; value: number; title?: string }) {
+/** `hint` is shown as text under the label (a `title` never shows on a phone). */
+function Step({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
-    <li
-      className="flex items-baseline justify-between gap-3 rounded-lg border border-border/70 bg-card px-4 py-3"
-      title={title}
-    >
-      <span className="text-body text-muted-foreground">{label}</span>
-      <span className="text-lg font-semibold tabular-nums">{num(value)}</span>
+    <li className="flex items-baseline justify-between gap-3 rounded-lg border border-border/70 bg-card px-4 py-3">
+      <span className="min-w-0">
+        <span className="block text-body text-muted-foreground">{label}</span>
+        {hint && <span className="mt-0.5 block text-meta text-muted-foreground/80">{hint}</span>}
+      </span>
+      <span className="shrink-0 text-lg font-semibold tabular-nums">{num(value)}</span>
     </li>
   );
 }
@@ -60,7 +61,7 @@ export function ReportFunnel({
                 : `Depositaram em até ${janelaHoras}h`
             }
             value={current.leadsDepositaramClique}
-            title={CLIQUE_DEPOSITO_DEFINICAO}
+            hint={CLIQUE_DEPOSITO_DEFINICAO}
           />
         </ol>
         <p className="flex items-baseline justify-between gap-3 px-4 text-body">

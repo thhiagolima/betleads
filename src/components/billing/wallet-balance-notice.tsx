@@ -29,8 +29,8 @@ export function WalletBalanceNotice({
     <Alert
       className={cn(
         notice.kind === "empty"
-          ? "border-red-500/40 bg-red-500/10 text-red-200 [&>svg]:text-red-400"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-100 [&>svg]:text-amber-400",
+          ? "border-danger/40 bg-danger/10 text-foreground [&>svg]:text-danger"
+          : "border-warning/40 bg-warning/10 text-foreground [&>svg]:text-warning",
         className,
       )}
       {...tourAnchor("canal.carteira.aviso")}

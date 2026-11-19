@@ -334,13 +334,23 @@ function AdminIntegrationsTab() {
                   </Badge>
                 </div>
                 <div className="space-y-1">
-                  <Label>Endpoint</Label>
-                  <Input readOnly value={item.endpoint} className="font-mono text-meta" />
+                  <Label htmlFor={`integration-endpoint-${item.channel}`}>Endpoint</Label>
+                  <Input
+                    id={`integration-endpoint-${item.channel}`}
+                    readOnly
+                    value={item.endpoint}
+                    className="font-mono text-meta"
+                  />
                 </div>
                 <div className="space-y-1">
-                  <Label>Callback</Label>
+                  <Label htmlFor={`integration-callback-${item.channel}`}>Callback</Label>
                   <div className="flex gap-2">
-                    <Input readOnly value={item.callbackUrl} className="font-mono text-meta" />
+                    <Input
+                      id={`integration-callback-${item.channel}`}
+                      readOnly
+                      value={item.callbackUrl}
+                      className="font-mono text-meta"
+                    />
                     <IconButton
                       variant="outline"
                       label="Copiar callback"
@@ -491,6 +501,18 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
     },
     onError: (error: Error) => toast.error(error.message),
   });
+  // Changing the role of an existing link is its own mutation: it must not
+  // touch the "Adicionar casa" form state (tenantId/role) above.
+  const changeRoleMut = useMutation({
+    mutationFn: (vars: { tenantId: string; role: typeof role }) =>
+      assign({ data: { user_id: userId, tenant_id: vars.tenantId, role: vars.role } }),
+    onSuccess: () => {
+      toast.success("Papel atualizado");
+      qc.invalidateQueries({ queryKey: ["admin-user-accesses", userId] });
+      qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
   const removeMut = useMutation({
     mutationFn: (id: string) => remove({ data: { user_id: userId, tenant_id: id } }),
     onSuccess: () => {
@@ -523,7 +545,7 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
               <p className="text-sm font-medium">Adicionar casa</p>
               <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_130px_auto]">
                 <Select value={tenantId} onValueChange={setTenantId}>
-                  <SelectTrigger>
+                  <SelectTrigger aria-label="Casa">
                     <SelectValue placeholder="Selecione uma casa" />
                   </SelectTrigger>
                   <SelectContent>
@@ -537,7 +559,7 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                   </SelectContent>
                 </Select>
                 <Select value={role} onValueChange={(value) => setRole(value as typeof role)}>
-                  <SelectTrigger>
+                  <SelectTrigger aria-label="Papel">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -558,7 +580,7 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
               {(data?.memberships ?? []).map((membership) => (
                 <div
                   key={membership.id}
-                  className="flex items-center gap-3 rounded-lg border border-border/60 p-3"
+                  className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border/60 p-3"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">
@@ -573,24 +595,22 @@ function ManageAccessButton({ userId, email }: { userId: string; email: string }
                     value={membership.role}
                     // Expert memberships are managed only in Experts (the
                     // server refuses with EXPERT_MEMBER_GUARD).
-                    disabled={(membership.role as string) === "expert"}
-                    onValueChange={(value) => {
-                      setTenantId(membership.tenant_id!);
-                      setRole(value as typeof role);
-                      assign({
-                        data: {
-                          user_id: userId,
-                          tenant_id: membership.tenant_id!,
-                          role: value as typeof role,
-                        },
+                    disabled={
+                      (membership.role as string) === "expert" ||
+                      (changeRoleMut.isPending &&
+                        changeRoleMut.variables?.tenantId === membership.tenant_id)
+                    }
+                    onValueChange={(value) =>
+                      changeRoleMut.mutate({
+                        tenantId: membership.tenant_id!,
+                        role: value as typeof role,
                       })
-                        .then(() =>
-                          qc.invalidateQueries({ queryKey: ["admin-user-accesses", userId] }),
-                        )
-                        .catch((error: Error) => toast.error(error.message));
-                    }}
+                    }
                   >
-                    <SelectTrigger className="w-28">
+                    <SelectTrigger
+                      className="w-28 shrink-0"
+                      aria-label={`Papel em ${membership.tenant?.nome ?? "esta casa"}`}
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -992,12 +1012,13 @@ function AdjustWalletDialog({ tenant }: { tenant: WalletTenantRow }) {
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>Casa</Label>
+            <p className="text-sm font-medium leading-none">Casa</p>
             <p className="text-sm font-medium">{tenant.tenant_name ?? tenant.tenant_id}</p>
           </div>
           <div className="space-y-2">
-            <Label>Valor (R$)</Label>
+            <Label htmlFor="adjust-wallet-dialog-valor">Valor (R$)</Label>
             <Input
+              id="adjust-wallet-dialog-valor"
               type="number"
               step="0.01"
               value={amount}
@@ -1005,8 +1026,12 @@ function AdjustWalletDialog({ tenant }: { tenant: WalletTenantRow }) {
             />
           </div>
           <div className="space-y-2">
-            <Label>Motivo</Label>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} />
+            <Label htmlFor="adjust-wallet-dialog-motivo">Motivo</Label>
+            <Input
+              id="adjust-wallet-dialog-motivo"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>
@@ -1098,9 +1123,9 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label>Item</Label>
+            <Label htmlFor="tenant-price-dialog-item">Item</Label>
             <Select value={item} onValueChange={(value) => setItem(value as typeof item)}>
-              <SelectTrigger>
+              <SelectTrigger id="tenant-price-dialog-item">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1113,8 +1138,9 @@ function TenantPriceDialog({ tenant }: { tenant: WalletTenantRow }) {
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Preço unitário (R$)</Label>
+            <Label htmlFor="tenant-price-dialog-preco-unitario-r">Preço unitário (R$)</Label>
             <Input
+              id="tenant-price-dialog-preco-unitario-r"
               type="number"
               min="0"
               step="0.0001"
@@ -1192,13 +1218,13 @@ function WebpushBillingModeField({ tenantId, enabled }: { tenantId: string; enab
   const prices = current.data?.prices;
   return (
     <div className="space-y-2 border-t border-border pt-3">
-      <Label>Cobrança Web Push</Label>
+      <Label htmlFor="webpush-billing-mode-field-cobranca-web-push">Cobrança Web Push</Label>
       <Select
         value={mode ?? ""}
         disabled={current.isLoading || save.isPending}
         onValueChange={(value) => save.mutate(value as WebpushBillingMode)}
       >
-        <SelectTrigger>
+        <SelectTrigger id="webpush-billing-mode-field-cobranca-web-push">
           <SelectValue
             placeholder={current.isLoading ? "Carregando…" : "Nenhuma (envio e lead a R$ 0)"}
           />

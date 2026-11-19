@@ -144,8 +144,7 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
             className="w-full rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3 text-left text-sm text-foreground transition-colors hover:bg-primary/10"
             {...tourAnchor("casa.remetente.hint")}
           >
-            Domínio verificado. Agora crie um remetente para enviar campanhas e jornadas por
-            e-mail.
+            Domínio verificado. Agora crie um remetente para enviar campanhas e jornadas por e-mail.
           </button>
         )}
         {senders.map((s, index) => (
@@ -154,11 +153,11 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/40 bg-background/30 p-3"
           >
             <div className="min-w-0">
-              <p className="text-sm font-medium truncate">
+              <p className="break-all text-sm font-medium">
                 {s.fromName} &lt;{s.fromEmail}&gt;
               </p>
               {!s.domainVerified && (
-                <p className="text-xs text-amber-300">Domínio ainda não verificado</p>
+                <p className="text-xs text-warning">Domínio ainda não verificado</p>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -189,7 +188,10 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
       </div>
 
       {canEdit && (
-        <div ref={formRef} className="space-y-3 rounded-lg border border-border/40 bg-background/30 p-4">
+        <div
+          ref={formRef}
+          className="space-y-3 rounded-lg border border-border/40 bg-background/30 p-4"
+        >
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label>Domínio de e-mail</Label>
@@ -207,9 +209,10 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
               </Select>
             </div>
             <div>
-              <Label>Endereço</Label>
-              <div className="flex items-center gap-1">
+              <Label htmlFor="email-sender-local-part">Endereço</Label>
+              <div className="flex min-w-0 flex-wrap items-center gap-1">
                 <Input
+                  id="email-sender-local-part"
                   ref={localPartInputRef}
                   value={localPart}
                   onChange={(e) => setLocalPart(e.target.value)}
@@ -217,7 +220,7 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
                   className="max-w-[140px]"
                   {...tourAnchor("casa.remetente.local-part")}
                 />
-                <span className="text-sm text-muted-foreground">
+                <span className="min-w-0 break-all text-sm text-muted-foreground">
                   @{selectedDomain?.hostname ?? "..."}
                 </span>
               </div>
@@ -246,14 +249,20 @@ export function EmailSendersSection({ variant = "page" }: { variant?: "page" | "
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Switch checked={isDefault} onCheckedChange={setIsDefault} {...tourAnchor("casa.remetente.default")} />
+            <Switch
+              checked={isDefault}
+              onCheckedChange={setIsDefault}
+              {...tourAnchor("casa.remetente.default")}
+            />
             <Label>Remetente padrão</Label>
           </div>
           <DemoDisabledTooltip active={isDemo}>
             <Button
               type="button"
               size="sm"
-              disabled={isDemo || !domainId || !localPart.trim() || !fromName.trim() || save.isPending}
+              disabled={
+                isDemo || !domainId || !localPart.trim() || !fromName.trim() || save.isPending
+              }
               onClick={() => save.mutate()}
               {...tourAnchor("casa.remetente.save")}
             >

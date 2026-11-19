@@ -198,7 +198,7 @@ export function ProfitTrendChart({
         {title ?? trendChartTitle(stacked, metric)}
       </h2>
       <div
-        className="inline-flex gap-0.5 rounded-lg border border-border bg-secondary/40 p-0.5"
+        className="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-secondary/40 p-0.5 [scrollbar-width:none]"
         role="group"
         aria-label="Métrica do gráfico"
       >
@@ -209,7 +209,7 @@ export function ProfitTrendChart({
             aria-pressed={metric === item.key}
             onClick={() => setMetric(item.key)}
             className={cn(
-              "rounded-md px-2.5 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "min-h-10 shrink-0 whitespace-nowrap rounded-md px-3 py-1 text-label outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:px-2.5 sm:text-xs",
               metric === item.key
                 ? "bg-secondary font-medium text-foreground"
                 : "text-muted-foreground hover:text-foreground",
@@ -401,7 +401,7 @@ export function ProfitTrendChart({
           </BarChart>
         </ResponsiveContainer>
       </div>
-      {hint && <p className="text-[13px] text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-body text-muted-foreground">{hint}</p>}
       {missing && (
         <p className="text-xs text-muted-foreground">{betleadsMissingNote(betleadsSince)}</p>
       )}

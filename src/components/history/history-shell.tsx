@@ -60,6 +60,7 @@ import { historyWindow } from "@/components/channels/channel-period";
 import { PeriodPicker } from "@/components/home/period-picker";
 import { periodRange, type PeriodPreset } from "@/lib/home-dashboard";
 import { brtDayKey } from "@/lib/tz";
+import { cn } from "@/lib/utils";
 import { tourAnchor } from "@/help/anchor";
 
 import { StatusBadge } from "./status-badge";
@@ -310,8 +311,12 @@ export function HistoryShell({
       {options.title && <h2 className="text-section">{options.title}</h2>}
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5" {...tourAnchor("historico.cards")}>
+      <div
+        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+        {...tourAnchor("historico.cards")}
+      >
         <StatCard
+          className="col-span-2 sm:col-span-1"
           icon={<Send className="h-4 w-4" />}
           label={cards.total}
           value={stats.data?.total}
@@ -523,7 +528,20 @@ export function HistoryShell({
               </TableHeader>
               <TableBody>
                 {rows.map((r) => (
-                  <TableRow key={r.id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
+                  <TableRow
+                    key={r.id}
+                    className="cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-none"
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Ver detalhes do envio para ${r.lead_name ?? r.contact}`}
+                    onClick={() => setOpenRow(r)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setOpenRow(r);
+                      }
+                    }}
+                  >
                     <TableCell className="whitespace-nowrap text-meta text-muted-foreground">
                       {new Date(r.created_at).toLocaleString("pt-BR", {
                         day: "2-digit",
@@ -538,8 +556,11 @@ export function HistoryShell({
                     <TableCell className="font-mono text-meta text-muted-foreground">
                       {r.contact}
                     </TableCell>
-                    <TableCell className="max-w-[280px] truncate text-xs text-muted-foreground">
-                      {r.message ?? "—"}
+                    <TableCell className="text-xs text-muted-foreground">
+                      {/* Clamped; the full message is in the details the row opens. */}
+                      <div className="line-clamp-2 min-w-40 max-w-[280px] break-words">
+                        {r.message ?? "—"}
+                      </div>
                     </TableCell>
                     {showFlow && (
                       <TableCell className="text-xs">
@@ -568,7 +589,7 @@ export function HistoryShell({
           )}
         </CardContent>
         {rows.length > 0 && (
-          <div className="flex items-center justify-between gap-2 border-t border-white/5 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
             <div className="text-xs text-muted-foreground">
               {total.toLocaleString("pt-BR")} registros · página {page + 1} de {totalPages}
             </div>
@@ -687,7 +708,9 @@ function StatCard({
   value,
   subtitle,
   deltaPct,
+  className,
 }: {
+  className?: string;
   icon: React.ReactNode;
   label: string;
   value: number | undefined;
@@ -695,7 +718,7 @@ function StatCard({
   deltaPct?: number | null;
 }) {
   return (
-    <Card>
+    <Card className={cn("min-w-0", className)}>
       <CardContent className="flex items-center justify-between gap-3 p-4">
         <div className="min-w-0">
           <p className="text-label text-muted-foreground">{label}</p>
@@ -770,11 +793,23 @@ function FlowRanking({
           return (
             <TableRow
               key={s.flow_id}
-              className={`cursor-pointer ${isSelected ? "bg-primary/5" : ""}`}
+              className={`cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-none ${isSelected ? "bg-primary/5" : ""}`}
+              tabIndex={0}
+              role="button"
+              aria-pressed={isSelected}
+              aria-label={`Ver envios da jornada ${s.flow_name}`}
               onClick={() => onSelect(s.flow_id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelect(s.flow_id);
+                }
+              }}
             >
-              <TableCell className="max-w-[260px]">
-                <div className="text-xs font-medium">{s.flow_name}</div>
+              <TableCell>
+                <div className="line-clamp-2 min-w-32 max-w-[260px] break-words text-xs font-medium">
+                  {s.flow_name}
+                </div>
                 <div className="mt-1 h-1 w-full rounded bg-muted/40">
                   <div className="h-1 rounded bg-primary/70" style={{ width: `${width}%` }} />
                 </div>

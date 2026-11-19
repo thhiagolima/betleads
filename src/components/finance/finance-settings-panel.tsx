@@ -28,6 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorState } from "@/components/finance/query-error-state";
 
 /** "YYYY-MM-DD" of today in São Paulo, matching the server's default `validFrom`. */
 function today() {
@@ -82,8 +83,18 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
     onError: (error: Error) => toast.error(error.message),
   });
 
-  if (query.isLoading || !query.data) {
+  if (query.isLoading) {
     return <div className="h-40 animate-pulse rounded-lg border border-border/40" />;
+  }
+
+  if (query.isError || !query.data) {
+    return (
+      <QueryErrorState
+        title="Não foi possível carregar as configurações do financeiro."
+        retrying={query.isFetching}
+        onRetry={() => void query.refetch()}
+      />
+    );
   }
 
   const { rates, viewers, permissions } = query.data;
@@ -207,9 +218,7 @@ export function FinanceSettingsPanel({ tenantId }: { tenantId: string }) {
                     onCheckedChange={(checked) =>
                       setViewer.mutate({ userId: viewer.user_id, canView: checked })
                     }
-                    {...(index === 0
-                      ? tourAnchor("financeiro.configuracoes.liberar-gestor")
-                      : {})}
+                    {...(index === 0 ? tourAnchor("financeiro.configuracoes.liberar-gestor") : {})}
                   />
                 </DemoDisabledTooltip>
               </div>

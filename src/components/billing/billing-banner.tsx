@@ -27,39 +27,42 @@ export function BillingBanner() {
       role="status"
       {...tourAnchor("shell.faixa.mensalidade")}
       className={cn(
-        "flex flex-wrap items-center gap-3 border-b px-4 py-2.5 text-sm sm:px-6",
-        tone === "yellow"
-          ? "border-amber-500/40 bg-amber-500/10 text-amber-100"
-          : "border-red-500/40 bg-red-500/10 text-red-100",
+        "border-b px-4 py-2.5 text-sm text-foreground sm:px-6",
+        tone === "yellow" ? "border-warning/40 bg-warning/10" : "border-danger/40 bg-danger/10",
       )}
     >
-      <div className="flex min-w-0 flex-1 basis-full items-start gap-2 sm:basis-auto">
-        <AlertTriangle
-          className={cn(
-            "h-4 w-4 shrink-0 translate-y-0.5",
-            tone === "yellow" ? "text-amber-400" : "text-red-400",
-          )}
-          aria-hidden="true"
-        />
-        <p className="min-w-0 leading-relaxed">
-          {text}
-          {memberHint && <span className="ml-1 text-xs opacity-80">{memberHint}</span>}
-        </p>
+      {/* Same width as the page content and the other banners (max-w-[1600px]). */}
+      <div className="mx-auto flex w-full max-w-[1600px] flex-wrap items-center gap-3">
+        <div className="flex min-w-0 flex-1 basis-full items-start gap-2 sm:basis-auto">
+          <AlertTriangle
+            className={cn(
+              "h-4 w-4 shrink-0 translate-y-0.5",
+              tone === "yellow" ? "text-warning" : "text-danger",
+            )}
+            aria-hidden="true"
+          />
+          <p className="min-w-0 leading-relaxed">
+            {text}
+            {memberHint && (
+              <span className="ml-1 text-meta text-muted-foreground">{memberHint}</span>
+            )}
+          </p>
+        </div>
+        {showPay && (
+          <Button
+            asChild
+            size="sm"
+            className={cn(
+              "w-full sm:w-auto",
+              tone === "yellow"
+                ? "bg-warning text-background hover:bg-warning/90"
+                : "bg-danger text-white hover:bg-danger/90",
+            )}
+          >
+            <Link to="/plano-e-creditos">Pagar agora</Link>
+          </Button>
+        )}
       </div>
-      {showPay && (
-        <Button
-          asChild
-          size="sm"
-          className={cn(
-            "w-full sm:w-auto",
-            tone === "yellow"
-              ? "bg-amber-500 text-amber-950 hover:bg-amber-500/90"
-              : "bg-red-500 text-white hover:bg-red-500/90",
-          )}
-        >
-          <Link to="/plano-e-creditos">Pagar agora</Link>
-        </Button>
-      )}
     </div>
   );
 }

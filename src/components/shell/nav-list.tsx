@@ -175,7 +175,7 @@ export function NavSections({
       {sections.map((section, index) => (
         <div key={section.label ?? index} role="group" aria-label={section.label}>
           {section.label && (
-            <div className="px-2.5 pb-1.5 pt-4 text-[10.5px] font-semibold uppercase leading-none tracking-[0.12em] text-muted-foreground sb-collapsed:hidden">
+            <div className="px-2.5 pb-1.5 pt-4 text-meta font-semibold uppercase leading-none tracking-[0.12em] text-muted-foreground sb-collapsed:hidden">
               {section.label}
             </div>
           )}

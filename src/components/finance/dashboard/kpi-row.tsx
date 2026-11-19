@@ -28,8 +28,8 @@ export function KpiBlock({
       {...anchorAttrs}
       className="min-w-0 rounded-[14px] border border-border bg-card/80 px-5 pb-2 pt-5 sm:px-[22px]"
     >
-      <h3 className="text-[15px] font-semibold leading-tight">{title}</h3>
-      <p className="mb-3.5 mt-0.5 text-[12.5px] text-muted-foreground/80">{description}</p>
+      <h3 className="text-section font-semibold leading-tight">{title}</h3>
+      <p className="mb-3.5 mt-0.5 text-label text-muted-foreground/80">{description}</p>
       {children}
     </section>
   );
@@ -94,7 +94,7 @@ export function KpiRowShell({
         >
           {value}
         </p>
-        {sub && <p className="mt-0.5 text-[11.5px] font-medium text-muted-foreground">{sub}</p>}
+        {sub && <p className="mt-0.5 text-meta font-medium text-muted-foreground">{sub}</p>}
         {variation}
       </div>
     </div>

@@ -5,7 +5,7 @@
 // The category is a fixed set plus the ones the house typed before; a cost that
 // looks like a Betleads charge gets a typing hint, and an already-launched one
 // in a month with automatic Betleads cost is flagged as a probable duplicate.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Check, ChevronsUpDown, Info, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
@@ -27,6 +27,8 @@ import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { tourAnchor } from "@/help/anchor";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { QueryErrorState } from "@/components/finance/query-error-state";
 import {
   Command,
   CommandEmpty,
@@ -99,7 +101,7 @@ export function CostDateLabel({
     <span className="inline-flex items-center gap-1.5">
       {ddmm(costDate)}
       {repeatMonthly && (
-        <span className="inline-flex items-center gap-1 rounded-md border border-border/60 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1 rounded-md border border-border/60 px-1.5 py-0.5 text-meta text-muted-foreground">
           <Repeat className="h-3 w-3" />
           todo mês
         </span>
@@ -185,10 +187,13 @@ export function CostDateRepeatFields({
   const bounds = costDateBounds(month, today);
   return (
     <>
-      <div className="w-40">
+      <div className="w-full space-y-1 sm:w-40">
+        <label htmlFor="other-cost-date" className="text-meta text-muted-foreground">
+          Data
+        </label>
         <Input
+          id="other-cost-date"
           type="date"
-          aria-label="Data"
           min={bounds?.min}
           max={bounds?.max}
           value={costDate}
@@ -197,7 +202,7 @@ export function CostDateRepeatFields({
           {...tourAnchor("financeiro.outros-custos.data")}
         />
       </div>
-      <label className="flex h-9 items-center gap-2 text-sm">
+      <label className="flex h-10 items-center gap-2 text-sm sm:h-9">
         <Switch
           checked={repeatMonthly}
           onCheckedChange={onRepeatChange}
@@ -329,7 +334,7 @@ export function DuplicateBetleadsNote({
 }) {
   return (
     <div className="mt-1 flex flex-wrap items-center gap-2">
-      <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-600 dark:text-amber-400">
+      <span className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs text-warning">
         <Info className="h-3 w-3 shrink-0" />
         parece duplicado com o custo Betleads automático
       </span>
@@ -382,6 +387,9 @@ export function FinanceOtherCosts({
     setRepeatMonthly(false);
   };
 
+  const formRef = useRef<HTMLDivElement>(null);
+  const descricaoRef = useRef<HTMLInputElement>(null);
+
   const startEdit = (cost: {
     id: string;
     descricao: string;
@@ -396,6 +404,12 @@ export function FinanceOtherCosts({
     setValor(String(cost.valor));
     setCostDate(cost.costDate);
     setRepeatMonthly(cost.repeatMonthly);
+    // The form sits below the list: bring it into view and focus it so the
+    // tap on "Editar" visibly does something (on a phone it was off screen).
+    requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      descricaoRef.current?.focus({ preventScroll: true });
+    });
   };
 
   const query = useQuery({
@@ -445,8 +459,18 @@ export function FinanceOtherCosts({
     else remove.mutate({ id: cost.id, mode: "delete" });
   };
 
-  if (query.isLoading || !query.data) {
+  if (query.isLoading) {
     return <div className="h-24 animate-pulse rounded-lg border border-border/40" />;
+  }
+
+  if (query.isError || !query.data) {
+    return (
+      <QueryErrorState
+        title="Não foi possível carregar os outros custos deste mês."
+        retrying={query.isFetching}
+        onRetry={() => void query.refetch()}
+      />
+    );
   }
 
   const canEdit = query.data.permissions.canEditValues;
@@ -462,6 +486,7 @@ export function FinanceOtherCosts({
         type="month"
         value={month}
         onChange={(e) => setMonth(e.target.value)}
+        aria-label="Mês"
         className="w-44"
         {...tourAnchor("financeiro.outros-custos.mes")}
       />
@@ -508,30 +533,25 @@ export function FinanceOtherCosts({
                   <TableCell>
                     <div className="flex items-center gap-1">
                       <DemoDisabledTooltip active={isDemo}>
-                        <Button
+                        <IconButton
                           type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
+                          label={`Editar ${cost.descricao}`}
+                          icon={<Pencil className="h-4 w-4" />}
                           disabled={isDemo}
                           onClick={() => startEdit(cost)}
                           {...(index === 0 ? tourAnchor("financeiro.outros-custos.editar") : {})}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
+                        />
                       </DemoDisabledTooltip>
                       <DemoDisabledTooltip active={isDemo}>
-                        <Button
+                        <IconButton
                           type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          label={`Excluir ${cost.descricao}`}
+                          icon={<Trash2 className="h-4 w-4" />}
+                          className="text-destructive hover:text-destructive"
                           disabled={isDemo || remove.isPending}
                           onClick={() => requestDelete(cost)}
                           {...(index === 0 ? tourAnchor("financeiro.outros-custos.excluir") : {})}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        />
                       </DemoDisabledTooltip>
                     </div>
                   </TableCell>
@@ -588,7 +608,11 @@ export function FinanceOtherCosts({
       )}
 
       {canEdit && (
-        <div className="space-y-2 rounded-lg border border-border/40 bg-background/30 p-3">
+        <div
+          ref={formRef}
+          className="scroll-mt-24 space-y-2 rounded-lg border border-border/40 bg-background/30 p-3"
+        >
+          {editingId && <p className="text-sm font-medium">Editando custo</p>}
           <div className="flex flex-wrap items-end gap-2">
             <CostDateRepeatFields
               month={month}
@@ -599,16 +623,24 @@ export function FinanceOtherCosts({
               onCostDateChange={setCostDate}
               onRepeatChange={setRepeatMonthly}
             />
-            <div className="min-w-[160px] flex-1">
+            <div className="w-full min-w-0 space-y-1 sm:w-auto sm:min-w-[160px] sm:flex-1">
+              <label htmlFor="other-cost-descricao" className="text-meta text-muted-foreground">
+                Descrição
+              </label>
               <Input
-                placeholder="Descrição (ex.: Designer, Afiliado X)"
+                id="other-cost-descricao"
+                ref={descricaoRef}
+                placeholder="ex.: Designer, Afiliado X"
                 value={descricao}
                 onChange={(e) => setDescricao(e.target.value)}
                 disabled={isDemo}
                 {...tourAnchor("financeiro.outros-custos.descricao")}
               />
             </div>
-            <div className="w-full sm:w-52">
+            <div className="w-full space-y-1 sm:w-52">
+              <span className="block text-meta text-muted-foreground" aria-hidden="true">
+                Categoria
+              </span>
               <CategoryCombobox
                 categories={categories}
                 value={categoria}
@@ -616,12 +648,17 @@ export function FinanceOtherCosts({
                 disabled={isDemo}
               />
             </div>
-            <div className="w-32">
+            <div className="min-w-0 flex-1 space-y-1 sm:w-36 sm:flex-none">
+              <label htmlFor="other-cost-valor" className="text-meta text-muted-foreground">
+                Valor
+              </label>
               <Input
+                id="other-cost-valor"
                 type="number"
                 step="0.01"
                 min={0}
-                placeholder="Valor"
+                inputMode="decimal"
+                placeholder="0,00"
                 value={valor}
                 onChange={(e) => setValor(e.target.value)}
                 disabled={isDemo}
@@ -648,7 +685,7 @@ export function FinanceOtherCosts({
             )}
           </div>
           {hint && (
-            <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+            <p className="flex items-center gap-1.5 text-xs text-warning">
               <Info className="h-3.5 w-3.5 shrink-0" />
               {hint}
             </p>

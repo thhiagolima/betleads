@@ -111,8 +111,9 @@ describe("ReportCards in an empty period", () => {
     for (const title of ["Depositado creditado", "FTDs", "Redepósitos", "Reativados"]) {
       expect(html).toContain(title);
     }
-    expect(html).toContain('<p class="text-kpi tabular-nums">R$ 0,00</p>');
-    expect(html.match(/<p class="text-kpi tabular-nums">0<\/p>/g)).toHaveLength(3);
+    // The value <p> (its classes belong to the shared Kpi and may change).
+    expect(html).toMatch(/<p class="[^"]*tabular-nums[^"]*">R\$\u00a00,00<\/p>/);
+    expect(html.match(/<p class="[^"]*tabular-nums[^"]*">0<\/p>/g)).toHaveLength(3);
     expect(html.match(/—<span class="sr-only"> sem base no período anterior/g)).toHaveLength(4);
     expect(html).not.toContain("▲");
     expect(html).not.toContain("▼");
@@ -158,7 +159,9 @@ describe("ReportFunnel", () => {
     );
     expect(html).toContain("Leads que clicaram (100%)");
     expect(html).toContain("Depositaram em até 72h (100% dos que clicaram)");
-    expect(html).toContain(`title="${CLIQUE_DEPOSITO_DEFINICAO}"`);
+    // Visible text, not a `title` (phones never show one).
+    expect(html).toContain(`>${CLIQUE_DEPOSITO_DEFINICAO}<`);
+    expect(html).not.toContain("title=");
   });
 
   it("omits the share when there is no base", () => {

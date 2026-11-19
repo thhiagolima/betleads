@@ -6,21 +6,15 @@ import {
   Send,
   Workflow,
   ListOrdered,
-  History,
   Shield,
   Plus,
   Pause,
-  Play,
   Power,
   QrCode,
   TrendingUp,
-  Users,
   Clock,
   Sparkles,
-  Shuffle,
   Phone,
-  Search,
-  Star,
   AlertTriangle,
   CheckCircle2,
   UserCheck,
@@ -36,7 +30,6 @@ import {
   Type,
   Copy,
   Zap,
-  BookOpen,
 } from "lucide-react";
 import {
   Card,
@@ -58,7 +51,6 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -71,8 +63,6 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { TRIGGER_NAMES, TRIGGER_MEANINGS, type TriggerType } from "@/lib/triggers";
 import { toast } from "sonner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -87,9 +77,6 @@ import {
   renameWhatsappSession,
   getEvolutionRealtimeConfig,
   diagnoseEvolution,
-  listInboxChats,
-  listChatMessages,
-  sendWhatsappMessage,
   configureEvolutionWebhook,
   getWhatsappQueueStats,
   resumeWhatsappQueue,
@@ -113,15 +100,12 @@ import { DemoDisabledTooltip } from "@/components/demo-disabled-tooltip";
 import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import {
-  listRules,
-  updateRule,
   listFlows,
   getFlow,
   saveFlow,
   deleteFlow,
   toggleFlow,
   duplicateFlow,
-  testRule,
   createMediaUploadUrl,
   getAntibanSettings,
   saveAntibanSettings,
@@ -129,7 +113,7 @@ import {
   runEvaluateAndDispatch,
 } from "@/lib/automations.functions";
 import { LeadSelector, type SelectedLead } from "@/components/ligacoes/lead-selector";
-import { MetricCard, EmptyState, PageHeader } from "@/components/ui-premium";
+import { MetricCard, Page, PageHeader } from "@/components/ui-premium";
 import { MessageVariablePicker } from "@/components/message-variable-picker";
 import { requestConfirmation } from "@/components/system-dialog-host";
 import { getWhatsappDashboard, type WhatsappDashboard } from "@/lib/whatsapp-dashboard.functions";
@@ -220,9 +204,9 @@ interface HistoricoItem {
 // HELPERS
 // ============================================================
 function realStatusBadge(s: string) {
-  if (s === "connected") return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
-  if (s === "qrcode" || s === "connecting") return "bg-amber-500/15 text-amber-400 border-amber-500/30";
-  if (s === "error") return "bg-rose-500/15 text-rose-400 border-rose-500/30";
+  if (s === "connected") return "bg-success/15 text-success border-success/30";
+  if (s === "qrcode" || s === "connecting") return "bg-warning/15 text-warning border-warning/30";
+  if (s === "error") return "bg-destructive/15 text-destructive border-destructive/30";
   return "bg-slate-500/15 text-slate-300 border-slate-500/30";
 }
 
@@ -237,9 +221,9 @@ function traduzirStatus(s: string): string {
 
 function prioridadeBadge(p: "critico" | "alto" | "medio" | "baixo") {
   const map = {
-    critico: "bg-red-500/15 text-red-400 border-red-500/30",
+    critico: "bg-destructive/15 text-destructive border-destructive/30",
     alto: "bg-orange-500/15 text-orange-400 border-orange-500/30",
-    medio: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    medio: "bg-warning/15 text-warning border-warning/30",
     baixo: "bg-slate-500/15 text-slate-300 border-slate-500/30",
   };
   return map[p];
@@ -249,9 +233,9 @@ function resultadoBadge(r: HistoricoItem["resultado"]) {
   const map = {
     entregue: "bg-sky-500/15 text-sky-400 border-sky-500/30",
     lido: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30",
-    respondeu: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+    respondeu: "bg-success/15 text-success border-success/30",
     convertido: "bg-violet-500/15 text-violet-300 border-violet-500/30",
-    falhou: "bg-rose-500/15 text-rose-400 border-rose-500/30",
+    falhou: "bg-destructive/15 text-destructive border-destructive/30",
   };
   return map[r];
 }
@@ -301,32 +285,32 @@ function WhatsAppPage() {
   const isInbox = currentTab === "inbox";
 
   if (isInbox) {
-    // Inbox em modo "operacional": ocupa toda a viewport útil, sem header da página,
-    // sem padding externo. Neutraliza o padding do <main> do AppLayout.
+    // Inbox em modo "operacional": ocupa toda a viewport útil, sem header da página.
+    // Cancels the <main> padding on top/sides only: below md the bottom padding
+    // reserves the tab bar, so the height stops above it (shell header = 3.5rem).
+    // Banners above <main> push the inbox down; the page then scrolls a little
+    // and the composer stays reachable above the tab bar.
     return (
-      <div className="-m-4 sm:-m-6 h-[calc(100dvh-4rem)] overflow-hidden bg-background">
+      <div className="-mx-4 -mt-4 sm:-mx-6 sm:-mt-6 md:-mb-6 h-[calc(100dvh-3.5rem-76px-env(safe-area-inset-bottom))] md:h-[calc(100dvh-3.5rem)] overflow-hidden bg-background">
         <WhatsappInbox openChatId={search.chat} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <Page>
         <PageHeader
           title="WhatsApp"
           subtitle="Central de automação, conversas e retenção."
-          icon={<MessageCircle className="h-5 w-5 text-white" />}
-          iconClassName="bg-gradient-to-br from-emerald-500 to-teal-600"
           actions={<div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
             <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/60" />
+              <span className="h-2 w-2 rounded-full bg-success shadow-[0_0_8px] shadow-success/60" />
               {sessoesAtivas} sessões ativas · {filaTotal} na fila
             </span>
             <DashboardDateRangePicker range={range} onChange={setRange} />
           </div>}
         />
-        <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
+        <div className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-sm text-warning">
           <Pause className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <p className="font-medium">Automações de WhatsApp em validação</p>
@@ -366,37 +350,13 @@ function WhatsAppPage() {
           <TabsContent value="proxies"><ProxiesTab /></TabsContent>
           <TabsContent value="externo"><ExternalIntegrationTab /></TabsContent>
         </Tabs>
-      </div>
-    </div>
+    </Page>
   );
 }
 
 // ============================================================
 // DASHBOARD
 // ============================================================
-function GatilhosTab() {
-  const keys = Object.keys(TRIGGER_NAMES) as TriggerType[];
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Referência rápida dos 12 gatilhos inteligentes. Use a aba Regras para vinculá-los a um fluxo.
-      </p>
-      <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
-        {keys.map((k) => (
-          <Card key={k} className="border-border/60 bg-card/60">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">{TRIGGER_NAMES[k]}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">{TRIGGER_MEANINGS[k]}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function DashboardTab({
   dashboard,
   dataUpdatedAt,
@@ -441,9 +401,9 @@ function DashboardTab({
 
   const rtColor =
     rtStatus === "active"
-      ? "bg-emerald-400 shadow-emerald-400/60"
+      ? "bg-success shadow-success/60"
       : rtStatus === "connecting"
-        ? "bg-amber-400 shadow-amber-400/60"
+        ? "bg-warning shadow-warning/60"
         : "bg-slate-500 shadow-slate-500/40";
   const rtLabel =
     rtStatus === "active" ? "Ao vivo" : rtStatus === "connecting" ? "Conectando…" : "Offline";
@@ -451,17 +411,17 @@ function DashboardTab({
   return (
     <div className="space-y-6">
       {/* Hero: disparos de hoje em destaque */}
-      <Card className="border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-card to-card overflow-hidden">
+      <Card className="border-success/20 bg-gradient-to-br from-success/5 via-card to-card overflow-hidden">
         <CardContent className="p-6 grid gap-6 md:grid-cols-[1fr_auto] items-center">
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
               <Send className="h-3.5 w-3.5" />
               Disparos hoje
-              <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-background/60 px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-foreground/80 border border-border/60">
+              <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-background/60 px-2 py-0.5 text-meta font-medium normal-case tracking-normal text-foreground/80 border border-border/60">
                 <span className={`h-1.5 w-1.5 rounded-full shadow-[0_0_6px] ${rtColor}`} />
                 {rtLabel}
               </span>
-              <span className="ml-auto text-[10px] normal-case tracking-normal text-muted-foreground">
+              <span className="ml-auto text-meta normal-case tracking-normal text-muted-foreground">
                 Atualizado {updatedAgo}
               </span>
             </div>
@@ -469,7 +429,7 @@ function DashboardTab({
               <span className="text-5xl md:text-6xl font-bold tabular-nums tracking-tight">
                 {sentToday.toLocaleString("pt-BR")}
               </span>
-              <span className={`text-sm font-medium ${lastHour > 0 ? "text-emerald-400" : "text-muted-foreground"}`}>
+              <span className={`text-sm font-medium ${lastHour > 0 ? "text-success" : "text-muted-foreground"}`}>
                 {lastHour > 0 ? `↑ ${lastHour} na última hora` : "Nenhum disparo na última hora"}
               </span>
             </div>
@@ -484,7 +444,7 @@ function DashboardTab({
               return (
                 <div
                   key={i}
-                  className="w-2 rounded-sm bg-emerald-500/40 hover:bg-emerald-400 transition-colors"
+                  className="w-2 rounded-sm bg-success/40 hover:bg-success transition-colors"
                   style={{ height: `${h}px` }}
                   title={`${new Date(b.hour).getHours()}h: ${b.sent} disparos`}
                 />
@@ -528,8 +488,8 @@ function DashboardTab({
                     </span>
                   </div>
                   <div className="flex h-1.5 rounded-full overflow-hidden bg-muted">
-                    <div className="bg-emerald-500" style={{ width: `${okPct}%` }} />
-                    <div className="bg-rose-500" style={{ width: `${failPct}%` }} />
+                    <div className="bg-success" style={{ width: `${okPct}%` }} />
+                    <div className="bg-destructive" style={{ width: `${failPct}%` }} />
                   </div>
                 </div>
               );
@@ -553,7 +513,7 @@ function DashboardTab({
                   <div className="flex justify-between items-center text-sm">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{s.name}</span>
-                      <Badge variant="outline" className={`text-[10px] ${realStatusBadge(s.status)}`}>{traduzirStatus(s.status)}</Badge>
+                      <Badge variant="outline" className={`text-meta ${realStatusBadge(s.status)}`}>{traduzirStatus(s.status)}</Badge>
                     </div>
                     <span className="text-muted-foreground text-xs">{s.messages_sent_today ?? 0}/{s.daily_limit ?? 0}</span>
                   </div>
@@ -967,15 +927,15 @@ function RealSessoesTab() {
   }, [qrSession?.id, sessions, rtConfigFn, qc]);
 
   function statusColor(s: string) {
-    if (s === "connected") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
-    if (s === "qrcode" || s === "connecting") return "bg-amber-500/10 text-amber-400 border-amber-500/30";
-    if (s === "error") return "bg-red-500/10 text-red-400 border-red-500/30";
+    if (s === "connected") return "bg-success/10 text-success border-success/30";
+    if (s === "qrcode" || s === "connecting") return "bg-warning/10 text-warning border-warning/30";
+    if (s === "error") return "bg-destructive/10 text-destructive border-destructive/30";
     return "bg-muted text-muted-foreground border-border";
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">Centralize sessões, automações e conversas do WhatsApp em tempo real.</p>
         <div className="flex gap-2">
           <DemoDisabledTooltip active={isDemo}>
@@ -991,8 +951,8 @@ function RealSessoesTab() {
       ) : sessions.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center space-y-4">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10">
-              <MessageCircle className="h-6 w-6 text-emerald-400" />
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
+              <MessageCircle className="h-6 w-6 text-success" />
             </div>
             <div className="space-y-1">
               <h3 className="text-base font-semibold">Nenhum WhatsApp conectado</h3>
@@ -1014,10 +974,10 @@ function RealSessoesTab() {
           {sessions.map((s: any) => (
             <Card key={s.id}>
               <CardHeader className="pb-3">
-                <div className="flex justify-between items-start">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <CardTitle className="text-base flex items-center gap-2">
-                      <Phone className="h-4 w-4 text-emerald-400" /> {s.name}
+                      <Phone className="h-4 w-4 text-success" /> {s.name}
                       <button
                         type="button"
                         onClick={() => {
@@ -1026,13 +986,14 @@ function RealSessoesTab() {
                         }}
                         className="text-muted-foreground hover:text-foreground transition-colors"
                         title="Renomear"
+                        aria-label="Renomear sessão"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                     </CardTitle>
                     <CardDescription className="text-xs mt-0.5">{s.phone_number || s.instance_name}</CardDescription>
                   </div>
-                  <Badge variant="outline" className={`text-[10px] ${statusColor(s.status)}`}>{traduzirStatus(s.status)}</Badge>
+                  <Badge variant="outline" className={`text-meta ${statusColor(s.status)}`}>{traduzirStatus(s.status)}</Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -1048,7 +1009,7 @@ function RealSessoesTab() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Label className="text-meta uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <Shield className="h-3 w-3" /> Proxy
                   </Label>
                   <Select
@@ -1103,6 +1064,7 @@ function RealSessoesTab() {
                     variant="outline"
                     onClick={() => setManageSession({ id: s.id, name: s.name })}
                     title="Gerenciar sessão"
+                    aria-label="Gerenciar sessão"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -1125,7 +1087,7 @@ function RealSessoesTab() {
               <Label>Nome</Label>
               <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="WhatsApp 01" />
               {newName && (
-                <p className="text-[11px] text-muted-foreground mt-1">
+                <p className="text-meta text-muted-foreground mt-1">
                   Identificador: <span className="font-mono">{instanceName}</span>
                 </p>
               )}
@@ -1335,82 +1297,6 @@ const TRIGGER_LABELS: Record<string, string> = {
   sem_login_60_mais: "60+ dias sem login",
 };
 
-function RegrasTab() {
-  const qc = useQueryClient();
-  const listRulesFn = useServerFn(listRules);
-  const listFlowsFn = useServerFn(listFlows);
-  const updateRuleFn = useServerFn(updateRule);
-  const testRuleFn = useServerFn(testRule);
-
-  const { data: rulesData, isLoading } = useQuery({
-    queryKey: ["rules"],
-    queryFn: () => listRulesFn(),
-  });
-  const { data: flowsData } = useQuery({
-    queryKey: ["flows"],
-    queryFn: () => listFlowsFn(),
-  });
-
-  const rules = (rulesData?.rules ?? []) as any[];
-  const flows = (flowsData?.flows ?? []) as any[];
-
-  const mutate = useMutation({
-    mutationFn: (input: { id: string; active?: boolean; flow_id?: string | null }) => updateRuleFn({ data: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rules"] }),
-    onError: (e: any) => toast.error(e?.message ?? "Falha ao atualizar regra"),
-  });
-
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        12 gatilhos inteligentes hard-coded. Vincule cada um a um fluxo para começar a disparar automaticamente.
-      </p>
-
-      <div className="grid gap-3">
-        {isLoading && <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">Carregando regras…</CardContent></Card>}
-        {rules.map((r) => (
-          <Card key={r.id}>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="flex-1 min-w-[240px]">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold">{r.name}</h3>
-                    <Badge variant="outline" className={`text-[10px] ${prioridadeBadge(r.priority)}`}>{r.priority}</Badge>
-                    {!r.active && <Badge variant="outline" className="text-[10px]">pausado</Badge>}
-                    {!r.flow_id && <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-400">sem fluxo</Badge>}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">{r.meaning}</p>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Select
-                    value={r.flow_id ?? "__none"}
-                    onValueChange={(v) => mutate.mutate({ id: r.id, flow_id: v === "__none" ? null : v })}
-                  >
-                    <SelectTrigger className="w-[200px] h-8 text-xs"><SelectValue placeholder="Vincular fluxo…" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none">— sem fluxo —</SelectItem>
-                      {flows.map((f) => (
-                        <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Switch checked={r.active} onCheckedChange={(v) => mutate.mutate({ id: r.id, active: v })} />
-                  <Button size="sm" variant="outline" onClick={async () => {
-                    const res = await testRuleFn({ data: { trigger_type: r.trigger_type } });
-                    toast.message(`${r.name}`, { description: `${res.matches_last_7d} disparos nos últimos 7 dias` });
-                  }}>
-                    Testar
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ============================================================
 // FLUXOS (backend real)
 // ============================================================
@@ -1503,9 +1389,9 @@ export function WhatsappAutomationFlowsPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">Automações multi-bloco com templates aleatórios e condições de saída. Delays, cooldown e limites ficam na aba Antispam.</p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <DemoDisabledTooltip active={isDemo}>
           <Button
             size="sm"
@@ -1564,19 +1450,19 @@ export function WhatsappAutomationFlowsPanel() {
                 <div className="flex-1 min-w-[240px]">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-semibold tracking-tight">{f.name}</h3>
-                    <Badge variant="outline" className={`text-[10px] ${prioridadeBadge(f.priority)}`}>{f.priority}</Badge>
-                    {!f.active && <Badge variant="outline" className="text-[10px]">pausado</Badge>}
+                    <Badge variant="outline" className={`text-meta ${prioridadeBadge(f.priority)}`}>{f.priority}</Badge>
+                    {!f.active && <Badge variant="outline" className="text-meta">pausado</Badge>}
                     {f.active && f.activated_at ? (() => {
                       const activatedAt = new Date(f.activated_at).getTime();
                       const graceExpires = activatedAt + 48 * 60 * 60 * 1000;
                       const within = Date.now() < graceExpires;
                       const fmt = (ts: number) => new Date(ts).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
                       return within ? (
-                        <Badge variant="outline" className="text-[10px] border-amber-500/50 text-amber-600 dark:text-amber-400" title="Nas primeiras 48h após ativação, só novos eventos disparam — proteção do WhatsApp.">
+                        <Badge variant="outline" className="text-meta border-warning/50 text-warning" title="Nas primeiras 48h após ativação, só novos eventos disparam — proteção do WhatsApp.">
                           proteção 48h · libera {fmt(graceExpires)}
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        <Badge variant="outline" className="text-meta text-muted-foreground">
                           ativo desde {fmt(activatedAt)}
                         </Badge>
                       );
@@ -1602,7 +1488,7 @@ export function WhatsappAutomationFlowsPanel() {
                           <span>· delay {fmtDelay(delayMin)}–{fmtDelay(delayMax)}</span>
                           <span>· cooldown {cooldown}h</span>
                           <span>· {daily}/dia · {hourly}/h</span>
-                          <Badge variant="outline" className="text-[9px] ml-1 border-primary/40 text-primary">via Antispam</Badge>
+                          <Badge variant="outline" className="text-meta ml-1 border-primary/40 text-primary">via Antispam</Badge>
                         </>
                       );
                     })() : (
@@ -1611,7 +1497,7 @@ export function WhatsappAutomationFlowsPanel() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Switch checked={f.active} onCheckedChange={async (v) => {
+                  <Switch checked={f.active} aria-label={`Fluxo ${f.name} ativo`} onCheckedChange={async (v) => {
                     if (v && !f.active) {
                       const ok = await requestConfirmation({
                         title: `Ativar fluxo “${f.name}”?`,
@@ -1623,13 +1509,14 @@ export function WhatsappAutomationFlowsPanel() {
                     await toggleFlowFn({ data: { id: f.id, active: v } });
                     invalidate();
                   }} />
-                  <Button size="sm" variant="outline" onClick={() => setEditingId(f.id)}>
+                  <Button size="sm" variant="outline" onClick={() => setEditingId(f.id)} title="Editar fluxo" aria-label="Editar fluxo">
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
                     title="Disparar teste"
+                    aria-label="Disparar teste"
                     onClick={() => {
                       setTestFlowId(f.id);
                       setTestLead(null);
@@ -1637,10 +1524,10 @@ export function WhatsappAutomationFlowsPanel() {
                   >
                     <Send className="h-3.5 w-3.5" />
                   </Button>
-                  <Button size="sm" variant="outline" onClick={async () => { await duplicateFlowFn({ data: { id: f.id } }); invalidate(); toast.success("Fluxo duplicado"); }}>
+                  <Button size="sm" variant="outline" onClick={async () => { await duplicateFlowFn({ data: { id: f.id } }); invalidate(); toast.success("Fluxo duplicado"); }} title="Duplicar fluxo" aria-label="Duplicar fluxo">
                     <Copy className="h-3.5 w-3.5" />
                   </Button>
-                  <Button size="sm" variant="outline" onClick={async () => {
+                  <Button size="sm" variant="outline" title="Excluir fluxo" aria-label="Excluir fluxo" onClick={async () => {
                     if (!(await requestConfirmation({
                       title: `Excluir fluxo “${f.name}”?`,
                       description: "O fluxo e todas as suas etapas serão removidos permanentemente.",
@@ -1867,7 +1754,7 @@ function FluxoEditor({ flowId, onClose, onSaved }: { flowId: string | null; onCl
           <p className="text-sm text-muted-foreground py-8 text-center">Carregando…</p>
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Nome</Label>
                 <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
@@ -1900,7 +1787,7 @@ function FluxoEditor({ flowId, onClose, onSaved }: { flowId: string | null; onCl
               </div>
             </div>
 
-            <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-meta text-muted-foreground">
               Delay entre disparos, cooldown por lead e limites por hora/dia são globais e ficam na aba <strong className="text-foreground">Antispam</strong>.
             </div>
 
@@ -1922,8 +1809,8 @@ function FluxoEditor({ flowId, onClose, onSaved }: { flowId: string | null; onCl
                     className={`px-3 py-1.5 rounded-t-md text-xs flex items-center gap-1.5 transition-colors ${ti === activeTpl ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                   >
                     <span>{t.name || `Template ${ti + 1}`}</span>
-                    {!t.is_active && <Badge variant="outline" className="text-[9px] px-1 py-0">pausado</Badge>}
-                    <span className="text-[9px] opacity-60">peso {t.weight}</span>
+                    {!t.is_active && <Badge variant="outline" className="text-meta px-1 py-0">pausado</Badge>}
+                    <span className="text-meta opacity-60">peso {t.weight}</span>
                   </button>
                 ))}
               </div>
@@ -1932,11 +1819,11 @@ function FluxoEditor({ flowId, onClose, onSaved }: { flowId: string | null; onCl
               {draft.templates[activeTpl] && (
                 <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-2 items-end p-2 rounded-md bg-muted/30">
                   <div className="space-y-1">
-                    <Label className="text-[11px]">Nome do template</Label>
+                    <Label className="text-meta">Nome do template</Label>
                     <Input value={draft.templates[activeTpl].name} onChange={(e) => patchTemplate(activeTpl, { name: e.target.value })} />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px]">Peso</Label>
+                    <Label className="text-meta">Peso</Label>
                     <Input type="number" min={1} max={100} className="w-20" value={draft.templates[activeTpl].weight} onChange={(e) => patchTemplate(activeTpl, { weight: Math.max(1, +e.target.value || 1) })} />
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -1944,8 +1831,8 @@ function FluxoEditor({ flowId, onClose, onSaved }: { flowId: string | null; onCl
                     <span className="text-xs">{draft.templates[activeTpl].is_active ? "Ativo" : "Pausado"}</span>
                   </div>
                   <div className="flex gap-1">
-                    <Button size="sm" variant="outline" onClick={() => duplicateTemplate(activeTpl)} title="Duplicar template"><Copy className="h-3 w-3" /></Button>
-                    <Button size="sm" variant="outline" onClick={() => removeTemplate(activeTpl)} title="Excluir template"><Trash2 className="h-3 w-3" /></Button>
+                    <Button size="sm" variant="outline" onClick={() => duplicateTemplate(activeTpl)} title="Duplicar template" aria-label="Duplicar template"><Copy className="h-3 w-3" /></Button>
+                    <Button size="sm" variant="outline" onClick={() => removeTemplate(activeTpl)} title="Excluir template" aria-label="Excluir template"><Trash2 className="h-3 w-3" /></Button>
                   </div>
                 </div>
               )}
@@ -1964,11 +1851,11 @@ function FluxoEditor({ flowId, onClose, onSaved }: { flowId: string | null; onCl
                 <Card key={i} className="border-border/60">
                   <CardContent className="p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline" className="text-[10px] capitalize">{i + 1}. {b.block_type}</Badge>
+                      <Badge variant="outline" className="text-meta capitalize">{i + 1}. {b.block_type}</Badge>
                       <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => moveBlock(i, -1)} disabled={i === 0}><ArrowUp className="h-3 w-3" /></Button>
-                        <Button size="sm" variant="ghost" onClick={() => moveBlock(i, 1)} disabled={i === (draft.templates[activeTpl]?.blocks.length ?? 0) - 1}><ArrowDown className="h-3 w-3" /></Button>
-                        <Button size="sm" variant="ghost" onClick={() => removeBlock(i)}><Trash2 className="h-3 w-3" /></Button>
+                        <Button size="sm" variant="ghost" onClick={() => moveBlock(i, -1)} disabled={i === 0} aria-label="Subir bloco"><ArrowUp className="h-3 w-3" /></Button>
+                        <Button size="sm" variant="ghost" onClick={() => moveBlock(i, 1)} disabled={i === (draft.templates[activeTpl]?.blocks.length ?? 0) - 1} aria-label="Descer bloco"><ArrowDown className="h-3 w-3" /></Button>
+                        <Button size="sm" variant="ghost" onClick={() => removeBlock(i)} aria-label="Remover bloco"><Trash2 className="h-3 w-3" /></Button>
                       </div>
                     </div>
 
@@ -2008,7 +1895,7 @@ function FluxoEditor({ flowId, onClose, onSaved }: { flowId: string | null; onCl
                           onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(i, f); }}
                         />
                         {b.media_url && (
-                          <p className="text-[11px] text-emerald-400">✓ {b.media_filename}</p>
+                          <p className="text-meta text-success">✓ {b.media_filename}</p>
                         )}
                         {b.block_type !== "audio" && (
                           <>
@@ -2081,161 +1968,6 @@ function FluxoEditor({ flowId, onClose, onSaved }: { flowId: string | null; onCl
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-// ============================================================
-// INBOX
-// ============================================================
-function InboxTab() {
-  const qc = useQueryClient();
-  const listChats = useServerFn(listInboxChats);
-  const listMsgs = useServerFn(listChatMessages);
-  const sendFn = useServerFn(sendWhatsappMessage);
-
-  const { data: chatsData, isLoading: chatsLoading } = useQuery({
-    queryKey: ["inbox-chats"],
-    queryFn: () => listChats(),
-    refetchInterval: 15000,
-  });
-  const chats = (chatsData?.chats ?? []) as any[];
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-
-  useEffect(() => {
-    if (!activeId && chats.length > 0) setActiveId(chats[0].id);
-  }, [chats, activeId]);
-
-  const { data: msgsData } = useQuery({
-    queryKey: ["inbox-messages", activeId],
-    queryFn: () => (activeId ? listMsgs({ data: { chat_id: activeId } }) : Promise.resolve({ messages: [] })),
-    enabled: !!activeId,
-    refetchInterval: 5000,
-  });
-  const messages = (msgsData?.messages ?? []) as any[];
-
-  // Realtime: invalida queries quando chega mensagem nova
-  useEffect(() => {
-    const ch = supabase
-      .channel("whatsapp-inbox")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "whatsapp_messages" },
-        () => {
-          qc.invalidateQueries({ queryKey: ["inbox-chats"] });
-          qc.invalidateQueries({ queryKey: ["inbox-messages"] });
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "whatsapp_chats" },
-        () => qc.invalidateQueries({ queryKey: ["inbox-chats"] }),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [qc]);
-
-  const sendMut = useMutation({
-    mutationFn: () => sendFn({ data: { chat_id: activeId!, text: draft } }),
-    onSuccess: () => {
-      setDraft("");
-      qc.invalidateQueries({ queryKey: ["inbox-messages", activeId] });
-      qc.invalidateQueries({ queryKey: ["inbox-chats"] });
-    },
-    onError: (e: any) => toast.error(e?.message ?? "Falha ao enviar"),
-  });
-
-  return (
-    <Card className="overflow-hidden">
-      <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] h-[600px]">
-        {/* Lista de conversas */}
-        <div className="border-r border-border flex flex-col">
-          <div className="p-3 border-b border-border flex items-center gap-2">
-            <span className="text-sm font-medium">Conversas</span>
-            <span className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400/60" />
-              tempo real
-            </span>
-          </div>
-          <ScrollArea className="flex-1">
-            {chatsLoading ? (
-              <p className="p-4 text-xs text-muted-foreground">Carregando…</p>
-            ) : chats.length === 0 ? (
-              <div className="p-4 text-xs text-muted-foreground space-y-2">
-                <p>Aguardando mensagens.</p>
-                <p className="text-muted-foreground/70">
-                  Envie ou receba algo no WhatsApp conectado — a conversa aparece aqui em tempo real.
-                </p>
-              </div>
-            ) : (
-              chats.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setActiveId(c.id)}
-                  className={`w-full text-left p-3 border-b border-border/60 hover:bg-muted/40 transition-colors ${activeId === c.id ? "bg-muted/60" : ""}`}
-                >
-                  <div className="flex justify-between items-baseline gap-2">
-                    <span className="text-sm font-medium truncate">{c.name || c.phone || c.remote_jid}</span>
-                    {c.unread_count > 0 && (
-                      <Badge variant="default" className="text-[10px] h-4 px-1.5">{c.unread_count}</Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{c.last_message ?? "—"}</p>
-                </button>
-              ))
-            )}
-          </ScrollArea>
-        </div>
-
-        {/* Painel mensagens */}
-        <div className="flex flex-col">
-          {!activeId ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-              Selecione uma conversa
-            </div>
-          ) : (
-            <>
-              <ScrollArea className="flex-1 p-4">
-                <div className="space-y-2">
-                  {messages.map((m) => (
-                    <div
-                      key={m.id}
-                      className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${m.from_me ? "ml-auto bg-emerald-500/15 text-emerald-100" : "bg-muted/60"}`}
-                    >
-                      <div className="whitespace-pre-wrap break-words">{m.text ?? `[${m.message_type}]`}</div>
-                      <div className="text-[10px] text-muted-foreground/70 mt-1 text-right">
-                        {new Date(m.message_timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                      </div>
-                    </div>
-                  ))}
-                  {messages.length === 0 && (
-                    <p className="text-xs text-muted-foreground text-center py-8">Sem mensagens nesta conversa.</p>
-                  )}
-                </div>
-              </ScrollArea>
-              <div className="border-t border-border p-3 flex gap-2">
-                <Input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey && draft.trim()) {
-                      e.preventDefault();
-                      sendMut.mutate();
-                    }
-                  }}
-                  placeholder="Digite uma mensagem…"
-                />
-                <Button onClick={() => sendMut.mutate()} disabled={!draft.trim() || sendMut.isPending}>
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </Card>
   );
 }
 
@@ -2370,7 +2102,7 @@ function FilaTab() {
 function QueueMetric({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
   return (
     <div className="rounded-md border p-3">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-meta uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className={`text-2xl font-semibold ${highlight ? "text-destructive" : ""}`}>{value}</div>
     </div>
   );
@@ -2516,14 +2248,14 @@ function AntibanTab() {
         </CardContent>
       </Card>
 
-      <Card className="lg:col-span-2 border-amber-500/30 bg-amber-500/5">
+      <Card className="lg:col-span-2 border-warning/30 bg-warning/5">
         <CardContent className="p-4 flex gap-3 items-start">
-          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+          <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
           <div className="text-xs">
-            <p className="font-semibold text-amber-300 mb-1 flex items-center gap-2">
+            <p className="font-semibold text-warning mb-1 flex items-center gap-2">
               Política anti-ban ativa
               {savedAt && (
-                <span className="text-[10px] font-normal text-emerald-400">• salvo</span>
+                <span className="text-meta font-normal text-success">• salvo</span>
               )}
             </p>
             <p className="text-muted-foreground">
@@ -2681,7 +2413,7 @@ function ProxiesTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Proxies WhatsApp</h2>
           <p className="text-sm text-muted-foreground">
@@ -2700,8 +2432,8 @@ function ProxiesTab() {
       ) : proxies.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center space-y-3">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10">
-              <Shield className="h-6 w-6 text-emerald-400" />
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
+              <Shield className="h-6 w-6 text-success" />
             </div>
             <div className="space-y-1">
               <h3 className="text-base font-semibold">Nenhum proxy cadastrado</h3>
@@ -2723,23 +2455,23 @@ function ProxiesTab() {
           {proxies.map((p) => (
             <Card key={p.id}>
               <CardHeader className="pb-3">
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-start gap-2">
                   <div className="min-w-0">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-emerald-400" /> {p.name}
+                      <Shield className="h-4 w-4 text-success" /> {p.name}
                     </CardTitle>
                     <CardDescription className="text-xs mt-0.5 font-mono truncate">
                       {p.protocol}://{p.host}:{p.port}
                     </CardDescription>
                     {p.provider && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{p.provider}</p>
+                      <p className="text-meta text-muted-foreground mt-0.5">{p.provider}</p>
                     )}
                   </div>
                   <Badge
                     variant="outline"
-                    className={`text-[10px] ${
+                    className={`text-meta ${
                       p.status === "active"
-                        ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                        ? "bg-success/15 text-success border-success/30"
                         : "bg-slate-500/15 text-slate-400 border-slate-500/30"
                     }`}
                   >
@@ -2750,10 +2482,10 @@ function ProxiesTab() {
               <CardContent className="space-y-3">
                 {p.last_tested_at && (
                   <div
-                    className={`text-[11px] rounded-md p-2 ${
+                    className={`text-meta rounded-md p-2 ${
                       p.last_test_ok
-                        ? "bg-emerald-500/10 text-emerald-400"
-                        : "bg-rose-500/10 text-rose-400"
+                        ? "bg-success/10 text-success"
+                        : "bg-destructive/10 text-destructive"
                     }`}
                   >
                     Último teste: {p.last_test_ok ? "✓ OK" : `✗ ${p.last_test_error ?? "falhou"}`}
@@ -2808,8 +2540,8 @@ function ProxiesTab() {
               Dados usados apenas para conectar sessões WhatsApp à Evolution.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="sm:col-span-2">
               <Label>Nome</Label>
               <Input
                 value={form.name}
@@ -2842,7 +2574,7 @@ function ProxiesTab() {
                 placeholder="opcional"
               />
             </div>
-            <div className="col-span-2 grid grid-cols-3 gap-3">
+            <div className="sm:col-span-2 grid grid-cols-3 gap-3">
               <div className="col-span-2">
                 <Label>Host</Label>
                 <Input
@@ -2877,12 +2609,12 @@ function ProxiesTab() {
                 placeholder={form.has_password ? "••••••••" : "opcional"}
               />
               {form.has_password && (
-                <p className="text-[10px] text-muted-foreground mt-1">
+                <p className="text-meta text-muted-foreground mt-1">
                   Deixe em branco para manter a atual.
                 </p>
               )}
             </div>
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <Label>Notas</Label>
               <Textarea
                 value={form.notes}
@@ -2890,7 +2622,7 @@ function ProxiesTab() {
                 rows={2}
               />
             </div>
-            <div className="col-span-2 flex items-center justify-between rounded-md border border-border p-3">
+            <div className="sm:col-span-2 flex items-center justify-between rounded-md border border-border p-3">
               <div>
                 <div className="text-sm font-medium">Ativo</div>
                 <div className="text-xs text-muted-foreground">

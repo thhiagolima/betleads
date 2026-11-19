@@ -23,8 +23,9 @@ import {
   UNASSIGNED_AFFILIATES_QUERY_KEY,
 } from "@/components/experts/experts-query";
 import { CreditStatement } from "@/components/rendimento/credit-statement";
-import { downloadCsv } from "@/components/rendimento/download-csv";
+import { csvDeliveryMessage, downloadCsv } from "@/components/rendimento/download-csv";
 import { LeadHistorySheet } from "@/components/rendimento/lead-history-sheet";
+import { LoadError, NO_ACTIVE_TENANT_MESSAGE } from "@/components/rendimento/load-states";
 import {
   PortfolioTable,
   TopLeadsCard,
@@ -132,9 +133,9 @@ function ExportStatementButton({ expertId, period }: { expertId?: string; period
   const exportFn = useServerFn(exportExpertCreditsCsv);
   const exportMutation = useMutation({
     mutationFn: () => exportFn({ data: { expertId, period } }),
-    onSuccess: (result) => {
-      downloadCsv(result.filename, result.csv);
-      toast.success("CSV exportado.");
+    onSuccess: async (result) => {
+      const message = csvDeliveryMessage(await downloadCsv(result.filename, result.csv));
+      if (message) toast.success(message);
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -152,7 +153,7 @@ function ExportStatementButton({ expertId, period }: { expertId?: string; period
   );
 }
 
-function MessageCard({ children }: { children: string }) {
+function MessageCard({ children }: { children: ReactNode }) {
   return (
     <Card>
       <CardContent className="py-12 text-center text-muted-foreground">{children}</CardContent>
@@ -168,7 +169,8 @@ function MessageCard({ children }: { children: string }) {
 export function ReportView({ expertId, tabs }: { expertId?: string; tabs?: ReactNode }) {
   const [period, setPeriod] = useState<PeriodKey>(DEFAULT_REPORT_PERIOD);
   const [openLead, setOpenLead] = useState<LeadRef | null>(null);
-  const { data: switcher, active } = useActiveTenant();
+  const switcherQuery = useActiveTenant();
+  const { data: switcher, active } = switcherQuery;
   const tenantId = switcher?.activeTenantId ?? null;
 
   const reportFn = useServerFn(getExpertReport);
@@ -178,12 +180,40 @@ export function ReportView({ expertId, tabs }: { expertId?: string; tabs?: React
     enabled: !!tenantId,
   });
 
+  // Without an active house the queries never run: say so instead of an
+  // endless "Carregando…".
+  if (switcherQuery.isError || (switcherQuery.isSuccess && !tenantId)) {
+    return (
+      <Page>
+        <PageHeader />
+        {tabs}
+        <MessageCard>
+          {switcherQuery.isError ? (
+            <LoadError
+              className="py-0"
+              message="Não foi possível carregar a casa ativa."
+              onRetry={() => void switcherQuery.refetch()}
+            />
+          ) : (
+            NO_ACTIVE_TENANT_MESSAGE
+          )}
+        </MessageCard>
+      </Page>
+    );
+  }
+
   if (reportQuery.isError) {
     return (
       <Page>
         <PageHeader />
         {tabs}
-        <MessageCard>{actionErrorMessage(reportQuery.error)}</MessageCard>
+        <MessageCard>
+          <LoadError
+            className="py-0"
+            message={actionErrorMessage(reportQuery.error)}
+            onRetry={() => void reportQuery.refetch()}
+          />
+        </MessageCard>
       </Page>
     );
   }

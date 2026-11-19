@@ -325,6 +325,13 @@ export function LevelRulesCard({
         </div>
       </fieldset>
 
+      {/* Second Salvar at the end of the form: on phones the header button is far above. */}
+      {dirty && (
+        <Button className="mt-4 w-full sm:w-auto" disabled={saving} onClick={onSave}>
+          {saving ? "Salvando…" : "Salvar faixas e regras"}
+        </Button>
+      )}
+
       <div className="mt-5 rounded-xl bg-secondary/60 p-3.5 text-body">
         <h3 className="font-semibold">O que fazer com isso</h3>
         <ul className="mt-2 space-y-1.5 text-muted-foreground">
@@ -362,7 +369,8 @@ function DaysField({
   return (
     <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
       <Label htmlFor={id}>{label}</Label>
-      <div className="relative">
+      {/* Unit beside the field (not inside it): on phones the inside suffix left no room for the number. */}
+      <div className="flex min-w-0 items-center gap-2">
         <Input
           id={id}
           type="number"
@@ -370,10 +378,11 @@ function DaysField({
           min={1}
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="h-10 pr-32 tabular-nums"
+          aria-describedby={`${id}-unit`}
+          className="h-10 w-24 shrink-0 tabular-nums"
           {...anchorProps}
         />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-meta text-muted-foreground">
+        <span id={`${id}-unit`} className="min-w-0 text-meta text-muted-foreground">
           dias sem depositar
         </span>
       </div>

@@ -2,6 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { activeTenantFilter, scopeToTenant } from "@/lib/active-tenant-filter";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { POLL_INTERVALS, UpdatedAgo } from "@/hooks/use-updated-ago";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -89,40 +91,48 @@ type EnrichedPlayer = PlayerLike & {
   followups: Followup[];
 };
 
-async function fetchAlertsData(currency: TenantCurrency): Promise<EnrichedPlayer[]> {
+async function fetchAlertsData(
+  currency: TenantCurrency,
+  activeTenantId: string | null,
+): Promise<EnrichedPlayer[]> {
+  // RLS alone lets a super admin read every house: filter explicitly by the
+  // house picked in the header (falls back to the server's notion of it).
+  const tenantId = activeTenantId ?? (await activeTenantFilter(supabase));
   const iso30 = new Date(Date.now() - 30 * 86400000).toISOString();
   const iso60 = new Date(Date.now() - 60 * 86400000).toISOString();
 
   const [playersRes, depsRes, wd30Res, sessionsRes, followupsRes] = await Promise.all([
-    supabase
-      .from("players")
-      .select(
-        "id,nome,telefone,status,vip,total_depositado,total_sacado,saldo_carteira,ultimo_login,ultimo_jogo,ultimo_deposito,created_at,ftd_em,expert,origem,utm_source",
-      )
+    scopeToTenant(
+      supabase
+        .from("players")
+        .select(
+          "id,nome,telefone,status,vip,total_depositado,total_sacado,saldo_carteira,ultimo_login,ultimo_jogo,ultimo_deposito,created_at,ftd_em,expert,origem,utm_source",
+        ),
+      tenantId,
+    )
       .order("total_depositado", { ascending: false })
       .limit(800),
-    supabase
-      .from("deposits")
-      .select("player_id,valor,created_at")
+    scopeToTenant(supabase.from("deposits").select("player_id,valor,created_at"), tenantId)
       .gte("created_at", iso60)
       .eq("status", "aprovado")
       .limit(8000),
-    supabase
-      .from("withdrawals")
-      .select("player_id,valor,created_at")
+    scopeToTenant(supabase.from("withdrawals").select("player_id,valor,created_at"), tenantId)
       .gte("created_at", iso30)
       .limit(5000),
-    supabase
-      .from("sessions")
-      .select("player_id,iniciado_em")
+    scopeToTenant(supabase.from("sessions").select("player_id,iniciado_em"), tenantId)
       .gte("iniciado_em", iso60)
       .limit(10000),
-    supabase
-      .from("lead_followups")
-      .select("id,player_id,alerta_tipo,acao,created_at")
+    scopeToTenant(
+      supabase.from("lead_followups").select("id,player_id,alerta_tipo,acao,created_at"),
+      tenantId,
+    )
       .gte("created_at", iso30)
       .order("created_at", { ascending: false }),
   ]);
+
+  // A failed read must not look like an empty queue ("Fila zerada").
+  const failed = [playersRes, depsRes, wd30Res, sessionsRes, followupsRes].find((r) => r.error);
+  if (failed?.error) throw new Error(failed.error.message);
 
   const dep30 = new Map<string, number>();
   const dep3060 = new Map<string, number>();
@@ -284,6 +294,13 @@ const ACOES: AcaoRecomendada[] = [
 
 type LeadStatus = "pendente" | "aguardando" | "recuperado" | "convertido";
 
+const PRIORIDADE_FILTRO_LABEL: Record<Prioridade, string> = {
+  critico: "Crítica",
+  alto: "Alta",
+  medio: "Média",
+  baixo: "Baixa",
+};
+
 const STATUS_LABEL: Record<LeadStatus, string> = {
   pendente: "Pendente",
   aguardando: "Aguardando retorno",
@@ -378,7 +395,7 @@ function AlertRow({
               {p.nome}
             </Link>
             {p.vip && (
-              <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 gap-1">
+              <Badge className="bg-warning/15 text-warning border-warning/30 gap-1">
                 <Crown className="h-3 w-3" /> VIP
               </Badge>
             )}
@@ -455,8 +472,8 @@ function AlertRow({
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2 mb-3">
-        <ScoreBlock label="Retention" value={p.scoreRet} good="high" icon={Shield} />
-        <ScoreBlock label="Risk" value={p.scoreRisk} good="low" icon={AlertTriangle} />
+        <ScoreBlock label="Retenção" value={p.scoreRet} good="high" icon={Shield} />
+        <ScoreBlock label="Risco" value={p.scoreRisk} good="low" icon={AlertTriangle} />
       </div>
 
       {/* Alerta principal + motivo + ação ideal */}
@@ -485,7 +502,7 @@ function AlertRow({
                 </div>
                 {abordagem && (
                   <div className="flex items-start gap-2 rounded-md bg-background/40 px-2 py-1.5">
-                    <HeartHandshake className="h-3.5 w-3.5 mt-0.5 shrink-0 text-violet-400" />
+                    <HeartHandshake className="h-3.5 w-3.5 mt-0.5 shrink-0 text-info" />
                     <p className="text-xs">
                       <span className="text-muted-foreground">Abordagem: </span>
                       <span className="font-medium">{abordagem}</span>
@@ -569,9 +586,14 @@ function AlertRow({
 function AlertasPage() {
   const qc = useQueryClient();
   const { currency } = useMoney();
-  const { data, isLoading, refetch, isFetching, dataUpdatedAt } = useQuery({
-    queryKey: ["alertas", currency],
-    queryFn: () => fetchAlertsData(currency),
+  const { data: switcher, isLoading: switcherLoading } = useActiveTenant();
+  const tenantId = switcher?.activeTenantId ?? null;
+  const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery({
+    // Tenant first so a house switch never shows the previous house's queue;
+    // invalidations by the ["alertas"] prefix still match.
+    queryKey: ["alertas", tenantId, currency],
+    queryFn: () => fetchAlertsData(currency, tenantId),
+    enabled: !switcherLoading,
     staleTime: 30_000,
     refetchInterval: POLL_INTERVALS.stats,
     refetchOnWindowFocus: true,
@@ -717,7 +739,7 @@ function AlertasPage() {
         }
       />
 
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-5">
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         <MetricCard
           label="Críticos"
           value={counts.critico}
@@ -743,6 +765,7 @@ function AlertasPage() {
           icon={<Clock className="h-4 w-4" />}
         />
         <MetricCard
+          className="col-span-2 sm:col-span-1"
           label="Players na fila"
           value={enriched.filter((p) => p.status === statusTab).length}
           icon={<Inbox className="h-4 w-4" />}
@@ -775,7 +798,7 @@ function AlertasPage() {
               id: "convertido",
               label: "Convertido",
               icon: Sparkles,
-              cls: "bg-violet-500/15 text-violet-300 border-violet-500/50",
+              cls: "bg-info/15 text-info border-info/50",
             },
           ] as const
         ).map((t) => {
@@ -786,7 +809,7 @@ function AlertasPage() {
               key={t.id}
               onClick={() => setStatusTab(t.id)}
               className={cn(
-                "h-9 px-3 rounded-lg text-xs font-semibold border transition-colors inline-flex items-center gap-1.5",
+                "h-10 md:h-9 px-3 rounded-lg text-xs font-semibold border transition-colors inline-flex items-center gap-1.5",
                 active
                   ? t.cls
                   : "bg-card/40 text-muted-foreground border-border/50 hover:text-foreground hover:border-border",
@@ -822,7 +845,7 @@ function AlertasPage() {
               label: "Médio",
               cls: "bg-warning/15 text-warning border-warning/50",
             },
-            { id: "baixo", label: "Baixo", cls: "bg-sky-500/15 text-sky-300 border-sky-500/50" },
+            { id: "baixo", label: "Baixo", cls: "bg-info/15 text-info border-info/50" },
           ] as const
         ).map((f) => {
           const active = prioridade === f.id;
@@ -831,7 +854,7 @@ function AlertasPage() {
               key={f.id}
               onClick={() => setPrioridade(f.id)}
               className={cn(
-                "h-8 px-4 rounded-full text-xs font-semibold border transition-colors",
+                "h-10 md:h-8 px-4 rounded-full text-xs font-semibold border transition-colors",
                 active
                   ? f.cls
                   : "bg-card/40 text-muted-foreground border-border/50 hover:text-foreground hover:border-border",
@@ -848,13 +871,26 @@ function AlertasPage() {
           <CardTitle className="text-sm font-semibold">{filtered.length} lead(s) na fila</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {isLoading ? (
+          {isLoading || switcherLoading ? (
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-48" />)
+          ) : isError ? (
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <p className="text-sm text-danger">Não foi possível carregar a fila de alertas.</p>
+              {error instanceof Error && error.message ? (
+                <p className="text-meta text-muted-foreground">{error.message}</p>
+              ) : null}
+              <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+                <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+                Tentar novamente
+              </Button>
+            </div>
           ) : filtered.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
-              {statusTab === "pendente"
-                ? "Fila zerada. Todos os leads críticos já receberam tentativa."
-                : `Nenhum lead em "${STATUS_LABEL[statusTab]}" no momento.`}
+              {prioridade !== "todos"
+                ? `Nenhum lead de prioridade ${PRIORIDADE_FILTRO_LABEL[prioridade]} em "${STATUS_LABEL[statusTab]}".`
+                : statusTab === "pendente"
+                  ? "Fila zerada. Todos os leads já receberam tentativa."
+                  : `Nenhum lead em "${STATUS_LABEL[statusTab]}" no momento.`}
             </p>
           ) : (
             filtered.map((p) => <AlertRow key={p.id} p={p} onAction={handleAction} />)

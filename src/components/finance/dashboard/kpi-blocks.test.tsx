@@ -149,13 +149,13 @@ describe("KpiBlocks", () => {
     expect(deposits).toContain("R$ 5.000,00");
     expect(deposits).toContain("40 depósitos");
     expect(deposits).toContain("▲ 25,0%");
-    expect(deposits).toContain("text-emerald-400");
+    expect(deposits).toContain("text-success");
 
     const withdrawals = row(html, "withdrawals");
     expect(withdrawals).toContain("R$ 1.200,00");
     expect(withdrawals).toContain("12 saques");
     expect(withdrawals).toContain("▲ 20,0%");
-    expect(withdrawals).toContain("text-rose-400");
+    expect(withdrawals).toContain("text-danger");
 
     expect(row(html, "net")).toContain("Net (depósitos − saques)");
     expect(row(html, "depositorsPerDay")).toContain("7,3");

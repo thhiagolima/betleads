@@ -91,7 +91,7 @@ export function ActiveTenantSwitcher({ compact = false }: { compact?: boolean })
         {currentLabel}
       </span>
       {!compact && !onGroupRoute && active && (
-        <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+        <span className="rounded-md bg-secondary px-1.5 py-0.5 text-meta font-medium text-muted-foreground">
           {roleLabel[active.role]}
         </span>
       )}

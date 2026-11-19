@@ -272,6 +272,18 @@ const screen: HelpScreen = {
           what: "Apaga essa etapa da lista. Repete-se em cada etapa; a âncora marca só a primeira.",
         },
         {
+          anchor: "jornada.etapas.mover",
+          label: "Mover a etapa para cima / para baixo (setas)",
+          what: "Troca a etapa de lugar com a anterior ou a seguinte. A seta para cima fica desligada na primeira etapa e a seta para baixo na última. Repete-se em cada etapa; a âncora marca só a primeira.",
+          notes:
+            "Numa jornada ativa ou pausada, mudar a ordem das etapas cria uma revisão em rascunho ao salvar.",
+        },
+        {
+          anchor: "jornada.etapas.adicionar-abaixo",
+          label: "Adicionar etapa abaixo (ícone +)",
+          what: "Abre o mesmo menu de \"Adicionar etapa\" (Espera, SMS, E-mail ou Ligação), mas coloca a nova etapa logo abaixo desta, em vez de no fim da lista.",
+        },
+        {
           anchor: "jornada.etapas.espera-tempo",
           label: "Tempo de espera (etapa Aguardar)",
           what: "Quanto tempo a jornada aguarda antes de seguir para a próxima etapa. Aceita vírgula (ex.: 1,5).",
@@ -368,13 +380,15 @@ const screen: HelpScreen = {
           anchor: "jornada.limites.diario",
           label: "Limite diário de mensagens",
           what: "Quantas mensagens esta jornada pode enviar por dia, no total.",
+          notes:
+            'Número inteiro a partir de 1. Campo vazio ou inválido mostra "Informe o limite diário (número inteiro a partir de 1)." e impede salvar.',
         },
         {
           anchor: "jornada.limites.intervalo",
           label: "Intervalo entre jornadas (horas)",
           what: "Tempo mínimo antes de outra jornada enviar no mesmo canal para o mesmo jogador.",
           notes:
-            'Este mesmo número também é usado pela opção de Reentrada "Depois do intervalo entre jornadas", em Público — não existe um segundo campo só para isso.',
+            'Este mesmo número também é usado pela opção de Reentrada "Depois do intervalo entre jornadas", em Público — não existe um segundo campo só para isso. De 0 a 8760; campo vazio mostra "Informe o intervalo entre jornadas em horas (de 0 a 8760)." e impede salvar.',
         },
         {
           anchor: "jornada.limites.controle",
@@ -419,6 +433,8 @@ const screen: HelpScreen = {
           anchor: "jornada.conflitos.prioridade",
           label: "Prioridade (1 é a maior)",
           what: "Número de 1 a 100. Quando duas jornadas ativas disputam o mesmo canal para o mesmo jogador, a de menor número vence.",
+          notes:
+            'Campo vazio ou fora da faixa mostra "Informe a prioridade (número inteiro de 1 a 100)." e impede salvar.',
         },
         {
           anchor: "jornada.conflitos.ao-competir",
@@ -435,7 +451,7 @@ const screen: HelpScreen = {
       id: "dialogos",
       title: "Diálogos",
       intro:
-        "Os 3 diálogos do editor. Nenhum deles tem elementos marcados para o tour — o tour nunca abre um diálogo sozinho.",
+        "Os 4 diálogos do editor. Nenhum deles tem elementos marcados para o tour — o tour nunca abre um diálogo sozinho.",
       items: [
         {
           label: 'Diálogo "Pausar [nome]?"',
@@ -452,6 +468,10 @@ const screen: HelpScreen = {
         {
           label: 'Confirmação "Ativar sem as alterações?"',
           what: 'Aparece ao clicar em Ativar numa jornada ativa ou pausada com alterações não salvas no editor: "As alterações que você fez aqui ainda não foram salvas e não entram na jornada. Para usá-las, clique em Salvar antes de ativar." Botões "Cancelar" e "Ativar versão salva".',
+        },
+        {
+          label: 'Confirmação "Sair sem salvar?"',
+          what: 'Aparece ao sair do editor com alterações não salvas (barra de abas, "← Automações", voltar do navegador ou do celular): "As alterações feitas nesta jornada ainda não foram salvas e serão perdidas." Botões "Continuar editando" e "Sair sem salvar". Ao fechar ou recarregar a aba, o próprio navegador pergunta se quer sair.',
         },
       ],
     },

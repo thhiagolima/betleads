@@ -31,7 +31,8 @@ import {
   type ExpertCreditRow,
 } from "@/lib/expert-metrics.functions";
 import type { PeriodKey } from "@/lib/expert-period";
-import { downloadCsv } from "@/components/rendimento/download-csv";
+import { csvDeliveryMessage, downloadCsv } from "@/components/rendimento/download-csv";
+import { LoadError } from "@/components/rendimento/load-states";
 
 const CREDITS_PAGE_SIZE = 100;
 
@@ -83,9 +84,9 @@ export function CreditStatement({
   const exportFn = useServerFn(exportExpertCreditsCsv);
   const exportMutation = useMutation({
     mutationFn: () => exportFn({ data: { expertId, period } }),
-    onSuccess: (result) => {
-      downloadCsv(result.filename, result.csv);
-      toast.success("CSV exportado.");
+    onSuccess: async (result) => {
+      const message = csvDeliveryMessage(await downloadCsv(result.filename, result.csv));
+      if (message) toast.success(message);
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -116,40 +117,72 @@ export function CreditStatement({
         )}
       </CardHeader>
       <CardContent className="space-y-3">
-        {creditsQuery.isLoading ? (
+        {creditsQuery.isError ? (
+          <LoadError
+            message="Não foi possível carregar o extrato."
+            onRetry={() => void creditsQuery.refetch()}
+          />
+        ) : creditsQuery.isPending ? (
+          // isPending also covers "waiting for the active house" (query disabled).
           <p className="py-6 text-center text-muted-foreground">Carregando…</p>
         ) : rows.length === 0 ? (
           <p className="py-6 text-center text-muted-foreground">Nenhum crédito no período.</p>
         ) : (
           <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Data</TableHead>
-                  <TableHead>Lead</TableHead>
-                  <TableHead>Valor</TableHead>
-                  <TableHead>Origem</TableHead>
-                  <TableHead>Oferta</TableHead>
-                  <TableHead>Clique em</TableHead>
-                  <TableHead>Primeiro depósito</TableHead>
-                  <TableHead>Reativação</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.depositId}>
-                    <TableCell>{formatBrtDateTime(row.depositAt)}</TableCell>
-                    <TableCell>{row.leadNome}</TableCell>
-                    <TableCell>{money(row.valor)}</TableCell>
-                    <TableCell>{VIA_LABEL[row.via]}</TableCell>
-                    <TableCell>{row.oferta ?? "—"}</TableCell>
-                    <TableCell>{row.clickAt ? formatBrtDateTime(row.clickAt) : "—"}</TableCell>
-                    <TableCell>{row.isFtd ? "Sim" : "Não"}</TableCell>
-                    <TableCell>{row.isReativacao ? "Sim" : "Não"}</TableCell>
+            {/* Phones: one card per credit. */}
+            <ul className="divide-y divide-border/70 md:hidden">
+              {rows.map((row) => (
+                <li key={row.depositId} className="space-y-0.5 py-2.5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0 truncate text-body font-medium">{row.leadNome}</span>
+                    <span className="shrink-0 text-body font-semibold tabular-nums">
+                      {money(row.valor)}
+                    </span>
+                  </div>
+                  <p className="text-label text-muted-foreground">
+                    {formatBrtDateTime(row.depositAt)} · {VIA_LABEL[row.via]}
+                    {row.isFtd && " · Primeiro depósito"}
+                    {row.isReativacao && " · Reativação"}
+                  </p>
+                  {(row.oferta || row.clickAt) && (
+                    <p className="text-label text-muted-foreground">
+                      {row.oferta ?? "Sem oferta"}
+                      {row.clickAt && ` · clique em ${formatBrtDateTime(row.clickAt)}`}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Data</TableHead>
+                    <TableHead>Lead</TableHead>
+                    <TableHead>Valor</TableHead>
+                    <TableHead>Origem</TableHead>
+                    <TableHead>Oferta</TableHead>
+                    <TableHead>Clique em</TableHead>
+                    <TableHead>Primeiro depósito</TableHead>
+                    <TableHead>Reativação</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow key={row.depositId}>
+                      <TableCell>{formatBrtDateTime(row.depositAt)}</TableCell>
+                      <TableCell>{row.leadNome}</TableCell>
+                      <TableCell>{money(row.valor)}</TableCell>
+                      <TableCell>{VIA_LABEL[row.via]}</TableCell>
+                      <TableCell>{row.oferta ?? "—"}</TableCell>
+                      <TableCell>{row.clickAt ? formatBrtDateTime(row.clickAt) : "—"}</TableCell>
+                      <TableCell>{row.isFtd ? "Sim" : "Não"}</TableCell>
+                      <TableCell>{row.isReativacao ? "Sim" : "Não"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
             {totalPages > 1 && (
               <nav
                 aria-label="Paginação do extrato de créditos"
@@ -160,7 +193,7 @@ export function CreditStatement({
                 </span>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   aria-label="Página anterior"
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                   disabled={page === 0}
@@ -169,7 +202,7 @@ export function CreditStatement({
                 </Button>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   aria-label="Próxima página"
                   onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                   disabled={page >= totalPages - 1}

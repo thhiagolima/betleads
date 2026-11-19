@@ -149,8 +149,8 @@ export function EnviarPeloWhatsAppDialog({
           </div>
         ) : data?.pinned ? (
           <div className="space-y-3">
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs flex gap-2">
-              <Lock className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-xs flex gap-2">
+              <Lock className="h-4 w-4 text-warning shrink-0 mt-0.5" />
               <div>
                 {pinnedUnavailable ? (
                   <>
@@ -207,8 +207,8 @@ export function EnviarPeloWhatsAppDialog({
                           variant="outline"
                           className={
                             s.status === "connected"
-                              ? "text-[10px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                              : "text-[10px] bg-slate-500/15 text-slate-300 border-slate-500/30"
+                              ? "text-meta bg-success/15 text-success border-success/30"
+                              : "text-meta bg-slate-500/15 text-slate-300 border-slate-500/30"
                           }
                         >
                           {s.status === "connected" ? "Conectado" : "Offline"}

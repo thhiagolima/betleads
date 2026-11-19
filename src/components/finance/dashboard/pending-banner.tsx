@@ -63,24 +63,24 @@ export function PendingBanner({
 
   return (
     <div
-      className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+      className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground"
       {...tourAnchor("financeiro.painel.pendencias")}
     >
       {showPending && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" aria-hidden />
+          <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden />
           <p className="min-w-0 flex-1">
             {scopeKind === "tenant" ? (
               <>
-                <span className="font-semibold text-amber-200">
+                <span className="font-semibold text-warning">
                   {tenantPendingText(dates, ggrUpdatedThrough)}
                 </span>
                 {!ggrUpdatedThrough && (
-                  <span className="mt-0.5 block text-xs text-amber-100/70">{PENDING_HINT}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{PENDING_HINT}</span>
                 )}
               </>
             ) : (
-              <span className="font-semibold text-amber-200">
+              <span className="font-semibold text-warning">
                 Casas com dias faltando:{" "}
                 {pendingTenants
                   .map((tenant) => `${tenant.nome} (${tenant.pendingDates.length})`)
@@ -103,8 +103,8 @@ export function PendingBanner({
         </div>
       )}
       {duplicateBetleadsCosts > 0 && (
-        <div className="flex items-center gap-3 text-xs text-amber-100/80">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" aria-hidden />
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden />
           <span>Pode haver custo Betleads contado duas vezes. Revise em Outros custos.</span>
         </div>
       )}

@@ -110,7 +110,7 @@ export function ExternalIntegrationTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Webhook className="h-5 w-5 text-emerald-400" />
+            <Webhook className="h-5 w-5 text-success" />
             Integração externa (CRM terceiro)
           </CardTitle>
           <CardDescription>
@@ -143,7 +143,7 @@ export function ExternalIntegrationTab() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label>Gatilhos encaminhados</Label>
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <Button variant="ghost" size="sm" onClick={() => setTriggers(ALL_TRIGGERS as string[])}>
                   Todos
                 </Button>
@@ -171,7 +171,7 @@ export function ExternalIntegrationTab() {
             </p>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <DemoDisabledTooltip active={isDemo}>
               <Button onClick={handleSave} disabled={isDemo || saving || !url.trim()}>
                 {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -211,8 +211,8 @@ export function ExternalIntegrationTab() {
                   variant="outline"
                   className={
                     r.ok
-                      ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
-                      : "border-rose-500/30 bg-rose-500/15 text-rose-400"
+                      ? "border-success/30 bg-success/15 text-success"
+                      : "border-destructive/30 bg-destructive/15 text-destructive"
                   }
                 >
                   {r.ok ? `OK ${r.httpStatus ?? ""}` : (r.reason ?? "erro")}
@@ -253,9 +253,9 @@ export function ExternalIntegrationTab() {
                     variant="outline"
                     className={
                       ev.status === "sent"
-                        ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
+                        ? "border-success/30 bg-success/15 text-success"
                         : ev.status === "failed"
-                          ? "border-rose-500/30 bg-rose-500/15 text-rose-400"
+                          ? "border-destructive/30 bg-destructive/15 text-destructive"
                           : ""
                     }
                   >

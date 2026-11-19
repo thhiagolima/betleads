@@ -23,6 +23,7 @@ import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { getExpertLeadTimeline, type TimelineItem } from "@/lib/expert-report.functions";
 import { num } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { LoadError } from "@/components/rendimento/load-states";
 
 type DepositStatus = NonNullable<TimelineItem["status"]>;
 
@@ -156,10 +157,13 @@ export function LeadHistorySheet({
         </SheetHeader>
 
         <div className="space-y-5 p-6">
-          {timelineQuery.isLoading ? (
+          {timelineQuery.isPending ? (
             <p className="py-6 text-center text-muted-foreground">Carregando…</p>
           ) : timelineQuery.isError ? (
-            <p className="py-6 text-center text-muted-foreground">{timelineQuery.error.message}</p>
+            <LoadError
+              message={timelineQuery.error.message || "Não foi possível carregar o histórico."}
+              onRetry={() => void timelineQuery.refetch()}
+            />
           ) : (
             <>
               {resumo && (

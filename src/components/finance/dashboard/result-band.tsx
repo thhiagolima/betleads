@@ -26,7 +26,7 @@ export const NO_COMPARE_TEXT = "Sem período anterior para comparar";
 export const COMPARE_OFF_TEXT = "Sem comparação";
 
 const signClass = (value: number | null) =>
-  value === null || value === 0 ? undefined : value < 0 ? "text-rose-400" : "text-emerald-400";
+  value === null || value === 0 ? undefined : value < 0 ? "text-danger" : "text-success";
 
 function ResultCard({
   id,
@@ -56,26 +56,30 @@ function ResultCard({
       data-result={id}
       {...anchorAttrs}
       className={cn(
-        "min-w-0 rounded-[14px] border border-border bg-card/80 px-5 py-[18px]",
+        "@container min-w-0 rounded-[14px] border border-border bg-card/80 px-4 py-4 sm:px-5 sm:py-[18px]",
         main && "sm:col-span-2 xl:col-span-1",
-        tint === "negative" && "border-rose-500/30 bg-rose-500/[0.06]",
-        tint === "positive" && "border-emerald-500/30 bg-emerald-500/[0.06]",
+        tint === "negative" && "border-danger/30 bg-danger/[0.06]",
+        tint === "positive" && "border-success/30 bg-success/[0.06]",
       )}
     >
-      <p className="flex items-center text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+      <p className="flex items-center text-meta font-semibold uppercase tracking-[0.06em] text-muted-foreground">
         {label}
         {term && <TermTooltip term={term} />}
       </p>
       <p
         className={cn(
-          "mt-2.5 whitespace-nowrap font-bold leading-tight tracking-tight tabular-nums",
-          main ? "text-[30px] xl:text-[40px]" : "text-[22px] xl:text-[30px]",
+          // Sized by the card's own width (container query units), so a long
+          // amount shrinks instead of spilling into the next card; the
+          // currency symbol stays glued (pt-BR uses a no-break space) and the
+          // digits only break as a last resort.
+          "mt-2.5 font-bold leading-tight tracking-tight tabular-nums [overflow-wrap:anywhere]",
+          main ? "text-[clamp(1.5rem,10cqi,2.5rem)]" : "text-[clamp(1.25rem,9cqi,1.875rem)]",
           valueClassName,
         )}
       >
         {value}
       </p>
-      {meta && <div className="mt-2 text-xs text-muted-foreground/80">{meta}</div>}
+      {meta && <div className="mt-2 text-meta text-muted-foreground">{meta}</div>}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 // {link_<key>}) into a composer's SMS text or e-mail HTML at the cursor.
 // Used by the campaign composer and the journey editor's SMS/e-mail steps.
 import type { RefObject } from "react";
+import { Link } from "@tanstack/react-router";
 
 import { Badge } from "@/components/ui/badge";
 
@@ -57,9 +58,9 @@ export function LinkInsertMenu({
   if (!siteUrl) {
     return (
       <p className={`text-xs text-muted-foreground ${className ?? ""}`}>
-        <a href="/configuracoes/casa" className="font-medium text-primary hover:underline">
+        <Link to="/configuracoes/casa" className="font-medium text-primary hover:underline">
           Cadastre a URL da casa
-        </a>{" "}
+        </Link>{" "}
         para inserir links na mensagem.
       </p>
     );

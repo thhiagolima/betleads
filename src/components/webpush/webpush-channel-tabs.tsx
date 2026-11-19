@@ -183,7 +183,7 @@ export function WebpushOverviewTab({ onOpenHistory }: { onOpenHistory: () => voi
                 {recent.map((campaign) => (
                   <li
                     key={campaign.id}
-                    className="flex items-center gap-3 border-b border-border/70 py-2.5 text-[13.5px] last:border-b-0"
+                    className="flex items-center gap-3 border-b border-border/70 py-2.5 text-body last:border-b-0"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{campaign.name || "Campanha sem nome"}</p>
@@ -205,7 +205,7 @@ export function WebpushOverviewTab({ onOpenHistory }: { onOpenHistory: () => voi
           title="Instalação e permissão"
           description="Script no site, mensagem que pede a permissão e push de teste."
         >
-          <p className="text-[13.5px] text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             As configurações do Web Push ficam em Integrações, na aba Web Push.
           </p>
           <Button
@@ -244,15 +244,52 @@ export function WebpushHistoryTab() {
         {campaigns.isLoading ? (
           <Skeleton className="h-48 w-full" />
         ) : campaigns.isError ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            Não foi possível carregar as campanhas. Tente de novo em instantes.
-          </p>
+          <div className="py-6 text-center">
+            <p className="text-sm text-muted-foreground">Não foi possível carregar as campanhas.</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => campaigns.refetch()}>
+              Tentar novamente
+            </Button>
+          </div>
         ) : rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
             Nenhuma campanha de Web Push ainda.
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: one card per campaign; the table is md+ only. */}
+          <ul className="space-y-2 md:hidden">
+            {rows.map((campaign) => (
+              <li key={campaign.id} className="rounded-lg border border-border p-3 text-body">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="min-w-0 truncate font-medium">
+                    {campaign.name || "Campanha sem nome"}
+                  </span>
+                  <CampaignStatusBadge status={campaign.status} />
+                </div>
+                <p className="mt-1 text-meta text-muted-foreground">
+                  Agendada para {formatWhen(campaign.scheduledAt)}
+                </p>
+                <dl className="mt-2 grid grid-cols-3 gap-2 text-meta">
+                  <div>
+                    <dt className="text-muted-foreground">Público</dt>
+                    <dd className="tabular-nums">{num(campaign.targetCount)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Enviados</dt>
+                    <dd className="tabular-nums">{num(campaign.sentCount)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Falhas</dt>
+                    <dd className="tabular-nums">{num(campaign.failedCount)}</dd>
+                  </div>
+                </dl>
+                <div className="mt-2 flex justify-end">
+                  <ReportLink campaignId={campaign.id} />
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="hidden overflow-x-auto md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -296,6 +333,7 @@ export function WebpushHistoryTab() {
               </TableBody>
             </Table>
           </div>
+          </>
         )}
       </ChannelBlock>
     </div>

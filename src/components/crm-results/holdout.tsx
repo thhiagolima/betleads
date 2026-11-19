@@ -63,7 +63,7 @@ export function Holdout({ data }: { data: Data }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Jornada</TableHead>
+                  <TableHead className="sticky left-0 z-10 min-w-36 bg-card">Jornada</TableHead>
                   <TableHead className="text-right">Receberam: voltaram</TableHead>
                   <TableHead className="text-right">Controle: voltaram</TableHead>
                   <TableHead className="text-right">Diferença</TableHead>
@@ -75,7 +75,9 @@ export function Holdout({ data }: { data: Data }) {
               <TableBody>
                 {data.holdout.map((row) => (
                   <TableRow key={row.journeyId}>
-                    <TableCell className="font-medium">{row.name}</TableCell>
+                    <TableCell className="sticky left-0 z-10 max-w-44 break-words bg-card font-medium">
+                      {row.name}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {pct(row.treatedRate)}
                       <div className="text-xs text-muted-foreground">

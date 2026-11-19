@@ -1,7 +1,7 @@
 import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
 import { Building2, Plus, Save, Search, Settings2, Trash2, UserPlus, Wallet } from "lucide-react";
 import { toast } from "sonner";
@@ -306,6 +306,17 @@ function TenantsPage() {
   const consoleFn = useServerFn(getTenantManagementConsole);
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  // Below xl the detail sits under a long list of houses: after a tap, take
+  // the user down to it so the tap visibly does something.
+  const selectTenant = (tenantId: string) => {
+    setSelectedTenantId(tenantId);
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1279px)").matches) {
+      requestAnimationFrame(() =>
+        workspaceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      );
+    }
+  };
   // House admins have no picker here: the page follows the house chosen in the header.
   const { active: headerTenant } = useActiveTenant();
   const requestedTenantId = selectedTenantId ?? headerTenant?.id ?? null;
@@ -404,7 +415,7 @@ function TenantsPage() {
                   <button
                     key={tenant.id}
                     type="button"
-                    onClick={() => setSelectedTenantId(tenant.id)}
+                    onClick={() => selectTenant(tenant.id)}
                     aria-pressed={active}
                     className={`w-full rounded-lg border p-3 text-left transition ${
                       active
@@ -416,7 +427,7 @@ function TenantsPage() {
                       <div className="min-w-0 truncate text-body font-semibold">{tenant.nome}</div>
                       <div className="flex shrink-0 items-center gap-1">
                         {tenant.is_demo && (
-                          <Badge className="bg-violet-500/15 text-violet-300">demonstração</Badge>
+                          <Badge className="bg-info/15 text-info">demonstração</Badge>
                         )}
                         {statusBadge(tenant.status)}
                       </div>
@@ -436,7 +447,9 @@ function TenantsPage() {
             </div>
           </DataCard>
 
-          {workspace}
+          <div ref={workspaceRef} className="min-w-0 scroll-mt-20">
+            {workspace}
+          </div>
         </div>
       ) : (
         workspace
@@ -616,7 +629,7 @@ function UsersTab({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Pessoa</TableHead>
+            <TableHead className="sticky left-0 z-10 bg-card">Pessoa</TableHead>
             <TableHead>Papel</TableHead>
             <TableHead>Último acesso</TableHead>
             <TableHead>Status</TableHead>
@@ -626,7 +639,10 @@ function UsersTab({
         <TableBody>
           {detail.users.map((user, i) => (
             <TableRow key={user.id}>
-              <TableCell className="font-medium">{user.email ?? "Sem e-mail cadastrado"}</TableCell>
+              {/* Pinned while the other columns scroll sideways on a phone. */}
+              <TableCell className="sticky left-0 z-10 max-w-[10rem] break-all bg-card font-medium sm:max-w-none sm:break-normal">
+                {user.email ?? "Sem e-mail cadastrado"}
+              </TableCell>
               <TableCell>
                 <RoleSelect
                   tenantId={detail.tenant.id}
@@ -712,13 +728,18 @@ function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAd
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>E-mail</Label>
-            <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <Label htmlFor="add-user-dialog-e-mail">E-mail</Label>
+            <Input
+              id="add-user-dialog-e-mail"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
           </div>
           <div className="space-y-2">
-            <Label>Papel</Label>
+            <Label htmlFor="add-user-dialog-papel">Papel</Label>
             <Select value={role} onValueChange={(value) => setRole(value as TenantUser["role"])}>
-              <SelectTrigger>
+              <SelectTrigger id="add-user-dialog-papel">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -729,8 +750,9 @@ function AddUserDialog({ tenantId, isSuperAdmin }: { tenantId: string; isSuperAd
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Senha inicial opcional</Label>
+            <Label htmlFor="add-user-dialog-senha-inicial-opcional">Senha inicial opcional</Label>
             <Input
+              id="add-user-dialog-senha-inicial-opcional"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -1059,12 +1081,13 @@ function AdjustCreditsDialog({ tenant }: { tenant: TenantRow }) {
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>Casa</Label>
-            <Input value={tenant.nome} readOnly />
+            <Label htmlFor="adjust-credits-dialog-casa">Casa</Label>
+            <Input id="adjust-credits-dialog-casa" value={tenant.nome} readOnly />
           </div>
           <div className="space-y-2">
-            <Label>Valor (R$)</Label>
+            <Label htmlFor="adjust-credits-dialog-valor-r">Valor (R$)</Label>
             <Input
+              id="adjust-credits-dialog-valor-r"
               type="number"
               step="0.01"
               value={amount}
@@ -1072,8 +1095,12 @@ function AdjustCreditsDialog({ tenant }: { tenant: TenantRow }) {
             />
           </div>
           <div className="space-y-2">
-            <Label>Motivo</Label>
-            <Input value={reason} onChange={(event) => setReason(event.target.value)} />
+            <Label htmlFor="adjust-credits-dialog-motivo">Motivo</Label>
+            <Input
+              id="adjust-credits-dialog-motivo"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>
@@ -1145,8 +1172,9 @@ function PricingDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <Label>Preço unitário (R$)</Label>
+          <Label htmlFor="pricing-dialog-preco-unitario-r">Preço unitário (R$)</Label>
           <Input
+            id="pricing-dialog-preco-unitario-r"
             type="number"
             min="0"
             step="0.0001"
@@ -1308,15 +1336,16 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
     <DataCard title="Configuração da casa" bodyClassName="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label>Nome</Label>
+          <Label htmlFor="settings-tab-nome">Nome</Label>
           <Input
+            id="settings-tab-nome"
             value={form.nome}
             onChange={(event) => setForm((prev) => ({ ...prev, nome: event.target.value }))}
             {...tourAnchor("conta.config.nome")}
           />
         </div>
         <div className="space-y-2">
-          <Label>Status</Label>
+          <Label htmlFor="settings-tab-status">Status</Label>
           <Select
             value={form.status}
             disabled={!isSuperAdmin}
@@ -1324,7 +1353,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
               setForm((prev) => ({ ...prev, status: value as TenantRow["status"] }))
             }
           >
-            <SelectTrigger>
+            <SelectTrigger id="settings-tab-status">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1336,7 +1365,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Plano</Label>
+          <Label htmlFor="settings-tab-plano">Plano</Label>
           <Select
             value={form.plano}
             disabled={!isSuperAdmin}
@@ -1344,7 +1373,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
               setForm((prev) => ({ ...prev, plano: value as TenantRow["plano"] }))
             }
           >
-            <SelectTrigger>
+            <SelectTrigger id="settings-tab-plano">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1356,7 +1385,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Modelo CRM</Label>
+          <Label htmlFor="settings-tab-modelo-crm">Modelo CRM</Label>
           <Select
             value={form.crm_model}
             disabled={!isSuperAdmin}
@@ -1367,7 +1396,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
               }))
             }
           >
-            <SelectTrigger>
+            <SelectTrigger id="settings-tab-modelo-crm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1381,7 +1410,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Moeda</Label>
+          <Label htmlFor="settings-tab-moeda">Moeda</Label>
           <Select
             value={form.moeda}
             disabled={!isSuperAdmin}
@@ -1389,7 +1418,7 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
               setForm((prev) => ({ ...prev, moeda: toTenantCurrency(value) }))
             }
           >
-            <SelectTrigger>
+            <SelectTrigger id="settings-tab-moeda">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1408,8 +1437,9 @@ function SettingsTab({ detail, isSuperAdmin }: { detail: TenantDetail; isSuperAd
       </div>
       {planTouchesInterno && (
         <div className="space-y-2">
-          <Label>Motivo da troca de plano</Label>
+          <Label htmlFor="settings-tab-motivo-da-troca-de-plano">Motivo da troca de plano</Label>
           <Input
+            id="settings-tab-motivo-da-troca-de-plano"
             value={planReason}
             onChange={(event) => setPlanReason(event.target.value)}
             placeholder="Por que esta casa está entrando/saindo do plano interno?"
@@ -1493,22 +1523,29 @@ function CreateTenantDialog() {
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>Nome</Label>
+            <Label htmlFor="create-tenant-dialog-nome">Nome</Label>
             <Input
+              id="create-tenant-dialog-nome"
               value={form.nome}
               onChange={(event) => setForm((prev) => ({ ...prev, nome: event.target.value }))}
             />
           </div>
           <div className="space-y-2">
-            <Label>Endereço curto (opcional)</Label>
+            <Label htmlFor="create-tenant-dialog-endereco-curto-opcional">
+              Endereço curto (opcional)
+            </Label>
             <Input
+              id="create-tenant-dialog-endereco-curto-opcional"
               value={form.slug}
               onChange={(event) => setForm((prev) => ({ ...prev, slug: event.target.value }))}
             />
           </div>
           <div className="space-y-2">
-            <Label>E-mail do primeiro administrador</Label>
+            <Label htmlFor="create-tenant-dialog-e-mail-do-primeiro-administrad">
+              E-mail do primeiro administrador
+            </Label>
             <Input
+              id="create-tenant-dialog-e-mail-do-primeiro-administrad"
               type="email"
               value={form.adminEmail}
               onChange={(event) => setForm((prev) => ({ ...prev, adminEmail: event.target.value }))}
@@ -1520,14 +1557,14 @@ function CreateTenantDialog() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Status</Label>
+              <Label htmlFor="create-tenant-dialog-status">Status</Label>
               <Select
                 value={form.status}
                 onValueChange={(value) =>
                   setForm((prev) => ({ ...prev, status: value as TenantRow["status"] }))
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger id="create-tenant-dialog-status">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1539,14 +1576,14 @@ function CreateTenantDialog() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Plano</Label>
+              <Label htmlFor="create-tenant-dialog-plano">Plano</Label>
               <Select
                 value={form.plano}
                 onValueChange={(value) =>
                   setForm((prev) => ({ ...prev, plano: value as TenantRow["plano"] }))
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger id="create-tenant-dialog-plano">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

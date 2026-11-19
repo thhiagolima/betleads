@@ -83,7 +83,7 @@ describe("SendsBlock", () => {
     expect(sms).toContain("R$ 1.440,00");
     expect(sms).toContain("R$ 0,12");
     expect(sms).toContain("▲ 20,0%");
-    expect(sms).toContain("text-rose-400"); // a cost going up is bad
+    expect(sms).toContain("text-danger"); // a cost going up is bad
 
     const voice = row(html, "voice_30s");
     expect(voice).toContain("Voz");
@@ -95,7 +95,7 @@ describe("SendsBlock", () => {
     expect(email).toContain("5.000 e-mails");
     expect(email).toContain("R$ 0,0004");
     expect(email).toContain("▼ 50,0%");
-    expect(email).toContain("text-emerald-400");
+    expect(email).toContain("text-success");
 
     const total = row(html, "total");
     expect(total).toContain("Total de envios");

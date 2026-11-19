@@ -35,13 +35,15 @@ export function MetricCard({
   return (
     <section
       className={cn(
-        "flex flex-col rounded-2xl border border-border bg-card/80 p-4 sm:p-5",
+        "flex min-w-0 flex-col rounded-2xl border border-border bg-card/80 p-4 sm:p-5",
         className,
       )}
       {...rest}
     >
-      <h3 className="truncate text-label font-normal text-muted-foreground">{label}</h3>
-      <div className="mt-1.5 text-2xl font-semibold tracking-[-0.03em] tabular-nums sm:text-kpi">
+      <h3 className="line-clamp-2 break-words text-label font-normal text-muted-foreground">
+        {label}
+      </h3>
+      <div className="mt-1.5 min-w-0 break-words text-xl font-semibold tracking-[-0.03em] tabular-nums sm:text-2xl lg:text-kpi">
         {value}
       </div>
       {(delta || hint) && (

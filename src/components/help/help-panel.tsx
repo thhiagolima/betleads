@@ -77,7 +77,7 @@ export type HelpPanelViewProps = {
 
 function Heading({ children }: { children: ReactNode }) {
   return (
-    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-primary">
+    <h3 className="mb-2 text-meta font-semibold uppercase tracking-wider text-primary">
       {children}
     </h3>
   );
@@ -115,7 +115,7 @@ function SearchResults({
               onClick={() => onSelect(entry)}
               className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <span className="block text-[11px] text-muted-foreground">
+              <span className="block text-meta text-muted-foreground">
                 {resultLabel(entry, currentRoute)}
               </span>
               <span className="block text-sm font-medium">{entry.title}</span>
@@ -519,7 +519,7 @@ export function HelpPanel(props: HelpPanelProps) {
         closeLabel="Fechar"
         className={cn(
           "flex flex-col gap-0 overflow-y-auto p-0",
-          isMobile ? "h-[85dvh] rounded-t-2xl" : "w-full sm:max-w-[480px]",
+          isMobile ? "h-[85dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]" : "w-full sm:max-w-[480px]",
         )}
       >
         <SheetHeader className="border-b border-border/60 px-5 py-4 text-left">

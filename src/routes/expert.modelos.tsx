@@ -12,6 +12,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
+import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,7 @@ import {
 } from "@/lib/expert-template-variables";
 import { variablesForChannel } from "@/lib/message-variables";
 import { useEnabledChannels } from "@/hooks/use-enabled-channels";
-import { ChannelDisabledState } from "@/components/channels/channel-disabled-state";
+import { copyToClipboard } from "@/lib/clipboard";
 
 export const Route = createFileRoute("/expert/modelos")({
   component: ExpertTemplatesPage,
@@ -170,6 +171,39 @@ function TemplateFormDialog({
   );
 }
 
+/** One variable of the help list; tapping it copies the token. */
+function VariableButton({ token, label, note }: { token: string; label: string; note?: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copyToken() {
+    if (await copyToClipboard(token)) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+      toast.success(`${token} copiada.`);
+    } else {
+      toast.error("Não foi possível copiar.");
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void copyToken()}
+      aria-label={`Copiar ${token}: ${label}`}
+      className="flex min-h-11 w-full items-start gap-2 rounded-md border border-border/70 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+    >
+      <span className="min-w-0 flex-1">
+        <code className="text-label font-medium">{token}</code>
+        <span className="block text-label text-muted-foreground">{label}</span>
+        {note && <span className="block text-label text-muted-foreground">{note}</span>}
+      </span>
+      {copied ? (
+        <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden="true" />
+      ) : (
+        <Copy className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      )}
+    </button>
+  );
+}
+
 function ExpertTemplatesPage() {
   const qc = useQueryClient();
   const { isEnabled } = useEnabledChannels();
@@ -235,15 +269,9 @@ function ExpertTemplatesPage() {
     );
   }
 
-  // Estes modelos são de SMS; sem o canal, a página inteira não faz sentido.
-  if (!isEnabled("sms")) {
-    return (
-      <Page>
-        <PageHeader />
-        <ChannelDisabledState channel="sms" />
-      </Page>
-    );
-  }
+  // The expert's own models are WhatsApp text and work without SMS; only the
+  // house's models (sms_templates) depend on the house SMS channel.
+  const houseSmsOn = isEnabled("sms");
 
   const meus = templatesQuery.data?.meus ?? [];
   const casa = templatesQuery.data?.casa ?? [];
@@ -267,12 +295,17 @@ function ExpertTemplatesPage() {
             <p className="py-6 text-center text-muted-foreground">Carregando…</p>
           ) : meus.length === 0 ? (
             <p className="py-6 text-center text-muted-foreground">
-              Você ainda não tem modelos. Crie um ou copie um dos modelos da casa abaixo.
+              {houseSmsOn
+                ? "Você ainda não tem modelos. Crie um ou copie um dos modelos da casa abaixo."
+                : "Você ainda não tem modelos. Toque em Novo modelo para criar o primeiro."}
             </p>
           ) : (
             <ul className="divide-y divide-border/70">
               {meus.map((template) => (
-                <li key={template.id} className="flex items-start justify-between gap-3 py-3">
+                <li
+                  key={template.id}
+                  className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
+                >
                   <div className="min-w-0">
                     <p className="text-body font-medium">{template.nome}</p>
                     <p className="mt-0.5 line-clamp-2 text-label text-muted-foreground">
@@ -300,62 +333,65 @@ function ExpertTemplatesPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Modelos da casa</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {templatesQuery.isLoading ? (
-            <p className="py-6 text-center text-muted-foreground">Carregando…</p>
-          ) : casa.length === 0 ? (
-            <p className="py-6 text-center text-muted-foreground">
-              A casa ainda não tem modelos de SMS ativos.
-            </p>
-          ) : (
-            <ul className="divide-y divide-border/70">
-              {casa.map((template) => (
-                <li key={template.id} className="flex items-start justify-between gap-3 py-3">
-                  <div className="min-w-0">
-                    <p className="text-body font-medium">{template.nome}</p>
-                    <p className="mt-0.5 line-clamp-2 text-label text-muted-foreground">
-                      {template.conteudo}
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    disabled={copy.isPending}
-                    onClick={() => copy.mutate(template.id)}
+      {houseSmsOn && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Modelos da casa</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {templatesQuery.isLoading ? (
+              <p className="py-6 text-center text-muted-foreground">Carregando…</p>
+            ) : casa.length === 0 ? (
+              <p className="py-6 text-center text-muted-foreground">
+                A casa ainda não tem modelos de SMS ativos.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border/70">
+                {casa.map((template) => (
+                  <li
+                    key={template.id}
+                    className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
                   >
-                    Copiar para os meus
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+                    <div className="min-w-0">
+                      <p className="text-body font-medium">{template.nome}</p>
+                      <p className="mt-0.5 line-clamp-2 text-label text-muted-foreground">
+                        {template.conteudo}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 self-start"
+                      disabled={copy.isPending}
+                      onClick={() => copy.mutate(template.id)}
+                    >
+                      Copiar para os meus
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
           <CardTitle>Variáveis disponíveis</CardTitle>
+          <p className="text-label text-muted-foreground">Toque numa variável para copiar.</p>
         </CardHeader>
         <CardContent>
           <ul className="grid gap-2 sm:grid-cols-2">
-            <li className="rounded-md border border-border/70 px-3 py-2">
-              <code className="text-label font-medium">{"{link}"}</code>
-              <p className="text-label text-muted-foreground">
-                Link da oferta gerado na ficha do lead.
-              </p>
+            <li>
+              <VariableButton token="{link}" label="Link da oferta gerado na ficha do lead." />
             </li>
             {variaveis.map((variable) => (
-              <li key={variable.key} className="rounded-md border border-border/70 px-3 py-2">
-                <code className="text-label font-medium">{`{${variable.key}}`}</code>
-                <p className="text-label text-muted-foreground">{variable.label}</p>
-                {HOUSE_LINK_VARIABLE_KEYS.has(variable.key) && (
-                  <p className="text-label text-muted-foreground">{HOUSE_LINK_NOTE}</p>
-                )}
+              <li key={variable.key}>
+                <VariableButton
+                  token={`{${variable.key}}`}
+                  label={variable.label}
+                  note={HOUSE_LINK_VARIABLE_KEYS.has(variable.key) ? HOUSE_LINK_NOTE : undefined}
+                />
               </li>
             ))}
           </ul>

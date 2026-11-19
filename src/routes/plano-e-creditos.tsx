@@ -39,6 +39,7 @@ import { useIsDemoTenant } from "@/hooks/use-is-demo-tenant";
 import { DEMO_EMPTY_STATE_TEXT } from "@/lib/demo-tenant";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Page, PageHeader } from "@/components/ui-premium";
 import {
   Table,
   TableBody,
@@ -81,7 +82,12 @@ type InvoiceDTO = {
 
 type PlanOverview = {
   state: string;
-  plan: { name: string; priceCents: number; discountedCents: number; discountLabel: string | null } | null;
+  plan: {
+    name: string;
+    priceCents: number;
+    discountedCents: number;
+    discountLabel: string | null;
+  } | null;
   exempt: boolean;
   currentPeriod: { start: string; end: string } | null;
   nextDueDate: string | null;
@@ -142,9 +148,7 @@ function PlanoECreditosPage() {
   const tenant = useActiveTenant();
   const tenantId = tenant.data?.activeTenantId ?? null;
   const { isEnabled } = useEnabledChannels();
-  const visibleBillingItems = BILLING_ITEMS.filter((item) =>
-    isEnabled(BILLING_ITEM_CHANNEL[item]),
-  );
+  const visibleBillingItems = BILLING_ITEMS.filter((item) => isEnabled(BILLING_ITEM_CHANNEL[item]));
   const [buyOpen, setBuyOpen] = useState(false);
   const [payCharge, setPayCharge] = useState<PixChargePayload | null>(null);
   // Invoice behind `payCharge`, so "Gerar novo Pix" can call payInvoice again
@@ -206,21 +210,27 @@ function PlanoECreditosPage() {
 
   if (isLoading || tenant.isLoading || planOverview.isLoading) {
     return (
-      <div className="grid gap-4 md:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Card key={i} className="h-36 animate-pulse" />
-        ))}
-      </div>
+      <Page>
+        <PageHeader title="Plano e créditos" subtitle="Carregando…" />
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i} className="h-36 animate-pulse" />
+          ))}
+        </div>
+      </Page>
     );
   }
 
   if (isError || !data || planOverview.isError || !planOverview.data) {
     return (
-      <Card>
-        <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Não foi possível carregar os dados de cobrança agora. Tente novamente em instantes.
-        </CardContent>
-      </Card>
+      <Page>
+        <PageHeader title="Plano e créditos" />
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            Não foi possível carregar os dados de cobrança agora. Tente novamente em instantes.
+          </CardContent>
+        </Card>
+      </Page>
     );
   }
 
@@ -254,13 +264,11 @@ function PlanoECreditosPage() {
   });
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-2">
-        <h2 className="text-2xl font-semibold tracking-tight">Plano e créditos</h2>
-        <p className="text-sm text-muted-foreground">
-          Mensalidade do plano, faturas, saldo de créditos e extrato de movimentações.
-        </p>
-      </div>
+    <Page>
+      <PageHeader
+        title="Plano e créditos"
+        subtitle="Mensalidade do plano, faturas, saldo de créditos e extrato de movimentações."
+      />
 
       {/* Bloco 1: Mensalidade */}
       <Card className="border-primary/30 bg-card/80" {...tourAnchor("creditos.mensalidade.card")}>
@@ -272,7 +280,12 @@ function PlanoECreditosPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {overview.exempt ? null : (
+          {overview.exempt ? (
+            <p className="text-sm text-muted-foreground">
+              Esta casa usa o plano interno e não paga mensalidade. Só o consumo de SMS, voz e
+              e-mail sai do saldo abaixo.
+            </p>
+          ) : (
             <>
               <div>
                 <div className="text-xl font-semibold">
@@ -300,7 +313,9 @@ function PlanoECreditosPage() {
                   type="button"
                   size="sm"
                   disabled={payMutation.isPending}
-                  onClick={() => overview.openInvoice && payMutation.mutate(overview.openInvoice.id)}
+                  onClick={() =>
+                    overview.openInvoice && payMutation.mutate(overview.openInvoice.id)
+                  }
                   {...tourAnchor("creditos.mensalidade.pagar")}
                 >
                   {payMutation.isPending ? (
@@ -347,8 +362,11 @@ function PlanoECreditosPage() {
 
       <BuyCreditsDialog open={buyOpen} onOpenChange={setBuyOpen} tenantId={tenantId} />
 
-      <div className="grid gap-4 md:grid-cols-3" {...tourAnchor("creditos.saldo.cartoes")}>
-        <Card className="border-primary/30 bg-card/80">
+      <div
+        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        {...tourAnchor("creditos.saldo.cartoes")}
+      >
+        <Card className="border-primary/30 bg-card/80 sm:col-span-2 lg:col-span-1">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm text-muted-foreground">
               <Wallet className="h-4 w-4 text-primary" />
@@ -356,7 +374,9 @@ function PlanoECreditosPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-4xl font-bold">{brl(balance)}</div>
+            <div className="text-kpi break-words font-bold tabular-nums sm:text-4xl lg:text-kpi xl:text-4xl">
+              {brl(balance)}
+            </div>
             <p className="mt-1 text-sm text-muted-foreground">
               disponível para consumo — créditos não expiram
             </p>
@@ -388,7 +408,9 @@ function PlanoECreditosPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{brl(Number(summary.lifetime_purchased ?? 0))}</div>
+            <div className="text-kpi break-words font-bold tabular-nums">
+              {brl(Number(summary.lifetime_purchased ?? 0))}
+            </div>
             <p className="mt-1 text-sm text-muted-foreground">total histórico</p>
           </CardContent>
         </Card>
@@ -400,7 +422,9 @@ function PlanoECreditosPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{brl(Number(summary.lifetime_used ?? 0))}</div>
+            <div className="text-kpi break-words font-bold tabular-nums">
+              {brl(Number(summary.lifetime_used ?? 0))}
+            </div>
             <p className="mt-1 text-sm text-muted-foreground">desde o início</p>
           </CardContent>
         </Card>
@@ -446,7 +470,9 @@ function PlanoECreditosPage() {
                       {invoice.discountCents > 0 && (
                         <div className="text-xs text-muted-foreground line-through">
                           {brl(
-                            (invoice.amountCents + invoice.discountCents - invoice.channelFeesCents) /
+                            (invoice.amountCents +
+                              invoice.discountCents -
+                              invoice.channelFeesCents) /
                               100,
                           )}
                         </div>
@@ -507,7 +533,9 @@ function PlanoECreditosPage() {
           {receipt.isLoading ? (
             <p className="text-sm text-muted-foreground">Carregando…</p>
           ) : receipt.isError || !receipt.data ? (
-            <p className="text-sm text-muted-foreground">Não foi possível carregar o comprovante.</p>
+            <p className="text-sm text-muted-foreground">
+              Não foi possível carregar o comprovante.
+            </p>
           ) : (
             <div className="space-y-2 text-sm">
               <p>
@@ -547,11 +575,7 @@ function PlanoECreditosPage() {
       </Dialog>
 
       {/* Bloco 4: Consumo do mês e extrato */}
-      <MonthUsageCard
-        monthUsage={monthUsage}
-        prices={prices}
-        visibleItems={visibleBillingItems}
-      />
+      <MonthUsageCard monthUsage={monthUsage} prices={prices} visibleItems={visibleBillingItems} />
 
       <CurrentPricesCard prices={prices} visibleItems={visibleBillingItems} />
 
@@ -608,6 +632,6 @@ function PlanoECreditosPage() {
           </Table>
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }

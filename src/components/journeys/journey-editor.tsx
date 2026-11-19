@@ -1,9 +1,11 @@
 import { type ReactNode, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   Clock3,
   Mail,
   MessageSquare,
@@ -96,7 +98,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 
-type Step =
+type StepBody =
   | { kind: "wait"; amount: string; unit: WaitUnit; untilTime?: string }
   | {
       kind: "sms";
@@ -113,6 +115,13 @@ type Step =
       shortDomainId: string | null;
     }
   | { kind: "voice"; assetId: string; callerId: string };
+/**
+ * A step on screen. `uid` is a client-only id for React keys (stable across
+ * reorder/insert); the save payload is built field by field and never sends it.
+ */
+type Step = StepBody & { uid: string };
+let lastStepUid = 0;
+const newStepUid = () => `step-${++lastStepUid}`;
 type SavedStep = { step_type: string; config: Record<string, unknown>; is_enabled?: boolean };
 type ConflictPolicy = "coexist" | "pause_lower_priority" | "exclusive";
 type Option = { value: string; label: string };
@@ -209,7 +218,7 @@ function EditorSection({
   return (
     <section className="rounded-2xl border border-border bg-card/80 p-4 sm:p-5">
       <h2 className="text-section">{title}</h2>
-      {help && <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">{help}</p>}
+      {help && <p className="mt-1 text-meta leading-relaxed text-muted-foreground">{help}</p>}
       <div className="mt-4 space-y-4">{children}</div>
     </section>
   );
@@ -232,7 +241,7 @@ function Field({
     <div className={className ? `space-y-1.5 ${className}` : "space-y-1.5"}>
       <Label htmlFor={id}>{label}</Label>
       {children}
-      {hint && <p className="text-[12.5px] leading-relaxed text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-meta leading-relaxed text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -291,6 +300,35 @@ function withoutSendWindow(rules: Record<string, unknown> | null | undefined) {
   return rest;
 }
 
+/**
+ * Whole number typed in a limit field, or null when empty/invalid/out of range.
+ * The fields keep the typed text while editing (clearing one no longer jumps to
+ * 0 or 1); the number is checked on blur and on save.
+ */
+function parseWholeNumber(text: string, min: number, max: number): number | null {
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return value >= min && value <= max ? value : null;
+}
+
+const LIMIT_FIELDS = {
+  dailyLimit: { min: 1, max: 1_000_000, error: "Informe o limite diário (número inteiro a partir de 1)." },
+  cooldownHours: { min: 0, max: 8760, error: "Informe o intervalo entre jornadas em horas (de 0 a 8760)." },
+  journeyPriority: { min: 1, max: 100, error: "Informe a prioridade (número inteiro de 1 a 100)." },
+} as const;
+
+function blankStep(kind: StepBody["kind"]): Step {
+  const uid = newStepUid();
+  return kind === "wait"
+    ? { kind, amount: "1", unit: "hours", uid }
+    : kind === "sms"
+      ? { kind, templateId: "", content: "", uid }
+      : kind === "email"
+        ? { kind, templateId: "", senderId: null, shortDomainId: null, uid }
+        : { kind, assetId: "", callerId: "", uid };
+}
+
 /** Seconds of a wait step; a wait for a time of day may have no minimum (0). */
 function waitStepSeconds(s: { amount: string; unit: WaitUnit; untilTime?: string }) {
   if (s.untilTime != null && (!s.amount.trim() || Number(s.amount.replace(",", ".")) === 0))
@@ -299,6 +337,10 @@ function waitStepSeconds(s: { amount: string; unit: WaitUnit; untilTime?: string
 }
 
 function initialStep(s: SavedStep): Step[] {
+  return initialStepBody(s).map((body) => ({ ...body, uid: newStepUid() }));
+}
+
+function initialStepBody(s: SavedStep): StepBody[] {
   if (s.step_type === "wait") {
     const untilTime = waitStepUntilTime(s.config);
     return [
@@ -436,12 +478,31 @@ export function JourneyEditor({
   const [triggerConfig, setTriggerConfig] = useState<Record<string, unknown>>(
     initial?.trigger_config ?? {},
   );
-  const [dailyLimit, setDailyLimit] = useState(initial?.daily_limit ?? 1000);
-  const [cooldownHours, setCooldownHours] = useState(initial?.cooldown_hours ?? 72);
+  const [dailyLimitText, setDailyLimitText] = useState(String(initial?.daily_limit ?? 1000));
+  const [cooldownHoursText, setCooldownHoursText] = useState(
+    String(initial?.cooldown_hours ?? 72),
+  );
   const [endsAt, setEndsAt] = useState(() => toBrtInput(initial?.ends_at));
   const [holdoutPercent, setHoldoutPercent] = useState(initial?.holdout_percent ?? 0);
   const [conflictFamily, setConflictFamily] = useState(initial?.conflict_family ?? "");
-  const [journeyPriority, setJourneyPriority] = useState(initial?.journey_priority ?? 4);
+  const [journeyPriorityText, setJourneyPriorityText] = useState(
+    String(initial?.journey_priority ?? 4),
+  );
+  const dailyLimit = parseWholeNumber(
+    dailyLimitText,
+    LIMIT_FIELDS.dailyLimit.min,
+    LIMIT_FIELDS.dailyLimit.max,
+  );
+  const cooldownHours = parseWholeNumber(
+    cooldownHoursText,
+    LIMIT_FIELDS.cooldownHours.min,
+    LIMIT_FIELDS.cooldownHours.max,
+  );
+  const journeyPriority = parseWholeNumber(
+    journeyPriorityText,
+    LIMIT_FIELDS.journeyPriority.min,
+    LIMIT_FIELDS.journeyPriority.max,
+  );
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>(
     initial?.conflict_policy ?? "coexist",
   );
@@ -478,12 +539,12 @@ export function JourneyEditor({
     description,
     trigger,
     triggerConfig,
-    dailyLimit,
-    cooldownHours,
+    dailyLimitText.trim(),
+    cooldownHoursText.trim(),
     endsAt,
     holdoutPercent,
     conflictFamily,
-    journeyPriority,
+    journeyPriorityText.trim(),
     conflictPolicy,
     audience,
     reentry,
@@ -510,6 +571,9 @@ export function JourneyEditor({
           throw new Error("Informe as horas sem atividade (de 1 a 8760).");
         }
       }
+      if (dailyLimit === null) throw new Error(LIMIT_FIELDS.dailyLimit.error);
+      if (cooldownHours === null) throw new Error(LIMIT_FIELDS.cooldownHours.error);
+      if (journeyPriority === null) throw new Error(LIMIT_FIELDS.journeyPriority.error);
       steps.forEach((s, index) => {
         if (s.kind === "wait" && s.untilTime != null && !/^\d{2}:\d{2}$/.test(s.untilTime))
           throw new Error(`Informe o horário da etapa ${index + 1}.`);
@@ -686,6 +750,24 @@ export function JourneyEditor({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Leaving with unsaved changes (tab bar, "← Automações", system back): ask first.
+  // A save in flight navigates on its own (new journey / revision), so it never blocks.
+  const blockNavigation = dirty && !mutation.isPending;
+  useBlocker({
+    shouldBlockFn: async () =>
+      !(await requestConfirmation({
+        title: "Sair sem salvar?",
+        description:
+          "As alterações feitas nesta jornada ainda não foram salvas e serão perdidas.",
+        confirmLabel: "Sair sem salvar",
+        cancelLabel: "Continuar editando",
+        destructive: true,
+      })),
+    disabled: !blockNavigation,
+    // Closing or reloading the tab: the browser's own "leave site?" prompt.
+    enableBeforeUnload: true,
+  });
+
   // SMS texts with no link: a warning, not a block (some steps are reminders).
   const confirmSmsLinks = async (action: "save" | "activate") => {
     const missing = steps.flatMap((s, index) =>
@@ -747,17 +829,20 @@ export function JourneyEditor({
     });
   };
 
-  const add = (kind: Step["kind"]) =>
-    setSteps((all) => [
-      ...all,
-      kind === "wait"
-        ? { kind, amount: "1", unit: "hours" }
-        : kind === "sms"
-          ? { kind, templateId: "", content: "" }
-          : kind === "email"
-            ? { kind, templateId: "", senderId: null, shortDomainId: null }
-            : { kind, assetId: "", callerId: "" },
-    ]);
+  /** Adds a step at `at` (default: the end). */
+  const add = (kind: Step["kind"], at?: number) =>
+    setSteps((all) => {
+      const index = at ?? all.length;
+      return [...all.slice(0, index), blankStep(kind), ...all.slice(index)];
+    });
+  const move = (i: number, delta: -1 | 1) =>
+    setSteps((all) => {
+      const j = i + delta;
+      if (j < 0 || j >= all.length) return all;
+      const next = [...all];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
   const change = (i: number, value: Step) =>
     setSteps((all) => all.map((s, n) => (n === i ? value : s)));
 
@@ -806,7 +891,7 @@ export function JourneyEditor({
       trigger_config: triggerConfig,
       exit_rules: exitRules,
       conflict_family: conflictFamily || null,
-      journey_priority: journeyPriority,
+      journey_priority: journeyPriority ?? initial?.journey_priority ?? 4,
     },
     ((otherJourneys.data?.journeys ?? []) as MapJourney[]).filter((journey) => journey.id !== id),
   );
@@ -853,7 +938,7 @@ export function JourneyEditor({
         }
       />
       {id && (savedStatus === "active" || savedStatus === "paused") && (
-        <p className="rounded-xl border border-border bg-card/80 px-4 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
+        <p className="rounded-xl border border-border bg-card/80 px-4 py-3 text-meta leading-relaxed text-muted-foreground">
           Esta jornada está {journeyStatusLabel(savedStatus).toLowerCase()}. Mudar textos, esperas e
           limites vale assim que você salvar, inclusive para quem já está na jornada. Adicionar,
           remover ou trocar a ordem das etapas, ou mudar o gatilho, cria uma revisão em rascunho: a
@@ -861,7 +946,7 @@ export function JourneyEditor({
         </p>
       )}
       {id && savedStatus === "draft" && initial?.revision_of && (
-        <p className="rounded-xl border border-border bg-card/80 px-4 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
+        <p className="rounded-xl border border-border bg-card/80 px-4 py-3 text-meta leading-relaxed text-muted-foreground">
           Esta é uma revisão em rascunho de outra jornada. Ao ativar, ela substitui a jornada
           original: quem já está lá continua na mesma etapa e passa a seguir esta versão.
         </p>
@@ -889,7 +974,7 @@ export function JourneyEditor({
               if (nextTrigger === "nivel_alterado") {
                 setConflictFamily("progressao_niveis");
                 setConflictPolicy("exclusive");
-                setJourneyPriority(4);
+                setJourneyPriorityText("4");
                 setExitRules((current) => ({ ...current, level_changed: true }));
               }
             }}
@@ -926,7 +1011,7 @@ export function JourneyEditor({
         </Field>
         {trigger === "inactivity" && (
           <div className="space-y-2 border-t border-border pt-4">
-            <p className="text-[12.5px] text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               {INACTIVITY_TRIGGER_NAME}: o jogador entra quando passa este tempo sem a atividade
               escolhida.
             </p>
@@ -1077,7 +1162,7 @@ export function JourneyEditor({
           </Field>
         </div>
         <div className="space-y-3 border-t border-border pt-4">
-          <p className="text-[12.5px] text-muted-foreground">
+          <p className="text-meta text-muted-foreground">
             Filtros de entrada (opcionais). Valem na entrada e antes de cada envio: quem deixar de
             cumprir sai da jornada. Campo vazio não filtra.
           </p>
@@ -1132,7 +1217,7 @@ export function JourneyEditor({
         help="Cada etapa acontece depois que a anterior termina. O texto do SMS é escrito aqui (ou copiado de um template); o e-mail usa um template ativo, e a jornada guarda uma cópia da versão usada."
       >
         {steps.length === 0 && (
-          <p className="rounded-lg border border-dashed border-border p-4 text-center text-[13px] text-muted-foreground">
+          <p className="rounded-lg border border-dashed border-border p-4 text-center text-body text-muted-foreground">
             Nenhuma etapa ainda. Comece por uma espera ou por uma mensagem.
           </p>
         )}
@@ -1140,22 +1225,51 @@ export function JourneyEditor({
           {steps.map((s, i) => {
             const isFirstOfKind = steps.findIndex((other) => other.kind === s.kind) === i;
             return (
-            <li key={i} className="rounded-xl border border-border p-4">
+            <li key={s.uid} className="rounded-xl border border-border p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-[13.5px] font-semibold">
+                <h3 className="min-w-0 truncate text-body font-semibold">
                   {i + 1}. {STEP_TITLES[s.kind]}
                 </h3>
-                <IconButton
-                  label={`Remover a etapa ${i + 1}`}
-                  icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
-                  className="-my-2 text-muted-foreground hover:text-destructive"
-                  onClick={() => setSteps((all) => all.filter((_, n) => n !== i))}
-                  {...(i === 0 ? tourAnchor("jornada.etapas.remover") : {})}
-                />
+                <div className="-my-2 flex shrink-0 items-center">
+                  <IconButton
+                    label={`Mover a etapa ${i + 1} para cima`}
+                    icon={<ArrowUp className="h-4 w-4" aria-hidden="true" />}
+                    className="text-muted-foreground"
+                    disabled={i === 0}
+                    onClick={() => move(i, -1)}
+                    {...(i === 0 ? tourAnchor("jornada.etapas.mover") : {})}
+                  />
+                  <IconButton
+                    label={`Mover a etapa ${i + 1} para baixo`}
+                    icon={<ArrowDown className="h-4 w-4" aria-hidden="true" />}
+                    className="text-muted-foreground"
+                    disabled={i === steps.length - 1}
+                    onClick={() => move(i, 1)}
+                  />
+                  <AddStepMenu
+                    isEnabled={isEnabled}
+                    onAdd={(kind) => add(kind, i + 1)}
+                    trigger={
+                      <IconButton
+                        label={`Adicionar etapa abaixo da etapa ${i + 1}`}
+                        icon={<Plus className="h-4 w-4" aria-hidden="true" />}
+                        className="text-muted-foreground"
+                        {...(i === 0 ? tourAnchor("jornada.etapas.adicionar-abaixo") : {})}
+                      />
+                    }
+                  />
+                  <IconButton
+                    label={`Remover a etapa ${i + 1}`}
+                    icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => setSteps((all) => all.filter((_, n) => n !== i))}
+                    {...(i === 0 ? tourAnchor("jornada.etapas.remover") : {})}
+                  />
+                </div>
               </div>
               {(s.kind === "sms" || s.kind === "email" || s.kind === "voice") &&
               !isEnabled(s.kind) ? (
-                <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-[12.5px] text-warning">
+                <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-meta text-warning">
                   Canal desabilitado — será pulado
                 </p>
               ) : s.kind === "wait" ? (
@@ -1180,8 +1294,8 @@ export function JourneyEditor({
                       }
                     }}
                   >
-                    <ToggleGroupItem value="tempo">Por tempo</ToggleGroupItem>
-                    <ToggleGroupItem value="horario">Até um horário</ToggleGroupItem>
+                    <ToggleGroupItem value="tempo" className="h-10 px-3 sm:h-8 sm:px-2">Por tempo</ToggleGroupItem>
+                    <ToggleGroupItem value="horario" className="h-10 px-3 sm:h-8 sm:px-2">Até um horário</ToggleGroupItem>
                   </ToggleGroup>
                   {s.untilTime != null && (
                     <div className="space-y-1.5 pt-1">
@@ -1193,7 +1307,7 @@ export function JourneyEditor({
                         value={s.untilTime}
                         onChange={(e) => change(i, { ...s, untilTime: e.target.value })}
                       />
-                      <p className="text-[12.5px] text-muted-foreground">
+                      <p className="text-meta text-muted-foreground">
                         Horário de Brasília. Se já passou hoje, espera até esse horário amanhã.
                       </p>
                     </div>
@@ -1230,7 +1344,7 @@ export function JourneyEditor({
                   {(() => {
                     const seconds = waitToSeconds(s.amount, s.unit);
                     return s.untilTime == null && seconds !== null && seconds < 60 ? (
-                      <p className="text-[12.5px] text-muted-foreground">
+                      <p className="text-meta text-muted-foreground">
                         O mínimo é 1 minuto; menos que isso é salvo como 1 minuto.
                       </p>
                     ) : null;
@@ -1254,10 +1368,10 @@ export function JourneyEditor({
                           change(i, { ...s, content: s.variants[0] ?? "", variants: undefined });
                       }}
                     >
-                      <ToggleGroupItem value="unica">Mensagem única</ToggleGroupItem>
-                      <ToggleGroupItem value="rodizio">Rodízio de textos</ToggleGroupItem>
+                      <ToggleGroupItem value="unica" className="h-10 px-3 sm:h-8 sm:px-2">Mensagem única</ToggleGroupItem>
+                      <ToggleGroupItem value="rodizio" className="h-10 px-3 sm:h-8 sm:px-2">Rodízio de textos</ToggleGroupItem>
                     </ToggleGroup>
-                    <p className="text-[12.5px] text-muted-foreground">
+                    <p className="text-meta text-muted-foreground">
                       {s.variants
                         ? "A cada envio o CRM sorteia um destes textos. O mesmo jogador não recebe o mesmo texto duas vezes no dia enquanto houver outro disponível."
                         : "Todo jogador recebe sempre este texto nesta etapa."}
@@ -1456,8 +1570,10 @@ export function JourneyEditor({
             );
           })}
         </ol>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <AddStepMenu
+          isEnabled={isEnabled}
+          onAdd={(kind) => add(kind)}
+          trigger={
             <Button
               variant="outline"
               className="h-11 w-full sm:w-auto md:h-9"
@@ -1465,29 +1581,9 @@ export function JourneyEditor({
             >
               <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Adicionar etapa
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
-            <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("wait")}>
-              <Clock3 className="mr-2 h-4 w-4" aria-hidden="true" /> Espera
-            </DropdownMenuItem>
-            {isEnabled("sms") && (
-              <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("sms")}>
-                <MessageSquare className="mr-2 h-4 w-4" aria-hidden="true" /> SMS
-              </DropdownMenuItem>
-            )}
-            {isEnabled("email") && (
-              <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("email")}>
-                <Mail className="mr-2 h-4 w-4" aria-hidden="true" /> E-mail
-              </DropdownMenuItem>
-            )}
-            {isEnabled("voice") && (
-              <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => add("voice")}>
-                <Phone className="mr-2 h-4 w-4" aria-hidden="true" /> Ligação (voz)
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <div className="space-y-3 rounded-lg border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground">
+          }
+        />
+        <div className="space-y-3 rounded-lg border border-dashed border-border px-4 py-3 text-body text-muted-foreground">
           <p>
             Fim da jornada
             {loopTailLength !== null && ` · volta às últimas ${loopTailLength} etapa(s) em loop`}
@@ -1539,7 +1635,7 @@ export function JourneyEditor({
           ))}
         </div>
         {trigger === "nivel_alterado" && (
-          <p className="text-[12.5px] text-muted-foreground">
+          <p className="text-meta text-muted-foreground">
             Jornadas de nível encerram sozinhas quando o jogador muda de nível, e ele entra na
             jornada do novo nível a partir da primeira etapa.
           </p>
@@ -1551,29 +1647,49 @@ export function JourneyEditor({
         help="Protegem a operação contra envios em excesso. O intervalo entre jornadas não muda as esperas desta jornada."
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field id="daily-limit" label="Limite diário de mensagens">
+          <Field
+            id="daily-limit"
+            label="Limite diário de mensagens"
+            hint={
+              dailyLimit === null ? (
+                <FieldError>{LIMIT_FIELDS.dailyLimit.error}</FieldError>
+              ) : undefined
+            }
+          >
             <Input
               id="daily-limit"
               className="h-10"
               type="number"
-              min={1}
-              value={dailyLimit}
-              onChange={(e) => setDailyLimit(Number(e.target.value))}
+              inputMode="numeric"
+              min={LIMIT_FIELDS.dailyLimit.min}
+              value={dailyLimitText}
+              aria-invalid={dailyLimit === null || undefined}
+              onChange={(e) => setDailyLimitText(e.target.value)}
+              onBlur={() => dailyLimit !== null && setDailyLimitText(String(dailyLimit))}
               {...tourAnchor("jornada.limites.diario")}
             />
           </Field>
           <Field
             id="cooldown-hours"
             label="Intervalo entre jornadas (horas)"
-            hint="Tempo mínimo antes de outra jornada enviar no mesmo canal."
+            hint={
+              cooldownHours === null ? (
+                <FieldError>{LIMIT_FIELDS.cooldownHours.error}</FieldError>
+              ) : (
+                "Tempo mínimo antes de outra jornada enviar no mesmo canal."
+              )
+            }
           >
             <Input
               id="cooldown-hours"
               className="h-10"
               type="number"
-              min={0}
-              value={cooldownHours}
-              onChange={(e) => setCooldownHours(Number(e.target.value))}
+              inputMode="numeric"
+              min={LIMIT_FIELDS.cooldownHours.min}
+              value={cooldownHoursText}
+              aria-invalid={cooldownHours === null || undefined}
+              onChange={(e) => setCooldownHoursText(e.target.value)}
+              onBlur={() => cooldownHours !== null && setCooldownHoursText(String(cooldownHours))}
               {...tourAnchor("jornada.limites.intervalo")}
             />
           </Field>
@@ -1634,7 +1750,7 @@ export function JourneyEditor({
       >
         {conflictWarnings.length > 0 && (
           <ul
-            className="space-y-1 rounded-md border border-warning/30 bg-warning/10 p-3 text-[12.5px] text-warning"
+            className="space-y-1 rounded-md border border-warning/30 bg-warning/10 p-3 text-meta text-warning"
             role="status"
           >
             {conflictWarnings.map((warning) => (
@@ -1655,16 +1771,26 @@ export function JourneyEditor({
           <Field
             id="journey-priority"
             label={<Term id="prioridade-de-jornada">Prioridade (1 é a maior)</Term>}
+            hint={
+              journeyPriority === null ? (
+                <FieldError>{LIMIT_FIELDS.journeyPriority.error}</FieldError>
+              ) : undefined
+            }
           >
             <Input
               id="journey-priority"
               className="h-10"
               type="number"
-              min={1}
-              max={100}
-              value={journeyPriority}
+              inputMode="numeric"
+              min={LIMIT_FIELDS.journeyPriority.min}
+              max={LIMIT_FIELDS.journeyPriority.max}
+              value={journeyPriorityText}
+              aria-invalid={journeyPriority === null || undefined}
               {...tourAnchor("jornada.conflitos.prioridade")}
-              onChange={(event) => setJourneyPriority(Number(event.target.value) || 1)}
+              onChange={(event) => setJourneyPriorityText(event.target.value)}
+              onBlur={() =>
+                journeyPriority !== null && setJourneyPriorityText(String(journeyPriority))
+              }
             />
           </Field>
           <Field id="conflict-policy" label="Ao competir">
@@ -1677,7 +1803,7 @@ export function JourneyEditor({
             />
           </Field>
         </div>
-        <p className="text-[12.5px] text-muted-foreground">
+        <p className="text-meta text-muted-foreground">
           {conflictFamily === "progressao_niveis"
             ? "Ao mudar de nível, a jornada anterior é encerrada antes da entrada na nova jornada."
             : conflictPolicy === "pause_lower_priority"
@@ -1687,7 +1813,7 @@ export function JourneyEditor({
       </EditorSection>
 
       {/* Phones: Salvar / Ativar always at hand, above the bottom tab bar. */}
-      <div className="sticky bottom-[calc(60px+env(safe-area-inset-bottom))] z-30 -mx-4 flex gap-2 sm:-mx-6 sm:px-6 border-t border-border bg-background/95 px-4 py-3 backdrop-blur md:hidden [&>*]:flex-1">
+      <div className="sticky bottom-[calc(76px+env(safe-area-inset-bottom))] z-30 -mx-4 flex gap-2 border-t border-border bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 md:bottom-0 md:hidden [&>*]:flex-1">
         {statusAction}
         {saveAction}
       </div>
@@ -1696,9 +1822,54 @@ export function JourneyEditor({
   );
 }
 
+/** "Adicionar etapa" menu: at the end of the list or right below a step. */
+function AddStepMenu({
+  trigger,
+  onAdd,
+  isEnabled,
+}: {
+  trigger: ReactNode;
+  onAdd: (kind: StepBody["kind"]) => void;
+  isEnabled: (channel: "sms" | "email" | "voice") => boolean;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52">
+        <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => onAdd("wait")}>
+          <Clock3 className="mr-2 h-4 w-4" aria-hidden="true" /> Espera
+        </DropdownMenuItem>
+        {isEnabled("sms") && (
+          <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => onAdd("sms")}>
+            <MessageSquare className="mr-2 h-4 w-4" aria-hidden="true" /> SMS
+          </DropdownMenuItem>
+        )}
+        {isEnabled("email") && (
+          <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => onAdd("email")}>
+            <Mail className="mr-2 h-4 w-4" aria-hidden="true" /> E-mail
+          </DropdownMenuItem>
+        )}
+        {isEnabled("voice") && (
+          <DropdownMenuItem className="min-h-11 md:min-h-9" onSelect={() => onAdd("voice")}>
+            <Phone className="mr-2 h-4 w-4" aria-hidden="true" /> Ligação (voz)
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function FieldError({ children }: { children: ReactNode }) {
+  return (
+    <span role="alert" className="text-danger">
+      {children}
+    </span>
+  );
+}
+
 function SmsNoLinkNotice() {
   return (
-    <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-[12.5px] text-warning">
+    <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-meta text-warning">
       Este SMS está sem link. O jogador não terá onde tocar para entrar na casa e não haverá
       cliques para medir.
     </p>

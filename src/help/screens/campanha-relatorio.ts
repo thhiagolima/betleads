@@ -129,7 +129,7 @@ const screen: HelpScreen = {
           label: "Baixar CSV (não enviados)",
           what: "Baixa a lista completa de não enviados, com o telefone sem máscara.",
           notes:
-            'Disponível só para administradores da operação; para quem não tem a permissão, o botão fica desabilitado com a dica "Disponível para administradores da operação".',
+            'Disponível só para administradores da operação; para quem não tem a permissão, o botão fica desabilitado e, ao lado dele, aparece o aviso "Só administradores da operação baixam o CSV".',
         },
       ],
     },
@@ -172,7 +172,7 @@ const screen: HelpScreen = {
           label: "Baixar CSV (destinatários)",
           what: "Baixa a lista completa de destinatários com o que cada um fez.",
           notes:
-            'Disponível só para administradores da operação; para quem não tem a permissão, o botão fica desabilitado com a dica "Disponível para administradores da operação".',
+            'Disponível só para administradores da operação; para quem não tem a permissão, o botão fica desabilitado e, ao lado dele, aparece o aviso "Só administradores da operação baixam o CSV".',
         },
         {
           anchor: "campanha-relatorio.funil.lista",

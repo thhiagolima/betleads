@@ -52,9 +52,11 @@ export function KpiCard({
   className?: string;
 }) {
   return (
-    <HomeCard className={cn("flex flex-col p-4 sm:p-5", className)}>
+    <HomeCard className={cn("flex min-w-0 flex-col p-4 sm:p-5", className)}>
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-[12.5px] font-normal text-muted-foreground">{title}</h3>
+        <h3 className="min-w-0 break-words text-label font-normal text-muted-foreground">
+          {title}
+        </h3>
         {sparkline && sparkline.length > 1 && (
           <div className="-mt-1 h-8 w-20 shrink-0" aria-hidden="true">
             <ResponsiveContainer width="100%" height="100%">
@@ -72,10 +74,12 @@ export function KpiCard({
           </div>
         )}
       </div>
-      <p className="mt-1 text-2xl font-semibold tracking-[-0.03em] tabular-nums sm:text-[28px]">
+      <p className="mt-1 min-w-0 break-words text-xl font-semibold tracking-[-0.03em] tabular-nums sm:text-2xl lg:text-kpi">
         {value}
       </p>
-      {meta && <p className="mt-0.5 text-[13px] text-foreground/80 tabular-nums">{meta}</p>}
+      {meta && (
+        <p className="mt-0.5 break-words text-body text-foreground/80 tabular-nums">{meta}</p>
+      )}
       {/* mt-auto: o rodapé fica alinhado entre cartões de alturas diferentes. */}
       {(trend || detail) && (
         <p className="mt-auto flex flex-wrap gap-x-1.5 pt-2 text-xs text-muted-foreground">
@@ -109,7 +113,7 @@ export function MetricRow({
     </>
   );
   const classes =
-    "flex items-center justify-between gap-3 border-b border-border/70 py-2.5 text-[13.5px] last:border-b-0";
+    "flex items-center justify-between gap-3 border-b border-border/70 py-2.5 text-body last:border-b-0";
   return to ? (
     <Link
       to={to}

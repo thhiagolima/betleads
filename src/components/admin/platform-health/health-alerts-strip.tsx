@@ -87,7 +87,7 @@ function SeverityTag({ severity }: { severity: PlatformAlert["severity"] }) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold",
+        "shrink-0 rounded-md px-2 py-0.5 text-meta font-semibold",
         severity === "critical"
           ? "bg-destructive text-destructive-foreground"
           : "border border-warning/40 bg-warning/10 text-warning",
@@ -100,7 +100,7 @@ function SeverityTag({ severity }: { severity: PlatformAlert["severity"] }) {
 
 function AcknowledgedTag() {
   return (
-    <span className="shrink-0 rounded-md border border-muted-foreground/30 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+    <span className="shrink-0 rounded-md border border-muted-foreground/30 px-1.5 py-0.5 text-meta text-muted-foreground">
       reconhecido
     </span>
   );
@@ -110,7 +110,7 @@ function AcknowledgedTag() {
  * "silenciado até HH:MM" tag instead of the "Silenciar 24 h" button. */
 function SilencedTag({ until }: { until: string }) {
   return (
-    <span className="shrink-0 rounded-md border border-muted-foreground/30 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+    <span className="shrink-0 rounded-md border border-muted-foreground/30 px-1.5 py-0.5 text-meta text-muted-foreground">
       silenciado até {formatCheckedAt(until)}
     </span>
   );
@@ -121,7 +121,7 @@ function SilencedTag({ until }: { until: string }) {
 const ROW_CLASS =
   "flex w-full flex-col gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm sm:flex-row sm:items-center";
 const ACTION_BUTTON_CLASS =
-  "shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50";
+  "shrink-0 rounded-md border border-border px-2 py-1 text-meta text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50";
 
 /** Exported for direct testing (fix round 1): a silenced/acknowledged row's tag+button state is
  * only reachable through "mostrar" via a click renderToStaticMarkup can't simulate here, so the

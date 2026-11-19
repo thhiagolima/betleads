@@ -175,7 +175,7 @@ const screen: HelpScreen = {
         {
           anchor: "midia.evolucao.money-map-paginacao",
           label: 'Paginação de "Onde o dinheiro está"',
-          what: "Números de página para percorrer a lista de criativos do cartão, 8 por página (até 10 números de página mostrados por vez).",
+          what: "Botões Anterior e Próxima para percorrer a lista de criativos do cartão, 8 por página, com a página atual e o total ao lado (ex.: \"página 2 de 5\"). Só aparece quando há mais de uma página.",
         },
         {
           label: "Diagnóstico",

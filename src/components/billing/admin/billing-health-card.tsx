@@ -32,9 +32,9 @@ function providerLabel(provider: string | null | undefined): string | null {
 }
 
 const TONE_CLASS = {
-  ok: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-  warning: "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  critical: "border-red-500/40 bg-red-500/10 text-red-300",
+  ok: "border-success/40 bg-success/10 text-success",
+  warning: "border-warning/40 bg-warning/10 text-warning",
+  critical: "border-danger/40 bg-danger/10 text-danger",
 } as const;
 
 export function BillingHealthCard() {

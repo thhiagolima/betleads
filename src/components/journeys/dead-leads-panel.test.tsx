@@ -113,7 +113,8 @@ describe("DeadLeadsPanel", () => {
     expect(html).toContain("Sem FTD");
     expect(html).toContain("VIP");
     expect(html).toContain("2d atrás");
-    expect(html.match(/Reativar Maria Souza|Reativar João/g)).toHaveLength(2);
+    // Each lead renders twice: the phone card and the desktop table row.
+    expect(html.match(/Reativar Maria Souza|Reativar João/g)).toHaveLength(4);
   });
 
   it("offers the backfill when the rule is on and shows the empty state", () => {

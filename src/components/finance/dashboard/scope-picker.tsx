@@ -41,10 +41,10 @@ export function ScopePicker({
   );
 
   return (
-    <div className="flex items-center gap-2 text-sm">
+    <div className="flex min-w-0 items-center gap-2 text-sm">
       <span className="text-muted-foreground">Ver:</span>
       <Select value={scopeToValue(value)} onValueChange={(next) => onChange(valueToScope(next))}>
-        <SelectTrigger className="h-8 w-full max-w-xs text-xs sm:w-64">
+        <SelectTrigger aria-label="Ver" className="h-10 w-full max-w-xs sm:h-8 sm:w-64 sm:text-xs">
           <SelectValue placeholder="Todas as casas" />
         </SelectTrigger>
         <SelectContent>

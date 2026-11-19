@@ -13,7 +13,7 @@ export const COMPOSER_OPTIONS_LOAD_ERROR = "Não foi possível carregar as opç�
 
 function WarningBanner({ children }: { children: ReactNode }) {
   return (
-    <p className="rounded-lg border border-amber-500/35 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
+    <p className="rounded-lg border border-warning/35 bg-warning/5 p-2 text-xs text-warning">
       {children}
     </p>
   );

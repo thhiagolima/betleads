@@ -33,7 +33,7 @@ export function Variation({
     <span
       className={cn(
         "whitespace-nowrap text-xs font-medium",
-        good ? "text-emerald-400" : "text-rose-400",
+        good ? "text-success" : "text-danger",
         className,
       )}
     >

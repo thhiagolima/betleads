@@ -2,7 +2,6 @@ import { Link } from "@tanstack/react-router";
 import { ArrowRight, Route } from "lucide-react";
 
 import { EmptyState } from "@/components/ui-premium/empty-state";
-import { Term } from "@/components/help/term";
 import { tourAnchor } from "@/help/anchor";
 
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +44,7 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
           <section key={lane.key} aria-label={lane.title}>
             <div className="mb-2">
               <h3 className="text-sm font-semibold">{lane.title}</h3>
-              <p className="text-xs text-muted-foreground">{lane.description}</p>
+              <p className="text-meta text-muted-foreground">{lane.description}</p>
             </div>
             <ol className="flex flex-wrap items-center gap-1.5">
               {lane.items.map((item, index) => {
@@ -56,7 +55,7 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
                       to="/jornadas/$journeyId"
                       params={{ journeyId: item.id }}
                       title={item.detail ?? undefined}
-                      className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted/40 ${
+                      className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-meta hover:bg-muted/40 ${
                         inactive ? "border-dashed opacity-60" : ""
                       }`}
                       {...(laneIndex === 0 && index === 0
@@ -77,7 +76,8 @@ export function JourneyMapCard({ journeys }: { journeys: MapJourney[] }) {
                       {inactive && <span className="sr-only">({STATUS_LABEL[item.status]})</span>}
                       {Number(item.holdout_percent ?? 0) > 0 && (
                         <Badge variant="outline" className="px-1 py-0 text-meta">
-                          <Term id="grupo-de-controle">controle</Term> {item.holdout_percent}%
+                          <span aria-hidden="true">controle</span>
+                          <span className="sr-only">grupo de controle</span> {item.holdout_percent}%
                         </Badge>
                       )}
                     </Link>

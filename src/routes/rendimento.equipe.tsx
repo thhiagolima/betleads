@@ -17,7 +17,8 @@ import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { CentralPeriodPicker, Kpi } from "@/components/crm-results/shared";
 import { actionErrorMessage } from "@/components/expert/sheet-format";
 import { ExpertSettingsDialog } from "@/components/experts/expert-settings-dialog";
-import { downloadCsv } from "@/components/rendimento/download-csv";
+import { csvDeliveryMessage, downloadCsv } from "@/components/rendimento/download-csv";
+import { LoadError, NO_ACTIVE_TENANT_MESSAGE } from "@/components/rendimento/load-states";
 import { TeamRanking, TEAM_REPORT_QUERY_KEY } from "@/components/rendimento/team-ranking";
 import { updatedLabel } from "@/components/rendimento/updated-label";
 import { useActiveTenant } from "@/hooks/use-active-tenant";
@@ -51,9 +52,9 @@ function ExportTeamCsvButton({ period }: { period: PeriodKey }) {
   const exportFn = useServerFn(exportTeamReportCsv);
   const exportMutation = useMutation({
     mutationFn: () => exportFn({ data: { period } }),
-    onSuccess: (result) => {
-      downloadCsv(result.filename, result.csv);
-      toast.success("CSV exportado.");
+    onSuccess: async (result) => {
+      const message = csvDeliveryMessage(await downloadCsv(result.filename, result.csv));
+      if (message) toast.success(message);
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -74,8 +75,10 @@ function ExportTeamCsvButton({ period }: { period: PeriodKey }) {
 function RendimentoEquipePage() {
   const [period, setPeriod] = useState<PeriodKey>(DEFAULT_REPORT_PERIOD);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { data: switcher } = useActiveTenant();
-  const tenantId = switcher?.activeTenantId ?? null;
+  const switcherQuery = useActiveTenant();
+  const tenantId = switcherQuery.data?.activeTenantId ?? null;
+  // Without an active house the report query never runs.
+  const noTenant = switcherQuery.isSuccess && !tenantId;
   const { money } = useMoney();
 
   const teamReportFn = useServerFn(getTeamReport);
@@ -118,24 +121,39 @@ function RendimentoEquipePage() {
         }
       />
 
-      {teamReportQuery.isError ? (
+      {switcherQuery.isError ? (
+        <Card>
+          <CardContent className="py-12">
+            <LoadError
+              className="py-0"
+              message="Não foi possível carregar a casa ativa."
+              onRetry={() => void switcherQuery.refetch()}
+            />
+          </CardContent>
+        </Card>
+      ) : noTenant ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            {actionErrorMessage(teamReportQuery.error)}
+            {NO_ACTIVE_TENANT_MESSAGE}
+          </CardContent>
+        </Card>
+      ) : teamReportQuery.isError ? (
+        <Card>
+          <CardContent className="py-12">
+            <LoadError
+              className="py-0"
+              message={actionErrorMessage(teamReportQuery.error)}
+              onRetry={() => void teamReportQuery.refetch()}
+            />
           </CardContent>
         </Card>
       ) : !report ? (
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            Carregando…
-          </CardContent>
+          <CardContent className="py-12 text-center text-muted-foreground">Carregando…</CardContent>
         </Card>
       ) : (
         <>
-          <div
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
-            {...tourAnchor("equipe.cards")}
-          >
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" {...tourAnchor("equipe.cards")}>
             <Kpi
               label="Total creditado à equipe"
               value={money(report.totais.creditado)}

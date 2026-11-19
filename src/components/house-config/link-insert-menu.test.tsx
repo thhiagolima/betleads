@@ -1,5 +1,15 @@
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The notice links with the router's <Link>; render it as a plain anchor here.
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ to, children, className }: { to: string; children: ReactNode; className?: string }) => (
+    <a href={to} className={className}>
+      {children}
+    </a>
+  ),
+}));
 
 import { LinkInsertMenu, insertAtCursor, linkInsertItems } from "./link-insert-menu";
 

@@ -101,8 +101,11 @@ function IAPage() {
   return (
     <Page>
       <PageHeader subtitle="Pergunte sobre os jogadores da casa. A resposta usa os dados de agora." />
-      <div className="grid min-h-[480px] gap-4 lg:h-[calc(100dvh-240px)] lg:min-h-[560px] lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="flex min-h-[480px] flex-col overflow-hidden rounded-2xl border border-border bg-card/80">
+      {/* The chat has a fixed height on every screen so new messages scroll
+          inside it: on phones, the viewport minus the 56px header, the 76px
+          tab bar, the safe area, the page title and the suggestions row. */}
+      <div className="grid gap-4 lg:h-[calc(100dvh-240px)] lg:min-h-[560px] lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="flex h-[calc(100dvh-56px-76px-env(safe-area-inset-bottom)-12rem)] min-h-[360px] flex-col overflow-hidden rounded-2xl border border-border bg-card/80 md:h-[calc(100dvh-240px)] md:min-h-[480px] lg:h-auto">
           <div
             ref={scrollRef}
             {...tourAnchor("ia.conversa")}
@@ -132,7 +135,7 @@ function IAPage() {
                   </div>
                 )}
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-body ${
+                  className={`min-w-0 max-w-[85%] break-words rounded-2xl px-4 py-3 text-body [overflow-wrap:anywhere] ${
                     m.role === "user"
                       ? "bg-primary/15 border border-primary/30 text-foreground"
                       : "bg-muted/40 border border-border/40"

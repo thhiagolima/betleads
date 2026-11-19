@@ -652,7 +652,7 @@ function PlatformSection() {
       </Collapsible>
 
       <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
-        <DialogContent className="max-h-[88vh] max-w-4xl overflow-hidden p-0">
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-4xl flex-col overflow-hidden p-0 sm:max-h-[88vh]">
           {selectedLog && (
             <>
               <DialogHeader className="border-b border-border/60 px-5 py-4">
@@ -666,7 +666,7 @@ function PlatformSection() {
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-4 overflow-y-auto px-5 py-4">
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-md border border-border/60 bg-background/40 p-3">
                     <p className="text-label text-muted-foreground">Evento</p>
