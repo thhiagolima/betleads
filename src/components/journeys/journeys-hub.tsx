@@ -34,6 +34,7 @@ import {
 import { useMoney } from "@/hooks/use-tenant-currency";
 import { useEnabledChannels } from "@/hooks/use-enabled-channels";
 import { EXPRESS_JOURNEY_HINT } from "@/lib/journey-express";
+import { waitStepsSpanSeconds, waitStepUntilTime } from "@/lib/journeys.shared";
 import { ENROLLMENT_STATUS_LABELS } from "@/lib/player-journeys";
 import { JourneyMapCard } from "@/components/journeys/journey-map-card";
 import { useJourneyStatusControl } from "@/components/journeys/journey-status-control";
@@ -1155,15 +1156,15 @@ function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
     acc[step.step_type] = (acc[step.step_type] ?? 0) + 1;
     return acc;
   }, {});
-  const totalWaitSeconds = steps
-    .filter((step) => step.step_type === "wait")
-    .reduce((total, step) => total + Number(step.config.delay_seconds ?? 0), 0);
+  const totalWaitSeconds = waitStepsSpanSeconds(
+    steps.filter((step) => step.step_type === "wait").map((step) => step.config),
+  );
   const sequence = steps.slice(0, STEP_SEQUENCE_MAX);
   const hidden = steps.length - sequence.length;
   const fullSequence = steps
     .map((step) =>
       step.step_type === "wait"
-        ? formatWait(Number(step.config.delay_seconds ?? 0))
+        ? waitStepLabel(step.config)
         : channelNames[step.step_type],
     )
     .join(" → ");
@@ -1203,6 +1204,14 @@ function JourneyStepSummary({ steps }: { steps: Journey["journey_steps"] }) {
       </div>
     </div>
   );
+}
+
+/** "2 h", or "até 08:00" / "6 h, depois até 08:00" for a wait for a time of day. */
+function waitStepLabel(config: Record<string, unknown>) {
+  const seconds = Number(config.delay_seconds ?? 0);
+  const until = waitStepUntilTime(config);
+  if (!until) return formatWait(seconds);
+  return seconds > 0 ? `${formatWait(seconds)}, depois até ${until}` : `até ${until}`;
 }
 
 function formatWait(seconds: number) {

@@ -3,13 +3,73 @@ import { z } from "zod";
 export const journeyStatusSchema = z.enum(["draft", "active", "paused", "archived"]);
 export const journeyStepTypeSchema = z.enum(["wait", "sms", "email", "voice", "end"]);
 
-const waitConfigSchema = z.object({
-  delay_seconds: z
-    .number()
-    .int()
-    .min(60)
-    .max(365 * 24 * 60 * 60),
-});
+const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const waitConfigSchema = z
+  .object({
+    delay_seconds: z
+      .number()
+      .int()
+      .min(0)
+      .max(365 * 24 * 60 * 60),
+    /** "HH:MM" in Brasília: after delay_seconds, wait for the next time the clock shows it. */
+    until_time: z.string().regex(CLOCK_TIME).optional(),
+  })
+  .refine((config) => config.until_time != null || config.delay_seconds >= 60, {
+    message: "A espera precisa de pelo menos 1 minuto.",
+  });
+
+/** Brasília is UTC-3 all year (no daylight saving since 2019, see tz.ts). */
+const BRT_OFFSET_MS = 3 * 3600_000;
+
+/**
+ * When a wait step that starts at `fromMs` ends, or null when the config is invalid.
+ * With until_time it waits delay_seconds first, then for the next HH:MM in Brasília
+ * ("at least 6 h, then until 08:00").
+ */
+export function waitStepDueAt(
+  config: Record<string, unknown> | null | undefined,
+  fromMs: number,
+): number | null {
+  const seconds = Number(config?.delay_seconds ?? 0);
+  if (!Number.isInteger(seconds) || seconds < 0) return null;
+  const until = config?.until_time;
+  if (until == null) return seconds >= 60 ? fromMs + seconds * 1000 : null;
+  const match = CLOCK_TIME.exec(String(until));
+  if (!match) return null;
+  const earliest = fromMs + seconds * 1000;
+  const wall = new Date(earliest - BRT_OFFSET_MS);
+  let due =
+    Date.UTC(
+      wall.getUTCFullYear(),
+      wall.getUTCMonth(),
+      wall.getUTCDate(),
+      Number(match[1]),
+      Number(match[2]),
+    ) + BRT_OFFSET_MS;
+  if (due < earliest) due += 86400_000;
+  return due;
+}
+
+/** "HH:MM" of a wait step that waits for a time of day, or null for a plain wait. */
+export function waitStepUntilTime(config: Record<string, unknown> | null | undefined) {
+  const until = config?.until_time;
+  return until != null && CLOCK_TIME.test(String(until)) ? String(until) : null;
+}
+
+/**
+ * Seconds a sequence of waits takes, for summaries. Waits for a time of day
+ * depend on when the player entered, so they are counted from an entry at
+ * 12:00 in Brasília (an estimate).
+ */
+export function waitStepsSpanSeconds(configs: Array<Record<string, unknown> | null | undefined>) {
+  const start = Date.UTC(2026, 0, 1, 12) + BRT_OFFSET_MS;
+  let at = start;
+  for (const config of configs) {
+    const due = waitStepDueAt(config, at);
+    if (due != null) at = due;
+  }
+  return Math.round((at - start) / 1000);
+}
 const smsConfigSchema = z.object({
   content: z.string().trim().min(1).max(1600),
   // D-8: each send picks one variation (deterministic per occurrence).

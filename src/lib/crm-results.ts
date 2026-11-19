@@ -5,6 +5,8 @@
 // rule_version 3 it only counts players who were not already active at the
 // click (docs/AUDITORIA_NUMEROS_RESULTADOS_CRM_2026-10-19.md).
 
+import { waitStepUntilTime } from "./journeys.shared";
+
 export type CrmResultRow = {
   metric_date: string;
   source_type: "journey" | "campaign" | "other";
@@ -322,18 +324,22 @@ function delayLabel(seconds: number) {
 export function stepLabels(steps: JourneyStepInfo[]): Record<number, string> {
   const labels: Record<number, string> = {};
   let elapsed = 0;
+  // A wait for a time of day ("até 08:00") right before the message names the time instead.
+  let untilTime: string | null = null;
   let message = 0;
   for (const step of [...steps].sort((a, b) => a.position - b.position)) {
     if (!step.is_enabled || step.step_type === "end") continue;
     if (step.step_type === "wait") {
-      const config = (step.config ?? {}) as { delay_seconds?: unknown };
+      const config = (step.config ?? {}) as Record<string, unknown>;
       elapsed += Number(config.delay_seconds ?? 0) || 0;
+      untilTime = waitStepUntilTime(config);
       continue;
     }
     message += 1;
     const channel = CHANNEL_LABEL[step.step_type];
-    labels[step.position] =
-      `${message}ª mensagem · ${delayLabel(elapsed)}${channel ? ` · ${channel}` : ""}`;
+    const when = untilTime ? `às ${untilTime}` : delayLabel(elapsed);
+    untilTime = null;
+    labels[step.position] = `${message}ª mensagem · ${when}${channel ? ` · ${channel}` : ""}`;
   }
   return labels;
 }

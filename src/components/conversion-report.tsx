@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { tourAnchor } from "@/help/anchor";
+import { waitStepUntilTime } from "@/lib/journeys.shared";
 import {
   AlertTriangle,
   ChevronLeft,
@@ -843,7 +844,7 @@ function JourneyReport({
   const actionableSteps = allSteps.filter((step) => !["wait", "end"].includes(step.step_type));
   const stepRows = actionableSteps.map((step) => {
     const conversion = data.byStep.find((row) => row.stepId === step.id);
-    const waitSeconds = allSteps
+    const waitsBefore = allSteps
       .filter((candidate) => candidate.step_type === "wait" && candidate.position < step.position)
       .filter(
         (candidate) =>
@@ -853,11 +854,19 @@ function JourneyReport({
               between.position > candidate.position &&
               between.position < step.position,
           ),
-      )
-      .reduce((sum, candidate) => sum + Number((candidate.config as any)?.delay_seconds ?? 0), 0);
+      );
+    const waitSeconds = waitsBefore.reduce(
+      (sum, candidate) => sum + Number((candidate.config as any)?.delay_seconds ?? 0),
+      0,
+    );
+    const untilTime = waitsBefore
+      .map((candidate) => waitStepUntilTime(candidate.config as Record<string, unknown>))
+      .filter(Boolean)
+      .at(-1);
     return {
       ...step,
       waitSeconds,
+      untilTime: untilTime ?? null,
       current: Number(step.current ?? 0),
       delivered: Number(conversion?.delivered ?? 0),
       clicked: Number(conversion?.clicked ?? 0),
@@ -1003,7 +1012,9 @@ function JourneyReport({
                       </strong>
                       <span className="flex items-center gap-1 text-meta text-muted-foreground">
                         <Clock className="size-3.5" aria-hidden="true" />
-                        {formatJourneyDelay(step.waitSeconds)}
+                        {step.untilTime
+                          ? `Envio às ${step.untilTime}`
+                          : formatJourneyDelay(step.waitSeconds)}
                       </span>
                     </div>
                     <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,5fr)]">

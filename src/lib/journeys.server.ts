@@ -22,7 +22,7 @@ import {
   PLATFORM_HOLD_MS,
   journeyPlatformFailure,
 } from "./journey-platform-failure";
-import { endStepMaxLoops } from "./journeys.shared";
+import { endStepMaxLoops, waitStepDueAt, waitStepUntilTime } from "./journeys.shared";
 import {
   createClaimingSource,
   createTimeBudget,
@@ -407,6 +407,7 @@ export function staleSendLatencyMinutes(args: {
   return lateMinutes > limit ? Math.floor(lateMinutes) : null;
 }
 
+/** Planned seconds from entry to the step; null when a wait before it waits for a time of day. */
 async function waitSecondsBeforePosition(journeyId: string, position: number) {
   const { data } = await db
     .from("journey_steps")
@@ -415,7 +416,9 @@ async function waitSecondsBeforePosition(journeyId: string, position: number) {
     .eq("step_type", "wait")
     .eq("is_enabled", true)
     .lt("position", position);
-  return ((data ?? []) as Array<{ config: Record<string, unknown> }>).reduce(
+  const rows = (data ?? []) as Array<{ config: Record<string, unknown> }>;
+  if (rows.some((row) => waitStepUntilTime(row.config))) return null;
+  return rows.reduce(
     (total, row) => total + Math.max(0, Number(row.config?.delay_seconds ?? 0) || 0),
     0,
   );
@@ -532,15 +535,22 @@ async function executeEnrollment(
 
   if (step.step_type === "wait") {
     const run = await execution(enrollment, step, null);
-    const seconds = Number(step.config.delay_seconds ?? 0);
-    if (!Number.isInteger(seconds) || seconds < 60) throw new Error("Passo de espera inválido");
+    const now = Date.now();
+    const dueAt = waitStepDueAt(step.config, now);
+    if (dueAt == null) throw new Error("Passo de espera inválido");
+    const seconds = Math.round((dueAt - now) / 1000);
+    const untilTime = waitStepUntilTime(step.config);
     await finishExecution(run.id, { status: "sent", executed_at: new Date().toISOString() });
     await release(enrollment, ctx, {
       status: "waiting",
       current_position: step.position + 1,
-      next_run_at: new Date(Date.now() + seconds * 1000).toISOString(),
+      next_run_at: new Date(dueAt).toISOString(),
     });
-    await event(enrollment, "wait_scheduled", { seconds, step_position: step.position });
+    await event(enrollment, "wait_scheduled", {
+      seconds,
+      step_position: step.position,
+      ...(untilTime ? { until_time: untilTime } : {}),
+    });
     return;
   }
 
@@ -590,12 +600,16 @@ async function executeEnrollment(
     return;
   }
 
-  if (maxSendDelayMinutes(journey.trigger_type ?? "", journey.trigger_config) != null) {
+  const waitSecondsBefore =
+    maxSendDelayMinutes(journey.trigger_type ?? "", journey.trigger_config) != null
+      ? await waitSecondsBeforePosition(enrollment.journey_id, step.position)
+      : null;
+  if (waitSecondsBefore != null) {
     const lateMinutes = staleSendLatencyMinutes({
       triggerType: journey.trigger_type ?? "",
       triggerConfig: journey.trigger_config,
       enteredAt: enrollment.entered_at,
-      waitSecondsBefore: await waitSecondsBeforePosition(enrollment.journey_id, step.position),
+      waitSecondsBefore,
       loopIteration: Number(enrollment.loop_iteration ?? 0),
     });
     if (lateMinutes != null) {

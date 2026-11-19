@@ -45,7 +45,12 @@ import {
   smsVariants,
   type JourneyEntryFilters,
 } from "@/lib/journey-policy";
-import { MAX_LOOPS_LIMIT, endStepMaxLoops, type JourneyStepInput } from "@/lib/journeys.shared";
+import {
+  MAX_LOOPS_LIMIT,
+  endStepMaxLoops,
+  waitStepUntilTime,
+  type JourneyStepInput,
+} from "@/lib/journeys.shared";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -91,7 +96,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 
 type Step =
-  | { kind: "wait"; amount: string; unit: WaitUnit }
+  | { kind: "wait"; amount: string; unit: WaitUnit; untilTime?: string }
   | {
       kind: "sms";
       templateId: string;
@@ -285,9 +290,23 @@ function withoutSendWindow(rules: Record<string, unknown> | null | undefined) {
   return rest;
 }
 
+/** Seconds of a wait step; a wait for a time of day may have no minimum (0). */
+function waitStepSeconds(s: { amount: string; unit: WaitUnit; untilTime?: string }) {
+  if (s.untilTime != null && (!s.amount.trim() || Number(s.amount.replace(",", ".")) === 0))
+    return 0;
+  return waitToSeconds(s.amount, s.unit);
+}
+
 function initialStep(s: SavedStep): Step[] {
   if (s.step_type === "wait") {
-    return [{ kind: "wait", ...splitWaitSeconds(Number(s.config.delay_seconds ?? 3600)) }];
+    const untilTime = waitStepUntilTime(s.config);
+    return [
+      {
+        kind: "wait",
+        ...splitWaitSeconds(Number(s.config.delay_seconds ?? (untilTime ? 0 : 3600))),
+        ...(untilTime ? { untilTime } : {}),
+      },
+    ];
   }
   if (s.step_type === "sms") {
     const { variants: _variants, ...extra } = smsExtra(s.config);
@@ -491,7 +510,9 @@ export function JourneyEditor({
         }
       }
       steps.forEach((s, index) => {
-        if (s.kind === "wait" && waitToSeconds(s.amount, s.unit) === null)
+        if (s.kind === "wait" && s.untilTime != null && !/^\d{2}:\d{2}$/.test(s.untilTime))
+          throw new Error(`Informe o horário da etapa ${index + 1}.`);
+        if (s.kind === "wait" && waitStepSeconds(s) === null)
           throw new Error(`Informe o tempo de espera da etapa ${index + 1}.`);
         if (s.kind === "sms" && s.variants) {
           const empty = s.variants.findIndex((text) => !text.trim());
@@ -506,7 +527,10 @@ export function JourneyEditor({
           ? [
               {
                 step_type: "wait",
-                config: { delay_seconds: Math.max(60, waitToSeconds(s.amount, s.unit) ?? 0) },
+                config:
+                  s.untilTime != null
+                    ? { delay_seconds: waitStepSeconds(s) ?? 0, until_time: s.untilTime }
+                    : { delay_seconds: Math.max(60, waitToSeconds(s.amount, s.unit) ?? 0) },
               },
             ]
           : s.kind === "sms"
@@ -1109,7 +1133,49 @@ export function JourneyEditor({
                 </p>
               ) : s.kind === "wait" ? (
                 <div className="space-y-1.5">
-                  <Label htmlFor={`step-${i}-wait`}>Tempo de espera</Label>
+                  <Label id={`step-${i}-wait-mode`}>Tipo de espera</Label>
+                  <ToggleGroup
+                    type="single"
+                    size="sm"
+                    variant="outline"
+                    aria-labelledby={`step-${i}-wait-mode`}
+                    className="justify-start"
+                    value={s.untilTime != null ? "horario" : "tempo"}
+                    onValueChange={(mode) => {
+                      if (mode === "horario" && s.untilTime == null)
+                        change(i, { ...s, untilTime: "08:00", amount: "0", unit: "hours" });
+                      if (mode === "tempo" && s.untilTime != null) {
+                        const { untilTime: _untilTime, ...plain } = s;
+                        change(i, {
+                          ...plain,
+                          amount: waitStepSeconds(s) ? plain.amount : "1",
+                        });
+                      }
+                    }}
+                  >
+                    <ToggleGroupItem value="tempo">Por tempo</ToggleGroupItem>
+                    <ToggleGroupItem value="horario">Até um horário</ToggleGroupItem>
+                  </ToggleGroup>
+                  {s.untilTime != null && (
+                    <div className="space-y-1.5 pt-1">
+                      <Label htmlFor={`step-${i}-wait-time`}>Enviar a próxima etapa às</Label>
+                      <Input
+                        id={`step-${i}-wait-time`}
+                        type="time"
+                        className="h-10 w-32"
+                        value={s.untilTime}
+                        onChange={(e) => change(i, { ...s, untilTime: e.target.value })}
+                      />
+                      <p className="text-[12.5px] text-muted-foreground">
+                        Horário de Brasília. Se já passou hoje, espera até esse horário amanhã.
+                      </p>
+                    </div>
+                  )}
+                  <Label htmlFor={`step-${i}-wait`}>
+                    {s.untilTime != null
+                      ? "Antes disso, esperar pelo menos (0 = sem mínimo)"
+                      : "Tempo de espera"}
+                  </Label>
                   <div className="flex max-w-sm gap-2">
                     <Input
                       id={`step-${i}-wait`}
@@ -1136,7 +1202,7 @@ export function JourneyEditor({
                   </div>
                   {(() => {
                     const seconds = waitToSeconds(s.amount, s.unit);
-                    return seconds !== null && seconds < 60 ? (
+                    return s.untilTime == null && seconds !== null && seconds < 60 ? (
                       <p className="text-[12.5px] text-muted-foreground">
                         O mínimo é 1 minuto; menos que isso é salvo como 1 minuto.
                       </p>
