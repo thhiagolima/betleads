@@ -4,6 +4,7 @@ import { lookupExpertName, type SupabaseLike } from "./expert-lookup.server";
 import { toTenantCurrency } from "./currency";
 import { bindExternalListDispatches } from "./external-list-binding.server";
 import { enrollPlayerOnEvent, eventEntryTriggers } from "./journey-scanner.server";
+import { isBlankMoneyValue, parseMoneyValue } from "./money-parse";
 import { phoneWithCountryCode } from "./phone-normalization";
 
 export function getServiceClient(): SupabaseClient | null {
@@ -158,7 +159,11 @@ export async function processWebhookEvent(
 
     const rawValor =
       data.amount ?? data.valor ?? envelopeTx.amount ?? payload.amount ?? payload.valor;
-    const valor = rawValor != null ? Math.abs(Number(rawValor)) || null : null;
+    // "10,50", "R$ 10,50" and "1.234,56" are amounts too: Number() used to
+    // turn them into null and the deposit vanished with the log "processado".
+    const parsedValor = isBlankMoneyValue(rawValor) ? null : parseMoneyValue(rawValor);
+    const valorInvalido = !isBlankMoneyValue(rawValor) && parsedValor === null;
+    const valor = parsedValor || null;
 
     // A PixReals manda nome, e-mail e telefone em `data.userContact`, em
     // todos os eventos.
@@ -456,6 +461,23 @@ export async function processWebhookEvent(
         const bonus = finiteNumber(payload.balance_bonus ?? data.wallet_bonus);
         if (saldo !== null) updates.saldo_carteira = saldo;
         if (bonus !== null) updates.saldo_bonus = bonus;
+      }
+
+      if (financialEvent && valorInvalido) {
+        // Same 200 as the other processing errors: the log stays replayable
+        // and the house does not start a retry storm.
+        await markLog("erro", {
+          step: "financial_amount",
+          error: "invalid_amount",
+          motivo: "Valor da transação em formato não reconhecido",
+          raw_amount: String(
+            typeof rawValor === "object" ? JSON.stringify(rawValor) : rawValor,
+          ).slice(0, 100),
+        });
+        return Response.json(
+          { ok: false, evento, error: "Valor da transação inválido" },
+          { status: 200 },
+        );
       }
 
       if (financialEvent && valor) {

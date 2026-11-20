@@ -99,7 +99,10 @@ function segmentQuery(
       q = applyInactiveAtLeast(q, ago(60)).not("ftd_em", "is", null);
       break;
     default:
-      break;
+      // SA-11: um segmento desconhecido NUNCA vira "toda a base com e-mail".
+      throw new Error(
+        `Público de e-mail desconhecido: "${segmento}". Escolha um público válido antes de enviar.`,
+      );
   }
 
   return q;

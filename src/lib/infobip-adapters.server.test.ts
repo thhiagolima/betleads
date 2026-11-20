@@ -9,7 +9,12 @@ vi.mock("./tenant-access.server", () => ({
 // PG3 Task 4: the wallet reservation has its own coverage
 // (infobip-voice.billing.test.ts); here it always succeeds.
 vi.mock("./billing/wallet.server", () => ({
-  reserveForDelivery: vi.fn(async () => ({ ok: true, referenceId: "voice:test", amount: 0, balance: 0 })),
+  reserveForDelivery: vi.fn(async () => ({
+    ok: true,
+    referenceId: "voice:test",
+    amount: 0,
+    balance: 0,
+  })),
   refundForDelivery: vi.fn(async () => undefined),
 }));
 
@@ -30,11 +35,38 @@ vi.mock("./provider-callback-tokens.server", () => ({
   ),
 }));
 
+// Since 5f5180c4 the voice adapter reads `call_history` (dedupe) and
+// `tenant_channels` (channel on/off) before dialing. Both have their own
+// coverage; here the service-role client never reaches a database (no
+// existing call) and the voice channel is on, so `fetch` only sees Infobip.
+vi.mock("@/integrations/supabase/client.server", () => {
+  const chain: Record<string, unknown> = {};
+  for (const method of ["from", "select", "eq", "in", "is", "order"]) {
+    chain[method] = vi.fn(() => chain);
+  }
+  chain.limit = vi.fn(async () => ({ data: [], error: null }));
+  chain.maybeSingle = vi.fn(async () => ({ data: null, error: null }));
+  return { supabaseAdmin: chain };
+});
+
+vi.mock("./tenant-channels.server", () => ({
+  isChannelEnabled: vi.fn(async () => true),
+}));
+
 import { callInfobipEmail } from "./infobip-email.server";
 import { envInfobipAccount, resolveInfobipAccount } from "./provider-accounts.server";
 import { callInfobipVoice, normalizeE164BR } from "./infobip-voice.server";
 
 const TENANT = "00000000-0000-4000-8000-000000000001";
+
+type FetchCall = [string, RequestInit];
+
+/** The single fetch call made to `url` (found by URL, never by call order). */
+function callTo(fetchMock: ReturnType<typeof vi.fn>, url: string): FetchCall {
+  const calls = (fetchMock.mock.calls as FetchCall[]).filter(([u]) => String(u) === url);
+  expect(calls).toHaveLength(1);
+  return calls[0];
+}
 
 const INFOBIP_ENV = [
   "INFOBIP_BASE_URL",
@@ -121,7 +153,9 @@ describe("Infobip provider adapters", () => {
     process.env.PUBLIC_APP_URL = "https://app.example.test/";
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(new Response(JSON.stringify({ callId: "voice-provider-1" }), { status: 200 }));
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ callId: "voice-provider-1" }), { status: 200 }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     expect(normalizeE164BR("(11) 99999-9999")).toBe("+5511999999999");
@@ -132,7 +166,7 @@ describe("Infobip provider adapters", () => {
     );
 
     expect(result).toMatchObject({ ok: true, status: 200, providerCallId: "voice-provider-1" });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = callTo(fetchMock, "https://api.infobip.test/markuplanguage/1/create");
     expect(url).toBe("https://api.infobip.test/markuplanguage/1/create");
     expect(init.headers).toMatchObject({ Authorization: "App test-api-key" });
     const body = JSON.parse(String(init.body));
@@ -152,7 +186,9 @@ describe("Infobip provider adapters", () => {
     process.env.PUBLIC_APP_URL = "https://app.example.test/";
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(new Response(JSON.stringify({ callId: "voice-provider-tts" }), { status: 200 }));
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ callId: "voice-provider-tts" }), { status: 200 }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     const script = "Olá, este é um lembrete reservado.";
@@ -166,7 +202,8 @@ describe("Infobip provider adapters", () => {
       { tenantId: TENANT },
     );
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(result).toMatchObject({ ok: true, status: 200, providerCallId: "voice-provider-tts" });
+    const [, init] = callTo(fetchMock, "https://api.infobip.test/markuplanguage/1/create");
     const body = JSON.parse(String(init.body));
     expect(body.callback.url).toContain("mode=say");
     expect(body.callback.url).toContain("correlation=" + result.idempotencyKey);
@@ -190,7 +227,9 @@ describe("Infobip provider adapters", () => {
     vi.mocked(resolveInfobipAccount).mockResolvedValueOnce(owned).mockResolvedValueOnce(owned);
     const fetchMock = vi
       .fn()
-      .mockImplementation(async () => new Response(JSON.stringify({ callId: "c-1" }), { status: 200 }));
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ callId: "c-1" }), { status: 200 }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     await callInfobipEmail({
@@ -201,7 +240,8 @@ describe("Infobip provider adapters", () => {
       idempotencyKey: "email-owned-1",
       tenantId: TENANT,
     });
-    const emailUrl = String((fetchMock.mock.calls[0][1].body as FormData).get("notifyUrl"));
+    const [, emailInit] = callTo(fetchMock, "https://own.api.infobip.test/email/3/send");
+    const emailUrl = String((emailInit.body as FormData).get("notifyUrl"));
     expect(emailUrl).toContain(`token=${OWN_TOKEN}`);
     expect(emailUrl).not.toContain("email-callback-token");
     expect(emailUrl).not.toContain("token=callback-token");
@@ -211,7 +251,8 @@ describe("Infobip provider adapters", () => {
       { type: "audio", audioUrl: "https://assets.example.test/call.mp3" },
       { tenantId: TENANT },
     );
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1].body));
+    const [, voiceInit] = callTo(fetchMock, "https://own.api.infobip.test/markuplanguage/1/create");
+    const body = JSON.parse(String(voiceInit.body));
     for (const url of [body.callback.url as string, body.notifyUrl as string]) {
       expect(url).toContain("token=pa_");
       expect(url).toContain(`token=${OWN_TOKEN}`);

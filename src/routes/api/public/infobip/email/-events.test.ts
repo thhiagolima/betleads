@@ -106,3 +106,56 @@ describe("Infobip e-mail events route: callback scope", () => {
     expect(status("mail-l")).toBe("delivered");
   });
 });
+
+// QA-40: real Infobip status names. The failure check runs before the
+// delivered one, so UNDELIVERABLE_NOT_DELIVERED / REJECTED_NOT_SENT are errors.
+describe("Infobip e-mail events route: delivery outcome by status", () => {
+  function sendStatus(status: unknown) {
+    const url = new URL("https://betleads.io/api/public/infobip/email/events");
+    url.searchParams.set("token", "global-email-token");
+    return post({
+      request: new Request(url, {
+        method: "POST",
+        body: JSON.stringify({
+          results: [{ callbackData: "key-p", ...(status === undefined ? {} : { status }) }],
+        }),
+      }),
+    });
+  }
+
+  const cases: Array<[string, unknown, "delivered" | "error" | "sent"]> = [
+    ["groupName PENDING", { groupName: "PENDING" }, "sent"],
+    ["name PENDING_ACCEPTED", { name: "PENDING_ACCEPTED" }, "sent"],
+    ["name PENDING_WAITING_DELIVERY", { name: "PENDING_WAITING_DELIVERY" }, "sent"],
+    ["name PENDING_ENROUTE", { name: "PENDING_ENROUTE" }, "sent"],
+    ["groupName DELIVERED", { groupName: "DELIVERED" }, "delivered"],
+    ["name DELIVERED_TO_HANDSET", { name: "DELIVERED_TO_HANDSET" }, "delivered"],
+    ["name DELIVERED_TO_OPERATOR", { name: "DELIVERED_TO_OPERATOR" }, "delivered"],
+    [
+      "groupName + name DELIVERED",
+      { groupName: "DELIVERED", name: "DELIVERED_TO_HANDSET" },
+      "delivered",
+    ],
+    ["lowercase delivered", { groupName: "delivered" }, "delivered"],
+    ["groupName UNDELIVERABLE", { groupName: "UNDELIVERABLE" }, "error"],
+    ["name UNDELIVERABLE_NOT_DELIVERED", { name: "UNDELIVERABLE_NOT_DELIVERED" }, "error"],
+    ["name UNDELIVERABLE_REJECTED_OPERATOR", { name: "UNDELIVERABLE_REJECTED_OPERATOR" }, "error"],
+    ["groupName REJECTED", { groupName: "REJECTED" }, "error"],
+    ["name REJECTED_NOT_SENT", { name: "REJECTED_NOT_SENT" }, "error"],
+    ["name REJECTED_DESTINATION", { name: "REJECTED_DESTINATION" }, "error"],
+    ["groupName EXPIRED", { groupName: "EXPIRED" }, "error"],
+    ["name EXPIRED_EXPIRED", { name: "EXPIRED_EXPIRED" }, "error"],
+    ["name EXPIRED_DLR_UNKNOWN", { name: "EXPIRED_DLR_UNKNOWN" }, "error"],
+    ["plain string UNDELIVERABLE_NOT_DELIVERED", "UNDELIVERABLE_NOT_DELIVERED", "error"],
+    ["plain string DELIVERED", "DELIVERED", "delivered"],
+    ["tracking event OPENED (not a delivery status)", "OPENED", "sent"],
+    ["tracking event CLICKED (not a delivery status)", "CLICKED", "sent"],
+    ["no status at all", undefined, "sent"],
+  ];
+
+  it.each(cases)("%s", async (_label, eventStatus, expected) => {
+    const response = await sendStatus(eventStatus);
+    expect(response.status).toBe(200);
+    expect(status("mail-p")).toBe(expected);
+  });
+});

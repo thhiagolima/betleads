@@ -1,5 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getServiceClient, processWebhookEvent } from "@/lib/webhook-process.server";
+import {
+  HOUSE_WEBHOOK_MAX_BODY_BYTES,
+  payloadTooLargeResponse,
+  readBodyLimited,
+} from "@/lib/http-body.server";
 import { invalidateServerResultCache } from "@/lib/server-result-cache";
 
 async function validSignature(secret: string, payload: string, provided: string | null) {
@@ -37,7 +42,14 @@ export const Route = createFileRoute("/api/public/webhook/$token/$evento")({
         params: { token: string; evento: string };
       }) => {
         const { token, evento } = params;
-        const rawPayload = await request.text();
+        // Houses send one event per call (a few KB); 256 KB is far above any
+        // real payload and keeps abusive bodies out of memory (ENG-05).
+        const body = await readBodyLimited(request, HOUSE_WEBHOOK_MAX_BODY_BYTES);
+        if (!body.ok) {
+          if (body.reason === "too_large") return payloadTooLargeResponse(body.limit);
+          return Response.json({ ok: false, error: "corpo ilegível" }, { status: 400 });
+        }
+        const rawPayload = body.text;
         let payload: Record<string, unknown> = {};
         try {
           payload = rawPayload ? JSON.parse(rawPayload) : {};

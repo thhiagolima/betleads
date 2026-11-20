@@ -4,7 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { orchestrate } from "./orchestrator.server";
 import { brtDayStart } from "./tz";
-import { resolveOperationalTenantId } from "./tenant-access.server";
+import { requireTenantAdmin, resolveOperationalTenantId } from "./tenant-access.server";
 import { assertSuperAdmin } from "./provider-governance.server";
 
 export const simulateActivation = createServerFn({ method: "POST" })
@@ -102,7 +102,13 @@ export const updateLimits = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
-    const tenantId = await resolveOperationalTenantId(context.supabase);
+    // The write goes through the service role, so the role check is ours:
+    // only an admin of the house (or a super admin) changes its daily limits.
+    const tenantId = await requireTenantAdmin(
+      context.supabase,
+      await resolveOperationalTenantId(context.supabase),
+      "Só um administrador da casa pode mudar os limites diários.",
+    );
     const { data: s } = await supabaseAdmin
       .from("automation_settings")
       .select("id")
@@ -322,56 +328,49 @@ export const getQueueReadiness = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const tenantId = await resolveOperationalTenantId(context.supabase);
-    const [
-      smsPending,
-      emailPending,
-      callPending,
-      waPending,
-      lastRun,
-      recentErrors,
-      settings,
-    ] = await Promise.all([
-      supabaseAdmin
-        .from("sms_flow_leads")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId)
-        .in("status", ["pending", "running"]),
-      supabaseAdmin
-        .from("email_flow_leads")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId)
-        .in("status", ["pending", "running"]),
-      supabaseAdmin
-        .from("call_flow_progress")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId)
-        .in("status", ["active", "waiting"]),
-      supabaseAdmin
-        .from("flow_leads")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId)
-        .in("status", ["pending", "running", "cooldown"]),
-      supabaseAdmin
-        .from("activation_runs")
-        .select("id, mode, status, started_at, finished_at, error")
-        .eq("tenant_id", tenantId)
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabaseAdmin
-        .from("activation_runs")
-        .select("id, mode, started_at, error")
-        .eq("tenant_id", tenantId)
-        .not("error", "is", null)
-        .order("started_at", { ascending: false })
-        .limit(5),
-      supabaseAdmin
-        .from("automation_settings")
-        .select("paused")
-        .eq("tenant_id", tenantId)
-        .limit(1)
-        .maybeSingle(),
-    ]);
+    const [smsPending, emailPending, callPending, waPending, lastRun, recentErrors, settings] =
+      await Promise.all([
+        supabaseAdmin
+          .from("sms_flow_leads")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", tenantId)
+          .in("status", ["pending", "running"]),
+        supabaseAdmin
+          .from("email_flow_leads")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", tenantId)
+          .in("status", ["pending", "running"]),
+        supabaseAdmin
+          .from("call_flow_progress")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", tenantId)
+          .in("status", ["active", "waiting"]),
+        supabaseAdmin
+          .from("flow_leads")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", tenantId)
+          .in("status", ["pending", "running", "cooldown"]),
+        supabaseAdmin
+          .from("activation_runs")
+          .select("id, mode, status, started_at, finished_at, error")
+          .eq("tenant_id", tenantId)
+          .order("started_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("activation_runs")
+          .select("id, mode, started_at, error")
+          .eq("tenant_id", tenantId)
+          .not("error", "is", null)
+          .order("started_at", { ascending: false })
+          .limit(5),
+        supabaseAdmin
+          .from("automation_settings")
+          .select("paused")
+          .eq("tenant_id", tenantId)
+          .limit(1)
+          .maybeSingle(),
+      ]);
 
     const pending = {
       sms: smsPending.count ?? 0,

@@ -978,6 +978,9 @@ function AdjustWalletDialog({ tenant }: { tenant: WalletTenantRow }) {
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("50");
   const [reason, setReason] = useState("Ajuste manual pelo superadmin");
+  // A fresh key each time the dialog opens: clicking "Ajustar" twice (or
+  // retrying after a timeout) credits the house once.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const mut = useMutation({
     mutationFn: () =>
       fn({
@@ -985,6 +988,7 @@ function AdjustWalletDialog({ tenant }: { tenant: WalletTenantRow }) {
           tenantId: tenant.tenant_id,
           amount: Number(amount),
           reason,
+          idempotencyKey,
         },
       }),
     onSuccess: () => {
@@ -996,7 +1000,13 @@ function AdjustWalletDialog({ tenant }: { tenant: WalletTenantRow }) {
   });
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setIdempotencyKey(crypto.randomUUID());
+        setOpen(next);
+      }}
+    >
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
           Saldo

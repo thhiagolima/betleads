@@ -69,8 +69,10 @@ function endpoint(account: InfobipAccount): string | null {
 async function notifyUrl(correlationId: string, account: InfobipAccount): Promise<string | null> {
   const appUrl = process.env.PUBLIC_APP_URL?.trim().replace(/\/$/, "");
   const token =
-    (await callbackTokenFor(account)) ??
-    process.env.INFOBIP_EMAIL_CALLBACK_TOKEN?.trim() ??
+    // `||`, not `??`: an env set to "" must fall through, not produce a
+    // notifyUrl the events webhook then refuses.
+    (await callbackTokenFor(account)) ||
+    process.env.INFOBIP_EMAIL_CALLBACK_TOKEN?.trim() ||
     process.env.INFOBIP_VOICE_CALLBACK_TOKEN?.trim();
   if (!appUrl || !token) return null;
   const url = new URL(`${appUrl}/api/public/infobip/email/events`);
@@ -88,10 +90,7 @@ function parseBody(text: string, contentType: string | null): unknown {
 }
 
 /** Result of an e-mail whose house account is unavailable: nothing was sent. */
-function infobipEmailAccountUnavailable(
-  error: string,
-  idempotencyKey: string,
-): InfobipEmailResult {
+function infobipEmailAccountUnavailable(error: string, idempotencyKey: string): InfobipEmailResult {
   return {
     ok: false,
     status: 0,

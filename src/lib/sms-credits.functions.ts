@@ -365,6 +365,10 @@ export const adjustWalletInput = z.object({
     .max(100_000)
     .refine((v) => v !== 0, "O valor não pode ser zero"),
   reason: z.string().min(3).max(240),
+  // One key per adjustment the admin means to make (the dialog creates it when
+  // it opens): a double click or a retry after a timeout reuses it, and the
+  // ledger records the adjustment once.
+  idempotencyKey: z.string().uuid().optional(),
 });
 
 export async function adminAdjustSmsCreditsFor(
@@ -382,6 +386,7 @@ export async function adminAdjustSmsCreditsFor(
     _tenant: data.tenantId,
     _amount: data.amount,
     _reason: data.reason,
+    ...(data.idempotencyKey ? { _idempotency_key: `admin_adjust:${data.idempotencyKey}` } : {}),
   });
   if (error) throw new Error(error.message);
   const after = await getWalletSummarySnapshot(data.tenantId);

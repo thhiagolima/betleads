@@ -1,8 +1,10 @@
 name: Quality
 
 on:
+  # QA-31: every push on any branch runs the checks (not only main), so a red
+  # test is seen before the merge.
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
 

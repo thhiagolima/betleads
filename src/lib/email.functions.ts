@@ -933,7 +933,12 @@ export const sendEmailCampaignNow = createServerFn({ method: "POST" })
   });
 
 /** Statuses "Enviar agora" may start a campaign from ("enviando" is a run in progress). */
-export const EMAIL_CAMPAIGN_SEND_NOW_FROM = ["rascunho", "agendada", "pausada", "concluida"] as const;
+export const EMAIL_CAMPAIGN_SEND_NOW_FROM = [
+  "rascunho",
+  "agendada",
+  "pausada",
+  "concluida",
+] as const;
 
 export const EMAIL_CAMPAIGN_ALREADY_SENDING_MESSAGE =
   "Esta campanha já está sendo enviada ou não pode ser enviada agora.";
@@ -1041,7 +1046,16 @@ export async function runCampaignSend(
         locked_by: null,
       })
       .eq("id", campaignId);
-    return { enviados: 0, falhas: 0, pendentes: 0, total: 0, jaEnviados: 0, pausadaPorSaldo: false, pausadaPorTeto: false, continuaEmLotes: false };
+    return {
+      enviados: 0,
+      falhas: 0,
+      pendentes: 0,
+      total: 0,
+      jaEnviados: 0,
+      pausadaPorSaldo: false,
+      pausadaPorTeto: false,
+      continuaEmLotes: false,
+    };
   }
 
   // Área do Expert: re-checked at every run (approval, owner active, scope).
@@ -1050,12 +1064,27 @@ export async function runCampaignSend(
   if (expertOwner?.inactive) {
     await supabaseAdmin
       .from("email_campaigns")
-      .update({ status: "pausada", blocked_reason: EXPERT_SCOPE_INACTIVE, locked_at: null, locked_by: null })
+      .update({
+        status: "pausada",
+        blocked_reason: EXPERT_SCOPE_INACTIVE,
+        locked_at: null,
+        locked_by: null,
+      })
       .eq("id", campaignId);
-    return { enviados: 0, falhas: 0, pendentes: 0, total: 0, jaEnviados: 0, pausadaPorSaldo: false, pausadaPorTeto: false, continuaEmLotes: false };
+    return {
+      enviados: 0,
+      falhas: 0,
+      pendentes: 0,
+      total: 0,
+      jaEnviados: 0,
+      pausadaPorSaldo: false,
+      pausadaPorTeto: false,
+      continuaEmLotes: false,
+    };
   }
   const expertTpl = expertId ? (camp.template_snapshot as Record<string, any> | null) : null;
-  if (expertId && !expertTpl?.body_html) throw new Error("O conteúdo desta campanha não foi encontrado.");
+  if (expertId && !expertTpl?.body_html)
+    throw new Error("O conteúdo desta campanha não foi encontrado.");
 
   if (!camp.template_id && !expertTpl) throw new Error("Selecione um template antes de enviar.");
 
@@ -1095,7 +1124,10 @@ export async function runCampaignSend(
       .update({ blocked_reason: blocked.message })
       .eq("id", campaignId);
     if (blockedErr) {
-      console.error(`[email.functions] failed to record blocked_reason for campaign ${campaignId}:`, blockedErr);
+      console.error(
+        `[email.functions] failed to record blocked_reason for campaign ${campaignId}:`,
+        blockedErr,
+      );
     }
     throw blocked;
   }
@@ -1105,7 +1137,10 @@ export async function runCampaignSend(
       .update({ blocked_reason: null })
       .eq("id", campaignId);
     if (clearErr) {
-      console.error(`[email.functions] failed to clear blocked_reason for campaign ${campaignId}:`, clearErr);
+      console.error(
+        `[email.functions] failed to clear blocked_reason for campaign ${campaignId}:`,
+        clearErr,
+      );
     }
   }
 
@@ -1135,6 +1170,13 @@ export async function runCampaignSend(
     players = rows.filter((p: any) => p.email && p.email.trim());
   } else {
     const segmento = af.segmento || "Todos";
+    // SA-11: "Público salvo" is a hand-picked lead list, never a segment. Without
+    // ids it must stop here instead of falling into the whole base with e-mail.
+    if (segmento === "Público salvo") {
+      throw new Error(
+        "Este público salvo não tem nenhum lead. Selecione os leads novamente antes de enviar.",
+      );
+    }
     players = await loadPlayersForSegment(camp.tenant_id, segmento);
   }
 
@@ -1177,7 +1219,11 @@ export async function runCampaignSend(
     (p: { id?: string | null; email?: string | null }) =>
       p.id
         ? sets.playerIds.has(p.id)
-        : sets.emails.has(String(p.email ?? "").trim().toLowerCase());
+        : sets.emails.has(
+            String(p.email ?? "")
+              .trim()
+              .toLowerCase(),
+          );
   const isReached = isIn(reached);
   const isAttempted = isIn(reached.attempted);
   const remaining = players.filter((p) => !isReached(p) && !(continuation && isAttempted(p)));
@@ -1255,7 +1301,11 @@ export async function runCampaignSend(
       continuaEmLotes = true;
       break;
     }
-    if (processed > 0 && processed % EMAIL_CAMPAIGN_STATUS_CHECK_EVERY === 0 && !(await stillOwned())) {
+    if (
+      processed > 0 &&
+      processed % EMAIL_CAMPAIGN_STATUS_CHECK_EVERY === 0 &&
+      !(await stillOwned())
+    ) {
       interrompida = true;
       break;
     }
@@ -1454,12 +1504,16 @@ async function loadCampaignReachedRecipients(campaignId: string) {
   const attempted = { playerIds: new Set<string>(), emails: new Set<string>() };
   for (const row of logs) {
     if (row.player_id) attempted.playerIds.add(row.player_id);
-    const attemptedEmail = String(row.to_email ?? "").trim().toLowerCase();
+    const attemptedEmail = String(row.to_email ?? "")
+      .trim()
+      .toLowerCase();
     if (attemptedEmail) attempted.emails.add(attemptedEmail);
     const reached = row.status === "sent" || row.status === "delivered" || row.sent_at != null;
     if (!reached) continue;
     if (row.player_id) playerIds.add(row.player_id);
-    const email = String(row.to_email ?? "").trim().toLowerCase();
+    const email = String(row.to_email ?? "")
+      .trim()
+      .toLowerCase();
     if (email) emails.add(email);
   }
   return { playerIds, emails, attempted };

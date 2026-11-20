@@ -3,9 +3,12 @@ services:
     build:
       context: .
       args:
-        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
-        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
-        VITE_PUBLIC_APP_URL: ${VITE_PUBLIC_APP_URL:-http://localhost:3000}
+        # `:?` stops the build when the variable is missing, instead of shipping
+        # a bundle that silently points at the wrong place (the 27 h outage of
+        # 10-22 was an env missing with no alarm).
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?defina VITE_SUPABASE_URL no .env}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:?defina VITE_SUPABASE_PUBLISHABLE_KEY no .env}
+        VITE_PUBLIC_APP_URL: ${VITE_PUBLIC_APP_URL:?defina VITE_PUBLIC_APP_URL no .env}
         # Sentry (opcional): vazio = desligado.
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-}
@@ -18,18 +21,32 @@ services:
       # Mantido comentado porque o compose pode falhar se SENTRY_AUTH_TOKEN nao existir.
       # secrets:
       #   - sentry_auth_token
-    image: crm-betleads:local
+    # Tag per release: `IMAGE_TAG=$(git rev-parse --short HEAD) docker compose
+    # build`. The previous tag stays on the VPS, so a rollback is
+    # `IMAGE_TAG=<anterior> docker compose up -d --no-build`. Without IMAGE_TAG
+    # it keeps the old single tag.
+    image: crm-betleads:${IMAGE_TAG:-local}
     env_file:
       - .env
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 3000
-      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
-      VITE_PUBLIC_APP_URL: ${VITE_PUBLIC_APP_URL:-http://localhost:3000}
+      # Callback and link URLs are built from it: a localhost default would
+      # break every provider callback without any error.
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?defina PUBLIC_APP_URL no .env}
+      VITE_PUBLIC_APP_URL: ${VITE_PUBLIC_APP_URL:?defina VITE_PUBLIC_APP_URL no .env}
     ports:
       - "3000:3000"
     restart: unless-stopped
+    # Worker ticks run up to ~45 s; docker's default 10 s stop would cut a
+    # send batch in the middle on every deploy.
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
 # secrets:
 #   sentry_auth_token:

@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Json } from "@/integrations/supabase/types";
 import { ACCEPTED_SMS_STATUSES } from "@/lib/campaign-recipients.server";
+import { payloadTooLargeResponse, readBodyLimited } from "@/lib/http-body.server";
 import { likeKeyPrefixPattern } from "@/lib/sql-like";
 import {
   ownedAccountIdsFor,
@@ -42,13 +43,19 @@ import { applyRouteProbeCallback } from "@/lib/sms-route-probe.server";
 // Bulk em JSON com { lote: [...] }. Sempre respondemos 200 depois da
 // autenticacao para evitar retentativas em loop; erros internos ficam nos logs.
 
+/**
+ * A bulk lote carries up to ~1,000 statuses of ~200 bytes (2026-11-13), so
+ * the callback cannot use a tiny limit; 2 MB leaves 10x headroom and still
+ * stops abusive bodies before saveRawCallback stores them (ENG-05).
+ */
+export const SHORT_BRASIL_CALLBACK_MAX_BODY_BYTES = 2 * 1024 * 1024;
+
 export const SHORT_BRASIL_CALLBACK_CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, x-webhook-secret, x-cron-secret",
   "Access-Control-Max-Age": "86400",
 } as const;
-
 
 function extractToken(request: Request): string | null {
   const url = new URL(request.url);
@@ -182,16 +189,10 @@ function deliveredAtFor(status: string, payload: CallbackPayload): string | null
   );
 }
 
-
-
 let lastUnrecognizedLogAt = 0;
 
 /** Logs the shape (never the values) of a callback we could not read. */
-function logUnrecognizedShape(
-  request: Request,
-  payloads: CallbackPayload[],
-  bodyText: string,
-) {
+function logUnrecognizedShape(request: Request, payloads: CallbackPayload[], bodyText: string) {
   const now = Date.now();
   if (now - lastUnrecognizedLogAt < 60_000) return;
   lastUnrecognizedLogAt = now;
@@ -413,6 +414,12 @@ async function saveRawCallback(request: Request, body: string): Promise<number |
   }
 }
 
+function withoutContentLength(headers: Headers): Headers {
+  const copy = new Headers(headers);
+  copy.delete("content-length");
+  return copy;
+}
+
 /**
  * Handles one Short Brasil callback. `pathToken` comes from
  * /api/public/sms-webhook/$token (house-owned accounts); without it the token
@@ -432,13 +439,31 @@ export async function handleShortBrasilCallback(
   let ignored = 0;
   let unidentified = 0;
   let rawId: number | null = null;
+  let rawBody = "";
+  if (request.method !== "GET") {
+    const body = await readBodyLimited(request, SHORT_BRASIL_CALLBACK_MAX_BODY_BYTES);
+    if (!body.ok && body.reason === "too_large") {
+      return payloadTooLargeResponse(body.limit, SHORT_BRASIL_CALLBACK_CORS);
+    }
+    // A broken stream used to fail inside the try below: same outcome, an
+    // empty lote acknowledged with 200.
+    if (body.ok) rawBody = body.text;
+    else console.error("[sms-webhook] body not read:", body.error);
+  }
   try {
-    // Read the raw body once; the parser receives a copy of the request.
-    const rawBody = request.method === "GET" ? "" : await request.clone().text();
     rawId = await saveRawCallback(request, rawBody);
     const filter: CallbackFilter = { scope, ownedAccountIds: await ownedAccountIdsFor(scope) };
     let bodyText = "";
-    const payloads = await parseSmsCallbackPayloads(request, (text) => {
+    // The body stream is consumed: the parser gets a copy carrying the text.
+    const parseRequest =
+      request.method === "GET"
+        ? request
+        : new Request(request.url, {
+            method: request.method,
+            headers: withoutContentLength(request.headers),
+            body: rawBody,
+          });
+    const payloads = await parseSmsCallbackPayloads(parseRequest, (text) => {
       bodyText = text;
     });
     const identified: CallbackPayload[] = [];

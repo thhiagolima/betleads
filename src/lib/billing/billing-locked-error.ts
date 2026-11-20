@@ -4,6 +4,7 @@
 // a server function serializes it, and the server guards throw it.
 
 import { isDemoBlockedError } from "../demo-tenant";
+import { isTenantSuspendedError } from "../tenant-suspended-error";
 
 export const BILLING_LOCKED_CODE = "BILLING_LOCKED" as const;
 export const BILLING_LOCKED_TEXT = "Acesso suspenso. Regularize a mensalidade em Plano e créditos.";
@@ -46,7 +47,10 @@ function matchesText(text: string): boolean {
   return text.includes(BILLING_LOCKED_CODE) || text.includes(BILLING_LOCKED_TEXT);
 }
 
-/** A send refused by a tenant guard (demo or billing lock): final, never retried. */
+/**
+ * A send refused by a tenant guard (demo, billing lock, or a suspended /
+ * canceled house): final, never retried.
+ */
 export function isSendBlockedError(e: unknown): boolean {
-  return isDemoBlockedError(e) || isBillingLockedError(e);
+  return isDemoBlockedError(e) || isBillingLockedError(e) || isTenantSuspendedError(e);
 }

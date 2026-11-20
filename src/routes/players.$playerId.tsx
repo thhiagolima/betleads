@@ -73,11 +73,19 @@ function PlayerDetailPage() {
     queryFn: () => fetchLinks({ data: { playerId } }),
     staleTime: 15_000,
   });
-  // Nome da casa para a mensagem pronta (mesma copy da lista de Jogadores).
+  // Nome da casa do player para a mensagem pronta (mesma copy da lista de
+  // Jogadores). Lido pelo tenant_id do player: com limit(1) sem filtro, quem
+  // vê várias casas recebia o nome de outra casa.
+  const playerTenantId = (data?.player?.tenant_id as string | undefined) ?? null;
   const { data: tenantBrand } = useQuery({
-    queryKey: ["current-tenant-brand"],
+    queryKey: ["player-tenant-brand", playerTenantId],
+    enabled: !!playerTenantId,
     queryFn: async () => {
-      const { data: tenant } = await supabase.from("tenants").select("nome").limit(1).maybeSingle();
+      const { data: tenant } = await supabase
+        .from("tenants")
+        .select("nome")
+        .eq("id", playerTenantId as string)
+        .maybeSingle();
       return (tenant?.nome as string | undefined) ?? "";
     },
     staleTime: 5 * 60_000,

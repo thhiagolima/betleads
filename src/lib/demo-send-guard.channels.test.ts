@@ -30,8 +30,15 @@ vi.mock("node:dns/promises", () => ({
   lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
 }));
 
-import { __resetDemoTenantCacheForTests, assertTenantNotDemoForSend } from "./tenant-access.server";
+import {
+  __resetDemoTenantCacheForTests,
+  assertTenantNotDemoForSend,
+  demoSendBlockedReason,
+} from "./tenant-access.server";
 import { DEMO_SEND_BLOCKED_TEXT } from "./demo-tenant";
+import { TENANT_SUSPENDED_TEXT, TenantSuspendedError } from "./tenant-suspended-error";
+import { isSendBlockedError } from "./billing/billing-locked-error";
+import { classifyProviderFailure, ProviderSendError } from "./rate-limit/provider-errors.server";
 import { callShortBrasilSmsBulk, sendSmsInternal } from "./sms.functions";
 import { sendSmsBatch, type SmsBatchItem } from "./sms-bulk.server";
 import { sendInfobipEmail } from "./email-send.server";
@@ -50,6 +57,7 @@ import { buildPlayerVariables } from "./template-vars.server";
 const NORMAL = "00000000-0000-4000-8000-000000000001";
 const DEMO = "00000000-0000-4000-8000-000000000002";
 const SUSPENDED = "00000000-0000-4000-8000-000000000003";
+const CANCELED = "00000000-0000-4000-8000-000000000004";
 const PLAYER = "33333333-3333-4333-8333-000000000001";
 const GUARDED_TABLES = ["sms_send_logs", "wallet_ledger", "email_send_logs", "link_dispatches"];
 
@@ -136,6 +144,7 @@ beforeEach(() => {
       { id: NORMAL, status: "active", is_demo: false },
       { id: DEMO, status: "active", is_demo: true },
       { id: SUSPENDED, status: "suspended", is_demo: false },
+      { id: CANCELED, status: "canceled", is_demo: false },
     );
   fake.db.rows("players").push({ id: PLAYER, tenant_id: DEMO });
   vi.stubEnv("SHORTCODE_SMS_TOKEN", "test-token");
@@ -420,9 +429,47 @@ describe("assertTenantNotDemoForSend", () => {
     }
   });
 
-  it("leaves suspended and normal tenants to the channel's existing rules", async () => {
-    await expect(assertTenantNotDemoForSend(SUSPENDED)).resolves.toBeUndefined();
+  it("SA-02: refuses suspended and canceled houses with TENANT_SUSPENDED", async () => {
+    for (const tenantId of [SUSPENDED, CANCELED]) {
+      const refusal = assertTenantNotDemoForSend(tenantId);
+      await expect(refusal).rejects.toBeInstanceOf(TenantSuspendedError);
+      await expect(assertTenantNotDemoForSend(tenantId)).rejects.toMatchObject({
+        code: "TENANT_SUSPENDED",
+        message: TENANT_SUSPENDED_TEXT,
+      });
+    }
     await expect(assertTenantNotDemoForSend(NORMAL)).resolves.toBeUndefined();
+  });
+
+  it("read-back calls (allowBillingLocked) still pass for a suspended house", async () => {
+    await expect(
+      assertTenantNotDemoForSend(SUSPENDED, { allowBillingLocked: true }),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertTenantNotDemoForSend(DEMO, { allowBillingLocked: true }),
+    ).rejects.toMatchObject({ code: "DEMO_SEND_BLOCKED" });
+  });
+
+  it("demoSendBlockedReason returns the suspended copy (null for a normal house)", async () => {
+    expect(await demoSendBlockedReason(SUSPENDED)).toBe(TENANT_SUSPENDED_TEXT);
+    expect(await demoSendBlockedReason(CANCELED)).toBe(TENANT_SUSPENDED_TEXT);
+    expect(await demoSendBlockedReason(NORMAL)).toBeNull();
+  });
+
+  it("the refusal is final for dispatchers in every shape it arrives in", () => {
+    expect(isSendBlockedError(new TenantSuspendedError())).toBe(true);
+    expect(isSendBlockedError(TENANT_SUSPENDED_TEXT)).toBe(true);
+    expect(isSendBlockedError({ code: "TENANT_SUSPENDED" })).toBe(true);
+    // Journeys wrap an SMS result's `error` in a ProviderSendError (status 0).
+    const wrapped = new ProviderSendError({
+      channel: "sms",
+      message: TENANT_SUSPENDED_TEXT,
+      status: 0,
+    });
+    expect(classifyProviderFailure(wrapped)).toMatchObject({
+      kind: "fail",
+      reason: "tenant_blocked",
+    });
   });
 });
 
@@ -476,11 +523,49 @@ describe("link preparation never writes link_dispatches for a demo tenant", () =
   });
 });
 
-describe("suspended tenants keep their previous behaviour", () => {
-  it("sendSmsInternal still throws the operational block message", async () => {
+describe("SA-02: suspended/canceled houses send nothing on any channel", () => {
+  it("sendSmsInternal: final failure with the suspended copy, no fetch, nothing recorded", async () => {
+    for (const tenantId of [SUSPENDED, CANCELED]) {
+      const r = await sendSmsInternal({ to: "+5511999999999", content: "Oi", tenantId });
+      expect(r.ok).toBe(false);
+      expect((r as { error?: string }).error).toBe(TENANT_SUSPENDED_TEXT);
+      expect((r as { temporary?: boolean }).temporary).toBe(false);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expectNothingRecorded();
+  });
+
+  it("e-mail: TENANT_SUSPENDED, no fetch, nothing recorded", async () => {
+    for (const tenantId of [SUSPENDED, CANCELED]) {
+      await expect(sendInfobipEmail(emailInput(tenantId))).rejects.toMatchObject({
+        code: "TENANT_SUSPENDED",
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expectNothingRecorded();
+  });
+
+  it("external WhatsApp webhook: not sent, suspended copy as reason", async () => {
+    const r = await sendExternalTriggerEvent({
+      integration: integration(SUSPENDED),
+      trigger: "recuperacao_vip",
+      lead: { id: null, telefone: "5511900000001", nome: "Lead" },
+      isTest: true,
+    });
+    expect(r.sent).toBe(false);
+    expect(r.reason).toBe(TENANT_SUSPENDED_TEXT);
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  it("ElevenLabs: TENANT_SUSPENDED, no fetch", async () => {
     await expect(
-      sendSmsInternal({ to: "+5511999999999", content: "Oi", tenantId: SUSPENDED }),
-    ).rejects.toThrow("Tenant bloqueado para operacoes");
+      callElevenLabs({
+        tenantId: CANCELED,
+        text: "Olá",
+        voiceId: "voice-1",
+        voiceSettings: DEFAULT_VOICE_SETTINGS,
+      }),
+    ).rejects.toMatchObject({ code: "TENANT_SUSPENDED" });
     expect(fetchMock).toHaveBeenCalledTimes(0);
   });
 });

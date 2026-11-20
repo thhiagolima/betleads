@@ -13,7 +13,12 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { readMigration, resetSession as resetDbSession, SCHEMA, SEED } from "./billing-db-test-support";
+import {
+  readMigration,
+  resetSession as resetDbSession,
+  SCHEMA,
+  SEED,
+} from "./billing-db-test-support";
 
 const PRICE_BOOK_MIGRATION = readMigration(
   "supabase/migrations/20261022100000_billing_price_book.sql",
@@ -150,11 +155,19 @@ async function dayBefore(yyyyMmDd: string): Promise<string> {
   return scalar<string>(`select (date '${yyyyMmDd}' - interval '1 day')::date::text v`);
 }
 
+/** The calendar day `n` days after `yyyyMmDd` (plain date arithmetic). */
+async function daysAfter(yyyyMmDd: string, n: number): Promise<string> {
+  return scalar<string>(`select (date '${yyyyMmDd}' + ${n})::text v`);
+}
+
 async function manualSettle(invoice: string, paidAt: string | null): Promise<void> {
-  await admin(
-    "select public.billing_admin_manual_settle($1, $2, $3, $4, $5)",
-    [invoice, 400000, "pago por TED", "comprovante 123", paidAt],
-  );
+  await admin("select public.billing_admin_manual_settle($1, $2, $3, $4, $5)", [
+    invoice,
+    400000,
+    "pago por TED",
+    "comprovante 123",
+    paidAt,
+  ]);
 }
 
 async function refresh(tenant: string): Promise<string> {
@@ -172,12 +185,18 @@ describe("billing_admin_manual_settle with _paid_at", () => {
     await setToday("2026-11-10");
     const tenant = await createHouse("enterprise");
     const invoice = await openInvoiceOf(tenant);
+    // The lower bound is the invoice's REAL issue day (`created_at` = wall
+    // clock), so a fixed calendar date eventually falls before it and gets
+    // rejected. Pay on the issue day itself and move the test clock two days
+    // later, so that date is genuinely in the past and must be kept as-is.
+    const issueDay = await issueDayBRT(invoice!.id);
+    await setToday(await daysAfter(issueDay, 2));
 
-    await manualSettle(invoice!.id, "2026-11-08 09:00:00-03");
+    await manualSettle(invoice!.id, `${issueDay} 09:00:00-03`);
 
     const row = await paidAtAndVia(invoice!.id);
     expect(row.paid_via).toBe("manual");
-    expect(row.paid_at).toBe("2026-11-08 09:00:00");
+    expect(row.paid_at).toBe(`${issueDay} 09:00:00`);
   });
 
   it("a future date is clamped to now", async () => {

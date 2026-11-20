@@ -36,10 +36,7 @@ function callback(token: string | null, ref: { id?: string; parceiroId?: string 
   return get({ request: new Request(url) });
 }
 
-type PathHandler = (input: {
-  request: Request;
-  params: { token: string };
-}) => Promise<Response>;
+type PathHandler = (input: { request: Request; params: { token: string } }) => Promise<Response>;
 const pathHandlers = (
   PathRoute as unknown as {
     options: { server: { handlers: { GET: PathHandler; POST: PathHandler } } };
@@ -216,6 +213,20 @@ describe("Short Brasil sms-webhook: callback scope", () => {
       expect(await response.json()).toMatchObject({ matched: 0 });
       expect(orphans()).toHaveLength(0);
     });
+  });
+
+  it("a body over the callback limit is refused with 413 before anything is stored", async () => {
+    const post = (Route as unknown as { options: { server: { handlers: { POST: Handler } } } })
+      .options.server.handlers.POST;
+    const response = await post({
+      request: new Request("https://betleads.io/api/public/sms-webhook", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "x".repeat(2 * 1024 * 1024 + 1),
+      }),
+    });
+    expect(response.status).toBe(413);
+    expect(orphans()).toHaveLength(0);
   });
 
   describe("token in the path (/api/public/sms-webhook/$token)", () => {

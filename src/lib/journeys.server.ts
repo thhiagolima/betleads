@@ -68,6 +68,8 @@ type JourneyRow = {
   daily_limit: number;
   cooldown_hours: number;
   express?: boolean | null;
+  /** D-4: optional end date; past it the journey sends nothing more. */
+  ends_at?: string | null;
 };
 type EnrollmentRow = {
   id: string;
@@ -437,6 +439,38 @@ async function stepChannelDisabled(tenantId: string, stepType: string | null | u
   return channel ? !(await isChannelEnabled(tenantId, channel)) : false;
 }
 
+/**
+ * Journeys honour the voice kill switch only when it is set to "false"
+ * explicitly. The voice queue dispatcher is fail-closed on the same flag
+ * (unset = off), but journey voice steps have always called regardless of it:
+ * reading "unset" as off here would silently stop every journey call on the
+ * first deploy where the flag isn't in the env.
+ */
+function journeyVoiceKillSwitchOn(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.VOICE_DISPATCH_ENABLED?.trim().toLowerCase() === "false";
+}
+
+/**
+ * Why a send step's channel is unavailable, or null when it can send:
+ * `voice_dispatch_disabled` for a voice step while VOICE_DISPATCH_ENABLED is
+ * explicitly "false" (SA-13), `channel_disabled` when the house turned the
+ * channel off (tenant_channels).
+ */
+async function stepChannelUnavailable(
+  tenantId: string,
+  stepType: string | null | undefined,
+): Promise<"voice_dispatch_disabled" | "channel_disabled" | null> {
+  if (stepType === "voice" && journeyVoiceKillSwitchOn()) return "voice_dispatch_disabled";
+  return (await stepChannelDisabled(tenantId, stepType)) ? "channel_disabled" : null;
+}
+
+/** D-4: the journey's end date has passed. */
+export function journeyHasEnded(endsAt: string | null | undefined, now = Date.now()): boolean {
+  if (!endsAt) return false;
+  const end = Date.parse(endsAt);
+  return Number.isFinite(end) && end <= now;
+}
+
 async function executeEnrollment(
   id: string,
   ctx: DispatchContext,
@@ -454,13 +488,25 @@ async function executeEnrollment(
   const { data: journeyRaw } = await db
     .from("journeys")
     .select(
-      "id,status,trigger_type,trigger_config,exit_rules,entry_rules,daily_limit,cooldown_hours,express",
+      "id,status,trigger_type,trigger_config,exit_rules,entry_rules,daily_limit,cooldown_hours,express,ends_at",
     )
     .eq("id", enrollment.journey_id)
     .maybeSingle();
   const journey = journeyRaw as JourneyRow | null;
   if (!journey || journey.status !== "active") {
     await release(enrollment, ctx, { status: "paused" });
+    return;
+  }
+  // SA-02 / D-4: past its end date the journey sends nothing more. The claim
+  // already skips ended journeys; this covers an item claimed just before the
+  // end. Same final state the exit sweep writes (`journey_ended`).
+  if (journeyHasEnded(journey.ends_at)) {
+    await release(enrollment, ctx, {
+      status: "exited",
+      exited_at: new Date().toISOString(),
+      exit_reason: "journey_ended",
+    });
+    await event(enrollment, "exited", { reason: "journey_ended", source: "dispatcher" });
     return;
   }
   if (!(await stillMatchesJourneyEntry(enrollment, journey))) {
@@ -504,12 +550,14 @@ async function executeEnrollment(
     return;
   }
 
-  // Channel turned off for the house (tenant_channels): the step is skipped
-  // like a holdout — no send, no charge, not a failure — and the journey
-  // moves on. Re-enabling the channel never resends a skipped step.
-  if (await stepChannelDisabled(enrollment.tenant_id, step.step_type)) {
+  // Channel turned off for the house (tenant_channels), or a voice step while
+  // the platform's voice dispatch is off (VOICE_DISPATCH_ENABLED, SA-13): the
+  // step is skipped like a holdout — no send, no charge, not a failure — and
+  // the journey moves on. Re-enabling never resends a skipped step.
+  const unavailable = await stepChannelUnavailable(enrollment.tenant_id, step.step_type);
+  if (unavailable) {
     const run = await execution(enrollment, step, step.step_type);
-    await finishExecution(run.id, { status: "skipped", provider: "channel_disabled" });
+    await finishExecution(run.id, { status: "skipped", provider: unavailable });
     await release(enrollment, ctx, {
       status: "active",
       current_position: step.position + 1,
@@ -519,7 +567,7 @@ async function executeEnrollment(
     await event(enrollment, "step_skipped", {
       channel: step.step_type,
       step_position: step.position,
-      reason: "channel_disabled",
+      reason: unavailable,
     });
     return;
   }
@@ -1883,9 +1931,9 @@ async function runJourneyDispatcherMonitored(limit: number, run: JobRunHandle) {
         let gate: ChannelGate | null = null;
         try {
           let channel = row.step_type && SEND_CHANNELS.has(row.step_type) ? row.step_type : null;
-          // Channel off for the house: no breaker gate nor budget permit;
-          // executeEnrollment marks the step skipped and moves on.
-          if (channel && (await stepChannelDisabled(row.tenant_id, channel))) channel = null;
+          // Channel off for the house (or voice dispatch off): no breaker gate
+          // nor budget permit; executeEnrollment marks the step skipped.
+          if (channel && (await stepChannelUnavailable(row.tenant_id, channel))) channel = null;
           if (channel === "sms" && !(await admitSmsItem(row, ctx))) {
             // Provider breaker open: handed back untouched, not part of the batch.
             claimingSource.giveBack();

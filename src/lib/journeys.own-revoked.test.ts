@@ -379,6 +379,8 @@ beforeEach(() => {
   email.sendInfobipEmail.mockReset();
   vi.stubEnv("JOURNEYS_DISPATCH_ENABLED", "true");
   vi.stubEnv("JOURNEYS_ALLOW_ALL_TENANTS", "true");
+  // SA-13: the journey voice step honours the platform voice flag.
+  vi.stubEnv("VOICE_DISPATCH_ENABLED", "true");
 });
 
 afterEach(() => {

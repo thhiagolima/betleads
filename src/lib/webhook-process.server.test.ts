@@ -296,3 +296,58 @@ describe("crash after claim followed by retry processes the event exactly once",
     expect(eventInserts).toHaveLength(1);
   });
 });
+
+describe("financial amount parsing (SA-03)", () => {
+  function setup() {
+    return fakeSupabase(
+      (op) => {
+        if (op.table === "webhook_logs" && op.op === "insert") return { data: { id: "log-1" } };
+        if (op.table === "players" && op.op === "select") return { data: { id: "player-1" } };
+        if (op.table === "financial_webhook_attempts" && op.op === "insert")
+          return { data: { id: "attempt-1" } };
+        return undefined;
+      },
+      (name) => (name === "claim_webhook_event" ? { data: true } : {}),
+    );
+  }
+  const deposit = (amount: unknown) => ({
+    eventId: "evt-dep-1",
+    data: { userId: "user-1", transactionId: "tx-1", amount },
+  });
+
+  it("records a BR-formatted amount ('R$ 1.234,56') instead of dropping the deposit", async () => {
+    const { sb, ops } = setup();
+    const res = await processWebhookEvent(sb, TENANT, "deposito-aprovado", deposit("R$ 1.234,56"));
+    expect(res.status).toBe(200);
+    const rpc = (sb.rpc as unknown as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => c[0] === "record_financial_webhook_event",
+    );
+    expect(rpc?.[1]).toMatchObject({ p_amount: 1234.56, p_kind: "deposit" });
+    expect(logUpdates(ops).at(-1)?.payload?.status).toBe("processado");
+  });
+
+  it("marks the log as erro (still HTTP 200) when the amount cannot be read", async () => {
+    const { sb, ops } = setup();
+    const res = await processWebhookEvent(sb, TENANT, "deposito-aprovado", deposit("dez reais"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: false, error: "Valor da transação inválido" });
+    const rpcNames = (sb.rpc as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    expect(rpcNames).not.toContain("record_financial_webhook_event");
+    const last = logUpdates(ops).at(-1);
+    expect(last?.payload).toMatchObject({
+      status: "erro",
+      payload: { _processing: { step: "financial_amount", error: "invalid_amount" } },
+    });
+    expect(ops.some((o) => o.payload?.status === "processado")).toBe(false);
+  });
+
+  it("keeps ignoring an absent amount on non-financial events", async () => {
+    const { sb, ops } = setup();
+    const res = await processWebhookEvent(sb, TENANT, "login", {
+      eventId: "evt-login-1",
+      data: { userId: "user-1", amount: "abc" },
+    });
+    expect(res.status).toBe(200);
+    expect(logUpdates(ops).at(-1)?.payload?.status).toBe("processado");
+  });
+});

@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { DemoTenantBlockedError } from "@/lib/demo-tenant";
 import { isEffectiveLock, type BillingAccessState } from "@/lib/billing/billing-view";
 import { isSendBlockedError, TenantBillingLockedError } from "@/lib/billing/billing-locked-error";
+import { TenantSuspendedError } from "@/lib/tenant-suspended-error";
 
 type DbError = { message: string };
 type DbResult<T = unknown> = { data: T | null; error: DbError | null };
@@ -356,7 +357,8 @@ export async function resolveOperationalTenantId(supabase: RpcClient) {
  * null/undefined tenant id, an unknown tenant, or a demo tenant are all
  * refused with `DemoTenantBlockedError("DEMO_SEND_BLOCKED")` so nothing is
  * ever sent/recorded as sent on their behalf. A suspended/canceled tenant
- * keeps the existing `assertTenantCanOperate` message. A house with an
+ * keeps the existing `assertTenantCanOperate` message (its callers, expert
+ * links and expert AI, match on it). A house with an
  * effective billing lock is refused with `TenantBillingLockedError` for
  * everyone: sends are not user-scoped, so the superadmin exemption does not
  * apply here.
@@ -374,18 +376,21 @@ export async function assertTenantCanSendExternally(tenantId: string | null | un
 }
 
 /**
- * The demo half of `assertTenantCanSendExternally`, plus the billing lock,
- * for channels that never checked the tenant's billing status before
- * (e-mail, external webhook, Short.io, ElevenLabs): throws
- * `DemoTenantBlockedError` (`DEMO_SEND_BLOCKED`, fail-closed for
- * null/undefined/unknown/demo) or `TenantBillingLockedError` (effective
- * billing lock, for everyone), and leaves suspended/canceled tenants to each
- * channel's existing rules. A failed tenant lookup throws its own error
- * (also blocking the send).
+ * The send guard of every channel (SMS, e-mail, voice, WhatsApp, push,
+ * external webhook, Short.io, AI): throws
+ * - `DemoTenantBlockedError` (`DEMO_SEND_BLOCKED`, fail-closed for
+ *   null/undefined/unknown/demo);
+ * - `TenantSuspendedError` (`TENANT_SUSPENDED`) for a house whose status is
+ *   suspended or canceled (SA-02: before, each channel had its own rule and
+ *   e-mail, voice, WhatsApp and push still sent for such a house);
+ * - `TenantBillingLockedError` (effective billing lock, for everyone).
+ * All three are final for a dispatcher (`isSendBlockedError`). A failed
+ * tenant lookup throws its own error (also blocking the send).
  *
  * `allowBillingLocked` is only for calls that READ data back from a provider
  * for the house (Short.io click statistics): like the house's inbound
- * webhook, they keep working while the house is locked.
+ * webhook, they keep working while the house is locked or suspended — they
+ * send nothing in the house's name.
  */
 export async function assertTenantNotDemoForSend(
   tenantId: string | null | undefined,
@@ -396,16 +401,18 @@ export async function assertTenantNotDemoForSend(
   // propagates, so the send is refused (fail-closed).
   const tenant = await getCachedTenantStatus(tenantId);
   if (!tenant || tenant.is_demo) throw new DemoTenantBlockedError("DEMO_SEND_BLOCKED");
-  if (!options.allowBillingLocked && hasEffectiveBillingLock(tenant)) {
-    throw new TenantBillingLockedError();
+  if (options.allowBillingLocked) return;
+  if (tenant.status && blockedOperationalStatuses.has(tenant.status)) {
+    throw new TenantSuspendedError();
   }
+  if (hasEffectiveBillingLock(tenant)) throw new TenantBillingLockedError();
 }
 
 /**
  * `assertTenantNotDemoForSend` for senders whose contract is a result object:
- * the refusal message (`DEMO_SEND_BLOCKED` copy or the billing lock copy)
- * when the tenant is refused, else null. A lookup error is rethrown (the
- * send never happens).
+ * the refusal message (`DEMO_SEND_BLOCKED` copy, the suspended-house copy or
+ * the billing lock copy) when the tenant is refused, else null. A lookup
+ * error is rethrown (the send never happens).
  */
 export async function demoSendBlockedReason(
   tenantId: string | null | undefined,

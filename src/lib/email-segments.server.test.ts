@@ -52,8 +52,13 @@ vi.mock("@/integrations/supabase/client.server", () => {
       gte: () => builder,
       then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => {
         let data = rows().filter((row) => filters.every((f) => f(row)));
-        if (head) return Promise.resolve({ data: null, count: data.length, error: null }).then(resolve, reject);
-        if (order) data = [...data].sort((a, b) => String(a[order!]).localeCompare(String(b[order!])));
+        if (head)
+          return Promise.resolve({ data: null, count: data.length, error: null }).then(
+            resolve,
+            reject,
+          );
+        if (order)
+          data = [...data].sort((a, b) => String(a[order!]).localeCompare(String(b[order!])));
         return Promise.resolve({ data: data.slice(0, Math.min(cap, 1000)), error: null }).then(
           resolve,
           reject,
@@ -135,5 +140,26 @@ describe("e-mail audiences have no size cap", () => {
     );
     expect(rows).toHaveLength(6_000);
     expect(Math.max(...state.inSizes)).toBeLessThanOrEqual(300);
+  });
+});
+
+// SA-11: an unknown segment used to fall into `default: break` = every player
+// with an e-mail. It must fail loudly instead.
+describe("unknown e-mail segments never resolve to the whole base", () => {
+  it.each(["Público salvo", "Lista de e-mails", "Segmento que não existe", "todos"])(
+    "%s is refused by load and count",
+    async (segmento) => {
+      await expect(loadPlayersForSegment(A, segmento)).rejects.toThrow(
+        /Público de e-mail desconhecido/,
+      );
+      await expect(countPlayersForSegment(A, segmento)).rejects.toThrow(
+        /Público de e-mail desconhecido/,
+      );
+    },
+  );
+
+  it("known segments still resolve", async () => {
+    expect((await loadPlayersForSegment(A, "Todos")).map((r) => r.id)).toEqual(["a1", "a2"]);
+    expect((await loadPlayersForSegment(A, "VIP")).map((r) => r.id)).toEqual(["a1"]);
   });
 });

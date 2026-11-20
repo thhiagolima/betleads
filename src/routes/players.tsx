@@ -9,6 +9,8 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useActiveTenant } from "@/hooks/use-active-tenant";
+import { tenantReads } from "@/lib/active-tenant-filter";
 import { POLL_INTERVALS } from "@/hooks/use-updated-ago";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Input } from "@/components/ui/input";
@@ -449,16 +451,11 @@ function PlayersPage() {
     });
   }, [isDetailRoute, linkedPlayerId, navigate]);
 
-  // Nome do tenant atual para a copy de pré-ligação. RLS já garante que
-  // o usuário só vê o próprio tenant.
-  const { data: tenantBrand } = useQuery({
-    queryKey: ["current-tenant-brand"],
-    queryFn: async () => {
-      const { data } = await supabase.from("tenants").select("nome").limit(1).maybeSingle();
-      return (data?.nome as string | undefined) ?? "";
-    },
-    staleTime: 5 * 60_000,
-  });
+  // Nome da casa ativa para a copy de pré-ligação. Não basta ler `tenants`
+  // com limit(1): para o super admin (ou quem tem várias casas) a RLS devolve
+  // todas, e a mensagem sairia com a marca de outra casa.
+  const activeTenant = useActiveTenant();
+  const tenantBrand = activeTenant.active?.nome ?? "";
 
   const fetchGamification = useServerFn(getGamificationData);
   const {
@@ -856,19 +853,27 @@ function PlayersPage() {
   // Esse é o único caso que ainda baixa muitas linhas — mas só dispara quando
   // esses chips específicos são clicados.
   const { data: localAlertData } = useQuery({
-    queryKey: ["players-local-alerts", filter, search, currency],
+    queryKey: [
+      "players-local-alerts",
+      activeTenant.data?.activeTenantId ?? null,
+      filter,
+      search,
+      currency,
+    ],
     enabled: isLocalAlertFilter,
     refetchInterval: isLocalAlertFilter ? 30_000 : false,
     staleTime: 15_000,
     queryFn: async () => {
       const iso60 = new Date(Date.now() - 60 * 86400000).toISOString();
       const iso30 = new Date(Date.now() - 30 * 86400000).toISOString();
+      // Every read is scoped to the active house: RLS alone shows a super
+      // admin all houses (and these lists carry phones and e-mails).
+      const { from: scoped } = await tenantReads(supabase);
       // Pega todos os players (slim) — só as colunas que detectAlerts usa.
       const all: Player[] = [];
       const PAGE = 1000;
       for (let from = 0; ; from += PAGE) {
-        const { data, error } = await supabase
-          .from("players")
+        const { data, error } = await scoped("players")
           .select(
             "id,nome,telefone,email,player_external_id,origem,expert,status,ultimo_login,ultimo_jogo,ultimo_deposito,total_depositado,total_sacado,saldo_carteira,saldo_bonus,tags,vip,risco,created_at,ftd_em",
           )
@@ -879,24 +884,17 @@ function PlayersPage() {
         if (batch.length < PAGE) break;
       }
       const [depsRes, wdRes, sessRes, fupRes] = await Promise.all([
-        supabase
-          .from("deposits")
+        scoped("deposits")
           .select("player_id,valor,created_at,status")
           .gte("created_at", iso60)
           .eq("status", "aprovado")
           .limit(20000),
-        supabase
-          .from("withdrawals")
+        scoped("withdrawals")
           .select("player_id,valor,created_at")
           .gte("created_at", iso30)
           .limit(10000),
-        supabase
-          .from("sessions")
-          .select("player_id,iniciado_em")
-          .gte("iniciado_em", iso60)
-          .limit(20000),
-        supabase
-          .from("lead_followups")
+        scoped("sessions").select("player_id,iniciado_em").gte("iniciado_em", iso60).limit(20000),
+        scoped("lead_followups")
           .select("player_id,alerta_tipo,created_at")
           .gte("created_at", iso30),
       ]);

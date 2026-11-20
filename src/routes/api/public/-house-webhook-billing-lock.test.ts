@@ -89,3 +89,19 @@ describe("POST /api/public/webhook/$token/$evento on a house locked for the mont
     );
   });
 });
+
+describe("POST /api/public/webhook/$token/$evento body limit (ENG-05)", () => {
+  it("answers 413 for a body over 256 KB and processes nothing", async () => {
+    const response = await POST({
+      request: new Request(`https://app.example.test/api/public/webhook/${TOKEN}/cadastro`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: "player-1", junk: "x".repeat(300 * 1024) }),
+      }),
+      params: { token: TOKEN, evento: "cadastro" },
+    });
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({ ok: false });
+    expect(processWebhookEvent).not.toHaveBeenCalled();
+  });
+});

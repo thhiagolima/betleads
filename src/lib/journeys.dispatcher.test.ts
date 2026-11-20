@@ -165,6 +165,7 @@ vi.mock("./template-vars.server", () => ({
 
 import { runJourneyDispatcher } from "./journeys.server";
 import { MAX_NO_COST_DEFERS } from "./rate-limit/provider-errors.server";
+import { TENANT_SUSPENDED_TEXT } from "./tenant-suspended-error";
 import { __resetSmsBreakerCacheForTests } from "./sms-provider-breaker.server";
 import { __resetTenantChannelsCacheForTests } from "./tenant-channels.server";
 import { __resetProviderAccountsCacheForTests } from "./provider-accounts.server";
@@ -268,6 +269,8 @@ beforeEach(() => {
   alerts.notifyNoBalance.mockResolvedValue(false);
   vi.stubEnv("JOURNEYS_DISPATCH_ENABLED", "true");
   vi.stubEnv("JOURNEYS_ALLOW_ALL_TENANTS", "true");
+  // SA-13: the journey voice step honours the platform voice flag.
+  vi.stubEnv("VOICE_DISPATCH_ENABLED", "true");
 });
 
 afterEach(() => {
@@ -1420,13 +1423,32 @@ describe("runJourneyDispatcher with a channel disabled for the house", () => {
   function seedVoiceAtPosition2(stepTypeOnClaim: boolean) {
     seed(["e1"]);
     fake.tables.journey_steps = [
-      { id: "step-2", journey_id: JOURNEY, position: 2, step_type: "voice", is_enabled: true, config: { asset_id: "a1" } },
-      { id: "step-3", journey_id: JOURNEY, position: 3, step_type: "sms", is_enabled: true, config: { content: "oi" } },
+      {
+        id: "step-2",
+        journey_id: JOURNEY,
+        position: 2,
+        step_type: "voice",
+        is_enabled: true,
+        config: { asset_id: "a1" },
+      },
+      {
+        id: "step-3",
+        journey_id: JOURNEY,
+        position: 3,
+        step_type: "sms",
+        is_enabled: true,
+        config: { content: "oi" },
+      },
     ];
     fake.tables.journey_voice_assets = [{ id: "a1", tenant_id: TENANT, storage_path: "x.mp3" }];
     fake.tables.journey_enrollments[0].current_position = 2;
     fake.tables.tenant_channels = [
-      { tenant_id: TENANT, channel: "voice", enabled: false, disabled_at: new Date().toISOString() },
+      {
+        tenant_id: TENANT,
+        channel: "voice",
+        enabled: false,
+        disabled_at: new Date().toISOString(),
+      },
     ];
     if (stepTypeOnClaim) {
       let claimed = false;
@@ -1449,11 +1471,19 @@ describe("runJourneyDispatcher with a channel disabled for the house", () => {
     expect(rpcNames()).not.toContain("acquire_channel_slot");
     expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 3, attempts: 0 });
     expect(fake.tables.journey_step_executions).toEqual([
-      expect.objectContaining({ step_id: "step-2", status: "skipped", provider: "channel_disabled" }),
+      expect.objectContaining({
+        step_id: "step-2",
+        status: "skipped",
+        provider: "channel_disabled",
+      }),
     ]);
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
       event_type: "step_skipped",
-      detail: expect.objectContaining({ channel: "voice", step_position: 2, reason: "channel_disabled" }),
+      detail: expect.objectContaining({
+        channel: "voice",
+        step_position: 2,
+        reason: "channel_disabled",
+      }),
     });
   }
 
@@ -1520,12 +1550,157 @@ describe("runJourneyDispatcher: channel turned off between the skip check and th
     expect(fake.tables.journey_step_executions).toEqual([
       // The execution reserved by reserve_journey_delivery_v2 (its fake
       // row carries no step_id).
-      expect.objectContaining({ enrollment_id: "e1", status: "skipped", provider: "channel_disabled" }),
+      expect.objectContaining({
+        enrollment_id: "e1",
+        status: "skipped",
+        provider: "channel_disabled",
+      }),
     ]);
     expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
       event_type: "step_skipped",
-      detail: expect.objectContaining({ channel: "sms", step_position: 0, reason: "channel_disabled" }),
+      detail: expect.objectContaining({
+        channel: "sms",
+        step_position: 0,
+        reason: "channel_disabled",
+      }),
+    });
+  });
+});
+
+describe("runJourneyDispatcher with VOICE_DISPATCH_ENABLED off (SA-13)", () => {
+  function seedVoiceStep() {
+    seed(["e1"]);
+    fake.tables.journey_steps = [
+      {
+        id: "step-0",
+        journey_id: JOURNEY,
+        position: 0,
+        step_type: "voice",
+        is_enabled: true,
+        config: { asset_id: "a1" },
+      },
+      {
+        id: "step-1",
+        journey_id: JOURNEY,
+        position: 1,
+        step_type: "sms",
+        is_enabled: true,
+        config: { content: "oi" },
+      },
+    ];
+    fake.tables.journey_voice_assets = [{ id: "a1", tenant_id: TENANT, storage_path: "x.mp3" }];
+    let claimed = false;
+    fake.rpcs.claim_journey_enrollments_leased = (args) => {
+      if (claimed) return [];
+      claimed = true;
+      const row = fake.tables.journey_enrollments[0];
+      row.claimed_at = new Date().toISOString();
+      row.claimed_by = args.p_worker_id;
+      return [{ id: row.id, tenant_id: row.tenant_id, step_type: "voice" }];
+    };
+  }
+
+  for (const value of ["false", "FALSE"]) {
+    it(`skips the voice step like a disabled channel (VOICE_DISPATCH_ENABLED=${JSON.stringify(value)})`, async () => {
+      vi.stubEnv("VOICE_DISPATCH_ENABLED", value);
+      seedVoiceStep();
+      const result = await runJourneyDispatcher(1000);
+      expect(result).toMatchObject({ failed: 0 });
+      expect(voice.callInfobipVoice).not.toHaveBeenCalled();
+      expect(rpcNames().some((name) => name.startsWith("reserve_journey_delivery"))).toBe(false);
+      expect(rpcNames()).not.toContain("acquire_channel_slot");
+      expect(enrollment("e1")).toMatchObject({
+        status: "active",
+        current_position: 1,
+        attempts: 0,
+      });
+      expect(fake.tables.journey_step_executions).toEqual([
+        expect.objectContaining({
+          step_id: "step-0",
+          status: "skipped",
+          provider: "voice_dispatch_disabled",
+        }),
+      ]);
+      expect(fake.tables.journey_events.at(-1)).toMatchObject({
+        event_type: "step_skipped",
+        detail: expect.objectContaining({
+          channel: "voice",
+          step_position: 0,
+          reason: "voice_dispatch_disabled",
+        }),
+      });
+    });
+  }
+
+  it("keeps calling when the flag is unset (journeys only honour an explicit false)", async () => {
+    vi.stubEnv("VOICE_DISPATCH_ENABLED", "");
+    seedVoiceStep();
+    await runJourneyDispatcher(1000);
+    expect(
+      fake.tables.journey_step_executions.some(
+        (row: { provider?: string }) => row.provider === "voice_dispatch_disabled",
+      ),
+    ).toBe(false);
+  });
+
+  it("never affects an SMS step", async () => {
+    vi.stubEnv("VOICE_DISPATCH_ENABLED", "false");
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+    expect(enrollment("e1")).toMatchObject({ current_position: 1 });
+  });
+});
+
+describe("runJourneyDispatcher with a journey past its end date (SA-02)", () => {
+  it("exits the enrollment as journey_ended before reserving or sending", async () => {
+    seed(["e1"]);
+    fake.tables.journeys[0].ends_at = new Date(Date.now() - 60_000).toISOString();
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 0 });
+    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
+    expect(rpcNames().some((name) => name.startsWith("reserve_journey_delivery"))).toBe(false);
+    expect(enrollment("e1")).toMatchObject({
+      status: "exited",
+      exit_reason: "journey_ended",
+      claimed_by: null,
+    });
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "exited",
+      detail: expect.objectContaining({ reason: "journey_ended" }),
+    });
+  });
+
+  it("keeps sending while the end date is in the future", async () => {
+    seed(["e1"]);
+    fake.tables.journeys[0].ends_at = new Date(Date.now() + 86_400_000).toISOString();
+    sms.sendSmsInternal.mockResolvedValue({ ok: true, status: 200, response: "{}" });
+    await runJourneyDispatcher(1000);
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
+    expect(enrollment("e1")).toMatchObject({ status: "active", current_position: 1 });
+  });
+});
+
+describe("runJourneyDispatcher with a suspended house (SA-02)", () => {
+  it("a send refused as suspended fails the enrollment at once, never retried", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: TENANT_SUSPENDED_TEXT,
+      temporary: false,
+    });
+    const result = await runJourneyDispatcher(1000);
+    expect(result).toMatchObject({ failed: 1, rescheduled: 0 });
+    // attempts 1 -> 2 is below max_attempts (3): failed only because the
+    // refusal is final (tenant_blocked).
+    expect(enrollment("e1")).toMatchObject({ status: "failed", attempts: 2, claimed_by: null });
+    expect(String(enrollment("e1").exit_reason)).toContain(TENANT_SUSPENDED_TEXT);
+    expect(fake.tables.journey_events.at(-1)).toMatchObject({
+      event_type: "failed",
+      detail: expect.objectContaining({ reason: "tenant_blocked" }),
     });
   });
 });

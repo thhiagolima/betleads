@@ -205,7 +205,43 @@ docker compose ps
 docker compose logs -f crm
 ```
 
-O healthcheck consulta `http://localhost:3000/` dentro do container.
+O healthcheck consulta `http://localhost:3000/api/public/health` dentro do
+container (processo + banco; responde 503 quando o banco não responde).
+
+O compose para com erro se faltar `VITE_SUPABASE_URL`,
+`VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_PUBLIC_APP_URL` ou `PUBLIC_APP_URL` no
+`.env`: antes ele subia com `localhost` e os callbacks dos provedores quebravam
+sem aviso.
+
+## Deploy com versão e volta rápida (rollback)
+
+Cada deploy gera uma imagem com o commit no nome. A imagem anterior continua na
+VPS, então voltar leva segundos e não depende de novo build.
+
+```bash
+# 1. Antes: anote a versão que está no ar
+docker inspect --format '{{.Config.Image}}' $(docker compose ps -q crm)
+
+# 2. Build da nova versão (com o container atual ainda no ar)
+git pull
+export IMAGE_TAG=$(git rev-parse --short HEAD)
+SENTRY_RELEASE=$IMAGE_TAG docker compose build crm
+
+# 3. Troca (evite o minuto cheio, quando os ticks rodam)
+IMAGE_TAG=$IMAGE_TAG docker compose up -d --no-build crm
+docker compose ps        # esperar "healthy"
+curl -fsS http://127.0.0.1:3000/api/public/health
+
+# Volta (rollback) para a versão anotada no passo 1
+IMAGE_TAG=<tag-anterior> docker compose up -d --no-build crm
+```
+
+- `stop_grace_period: 60s` dá tempo para o tick em andamento terminar o lote.
+- Migrations: aplicar as aditivas **antes** do passo 3, arquivo por arquivo, e
+  registrar em `supabase_migrations.schema_migrations`. Rollback do app não
+  desfaz migration: por isso só migrations aditivas entram junto com deploy.
+- Antes de migrations com risco: snapshot/PITR confirmado no painel do Supabase.
+- Limpeza: manter as 3 últimas tags (`docker image ls crm-betleads`).
 
 ## Nginx recomendado
 

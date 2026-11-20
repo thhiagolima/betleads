@@ -237,14 +237,20 @@ function PlatformSection() {
   // UX-02: as duas ações mudam o que a casa precisa enviar; uma chave errada
   // ou ausente faz depósitos e cadastros pararem de entrar.
   async function confirmRotate() {
+    // The server refuses a new key while the signature is required (the
+    // house's old signatures would fail at once, and silently turning the
+    // requirement off was how a rotation used to drop the protection).
+    if (tokenInfo?.hmacEnforced) {
+      toast.error(
+        "Para trocar a chave, primeiro clique em “Aceitar sem assinatura por enquanto”. Depois gere a nova chave, atualize na plataforma da casa e volte a exigir a assinatura.",
+      );
+      return;
+    }
     const confirmed = tokenInfo?.hmacConfigured
       ? await requestConfirmation({
           title: "Trocar a chave de assinatura?",
-          description: `A chave atual deixa de valer imediatamente e uma nova é gerada; ela aparece uma única vez, então copie-a. ${
-            tokenInfo.hmacEnforced
-              ? "A exigência de assinatura será desligada até você ativá-la de novo, e os envios da plataforma passam a entrar sem verificação nesse intervalo. "
-              : ""
-          }Atualize a nova chave na plataforma da casa antes de exigir assinatura.`,
+          description:
+            "A chave atual deixa de valer imediatamente e uma nova é gerada; ela aparece uma única vez, então copie-a. Atualize a nova chave na plataforma da casa antes de exigir assinatura.",
           confirmLabel: "Trocar chave",
           destructive: true,
         })

@@ -131,6 +131,22 @@ describe("adminAdjustSmsCreditsFor", () => {
     expect(result).toEqual({ ok: true });
   });
 
+  it("passes the dialog's idempotency key, so a double click credits once", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    userDb.onRpc("admin_adjust_wallet", (args) => {
+      seen.push(args as Record<string, unknown>);
+      return { data: { balance: 150 }, error: null };
+    });
+    const key = "6f9619ff-8b86-4d01-b42d-00cf4fc964ff";
+    await adminAdjustSmsCreditsFor(ctxFor(SUPER_ADMIN), {
+      tenantId: TENANT,
+      amount: 50,
+      reason: "ajuste manual",
+      idempotencyKey: key,
+    });
+    expect(seen[0]?._idempotency_key).toBe(`admin_adjust:${key}`);
+  });
+
   it("calls admin_adjust_wallet with the R$ amount and audits before/after", async () => {
     const result = await adminAdjustSmsCreditsFor(ctxFor(SUPER_ADMIN), {
       tenantId: TENANT,

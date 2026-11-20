@@ -18,16 +18,17 @@ type JsonRecord = Record<string, unknown>;
 type EventFilter = { scope: CallbackScope; ownedAccountIds: ReadonlySet<string> };
 
 function globalToken(): string | undefined {
+  // `||`, not `??`: an e-mail token set to "" must fall back to the voice
+  // token (the same one infobip-email.server.ts puts in the notifyUrl).
   return (
-    process.env.INFOBIP_EMAIL_CALLBACK_TOKEN?.trim() ??
-    process.env.INFOBIP_VOICE_CALLBACK_TOKEN?.trim()
+    process.env.INFOBIP_EMAIL_CALLBACK_TOKEN?.trim() ||
+    process.env.INFOBIP_VOICE_CALLBACK_TOKEN?.trim() ||
+    undefined
   );
 }
 
 function asRecord(value: unknown): JsonRecord | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : null;
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
 }
 
 function callbackData(event: JsonRecord): string | null {
@@ -38,13 +39,20 @@ function callbackData(event: JsonRecord): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
+// QA-40: failure is checked FIRST. Infobip names such as
+// UNDELIVERABLE_NOT_DELIVERED or REJECTED_NOT_SENT contain "DELIVERED"/"SENT"
+// and used to count as delivered. PENDING_* (e.g. PENDING_WAITING_DELIVERY)
+// is not final -> null. Delivered only on a whole DELIVERED token
+// (DELIVERED, DELIVERED_TO_HANDSET, DELIVERED_TO_OPERATOR) or a bare SENT.
 function delivered(event: JsonRecord): boolean | null {
   const status = asRecord(event.status);
-  const raw = String(
-    status?.groupName ?? status?.name ?? event.status ?? event.state ?? "",
-  ).toUpperCase();
-  if (/(DELIVERED|DELIVERY|SENT)/.test(raw)) return true;
-  if (/(REJECT|UNDELIVER|FAIL|EXPIRE|BOUNCE|ERROR)/.test(raw)) return false;
+  const raw = String(status?.groupName ?? status?.name ?? event.status ?? event.state ?? "")
+    .trim()
+    .toUpperCase();
+  if (!raw) return null;
+  if (/(REJECT|UNDELIVER|NOT_DELIVERED|NOT_SENT|FAIL|EXPIRE|BOUNCE|ERROR)/.test(raw)) return false;
+  if (/^PENDING/.test(raw)) return null;
+  if (/(^|_)DELIVERED(_|$)/.test(raw) || raw === "SENT") return true;
   return null;
 }
 
@@ -55,11 +63,13 @@ async function applyEvent(correlation: string, event: JsonRecord, filter: EventF
     .contains("provider_response", { idempotency_key: correlation })
     .limit(20);
   if (error) throw error;
-  const rows = ((data ?? []) as Array<{
-    id: string;
-    provider_response: unknown;
-    provider_account_id?: string | null;
-  }>).filter((row) =>
+  const rows = (
+    (data ?? []) as Array<{
+      id: string;
+      provider_response: unknown;
+      provider_account_id?: string | null;
+    }>
+  ).filter((row) =>
     scopeAllowsRow(filter.scope, row.provider_account_id ?? null, filter.ownedAccountIds),
   );
   const isDelivered = delivered(event);
@@ -71,7 +81,9 @@ async function applyEvent(correlation: string, event: JsonRecord, filter: EventF
         .update({
           provider_response: { ...previous, delivery_event: event } as never,
           ...(isDelivered === true ? { status: "delivered" } : {}),
-          ...(isDelivered === false ? { status: "error", error: "Entrega recusada pelo provedor" } : {}),
+          ...(isDelivered === false
+            ? { status: "error", error: "Entrega recusada pelo provedor" }
+            : {}),
         })
         .eq("id", row.id);
     }),
