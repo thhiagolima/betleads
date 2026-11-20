@@ -10,6 +10,10 @@
 // ticked from real data (connections, first tool call), example questions per
 // granted area, how write confirmations work, what Claude never sees and the
 // common problems. Help article: src/help/screens/mcp.ts.
+//
+// At the bottom, "API (sistemas internos)": the user's own read-only API keys
+// (src/lib/api), shown only while API_ENABLED is on. A new key is shown once.
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -23,6 +27,7 @@ import { EmptyState } from "@/components/ui-premium/empty-state";
 import { Page, PageHeader } from "@/components/ui-premium/page-header";
 import { Term } from "@/components/help/term";
 import { tourAnchor } from "@/help/anchor";
+import { createMyApiKey, getMyApiKeys, revokeMyApiKey } from "@/lib/api/keys.functions";
 import { getMyMcpStatus, revokeMyConnection } from "@/lib/mcp/mcp.functions";
 import { copyToClipboard } from "@/lib/clipboard";
 import { requestConfirmation } from "@/components/system-dialog-host";
@@ -515,6 +520,149 @@ function McpPage() {
           ))}
         </CardContent>
       </Card>
+
+      <ApiKeysCard />
     </Page>
+  );
+}
+
+function ApiKeysCard() {
+  const qc = useQueryClient();
+  const keysFn = useServerFn(getMyApiKeys);
+  const createFn = useServerFn(createMyApiKey);
+  const revokeFn = useServerFn(revokeMyApiKey);
+  const [nome, setNome] = useState("");
+  const [novaChave, setNovaChave] = useState<string | null>(null);
+
+  const { data } = useQuery({ queryKey: ["api", "my-keys"], queryFn: () => keysFn() });
+  const create = useMutation({
+    mutationFn: (value: string) => createFn({ data: { nome: value } }),
+    onSuccess: ({ key }) => {
+      setNovaChave(key);
+      setNome("");
+      qc.invalidateQueries({ queryKey: ["api", "my-keys"] });
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Erro ao criar a chave."),
+  });
+  const revoke = useMutation({
+    mutationFn: (id: string) => revokeFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Chave revogada");
+      qc.invalidateQueries({ queryKey: ["api", "my-keys"] });
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Erro ao revogar."),
+  });
+
+  if (!data?.enabled) return null;
+
+  async function revogar(id: string, keyName: string) {
+    const confirmed = await requestConfirmation({
+      title: "Revogar a chave?",
+      description: `Os sistemas que usam a chave "${keyName}" param de funcionar na hora.`,
+      confirmLabel: "Revogar",
+      destructive: true,
+    });
+    if (confirmed) revoke.mutate(id);
+  }
+
+  const exemplo = [
+    `curl -X POST ${data.apiUrl}/resumo_financeiro \\`,
+    `  -H "Authorization: Bearer SUA_CHAVE" -H "Content-Type: application/json" \\`,
+    `  -d '{"escopo":{"tipo":"casa","id":"ID_DA_CASA"},"periodo":{"preset":"month"}}'`,
+  ].join("\n");
+
+  return (
+    <Card {...tourAnchor("mcp.api.card")}>
+      <CardHeader>
+        <CardTitle>API (sistemas internos)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <p className="text-muted-foreground">
+          Para planilhas, BI e scripts: as mesmas consultas do Claude, só leitura, com as mesmas
+          casas e áreas liberadas para você. Cada chamada leva a chave no cabeçalho{" "}
+          <code className="font-mono">Authorization: Bearer</code>. Limite de 60 chamadas por
+          minuto por chave. Lista de consultas: <code className="font-mono">GET {data.apiUrl}</code>;
+          documentação: <code className="font-mono">{data.apiUrl}/openapi.json</code>.
+        </p>
+
+        {novaChave ? (
+          <div className="space-y-2 rounded-md border border-primary/40 bg-primary/5 p-3">
+            <div className="font-medium">Copie a chave agora: ela não aparece de novo.</div>
+            <div className="flex gap-2">
+              <Input
+                readOnly
+                aria-label="Nova chave de API"
+                value={novaChave}
+                className="min-w-0 flex-1 font-mono"
+              />
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => void copiar(novaChave, "Chave copiada")}
+              >
+                <Copy className="h-4 w-4" /> Copiar
+              </Button>
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => setNovaChave(null)}>
+              Já copiei
+            </Button>
+          </div>
+        ) : null}
+
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          {...tourAnchor("mcp.api.criar")}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (nome.trim()) create.mutate(nome.trim());
+          }}
+        >
+          <Input
+            aria-label="Nome da chave"
+            placeholder='Nome da chave (ex.: "Planilha do financeiro")'
+            value={nome}
+            maxLength={80}
+            onChange={(event) => setNome(event.target.value)}
+            className="min-w-0 flex-1"
+          />
+          <Button type="submit" disabled={!nome.trim() || create.isPending}>
+            {create.isPending ? "Criando…" : "Criar chave"}
+          </Button>
+        </form>
+
+        <div className="space-y-2">
+          {data.keys.length === 0 && <p className="text-muted-foreground">Nenhuma chave ativa.</p>}
+          {data.keys.map((key) => (
+            <div
+              key={key.id}
+              className="flex items-center justify-between gap-2 border-b border-border/40 pb-2 last:border-0 last:pb-0"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-medium">{key.nome}</div>
+                <div className="text-meta text-muted-foreground">
+                  <span className="font-mono">{key.prefixo}…</span> · criada em{" "}
+                  {fmtDate(key.createdAt)} · último uso: {fmtDate(key.lastUsedAt)}
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                disabled={revoke.isPending && revoke.variables === key.id}
+                onClick={() => void revogar(key.id, key.nome)}
+              >
+                {revoke.isPending && revoke.variables === key.id ? "Revogando…" : "Revogar"}
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        <details className="rounded-md border px-3 py-2">
+          <summary className="cursor-pointer font-medium">Exemplo de chamada</summary>
+          <pre className="mt-2 overflow-x-auto whitespace-pre text-xs">{exemplo}</pre>
+        </details>
+      </CardContent>
+    </Card>
   );
 }

@@ -68,7 +68,7 @@ export const resumoFinanceiroInput = z.object({
   comparar: compareMode.optional(),
 });
 
-function toDashboardScope(escopo: z.infer<typeof escopoInput>): DashboardScope {
+export function toDashboardScope(escopo: z.infer<typeof escopoInput>): DashboardScope {
   switch (escopo.tipo) {
     case "casa":
       return { kind: "tenant", tenantId: escopo.id };

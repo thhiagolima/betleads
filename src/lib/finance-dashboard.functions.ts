@@ -232,7 +232,7 @@ async function activeRealTenants(): Promise<TenantLite[]> {
 }
 
 /** The scope's label and houses, after checking the caller may see it. */
-async function resolveScope(
+export async function resolveScope(
   userId: string,
   scope: DashboardScope,
 ): Promise<{ label: string; tenants: TenantLite[] }> {

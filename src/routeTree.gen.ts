@@ -46,6 +46,7 @@ import { Route as WhatsappRouteImport } from './routes/whatsapp'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known/oauth-authorization-server'
 import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known/oauth-protected-resource'
 import { Route as ApiMcpRouteImport } from './routes/api/mcp'
+import { Route as ApiV1RouteImport } from './routes/api/v1'
 import { Route as AutomacoesEmailRouteImport } from './routes/automacoes.email'
 import { Route as AutomacoesLigacoesRouteImport } from './routes/automacoes.ligacoes'
 import { Route as AutomacoesSmsRouteImport } from './routes/automacoes.sms'
@@ -72,6 +73,7 @@ import { Route as UTokenRouteImport } from './routes/u.$token'
 import { Route as ApiPublicEvolutionWebhookRouteImport } from './routes/api/public/evolution-webhook'
 import { Route as ApiPublicHealthRouteImport } from './routes/api/public/health'
 import { Route as ApiPublicSmsWebhookRouteImport } from './routes/api/public/sms-webhook'
+import { Route as ApiV1ToolRouteImport } from './routes/api/v1.$tool'
 import { Route as CampanhasCampaignIdRelatorioRouteImport } from './routes/campanhas.$campaignId.relatorio'
 import { Route as ExpertLeadsPlayerIdRouteImport } from './routes/expert.leads.$playerId'
 import { Route as JornadasJourneyIdRelatorioRouteImport } from './routes/jornadas.$journeyId_.relatorio'
@@ -312,6 +314,11 @@ const ApiMcpRoute = ApiMcpRouteImport.update({
   path: '/api/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1Route = ApiV1RouteImport.update({
+  id: '/api/v1',
+  path: '/api/v1',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AutomacoesEmailRoute = AutomacoesEmailRouteImport.update({
   id: '/email',
   path: '/email',
@@ -442,6 +449,11 @@ const ApiPublicSmsWebhookRoute = ApiPublicSmsWebhookRouteImport.update({
   id: '/api/public/sms-webhook',
   path: '/api/public/sms-webhook',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1ToolRoute = ApiV1ToolRouteImport.update({
+  id: '/$tool',
+  path: '/$tool',
+  getParentRoute: () => ApiV1Route,
 } as any)
 const CampanhasCampaignIdRelatorioRoute =
   CampanhasCampaignIdRelatorioRouteImport.update({
@@ -779,6 +791,7 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
   '/api/mcp': typeof ApiMcpRouteWithChildren
+  '/api/v1': typeof ApiV1RouteWithChildren
   '/automacoes/email': typeof AutomacoesEmailRoute
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
@@ -805,6 +818,7 @@ export interface FileRoutesByFullPath {
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
+  '/api/v1/$tool': typeof ApiV1ToolRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
   '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
@@ -896,6 +910,7 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
   '/api/mcp': typeof ApiMcpRouteWithChildren
+  '/api/v1': typeof ApiV1RouteWithChildren
   '/automacoes/email': typeof AutomacoesEmailRoute
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
@@ -922,6 +937,7 @@ export interface FileRoutesByTo {
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
+  '/api/v1/$tool': typeof ApiV1ToolRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
   '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId/relatorio': typeof JornadasJourneyIdRelatorioRoute
@@ -1014,6 +1030,7 @@ export interface FileRoutesById {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/.well-known/oauth-protected-resource': typeof DotwellKnownOauthProtectedResourceRouteWithChildren
   '/api/mcp': typeof ApiMcpRouteWithChildren
+  '/api/v1': typeof ApiV1RouteWithChildren
   '/automacoes/email': typeof AutomacoesEmailRoute
   '/automacoes/ligacoes': typeof AutomacoesLigacoesRoute
   '/automacoes/sms': typeof AutomacoesSmsRoute
@@ -1040,6 +1057,7 @@ export interface FileRoutesById {
   '/api/public/evolution-webhook': typeof ApiPublicEvolutionWebhookRoute
   '/api/public/health': typeof ApiPublicHealthRoute
   '/api/public/sms-webhook': typeof ApiPublicSmsWebhookRoute
+  '/api/v1/$tool': typeof ApiV1ToolRoute
   '/campanhas/$campaignId/relatorio': typeof CampanhasCampaignIdRelatorioRoute
   '/expert/leads/$playerId': typeof ExpertLeadsPlayerIdRoute
   '/jornadas/$journeyId_/relatorio': typeof JornadasJourneyIdRelatorioRoute
@@ -1133,6 +1151,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
     | '/api/mcp'
+    | '/api/v1'
     | '/automacoes/email'
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
@@ -1159,6 +1178,7 @@ export interface FileRouteTypes {
     | '/api/public/evolution-webhook'
     | '/api/public/health'
     | '/api/public/sms-webhook'
+    | '/api/v1/$tool'
     | '/campanhas/$campaignId/relatorio'
     | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
@@ -1250,6 +1270,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
     | '/api/mcp'
+    | '/api/v1'
     | '/automacoes/email'
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
@@ -1276,6 +1297,7 @@ export interface FileRouteTypes {
     | '/api/public/evolution-webhook'
     | '/api/public/health'
     | '/api/public/sms-webhook'
+    | '/api/v1/$tool'
     | '/campanhas/$campaignId/relatorio'
     | '/expert/leads/$playerId'
     | '/jornadas/$journeyId/relatorio'
@@ -1367,6 +1389,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/.well-known/oauth-protected-resource'
     | '/api/mcp'
+    | '/api/v1'
     | '/automacoes/email'
     | '/automacoes/ligacoes'
     | '/automacoes/sms'
@@ -1393,6 +1416,7 @@ export interface FileRouteTypes {
     | '/api/public/evolution-webhook'
     | '/api/public/health'
     | '/api/public/sms-webhook'
+    | '/api/v1/$tool'
     | '/campanhas/$campaignId/relatorio'
     | '/expert/leads/$playerId'
     | '/jornadas/$journeyId_/relatorio'
@@ -1485,6 +1509,7 @@ export interface RootRouteChildren {
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   DotwellKnownOauthProtectedResourceRoute: typeof DotwellKnownOauthProtectedResourceRouteWithChildren
   ApiMcpRoute: typeof ApiMcpRouteWithChildren
+  ApiV1Route: typeof ApiV1RouteWithChildren
   ConfiguracoesCasaRoute: typeof ConfiguracoesCasaRoute
   ExpertLeadsRoute: typeof ExpertLeadsRouteWithChildren
   ExpertModelosRoute: typeof ExpertModelosRoute
@@ -1808,6 +1833,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMcpRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1': {
+      id: '/api/v1'
+      path: '/api/v1'
+      fullPath: '/api/v1'
+      preLoaderRoute: typeof ApiV1RouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/automacoes/email': {
       id: '/automacoes/email'
       path: '/email'
@@ -1989,6 +2021,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/public/sms-webhook'
       preLoaderRoute: typeof ApiPublicSmsWebhookRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/$tool': {
+      id: '/api/v1/$tool'
+      path: '/$tool'
+      fullPath: '/api/v1/$tool'
+      preLoaderRoute: typeof ApiV1ToolRouteImport
+      parentRoute: typeof ApiV1Route
     }
     '/campanhas/$campaignId/relatorio': {
       id: '/campanhas/$campaignId/relatorio'
@@ -2496,6 +2535,16 @@ const ApiMcpRouteChildren: ApiMcpRouteChildren = {
 const ApiMcpRouteWithChildren =
   ApiMcpRoute._addFileChildren(ApiMcpRouteChildren)
 
+interface ApiV1RouteChildren {
+  ApiV1ToolRoute: typeof ApiV1ToolRoute
+}
+
+const ApiV1RouteChildren: ApiV1RouteChildren = {
+  ApiV1ToolRoute: ApiV1ToolRoute,
+}
+
+const ApiV1RouteWithChildren = ApiV1Route._addFileChildren(ApiV1RouteChildren)
+
 interface ExpertLeadsRouteChildren {
   ExpertLeadsPlayerIdRoute: typeof ExpertLeadsPlayerIdRoute
 }
@@ -2548,6 +2597,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotwellKnownOauthProtectedResourceRoute:
     DotwellKnownOauthProtectedResourceRouteWithChildren,
   ApiMcpRoute: ApiMcpRouteWithChildren,
+  ApiV1Route: ApiV1RouteWithChildren,
   ConfiguracoesCasaRoute: ConfiguracoesCasaRoute,
   ExpertLeadsRoute: ExpertLeadsRouteWithChildren,
   ExpertModelosRoute: ExpertModelosRoute,

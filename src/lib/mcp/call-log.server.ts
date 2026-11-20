@@ -58,6 +58,15 @@ export async function checkRateLimit(identity: McpIdentity, tool: string): Promi
   }
 }
 
+/** API de leitura: throws the pt-BR limit message past CALLS_PER_MINUTE calls of one key. */
+export async function checkApiRateLimit(apiKeyId: string): Promise<void> {
+  const lastMinute = new Date(Date.now() - 60_000).toISOString();
+  const calls = await countRows((q) =>
+    q.eq("api_key_id", apiKeyId).gte("created_at", lastMinute),
+  );
+  if (calls >= CALLS_PER_MINUTE) throw new Error(RATE_LIMITED);
+}
+
 /**
  * Who performed the call: the usual MCP identity (bound to a connection), or
  * an admin action taken straight from the admin panel, outside any MCP
@@ -80,6 +89,8 @@ export type CallLogEntry = {
   /** The call's arguments (already free of secrets — the caller redacts). */
   args?: unknown;
   scope?: CallLogScope | null;
+  /** API de leitura: the key that made the call (connection_id is then null). */
+  apiKeyId?: string | null;
 };
 
 /**
@@ -115,6 +126,7 @@ export async function logCall(entry: CallLogEntry): Promise<void> {
         preview_code_hash: entry.previewCodeHash ?? null,
         args: argsForLog(entry.args),
         scope: entry.scope ?? null,
+        ...(entry.apiKeyId ? { api_key_id: entry.apiKeyId } : {}),
       });
     if (error) console.error("[mcp-call-log]", error.message);
   } catch (error) {

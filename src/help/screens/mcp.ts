@@ -160,6 +160,27 @@ const screen: HelpScreen = {
         },
       ],
     },
+    {
+      id: "api",
+      title: "API (sistemas internos)",
+      intro:
+        "Só aparece quando a API está ligada neste ambiente. É para planilhas, BI e scripts internos: as mesmas consultas de leitura do Claude, com as mesmas casas e áreas liberadas para você, mais a série diária (uma linha por casa e por dia, até 366 dias).",
+      items: [
+        {
+          anchor: "mcp.api.card",
+          label: "API (sistemas internos)",
+          what: 'Mostra o endereço da API, a lista de consultas (GET no endereço) e a documentação (openapi.json), as suas chaves ativas (nome, começo da chave, criada em, último uso) e um "Exemplo de chamada" com curl. Cada chave tem o botão Revogar, que pede confirmação: os sistemas que usam a chave param na hora (toast "Chave revogada").',
+          notes:
+            "A API só lê: nada é alterado por ela, mesmo para quem tem nível Leitura e escrita. Limite de 60 chamadas por minuto por chave. Se o super admin tirar o seu acesso ao MCP, as suas chaves param de funcionar na hora.",
+        },
+        {
+          anchor: "mcp.api.criar",
+          label: "Criar chave",
+          what: 'Dê um nome (ex.: "Planilha do financeiro") e clique em Criar chave. A chave aparece uma única vez, com o botão Copiar: guarde-a num lugar seguro e clique em "Já copiei".',
+          notes: "Até 5 chaves ativas por pessoa. Perdeu a chave? Revogue e crie outra.",
+        },
+      ],
+    },
   ],
 
   states: [

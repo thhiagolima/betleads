@@ -12,6 +12,7 @@ vi.mock("@/integrations/supabase/client.server", async () => {
   return { supabaseAdmin: fake.admin.client };
 });
 
+import { serieDiaria } from "@/lib/api/serie-diaria.server";
 import { getFinanceDashboardFor } from "@/lib/finance-dashboard.functions";
 
 import {
@@ -296,6 +297,130 @@ describe("resumoPorDia", () => {
   it("a house outside the caller's scope is refused", async () => {
     await expect(
       resumoPorDia(identity(ADMIN_A), {
+        escopo: { tipo: "casa", id: HOUSE_B },
+        periodo: { inicio: "2026-10-20", fim: "2026-10-21" },
+      }),
+    ).rejects.toThrow("Sem permissão");
+  });
+});
+
+// API de leitura (src/lib/api/serie-diaria.server.ts): same fixtures as the
+// finance read tools, since it reads the same daily sources.
+describe("serieDiaria (API)", () => {
+  it("one row per house per day, equal to that day in the panel, plus CRM and send cost", async () => {
+    financeDayRows.push(
+      complete(HOUSE_A, "2026-10-20", 1000, 100),
+      dayRow(HOUSE_A, "2026-10-21", { registrations: 7, ftds: 2, deposit_amount: 300 }),
+      complete(HOUSE_B, "2026-10-20", 500, 50),
+      complete(HOUSE_B, "2026-10-21", 250, 25),
+    );
+    fake.admin.onRpc("finance_activity_days", () => ({
+      data: [
+        {
+          tenant_id: HOUSE_A,
+          metric_date: "2026-10-20",
+          deposit_count: 4,
+          depositor_count: 3,
+          withdrawal_count: 1,
+          crm_sent: 100,
+          crm_clicks: 9,
+          crm_direct_conversions: 2,
+          crm_direct_revenue: "150.505",
+        },
+      ],
+      error: null,
+    }));
+    fake.admin.onRpc("finance_send_usage", () => ({
+      data: [
+        { tenant_id: HOUSE_A, metric_date: "2026-10-20", item: "sms", units: 100, amount: "5.9", missing_cost_units: 0 },
+      ],
+      error: null,
+    }));
+
+    const serie = await serieDiaria(identity(SUPER), {
+      escopo: { tipo: "grupo", id: G1 },
+      periodo: { inicio: "2026-10-20", fim: "2026-10-21" },
+    });
+
+    expect(serie.rotulo).toBe("Grupo 1");
+    expect(serie.periodo).toEqual({ inicio: "2026-10-20", fim: "2026-10-21" });
+    expect(serie.linhas.map((l) => `${l.data}|${l.casa_id}`)).toEqual([
+      `2026-10-20|${HOUSE_A}`,
+      `2026-10-20|${HOUSE_B}`,
+      `2026-10-21|${HOUSE_A}`,
+      `2026-10-21|${HOUSE_B}`,
+    ]);
+
+    // Each house-day equals the panel with that single day selected.
+    for (const linha of serie.linhas) {
+      const umDia = await resumoFinanceiro(identity(SUPER), {
+        escopo: { tipo: "casa", id: linha.casa_id },
+        periodo: { preset: "custom", inicio: linha.data, fim: linha.data },
+        comparar: "none",
+      });
+      const atual = umDia.casas[0].atual;
+      expect(linha.valor_depositado).toBe(atual.depositAmount);
+      expect(linha.cadastros).toBe(atual.registrations);
+      expect(linha.ftds).toBe(atual.ftds);
+      expect(linha.net).toBe(atual.net);
+      expect(linha.anuncios ?? 0).toBe(atual.adSpend);
+    }
+
+    const a20 = serie.linhas[0];
+    expect(a20).toMatchObject({
+      depositos: 4,
+      depositantes: 3,
+      saques: 1,
+      crm_enviados: 100,
+      crm_cliques: 9,
+      crm_conversoes_diretas: 2,
+      crm_receita_direta: 150.51,
+      custo_envios_brl: 5.9,
+      pendente: false,
+    });
+    // 10-21 of house A has no ad spend nor GGR: pending, with nulls.
+    expect(serie.linhas[2]).toMatchObject({ anuncios: null, ggr: null, pendente: true, custo_envios_brl: 0 });
+  });
+
+  it("splits a month's accumulated GGR over the days like the panel, even mid-month", async () => {
+    for (let d = 1; d <= 24; d++) {
+      financeDayRows.push(dayRow(HOUSE_A, `2026-10-${String(d).padStart(2, "0")}`, { ad_spend: 0 }));
+    }
+    fake.admin
+      .rows("tenant_finance_monthly_ggr")
+      .push({ tenant_id: HOUSE_A, month: "2026-10-01", ggr: 2400, valid_through: "2026-10-24" });
+
+    const serie = await serieDiaria(identity(SUPER), {
+      escopo: { tipo: "casa", id: HOUSE_A },
+      periodo: { inicio: "2026-10-20", fim: "2026-10-21" },
+    });
+    for (const linha of serie.linhas) {
+      const umDia = await resumoFinanceiro(identity(SUPER), {
+        escopo: { tipo: "casa", id: HOUSE_A },
+        periodo: { preset: "custom", inicio: linha.data, fim: linha.data },
+        comparar: "none",
+      });
+      expect(linha.ggr_estimado).toBe(true);
+      expect(linha.ggr).toBe(umDia.casas[0].atual.ggr);
+    }
+  });
+
+  it("stops at today, refuses more than 366 days and a house outside the scope", async () => {
+    const ate = await serieDiaria(identity(SUPER), {
+      escopo: { tipo: "casa", id: HOUSE_A },
+      periodo: { inicio: "2026-10-23", fim: "2026-12-31" },
+    });
+    expect(ate.periodo).toEqual({ inicio: "2026-10-23", fim: "2026-10-24" });
+
+    await expect(
+      serieDiaria(identity(SUPER), {
+        escopo: { tipo: "casa", id: HOUSE_A },
+        periodo: { inicio: "2025-10-01", fim: "2026-10-24" },
+      }),
+    ).rejects.toThrow("No máximo 366 dias");
+
+    await expect(
+      serieDiaria(identity(ADMIN_A), {
         escopo: { tipo: "casa", id: HOUSE_B },
         periodo: { inicio: "2026-10-20", fim: "2026-10-21" },
       }),
