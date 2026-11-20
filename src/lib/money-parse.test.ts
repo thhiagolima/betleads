@@ -84,3 +84,20 @@ describe("isBlankMoneyValue", () => {
     expect(isBlankMoneyValue(0)).toBe(false);
   });
 });
+
+describe("parseMoneyValue with the formats houses really send (prod webhook_logs, 11-20)", () => {
+  // betgreen, Sorte Alta and PixReals send 18-decimal strings; LaEleBet,
+  // bravabet365, 99Bet, Mega Sorte 7k, ForrandoBet and LosHermanos send 2
+  // decimals. Each must read exactly as Number() read it before.
+  it.each([
+    ["20.000000000000000000", 20],
+    ["100.000000000000000000", 100],
+    ["1234.500000000000000000", 1234.5],
+    ["99.99", 99.99],
+    ["999.99", 999.99],
+    ["99999.99", 99999.99],
+  ])("%s -> %s", (raw, expected) => {
+    expect(parseMoneyValue(raw)).toBe(Number(raw));
+    expect(parseMoneyValue(raw)).toBe(expected);
+  });
+});
