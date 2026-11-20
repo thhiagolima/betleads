@@ -66,7 +66,7 @@ export function buildOpenApi(serverUrl: string) {
       title: "Betleads — API de leitura",
       version: "1.0.0",
       description:
-        "Uso interno. Os mesmos números do MCP e do painel, só leitura. Autenticação: Authorization: Bearer <chave>, criada na tela Conectar ao Claude. A chave vê as mesmas casas e áreas que o dono vê no MCP. Limite: 60 chamadas por minuto por chave.",
+        "Uso interno. Os mesmos números do MCP e do painel, só leitura. Autenticação: Authorization: Bearer <chave>, criada na tela API de dados (menu Claude e API). A chave vê as mesmas casas e áreas que o dono vê no MCP. Limite: 60 chamadas por minuto por chave.",
     },
     servers: [{ url: serverUrl }],
     components: { securitySchemes: { chave: { type: "http", scheme: "bearer" } } },

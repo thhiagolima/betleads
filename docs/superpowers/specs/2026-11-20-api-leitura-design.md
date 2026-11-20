@@ -29,7 +29,7 @@ webhooks, versão pública.
 - Tabela `api_keys` (id, user_id, nome, prefixo, hash SHA-256 da chave, criada em, último uso,
   revogada em). Só `service_role` acessa.
 - Formato `blk_<43 caracteres base64url>` (32 bytes aleatórios). A chave aparece **uma vez**, ao criar; o banco guarda só o hash.
-- Até 5 chaves ativas por pessoa. A pessoa cria e revoga as próprias na tela "Conectar ao Claude".
+- Até 5 chaves ativas por pessoa. A pessoa cria e revoga as próprias na tela "API de dados" (menu "Claude e API").
   Tirar o acesso ao MCP de alguém derruba as chaves dessa pessoa na hora (a checagem é por chamada).
 - Feature flag `API_ENABLED` (só a string "true" liga). Desligada: todas as rotas da API
   respondem 404 e a seção da tela some.
