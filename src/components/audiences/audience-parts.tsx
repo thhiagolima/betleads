@@ -23,7 +23,7 @@ export function RuleGroup({
   title: string;
   /** Texto de ajuda sob o título; aceita nó (ex.: <Term>), já que fica fora dos chips. */
   help?: ReactNode;
-  /** Classe de cor do grupo (FILTER_GROUP_DOT). */
+  /** Classe de cor do grupo (FILTER_GROUP_DOT). Só no título: os chips não repetem. */
   dot?: string;
   children: ReactNode;
 }) {
@@ -39,7 +39,7 @@ export function RuleGroup({
   );
 }
 
-/** Chip de regra com contagem: marcador na cor do tipo; o ativo fica em `primary`. */
+/** Chip de regra com contagem; o ativo fica em `primary`. */
 export function RuleChip({
   active,
   onClick,
@@ -57,7 +57,7 @@ export function RuleChip({
   label: string;
   count?: number;
   loading?: boolean;
-  /** Classe de cor da bolinha (tipo do filtro). */
+  /** Bolinha que carrega significado próprio (ex.: tons do tempo parado). */
   dot?: string;
   /** Marcador próprio (ex.: ícone do nível), no lugar da bolinha. */
   marker?: ReactNode;
@@ -70,7 +70,7 @@ export function RuleChip({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring sm:h-8",
+        "inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-label font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring sm:h-8",
         active
           ? "border-primary bg-primary/15 text-primary"
           : "border-border bg-background/40 text-foreground hover:bg-secondary",
@@ -102,80 +102,124 @@ export type AudienceMenuItem = {
   destructive?: boolean;
 };
 
-/** Cartão de um público: nome, descrição, etiquetas e ações ("Usar na campanha" + menu ⋯). */
-export function AudienceCard({
+/** Quantos jogadores um público tem agora (null = ainda calculando). */
+export type AudienceCount = {
+  total: number;
+  reachable: number;
+  /** Rótulo do alcançável: "com celular" (SMS). */
+  reachableLabel: string;
+} | null;
+
+/** "1.234 jogadores" / "1 lead". */
+export function countNoun(count: number, noun: "jogador" | "lead") {
+  const plural = noun === "jogador" ? "jogadores" : "leads";
+  return `${count.toLocaleString("pt-BR")} ${count === 1 ? noun : plural}`;
+}
+
+/** The count block on the right of a row: the size first, how many can receive below. */
+function CountBlock({
+  count,
+  error,
+  noun,
+}: {
+  count: AudienceCount;
+  error?: boolean;
+  noun: "jogador" | "lead";
+}) {
+  if (error) return <p className="text-meta text-muted-foreground">Sem contagem agora</p>;
+  if (!count)
+    return (
+      <div className="space-y-1" aria-label="Calculando">
+        <div className="ml-auto h-4 w-20 animate-pulse rounded bg-secondary" />
+        <div className="ml-auto h-3 w-24 animate-pulse rounded bg-secondary/60" />
+      </div>
+    );
+  return (
+    <div className="sm:text-right">
+      <p className="text-body font-semibold tabular-nums">{countNoun(count.total, noun)}</p>
+      <p className="text-meta tabular-nums text-muted-foreground">
+        {count.reachable.toLocaleString("pt-BR")} {count.reachableLabel}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * One audience as a list row: name (never cut to "…"), its rules on one line,
+ * how many players it has now, and the actions. "Usar" is an outline button —
+ * the page has a single primary button ("Novo público").
+ */
+export function AudienceRow({
   audienceId,
   name,
+  summary,
   description,
-  labels,
-  menu,
   badge,
-  cardAnchor,
+  count,
+  countError,
+  noun,
+  menu,
+  rowAnchor,
   actionAnchor,
   menuAnchor,
 }: {
   audienceId: string;
   name: string;
+  /** Regras em uma linha ("Nunca depositou · Cadastrou ontem"). */
+  summary?: string;
+  /** Descrição escrita por quem criou (só aparece se existir). */
   description?: string | null;
-  labels?: string[];
-  menu?: AudienceMenuItem[];
-  /** Short tag next to the name (e.g. "Da casa · somente leitura"). */
+  /** Etiqueta curta ao lado do nome (ex.: "Da casa · somente leitura"). */
   badge?: string;
-  /** `tourAnchor(...)` do chamador para o cartão (lista de cartões: só o primeiro recebe). */
-  cardAnchor?: Record<string, string>;
-  /** `tourAnchor(...)` do chamador para "Usar na campanha". */
+  count: AudienceCount;
+  countError?: boolean;
+  noun: "jogador" | "lead";
+  menu?: AudienceMenuItem[];
+  rowAnchor?: Record<string, string>;
   actionAnchor?: Record<string, string>;
-  /** `tourAnchor(...)` do chamador para o botão "⋯". */
   menuAnchor?: Record<string, string>;
 }) {
   const regular = (menu ?? []).filter((item) => !item.destructive);
   const destructive = (menu ?? []).filter((item) => item.destructive);
   return (
-    <article
-      className="flex flex-col gap-3 rounded-xl border border-border bg-background/30 p-3.5 sm:flex-row sm:items-start sm:justify-between"
-      {...cardAnchor}
+    <li
+      className="grid gap-x-4 gap-y-2 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+      {...rowAnchor}
     >
-      <div className="min-w-0 flex-1">
-        {badge ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="truncate text-body font-semibold">{name}</h3>
-            <span className="shrink-0 rounded-full border border-border bg-secondary/50 px-2 py-0.5 text-meta text-muted-foreground">
+      <div className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <h3 className="line-clamp-2 break-words text-body font-semibold">{name}</h3>
+          {badge && (
+            <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-meta text-muted-foreground">
               {badge}
             </span>
-          </div>
-        ) : (
-          <h3 className="truncate text-body font-semibold">{name}</h3>
-        )}
-        {description && <p className="mt-0.5 text-meta text-muted-foreground">{description}</p>}
-        {labels && labels.length > 0 && (
-          <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Regras do público">
-            {labels.map((label, index) => (
-              <li
-                key={`${label}-${index}`}
-                className="rounded-full border border-border bg-secondary/50 px-2 py-0.5 text-meta text-muted-foreground"
-              >
-                {label}
-              </li>
-            ))}
-          </ul>
+          )}
+        </div>
+        {summary && <p className="mt-0.5 text-meta text-muted-foreground">{summary}</p>}
+        {description && (
+          <p className="mt-0.5 line-clamp-2 text-meta italic text-muted-foreground/80">
+            {description}
+          </p>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
-        <Button asChild className="h-11 flex-1 sm:h-9 sm:flex-none">
+      <CountBlock count={count} error={countError} noun={noun} />
+      <div className="flex items-center gap-1.5">
+        <Button asChild variant="outline" className="h-10 flex-1 sm:h-9 sm:flex-none">
           <Link
             to="/campanhas"
             search={{ newCampaign: 1, audience: audienceId } as never}
+            aria-label={`Usar “${name}” numa campanha`}
             {...actionAnchor}
           >
             <Megaphone className="size-4" aria-hidden="true" />
-            Usar na campanha
+            Usar
           </Link>
         </Button>
-        {menu && menu.length > 0 && (
+        {menu && menu.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <IconButton
-                variant="outline"
+                variant="ghost"
                 label={`Mais ações para ${name}`}
                 icon={<MoreHorizontal className="size-4" />}
                 {...menuAnchor}
@@ -191,9 +235,47 @@ export function AudienceCard({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+        ) : (
+          // Same width as the ⋯ button, so the "Usar" buttons line up.
+          <span className="hidden size-9 sm:block" aria-hidden="true" />
         )}
       </div>
-    </article>
+    </li>
+  );
+}
+
+/** A tile of the loyalty-level block: icon, name and size; the whole tile opens the campaign. */
+export function LevelTile({
+  audienceId,
+  name,
+  icon,
+  count,
+  noun,
+  tourProps,
+}: {
+  audienceId: string;
+  name: string;
+  icon: ReactNode;
+  count: number | null;
+  noun: "jogador" | "lead";
+  tourProps?: Record<string, string>;
+}) {
+  return (
+    <Link
+      to="/campanhas"
+      search={{ newCampaign: 1, audience: audienceId } as never}
+      aria-label={`Usar o nível ${name} numa campanha`}
+      className="group flex min-h-[72px] flex-col justify-between gap-1 rounded-xl border border-border bg-background/40 p-3 outline-none transition-colors hover:border-primary/50 hover:bg-secondary/60 focus-visible:ring-2 focus-visible:ring-ring"
+      {...tourProps}
+    >
+      <span className="flex items-center gap-1.5 text-label font-medium">
+        {icon}
+        {name}
+      </span>
+      <span className="text-meta tabular-nums text-muted-foreground group-hover:text-foreground">
+        {count === null ? "…" : countNoun(count, noun)}
+      </span>
+    </Link>
   );
 }
 

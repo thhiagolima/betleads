@@ -1,9 +1,10 @@
 // Help article for "Públicos" (/publicos), versão da casa. Uma única tela
-// sem abas: o editor de regras (à esquerda), "Seus públicos" e "Públicos
-// automáticos" (à direita). A mesma tela também serve o expert
-// (useCampaignDataSource().isExpert muda a fonte de dados, a carteira de
-// leads e alguns textos), mas essa versão fica para a fase 4 — não
-// documentada aqui. Fonte: src/routes/publicos.tsx e
+// sem abas: a biblioteca ("Prontos para usar" e "Seus públicos", cada público
+// com quantos jogadores tem agora) e o botão "Novo público", que abre o editor
+// de regras num painel lateral (tela cheia no celular). A mesma tela também
+// serve o expert (useCampaignDataSource().isExpert muda a fonte de dados, a
+// carteira de leads e alguns textos), mas essa versão fica para a fase 4 —
+// não documentada aqui. Fonte: src/routes/publicos.tsx e
 // src/components/audiences/{audience-parts,criteria-labels}.ts, mais as
 // mensagens de erro de src/lib/sms-audience-crud.functions.ts e
 // src/lib/sms-audience-criteria.ts.
@@ -14,147 +15,40 @@ const screen: HelpScreen = {
   route: "/publicos",
   title: "Públicos",
   purpose:
-    "Criar e gerenciar grupos de jogadores (públicos) por regras de comportamento, usar os públicos automáticos por nível e enviar qualquer público direto para uma campanha ou (o 'Todos os jogadores') para uma jornada.",
+    "Ver quantos jogadores tem cada público, mandar qualquer público direto para uma campanha (ou o 'Todos os jogadores' para uma jornada) e criar públicos por regras de comportamento.",
   roles: ["admin", "gestor", "member"],
   terms: ["pix-gerado-pago", "leads-mortos"],
   sections: [
     // ---------------------------------------------------------------
-    // Editor de público
+    // Prontos para usar
     // ---------------------------------------------------------------
     {
-      id: "editor",
-      title: "Editor de público",
+      id: "automaticos",
+      title: "Prontos para usar",
       intro:
-        "O título muda entre \"Novo público\" e \"Editar público\" conforme você está criando ou alterando um já salvo. Abaixo, a pergunta \"Quem deve fazer parte deste público?\" guia as regras escolhidas ao lado.",
+        'Públicos que o CRM mantém sozinho, sem precisar criar nem salvar nada: "Atualizados sozinhos, conforme o comportamento dos jogadores." Cada um mostra quantos jogadores tem agora e quantos têm celular para receber SMS. "Contado às HH:MM" diz de quando é a contagem; "Recontar" conta tudo de novo.',
       items: [
         {
-          anchor: "publicos.editor.nome",
-          label: "Nome",
-          what: 'O nome do público, como "Ouro que parou há 30 dias" (texto de exemplo do campo). Obrigatório: o botão de salvar só libera depois de preenchido.',
-        },
-        {
-          anchor: "publicos.editor.descricao",
-          label: "Descrição (opcional)",
-          what: 'Um texto livre para lembrar quando usar esse público, como no exemplo do campo: "Quando este público deve ser usado?".',
-        },
-        {
-          label: 'Aviso "Público de seleção"',
-          what: 'Substitui todas as regras abaixo quando você está editando um público de seleção (uma lista fixa de jogadores escolhidos um a um em Jogadores, não um conjunto de regras): "Público de seleção: N jogadores escolhidos em Jogadores. As regras não se aplicam a ele; você pode alterar o nome e a descrição ou excluí-lo."',
+          anchor: "publicos.automaticos.cartao",
+          label: '"Todos os jogadores"',
+          what: "Todos os jogadores cadastrados na casa, com o total e quantos têm celular válido.",
           notes:
-            "Um público de seleção só nasce em Jogadores (escolhendo jogadores na lista e enviando para um público). Aqui em Públicos você só pode renomear, mudar a descrição ou excluir — por isso o menu \"⋯\" dele não tem \"Duplicar\" (duplicar abriria o editor de regras, que não vale para uma lista fixa de jogadores).",
+            '"Usar" abre uma campanha nova com esse público. O menu "⋯" tem "Usar em jornada", que leva para "Nova jornada" com esse público já escolhido.',
         },
         {
-          label: 'Aviso "Escolhas incompatíveis se substituem"',
-          what: '"O que o jogador fez": o grupo de chips liga/desliga das regras de atividade. O aviso abaixo do título diz "Escolhas incompatíveis se substituem; as demais podem ser combinadas." — ou seja, dentro do mesmo grupo (Depósito, ou Saques) só uma opção fica ativa por vez; entre grupos diferentes (Depósito + Pendências + Saques + Bônus, mais Nível e Tempo sem depositar) as escolhas se somam.',
+          anchor: "publicos.automaticos.menu",
+          label: 'Menu "⋯" de "Todos os jogadores"',
+          what: 'Item "Usar em jornada": abre "Nova jornada" com "Todos os jogadores" como público de entrada.',
         },
         {
-          anchor: "publicos.editor.deposito-sim",
-          label: "Já depositou",
-          what: "Chip liga/desliga: só entram no público os jogadores que já fizeram pelo menos um depósito.",
-          notes:
-            'Clicar de novo no chip já ativo desliga a regra (volta para "qualquer"). O número ao lado do nome é a contagem ao vivo de jogadores que atendem a essa regra (sozinha, sem combinar com as outras) — veja "Prévia do público".',
+          anchor: "publicos.automaticos.niveis",
+          label: "Por nível de fidelização (Bronze, Prata, Ouro, Diamante, Black VIP)",
+          what: "Um bloco por nível, com o ícone, o nome e quantos jogadores estão nele agora. Tocar num nível abre uma campanha nova só para ele.",
+          notes: "A âncora do tour marca só o primeiro bloco (Bronze).",
         },
         {
-          anchor: "publicos.editor.deposito-nunca",
-          label: "Nunca depositou",
-          what: "Chip liga/desliga: só entram os jogadores que nunca depositaram.",
-          notes:
-            'Ativar esta regra esconde os grupos "Nível" e "Tempo sem depositar" — quem nunca depositou não tem nível pago nem um "tempo sem depositar" para medir, então essas regras deixam de fazer sentido e são limpas automaticamente se estavam marcadas.',
-        },
-        {
-          anchor: "publicos.editor.deposito-primeiro",
-          label: "Só fez o 1º depósito",
-          what: "Chip liga/desliga: só entram os jogadores que fizeram o primeiro depósito e nenhum outro depois dele.",
-          notes:
-            "Assim que o jogador faz um segundo depósito aprovado, ele sai do público. Pode ser combinado com Nível e Tempo sem depositar (ex.: só o 1º depósito e 3+ dias sem depositar).",
-        },
-        {
-          anchor: "publicos.editor.cadastro-ontem",
-          label: "Cadastrou ontem",
-          what: 'Chip liga/desliga do grupo "Cadastro": só entram os jogadores que se cadastraram ontem, no dia inteiro (00:00 a 23:59, horário de Brasília).',
-          notes:
-            'Quando vira o dia, quem se cadastrou anteontem sai e entram os cadastros do novo "ontem". Combinado com "Nunca depositou", forma o público "cadastrou ontem e não depositou".',
-        },
-        {
-          anchor: "publicos.editor.pix-nao-pago",
-          label: "Gerou PIX e não pagou",
-          what: "Chip liga/desliga: só entram os jogadores que geraram um código Pix de depósito e não chegaram a pagá-lo.",
-          notes:
-            'Abaixo do título do grupo "Pendências" aparece "PIX gerado e não pago, ou saque ainda em aberto.", com um "i" ao lado de PIX que explica o termo.',
-        },
-        {
-          anchor: "publicos.editor.saque-pendente",
-          label: "Saque pendente",
-          what: "Chip liga/desliga: só entram os jogadores com um pedido de saque ainda não resolvido pela casa.",
-        },
-        {
-          anchor: "publicos.editor.saque-sim",
-          label: "Já sacou",
-          what: "Chip liga/desliga: só entram os jogadores que já sacaram pelo menos uma vez.",
-        },
-        {
-          anchor: "publicos.editor.saque-nunca",
-          label: "Nunca sacou",
-          what: "Chip liga/desliga: só entram os jogadores que nunca sacaram.",
-        },
-        {
-          anchor: "publicos.editor.cashback",
-          label: "Recebeu cashback",
-          what: "Chip liga/desliga: só entram os jogadores que já receberam algum cashback (bônus de devolução).",
-        },
-        {
-          anchor: "publicos.editor.nivel",
-          label: "Nível (Bronze, Prata, Ouro, Diamante, Black VIP)",
-          what: "Cinco chips, um por nível de fidelização; escolher um filtra o público para só esse nível. Pode ser combinado com o tempo sem depositar (texto de ajuda do grupo).",
-          notes:
-            'Some quando "Nunca depositou" está marcado. Repetem-se em linha; a âncora do tour marca só o primeiro (Bronze).',
-        },
-        {
-          anchor: "publicos.editor.tempo-sem-depositar",
-          label: "Tempo sem depositar (Esfriando, Dormindo, 30+ dias, 90+ dias)",
-          what: 'Quatro chips com faixas prontas de inatividade desde o último depósito. O texto de ajuda do grupo explica: "Escolha uma faixa ou informe os dias. Quanto mais escura a bolinha, mais tempo parado."',
-          notes:
-            'Some quando "Nunca depositou" está marcado. Repetem-se em linha; a âncora do tour marca só o primeiro (Esfriando).',
-        },
-        {
-          anchor: "publicos.editor.dias-personalizado",
-          label: "Campo de dias (ao lado das faixas prontas)",
-          what: 'Um número de dias sem depositar à sua escolha, no lugar de uma das faixas prontas. Mostra "dias ou mais" ao lado enquanto vazio.',
-          notes: "Preencher este campo desmarca qualquer faixa pronta escolhida, e vice-versa: só uma forma de medir o tempo sem depositar vale por vez.",
-        },
-        {
-          anchor: "publicos.editor.limpar-dias",
-          label: "Limpar (campo de dias)",
-          what: "Aparece só quando o campo de dias está preenchido; apaga o valor e volta o tempo sem depositar para \"qualquer\".",
-        },
-        {
-          anchor: "publicos.editor.dias-sem-entrar",
-          label: "Dias sem entrar",
-          what: 'Só entram os jogadores que não acessam a casa há pelo menos esse número de dias. Mostra "Sem limite" (texto de exemplo) quando vazio.',
-        },
-        {
-          anchor: "publicos.editor.dias-desde-cadastro",
-          label: "Dias desde o cadastro",
-          what: "Só entram os jogadores cadastrados há pelo menos esse número de dias.",
-        },
-        {
-          anchor: "publicos.editor.previa",
-          label: "Prévia do público",
-          what: 'Caixa que recalcula ao vivo, a cada mudança nas regras (depois de uma pequena espera): mostra "Calculando público…" enquanto espera a resposta e, pronta, o texto "N jogadores atendem a estas regras" (ou "N jogadores da seleção nesta casa" para um público de seleção), seguido de um resumo curto das regras escolhidas.',
-          notes:
-            'Abaixo do total aparecem duas linhas: "N com telefone válido para receber SMS" e, só quando algum jogador não tem telefone válido, "M ficam de fora do envio por não terem telefone válido." — a contagem principal conta todos os jogadores da regra, mas só quem tem telefone válido recebe o envio de fato.',
-        },
-        {
-          anchor: "publicos.editor.salvar",
-          label: "Criar público / Salvar alterações",
-          what: 'Grava o público. O texto do botão muda para "Salvar alterações" ao editar um já existente, ou fica "Criar público" para um novo.',
-          notes:
-            'Fica desabilitado sem um nome preenchido, enquanto salva ou enquanto a prévia ainda está calculando. Ao salvar, aparece o aviso "Público criado" (novo) ou "Público atualizado" (edição); se o servidor recusar, aparece a mensagem de erro dele.',
-        },
-        {
-          anchor: "publicos.editor.cancelar",
-          label: "Cancelar",
-          what: "Aparece só ao editar um público existente; descarta as alterações e limpa o formulário para um novo público.",
+          label: '"Leads mortos"',
+          what: "Jogadores que receberam várias mensagens de jornada seguidas sem nenhuma ação na casa. Mostra quantos são agora.",
         },
       ],
     },
@@ -166,33 +60,33 @@ const screen: HelpScreen = {
       id: "seus-publicos",
       title: "Seus públicos",
       intro:
-        'A lista dos públicos que você já salvou (por regras ou de seleção). O aviso "As quantidades são recalculadas no momento do envio" lembra que o número de jogadores de um público muda com o tempo — o que fica salvo são as regras, não a lista de jogadores do dia em que foi criado.',
+        'A lista dos públicos que você já salvou (por regras ou de seleção), cada um com quantos jogadores tem agora. "No envio, a lista é contada de novo": o que fica salvo são as regras, não a lista de jogadores do dia em que foi criado. Com mais de 5 públicos aparece a busca pelo nome.',
       items: [
         {
           anchor: "publicos.lista.cartao",
-          label: "Cartão do público",
-          what: "Um cartão por público salvo, com o nome, a descrição (quando houver) e as etiquetas das regras usadas (ex.: \"Nunca depositou\", \"30+ dias sem depositar\") ou \"N jogadores escolhidos\" para um público de seleção. Um público sem nenhuma regra marcada mostra a etiqueta \"Todos com telefone válido\".",
-          notes: "Repete-se em cada público salvo; a âncora do tour marca só o primeiro cartão.",
+          label: "Linha do público",
+          what: 'O nome, as regras numa linha só (ex.: "Nunca depositou · Cadastrou ontem") ou "N jogadores escolhidos" para um público de seleção, a descrição (quando houver) e, à direita, "N jogadores" com "N com celular" embaixo.',
+          notes: "Repete-se em cada público salvo; a âncora do tour marca só a primeira linha.",
         },
         {
           anchor: "publicos.lista.usar-campanha",
-          label: "Usar na campanha",
+          label: "Usar",
           what: "Leva direto para Campanhas com este público já escolhido, para montar e enviar uma campanha nova.",
-          notes: "Repete-se em cada cartão; a âncora marca só o primeiro.",
+          notes: "Repete-se em cada linha; a âncora marca só a primeira.",
         },
         {
           anchor: "publicos.lista.menu",
           label: 'Menu "⋯"',
           what: 'Abre as ações do público: "Editar" (ou "Renomear" para um público de seleção), "Duplicar" (ausente num público de seleção) e "Excluir".',
-          notes: "Repete-se em cada cartão; a âncora marca só o primeiro.",
+          notes: "Repete-se em cada linha; a âncora marca só a primeira.",
         },
         {
           label: 'Menu "⋯" — Editar / Renomear',
-          what: "Carrega o público no editor à esquerda (nome, descrição e regras, ou só nome/descrição para uma seleção) e rola a tela para o topo.",
+          what: "Abre o editor com o público carregado (nome, descrição e regras, ou só nome/descrição para uma seleção).",
         },
         {
           label: 'Menu "⋯" — Duplicar',
-          what: 'Carrega as mesmas regras no editor como um público novo, com "— cópia" acrescentado ao nome, para ajustar e salvar separado do original.',
+          what: 'Abre o editor com as mesmas regras como um público novo, com "— cópia" no nome, para ajustar e salvar separado do original.',
         },
         {
           label: 'Menu "⋯" — Excluir',
@@ -204,25 +98,144 @@ const screen: HelpScreen = {
     },
 
     // ---------------------------------------------------------------
-    // Públicos automáticos
+    // Editor de público
     // ---------------------------------------------------------------
     {
-      id: "automaticos",
-      title: "Públicos automáticos",
+      id: "editor",
+      title: "Novo público (editor)",
       intro:
-        'Públicos prontos que o CRM mantém sozinho, sem precisar criar nem salvar nada: "Os níveis de fidelização estão sempre prontos para uso e acompanham a classificação atual dos jogadores."',
+        'O botão "Novo público", no topo, abre o editor num painel ao lado (tela cheia no celular). O título muda entre "Novo público" e "Editar público". No rodapé do painel, sempre visível, ficam a contagem ao vivo e o botão de salvar.',
       items: [
         {
-          anchor: "publicos.automaticos.cartao",
-          label: 'Cartões "Todos os jogadores", Bronze, Prata, Ouro, Diamante, Black VIP e "Leads mortos (sem resposta às jornadas)"',
-          what: '"Todos os jogadores": todos os jogadores cadastrados na casa. Os cinco de nível: só os jogadores classificados naquele nível no momento do envio. "Leads mortos (sem resposta às jornadas)": jogadores que receberam várias mensagens de jornada seguidas sem nenhuma ação na casa.',
-          notes:
-            "Nenhum deles tem o menu \"⋯\" de editar/duplicar/excluir (são automáticos, não editáveis) — só \"Usar na campanha\", e, no cartão \"Todos os jogadores\", também \"Usar em jornada\". A âncora do tour marca só o primeiro cartão (\"Todos os jogadores\").",
+          anchor: "publicos.novo",
+          label: "Novo público",
+          what: "Abre o editor vazio para montar um público novo.",
         },
         {
-          anchor: "publicos.automaticos.menu",
-          label: 'Menu "⋯" (só no cartão "Todos os jogadores")',
-          what: 'Único cartão automático com um menu "⋯"; dentro dele, o item "Usar em jornada" leva para "Nova jornada" com esse público já escolhido como gatilho de entrada.',
+          anchor: "publicos.editor.nome",
+          label: "Nome",
+          what: 'O nome do público, como "Ouro que parou há 30 dias" (texto de exemplo do campo). Obrigatório: sem ele, o rodapé avisa "Dê um nome para salvar."',
+        },
+        {
+          anchor: "publicos.editor.descricao",
+          label: "Para que serve (opcional)",
+          what: "Um texto livre para lembrar quando usar esse público. Aparece na lista, embaixo das regras.",
+        },
+        {
+          label: 'Aviso "Público de seleção"',
+          what: 'Substitui todas as regras quando você está editando um público de seleção (uma lista fixa de jogadores escolhidos um a um em Jogadores): "Público de seleção: N jogadores escolhidos em Jogadores. As regras não se aplicam a ele; você pode alterar o nome e a descrição ou excluí-lo."',
+          notes:
+            'Um público de seleção só nasce em Jogadores. Aqui você só pode renomear, mudar a descrição ou excluir — por isso o menu "⋯" dele não tem "Duplicar".',
+        },
+        {
+          label: '"Quem entra"',
+          what: '"Toque para filtrar; dá para juntar filtros de grupos diferentes." Dentro do mesmo grupo (ex.: Depósito) só uma opção vale por vez; entre grupos as escolhas se somam. O número ao lado de cada opção mostra quantos jogadores ela traz junto com o que já está marcado.',
+        },
+        {
+          anchor: "publicos.editor.deposito-sim",
+          label: "Já depositou",
+          what: "Só entram os jogadores que já fizeram pelo menos um depósito.",
+          notes: 'Tocar de novo na opção marcada desmarca (volta para "qualquer").',
+        },
+        {
+          anchor: "publicos.editor.deposito-primeiro",
+          label: "Só fez o 1º depósito",
+          what: "Só entram os jogadores que fizeram o primeiro depósito e nenhum outro depois dele.",
+          notes:
+            "Assim que o jogador faz um segundo depósito aprovado, ele sai do público. Combina com Nível e Tempo sem depositar.",
+        },
+        {
+          anchor: "publicos.editor.deposito-nunca",
+          label: "Nunca depositou",
+          what: "Só entram os jogadores que nunca depositaram.",
+          notes:
+            'Marcar esta opção esconde "Nível" e "Tempo sem depositar" — quem nunca depositou não tem nível nem tempo parado para medir.',
+        },
+        {
+          anchor: "publicos.editor.pix-nao-pago",
+          label: "Gerou PIX e não pagou",
+          what: 'Grupo "Saques e pendências": só entram os jogadores que geraram um código Pix de depósito e não pagaram.',
+          notes: 'O "i" ao lado de PIX, no texto do grupo, explica o termo.',
+        },
+        {
+          anchor: "publicos.editor.saque-pendente",
+          label: "Saque pendente",
+          what: "Só entram os jogadores com um pedido de saque ainda não resolvido pela casa.",
+        },
+        {
+          anchor: "publicos.editor.saque-sim",
+          label: "Já sacou",
+          what: "Só entram os jogadores que já sacaram pelo menos uma vez.",
+        },
+        {
+          anchor: "publicos.editor.saque-nunca",
+          label: "Nunca sacou",
+          what: "Só entram os jogadores que nunca sacaram.",
+        },
+        {
+          anchor: "publicos.editor.nivel",
+          label: "Nível (Bronze, Prata, Ouro, Diamante, Black VIP)",
+          what: "Uma opção por nível de fidelização; escolher uma filtra o público para só esse nível. Combina com o tempo sem depositar.",
+          notes: 'Some quando "Nunca depositou" está marcado. A âncora do tour marca só Bronze.',
+        },
+        {
+          anchor: "publicos.editor.tempo-sem-depositar",
+          label: "Tempo sem depositar (Esfriando, Dormindo, 30+ dias, 90+ dias)",
+          what: 'Faixas prontas de tempo desde o último depósito: "Quanto mais escura a bolinha, mais tempo parado. Ou digite os dias."',
+          notes: 'Some quando "Nunca depositou" está marcado. A âncora do tour marca só Esfriando.',
+        },
+        {
+          anchor: "publicos.editor.dias-personalizado",
+          label: "Campo de dias",
+          what: 'Um número de dias sem depositar à sua escolha, no lugar de uma faixa pronta. Mostra "dias ou mais" ao lado enquanto vazio.',
+          notes: "Preencher este campo desmarca a faixa pronta, e vice-versa.",
+        },
+        {
+          anchor: "publicos.editor.limpar-dias",
+          label: "Limpar (campo de dias)",
+          what: 'Aparece só com o campo de dias preenchido; apaga o valor e volta o tempo sem depositar para "qualquer".',
+        },
+        {
+          anchor: "publicos.editor.cadastro-ontem",
+          label: "Cadastrou ontem",
+          what: 'Grupo "Cadastro e bônus": só entram os jogadores que se cadastraram ontem, no dia inteiro (00:00 a 23:59, horário de Brasília).',
+          notes:
+            'Quando vira o dia, quem se cadastrou anteontem sai e entram os cadastros do novo "ontem". Com "Nunca depositou", forma o público "cadastrou ontem e não depositou".',
+        },
+        {
+          anchor: "publicos.editor.cashback",
+          label: "Recebeu cashback",
+          what: "Só entram os jogadores que já receberam algum cashback (bônus de devolução).",
+        },
+        {
+          anchor: "publicos.editor.dias-sem-entrar",
+          label: "Mais filtros — Dias sem entrar",
+          what: 'Fica em "Mais filtros" (recolhido). Só entram os jogadores que não acessam a casa há pelo menos esse número de dias; vazio mostra "Sem limite".',
+          notes: "Se já tiver um valor, o bloco abre sozinho.",
+        },
+        {
+          anchor: "publicos.editor.dias-desde-cadastro",
+          label: "Mais filtros — Dias desde o cadastro",
+          what: "Só entram os jogadores cadastrados há pelo menos esse número de dias.",
+        },
+        {
+          anchor: "publicos.editor.previa",
+          label: "Contagem ao vivo (rodapé)",
+          what: 'Recalcula a cada mudança nas regras: "Calculando…" enquanto espera e, pronta, "N jogadores · N com celular", com um resumo curto das regras embaixo.',
+          notes:
+            'Quando há jogadores sem telefone válido, o resumo acrescenta "N sem telefone válido ficam de fora do SMS" — a contagem conta todos, mas só quem tem telefone válido recebe o SMS.',
+        },
+        {
+          anchor: "publicos.editor.salvar",
+          label: "Salvar público / Salvar alterações",
+          what: 'Grava o público e fecha o painel. O texto muda para "Salvar alterações" ao editar um já existente.',
+          notes:
+            'Fica desabilitado sem nome, enquanto salva ou enquanto a contagem ainda está calculando. Ao salvar, aparece "Público criado" ou "Público atualizado"; se o servidor recusar, aparece a mensagem de erro dele.',
+        },
+        {
+          anchor: "publicos.editor.cancelar",
+          label: "Cancelar",
+          what: "Fecha o painel sem salvar.",
         },
       ],
     },
@@ -230,14 +243,24 @@ const screen: HelpScreen = {
 
   states: [
     {
+      id: "contagem-calculando",
+      title: "Contando os públicos",
+      what: 'Enquanto a tela conta os públicos, a contagem de cada linha aparece como uma barra cinza pulsando; o botão "Recontar" mostra "Contando…".',
+    },
+    {
+      id: "contagem-erro",
+      title: "Sem contagem agora",
+      what: 'Aparece no lugar da contagem de um público quando o cálculo dele falha. O público continua usável; "Recontar" tenta de novo.',
+    },
+    {
       id: "previa-calculando",
-      title: "Calculando público…",
-      what: "Mostrado na caixa de prévia enquanto o CRM recalcula quantos jogadores atendem às regras escolhidas — toda mudança nas regras dispara um novo cálculo, com uma pequena espera antes de disparar.",
+      title: "Calculando…",
+      what: "Mostrado no rodapé do editor enquanto o CRM recalcula quantos jogadores atendem às regras escolhidas.",
     },
     {
       id: "previa-erro",
-      title: "Não foi possível calcular",
-      what: 'Mostrado na caixa de prévia quando o cálculo falha; o texto completo é "Não foi possível calcular: " seguido da mensagem de erro do servidor.',
+      title: "Não foi possível contar",
+      what: 'Mostrado no rodapé do editor quando o cálculo falha; o texto completo é "Não foi possível contar: " seguido da mensagem de erro do servidor.',
     },
     {
       id: "lista-carregando",
@@ -247,64 +270,52 @@ const screen: HelpScreen = {
     {
       id: "lista-atualizando",
       title: "Atualizando públicos…",
-      what: "Aparece com um ícone girando, acima da lista já carregada, sempre que ela está sendo recarregada em segundo plano — por exemplo, logo depois de salvar ou excluir um público.",
+      what: "Aparece com um ícone girando acima da lista já carregada, quando ela está sendo recarregada — por exemplo, logo depois de salvar ou excluir um público.",
     },
     {
       id: "lista-erro",
       title: "Não foi possível carregar os públicos",
-      what: 'Mostrado no lugar da lista quando a busca falha; o texto completo é "Não foi possível carregar os públicos: " seguido da mensagem de erro do servidor.',
+      what: 'Mostrado no lugar da lista quando a busca falha, seguido da mensagem de erro do servidor e do botão "Tentar novamente".',
     },
     {
       id: "lista-vazia",
-      title: "Você ainda não criou públicos personalizados.",
-      what: 'Mostrado no lugar da lista "Seus públicos" quando a casa ainda não tem nenhum público salvo (por regras ou de seleção).',
-      action: 'Preencha o editor à esquerda e clique em "Criar público".',
+      title: "Você ainda não criou públicos.",
+      what: 'Mostrado no lugar de "Seus públicos" quando a casa ainda não tem nenhum público salvo.',
+      action: 'Toque em "Criar meu primeiro público" (ou "Novo público", no topo).',
     },
   ],
 
   tours: {
     default: [
       {
-        anchor: "publicos.editor.nome",
-        title: "Nome do público",
-        body: "Dê um nome ao público que você está criando ou editando.",
-        articleSection: "editor",
+        anchor: "publicos.automaticos.cartao",
+        title: "Prontos para usar",
+        body: "Estes públicos o CRM mantém sozinho. Cada um mostra quantos jogadores tem agora e quantos têm celular.",
+        articleSection: "automaticos",
       },
       {
-        anchor: "publicos.editor.deposito-sim",
-        title: "Chips de regras",
-        body: 'Ative os chips que descrevem quem deve entrar. Dentro do mesmo grupo, escolhas incompatíveis se substituem; entre grupos, elas se combinam.',
-        articleSection: "editor",
-      },
-      {
-        anchor: "publicos.editor.tempo-sem-depositar",
-        title: "Tempo sem depositar",
-        body: "Escolha uma faixa pronta ou informe os dias exatos ao lado.",
-        articleSection: "editor",
-      },
-      {
-        anchor: "publicos.editor.previa",
-        title: "Prévia ao vivo",
-        body: "Acompanhe aqui, em tempo real, quantos jogadores atendem às regras escolhidas.",
-        articleSection: "editor",
-      },
-      {
-        anchor: "publicos.editor.salvar",
-        title: "Salvar o público",
-        body: "Grave o público para poder usá-lo nas suas campanhas.",
-        articleSection: "editor",
+        anchor: "publicos.automaticos.niveis",
+        title: "Por nível",
+        body: "Toque num nível para mandar uma campanha só para ele.",
+        articleSection: "automaticos",
       },
       {
         anchor: "publicos.lista.usar-campanha",
         title: "Usar na campanha",
-        body: "Qualquer público salvo pode ir direto para o compositor de uma campanha nova.",
+        body: 'Qualquer público salvo vai direto para uma campanha nova pelo botão "Usar".',
         articleSection: "seus-publicos",
       },
       {
-        anchor: "publicos.automaticos.cartao",
-        title: "Públicos automáticos",
-        body: "Os níveis de fidelização e \"Todos os jogadores\" já vêm prontos, sem precisar criar nada.",
-        articleSection: "automaticos",
+        anchor: "publicos.lista.menu",
+        title: "Editar, duplicar ou excluir",
+        body: 'No "⋯" de cada público você edita as regras, duplica para ajustar ou exclui.',
+        articleSection: "seus-publicos",
+      },
+      {
+        anchor: "publicos.novo",
+        title: "Criar um público",
+        body: "Monte um grupo com as regras que quiser. A contagem atualiza na hora, antes de salvar.",
+        articleSection: "editor",
       },
     ],
   },
