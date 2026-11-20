@@ -5,29 +5,72 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { getMcpLevel } from "@/lib/mcp/access.server";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { getMcpAccess, type McpArea } from "@/lib/mcp/access.server";
 import { logCall } from "@/lib/mcp/call-log.server";
 import { publicBaseUrlFromEnv } from "@/lib/mcp/oauth.server";
 import { dbUuid } from "@/lib/zod-helpers";
 
 import { isApiEnabled } from "./config.server";
 import { createApiKey, listApiKeys, revokeApiKey, type ApiKeyView } from "./keys.server";
+import { toolsFor } from "./tools.server";
 
 const API_OFF = "API desligada neste ambiente.";
 
+export type ApiToolView = { nome: string; titulo: string; area: McpArea | null };
+
 export type MyApiKeys = {
-  /** False when API_ENABLED is off or the user has no MCP access: the section is hidden. */
+  /** False when API_ENABLED is off or the user has no MCP access: the screen and menu entry are hidden. */
   enabled: boolean;
   apiUrl: string;
+  areas: McpArea[];
   keys: ApiKeyView[];
+  /** The queries this user's keys may call (listar_escopos plus the granted areas'). */
+  ferramentas: ApiToolView[];
+  /** True once one of the user's keys made a query (the tutorial's "first call" step). */
+  hasUsedApi: boolean;
 };
+
+/** Whether any key of the user made a query (key create/revoke rows are api.*, not queries). */
+async function hasUsedApi(userId: string): Promise<boolean> {
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any -- loose client typing */
+  const { data, error } = await (supabaseAdmin as any)
+    .from("mcp_call_log")
+    .select("tool")
+    .eq("user_id", userId)
+    .not("api_key_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) return false;
+  return ((data ?? []) as Array<{ tool: string }>).some((row) => !row.tool.startsWith("api."));
+}
 
 export async function getMyApiKeysFor(ctx: { userId: string }): Promise<MyApiKeys> {
   const apiUrl = `${publicBaseUrlFromEnv()}/api/v1`;
-  if (!isApiEnabled() || (await getMcpLevel(ctx.userId)) === "none") {
-    return { enabled: false, apiUrl, keys: [] };
-  }
-  return { enabled: true, apiUrl, keys: await listApiKeys(ctx.userId) };
+  const off: MyApiKeys = {
+    enabled: false,
+    apiUrl,
+    areas: [],
+    keys: [],
+    ferramentas: [],
+    hasUsedApi: false,
+  };
+  if (!isApiEnabled()) return off;
+  const access = await getMcpAccess(ctx.userId);
+  if (access.level === "none") return off;
+  const [keys, used] = await Promise.all([listApiKeys(ctx.userId), hasUsedApi(ctx.userId)]);
+  return {
+    enabled: true,
+    apiUrl,
+    areas: access.areas,
+    keys,
+    ferramentas: toolsFor(access.areas).map((tool) => ({
+      nome: tool.name,
+      titulo: tool.title,
+      area: tool.area,
+    })),
+    hasUsedApi: used,
+  };
 }
 
 export const getMyApiKeys = createServerFn({ method: "GET" })

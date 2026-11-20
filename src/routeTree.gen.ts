@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AlertasRouteImport } from './routes/alertas'
+import { Route as ApiDadosRouteImport } from './routes/api-dados'
 import { Route as AutomacoesRouteImport } from './routes/automacoes'
 import { Route as CampanhasRouteImport } from './routes/campanhas'
 import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
@@ -140,6 +141,11 @@ const AdminRoute = AdminRouteImport.update({
 const AlertasRoute = AlertasRouteImport.update({
   id: '/alertas',
   path: '/alertas',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDadosRoute = ApiDadosRouteImport.update({
+  id: '/api-dados',
+  path: '/api-dados',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AutomacoesRoute = AutomacoesRouteImport.update({
@@ -757,6 +763,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/alertas': typeof AlertasRoute
+  '/api-dados': typeof ApiDadosRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
   '/configuracoes': typeof ConfiguracoesRoute
@@ -876,6 +883,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/alertas': typeof AlertasRoute
+  '/api-dados': typeof ApiDadosRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
   '/configuracoes': typeof ConfiguracoesRoute
@@ -996,6 +1004,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/alertas': typeof AlertasRoute
+  '/api-dados': typeof ApiDadosRoute
   '/automacoes': typeof AutomacoesRouteWithChildren
   '/campanhas': typeof CampanhasRouteWithChildren
   '/configuracoes': typeof ConfiguracoesRoute
@@ -1117,6 +1126,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/alertas'
+    | '/api-dados'
     | '/automacoes'
     | '/campanhas'
     | '/configuracoes'
@@ -1236,6 +1246,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/alertas'
+    | '/api-dados'
     | '/automacoes'
     | '/campanhas'
     | '/configuracoes'
@@ -1355,6 +1366,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/alertas'
+    | '/api-dados'
     | '/automacoes'
     | '/campanhas'
     | '/configuracoes'
@@ -1475,6 +1487,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AlertasRoute: typeof AlertasRoute
+  ApiDadosRoute: typeof ApiDadosRoute
   AutomacoesRoute: typeof AutomacoesRouteWithChildren
   CampanhasRoute: typeof CampanhasRouteWithChildren
   ConfiguracoesRoute: typeof ConfiguracoesRoute
@@ -1593,6 +1606,13 @@ declare module '@tanstack/react-router' {
       path: '/alertas'
       fullPath: '/alertas'
       preLoaderRoute: typeof AlertasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api-dados': {
+      id: '/api-dados'
+      path: '/api-dados'
+      fullPath: '/api-dados'
+      preLoaderRoute: typeof ApiDadosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/automacoes': {
@@ -2561,6 +2581,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AlertasRoute: AlertasRoute,
+  ApiDadosRoute: ApiDadosRoute,
   AutomacoesRoute: AutomacoesRouteWithChildren,
   CampanhasRoute: CampanhasRouteWithChildren,
   ConfiguracoesRoute: ConfiguracoesRoute,

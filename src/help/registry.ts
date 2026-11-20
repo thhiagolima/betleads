@@ -47,6 +47,7 @@ export const HELP_SCREEN_LOADERS: Record<string, () => Promise<{ default: HelpSc
   "/treino-ia": () => import("./screens/treino-ia"),
   "/experts": () => import("./screens/experts"),
   "/mcp": () => import("./screens/mcp"),
+  "/api-dados": () => import("./screens/api-dados"),
   onboarding: () => import("./screens/onboarding"),
   shell: () => import("./screens/shell"),
 };

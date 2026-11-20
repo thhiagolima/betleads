@@ -232,6 +232,10 @@ export function McpAccessPanel({ mcpEnabled }: { mcpEnabled: boolean }) {
         <CardTitle className="flex items-center gap-2">
           <Bot className="h-5 w-5" /> Acesso ao MCP
         </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          O mesmo acesso vale para a API de dados: a pessoa pode criar chaves que veem as mesmas
+          casas e áreas, sempre só leitura. Tirar o acesso derruba as conexões e as chaves dela.
+        </p>
       </CardHeader>
       <CardContent className="p-0 overflow-x-auto">
         <Table>

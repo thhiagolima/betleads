@@ -314,7 +314,8 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/tenants": { section: "Conta", title: "Conta e equipe" },
   "/admin": { section: "Administração", title: "Visão da plataforma" },
   "/grupos": { section: "Administração", title: "Grupos" },
-  "/mcp": { section: "Configurações", title: "Conectar ao Claude" },
+  "/mcp": { section: "Claude e API", title: "Conectar ao Claude" },
+  "/api-dados": { section: "Claude e API", title: "API de dados" },
   // Not sidebar entries: the OAuth consent screen and the well-known
   // metadata endpoints the MCP OAuth flow exposes (specs §5). Still declared
   // routes, so the "every route has a title" test needs an entry for each.

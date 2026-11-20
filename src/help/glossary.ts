@@ -444,4 +444,18 @@ export const GLOSSARY: GlossaryTerm[] = [
     long:
       "O nível de acesso (leitura, ou leitura e escrita) e as áreas (Financeiro e Operação) são concedidos pelo super admin por pessoa, fora desta tela. A área de operação é só leitura e mostra cadastros, FTDs, depósitos, experts, afiliados, campanhas, jornadas e alertas das casas que a pessoa vê. Sem nenhum nível concedido, \"Conectar ao Claude\" nem aparece no menu.",
   },
+  // --- API de dados ---
+  {
+    id: "api",
+    term: "API",
+    short:
+      "Um endereço que outros sistemas (planilhas, BI, scripts) chamam para buscar os números do Betleads sem ninguém copiar e colar. A do Betleads só lê e vê as mesmas casas e áreas que a pessoa vê em \"Conectar ao Claude\".",
+  },
+  {
+    id: "chave-de-api",
+    term: "Chave de API",
+    short:
+      "A \"senha\" que um sistema usa para chamar a API em nome de uma pessoa. Aparece uma vez só, ao ser criada em \"API de dados\", e pode ser revogada a qualquer momento.",
+    long: "Cada pessoa tem até 5 chaves ativas. A chave vê o que o dono vê e para de funcionar na hora se for revogada ou se o super admin tirar o acesso do dono.",
+  },
 ];

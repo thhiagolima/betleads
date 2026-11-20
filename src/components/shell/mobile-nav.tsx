@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 
 import { Brand } from "@/components/app-sidebar";
+import { useClaudeApiSection } from "@/components/shell/use-claude-api-section";
 import { useShellNav } from "@/components/shell/use-shell-nav";
 import { NavSections } from "@/components/shell/nav-list";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -75,6 +76,8 @@ export function MobileMenu({
   onOpenChange: (open: boolean) => void;
 }) {
   const { sections } = useShellNav();
+  const claudeApi = useClaudeApiSection();
+  const allSections = claudeApi ? [...sections, claudeApi] : sections;
   const close = () => onOpenChange(false);
 
   return (
@@ -93,7 +96,7 @@ export function MobileMenu({
           {...tourAnchor("shell.sidebar.nav")}
           className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-[calc(0.75rem+env(safe-area-inset-bottom))]"
         >
-          <NavSections sections={sections} collapsed={false} onNavigate={close} />
+          <NavSections sections={allSections} collapsed={false} onNavigate={close} />
         </nav>
       </SheetContent>
     </Sheet>
