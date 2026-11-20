@@ -153,6 +153,8 @@ const EMPTY_FACETS: ResolvedSmsAudience["facets"] = {
   activity: {
     depositNever: 0,
     depositYes: 0,
+    depositFirstOnly: 0,
+    registeredYesterday: 0,
     pixUnpaid: 0,
     withdrawalYes: 0,
     withdrawalNever: 0,
@@ -220,6 +222,19 @@ async function rpcAudience(
   // e devolveria a casa inteira. Falha fechado em vez de enviar para todos.
   if (criteria.deadLeads && (data as { deadLeadsFilter?: unknown }).deadLeadsFilter !== true)
     throw new Error("O público Leads mortos ainda não está disponível nesta conta.");
+  // "Só fez o 1º depósito" e "Cadastrou ontem": um RPC anterior à migration
+  // 20261231101500 ignora "Cadastrou ontem" (devolveria todos os cadastros).
+  // Falha fechado nas duas regras.
+  if (
+    criteria.activity.deposit === "first_only" &&
+    (data as { firstDepositFilter?: unknown }).firstDepositFilter !== true
+  )
+    throw new Error("O público Só fez o 1º depósito ainda não está disponível nesta conta.");
+  if (
+    criteria.registeredYesterday &&
+    (data as { registeredYesterdayFilter?: unknown }).registeredYesterdayFilter !== true
+  )
+    throw new Error("O público Cadastrou ontem ainda não está disponível nesta conta.");
   return data as ResolvedSmsAudience & { playerIds?: string[] };
 }
 

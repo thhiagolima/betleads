@@ -3,7 +3,8 @@ import { z } from "zod";
 export const smsAudienceCriteriaSchema = z.object({
   activity: z
     .object({
-      deposit: z.enum(["any", "never", "yes"]).default("any"),
+      // first_only: fez o 1º depósito e nenhum outro depois dele.
+      deposit: z.enum(["any", "never", "yes", "first_only"]).default("any"),
       pixUnpaid: z.boolean().default(false),
       cashback: z.boolean().default(false),
       withdrawal: z.enum(["any", "yes", "never"]).default("any"),
@@ -35,6 +36,11 @@ export const smsAudienceCriteriaSchema = z.object({
   customDays: z.number().int().min(1).max(3650).default(2),
   daysWithoutLogin: z.number().int().min(1).max(3650).nullable().default(null),
   daysSinceRegistration: z.number().int().min(1).max(3650).nullable().default(null),
+  /**
+   * Cadastrou ontem: o dia anterior inteiro, 00:00–23:59 de Brasília. Virou o
+   * dia, o jogador sai do público. Resolvido no RPC `resolve_sms_audience_v2`.
+   */
+  registeredYesterday: z.boolean().optional(),
   /**
    * Só leads mortos (journey_dead_leads ativo: N mensagens de jornada seguidas
    * sem nenhuma ação na casa). Resolvido no RPC `resolve_sms_audience_v2`.
@@ -239,6 +245,7 @@ export function hasNoAudienceRules(criteria: SmsAudienceCriteria) {
     (criteria.timing === "any" || criteria.timing === "selection") &&
     criteria.daysWithoutLogin === null &&
     criteria.daysSinceRegistration === null &&
+    !criteria.registeredYesterday &&
     !criteria.deadLeads
   );
 }
@@ -256,6 +263,8 @@ export function describeSmsAudience(criteria: SmsAudienceCriteria) {
   if (criteria.deadLeads) parts.push("leads mortos (sem resposta às jornadas)");
   if (criteria.activity.deposit === "yes") parts.push("já depositou");
   if (criteria.activity.deposit === "never") parts.push("nunca depositou");
+  if (criteria.activity.deposit === "first_only")
+    parts.push("só fez o 1º depósito (nenhum depois dele)");
   if (criteria.activity.pixUnpaid) parts.push("gerou PIX e não pagou");
   if (criteria.activity.cashback) parts.push("recebeu cashback");
   if (criteria.activity.withdrawal === "yes") parts.push("já sacou");
@@ -283,5 +292,6 @@ export function describeSmsAudience(criteria: SmsAudienceCriteria) {
   if (criteria.daysWithoutLogin) parts.push(`${criteria.daysWithoutLogin}+ dias sem entrar`);
   if (criteria.daysSinceRegistration)
     parts.push(`${criteria.daysSinceRegistration}+ dias desde o cadastro`);
+  if (criteria.registeredYesterday) parts.push("cadastrou ontem");
   return parts.length ? parts.join(" · ") : "Todos os jogadores com telefone válido";
 }

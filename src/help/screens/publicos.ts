@@ -62,6 +62,20 @@ const screen: HelpScreen = {
             'Ativar esta regra esconde os grupos "Nível" e "Tempo sem depositar" — quem nunca depositou não tem nível pago nem um "tempo sem depositar" para medir, então essas regras deixam de fazer sentido e são limpas automaticamente se estavam marcadas.',
         },
         {
+          anchor: "publicos.editor.deposito-primeiro",
+          label: "Só fez o 1º depósito",
+          what: "Chip liga/desliga: só entram os jogadores que fizeram o primeiro depósito e nenhum outro depois dele.",
+          notes:
+            "Assim que o jogador faz um segundo depósito aprovado, ele sai do público. Pode ser combinado com Nível e Tempo sem depositar (ex.: só o 1º depósito e 3+ dias sem depositar).",
+        },
+        {
+          anchor: "publicos.editor.cadastro-ontem",
+          label: "Cadastrou ontem",
+          what: 'Chip liga/desliga do grupo "Cadastro": só entram os jogadores que se cadastraram ontem, no dia inteiro (00:00 a 23:59, horário de Brasília).',
+          notes:
+            'Quando vira o dia, quem se cadastrou anteontem sai e entram os cadastros do novo "ontem". Combinado com "Nunca depositou", forma o público "cadastrou ontem e não depositou".',
+        },
+        {
           anchor: "publicos.editor.pix-nao-pago",
           label: "Gerou PIX e não pagou",
           what: "Chip liga/desliga: só entram os jogadores que geraram um código Pix de depósito e não chegaram a pagá-lo.",

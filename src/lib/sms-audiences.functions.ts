@@ -23,6 +23,9 @@ export type ResolvedSmsAudience = {
     activity: {
       depositNever: number;
       depositYes: number;
+      /** Ausente em bancos ainda sem a migration 20261231101500. */
+      depositFirstOnly?: number;
+      registeredYesterday?: number;
       pixUnpaid: number;
       withdrawalYes: number;
       withdrawalNever: number;

@@ -278,6 +278,15 @@ function PublicosPage() {
                       tourProps={tourAnchor("publicos.editor.deposito-sim")}
                     />
                     <RuleChip
+                      label="Só fez o 1º depósito"
+                      dot={FILTER_GROUP_DOT.deposit}
+                      count={facets?.activity.depositFirstOnly}
+                      loading={calculating}
+                      active={criteria.activity.deposit === "first_only"}
+                      onClick={() => setActivity("deposit", "first_only")}
+                      tourProps={tourAnchor("publicos.editor.deposito-primeiro")}
+                    />
+                    <RuleChip
                       label="Nunca depositou"
                       dot={FILTER_GROUP_DOT.signup}
                       count={facets?.activity.depositNever}
@@ -334,6 +343,26 @@ function PublicosPage() {
                       active={criteria.activity.withdrawal === "never"}
                       onClick={() => setActivity("withdrawal", "never")}
                       tourProps={tourAnchor("publicos.editor.saque-nunca")}
+                    />
+                  </RuleGroup>
+                  <RuleGroup
+                    title="Cadastro"
+                    dot={FILTER_GROUP_DOT.signup}
+                    help="Ontem é o dia anterior inteiro, no horário de Brasília. Quando vira o dia, o jogador sai do público."
+                  >
+                    <RuleChip
+                      label="Cadastrou ontem"
+                      dot={FILTER_GROUP_DOT.signup}
+                      count={facets?.activity.registeredYesterday}
+                      loading={calculating}
+                      active={Boolean(criteria.registeredYesterday)}
+                      onClick={() =>
+                        setCriteria((current) => ({
+                          ...current,
+                          registeredYesterday: current.registeredYesterday ? undefined : true,
+                        }))
+                      }
+                      tourProps={tourAnchor("publicos.editor.cadastro-ontem")}
                     />
                   </RuleGroup>
                   <RuleGroup title="Bônus" dot={FILTER_GROUP_DOT.bonus}>
