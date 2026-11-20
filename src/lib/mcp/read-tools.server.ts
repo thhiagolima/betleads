@@ -25,6 +25,7 @@ import { dbUuid } from "@/lib/zod-helpers";
 
 import { escopoInput, periodoInput, toRangeAndPreset } from "./inputs.server";
 import { listarEscoposOps, type EscoposOps } from "./ops/scope.server";
+import { diasDe, periodoPorDiaInput, porDia } from "./por-dia.server";
 
 type ServerContext = { userId: string };
 const ctxFor = (identity: McpIdentity): ServerContext => ({ userId: identity.userId });
@@ -136,6 +137,60 @@ export async function resumoFinanceiro(
   });
   const dashboard = await getFinanceDashboardFor(ctxFor(identity), input);
   return shapeResumo(dashboard);
+}
+
+// ─── resumoPorDia ───────────────────────────────────────────────────────────
+
+export const resumoPorDiaInput = z.object({
+  escopo: escopoInput,
+  periodo: periodoPorDiaInput,
+});
+
+/**
+ * resumo_financeiro broken down by day in one call: each day is exactly a
+ * one-day resumo_financeiro (same permission, same numbers as the panel with
+ * that single day selected), trimmed to the totals and each house's `atual`
+ * (no comparison, goals or pending dates per day).
+ */
+export async function resumoPorDia(
+  identity: McpIdentity,
+  args: z.input<typeof resumoPorDiaInput>,
+  now: Date = new Date(),
+) {
+  const data = resumoPorDiaInput.parse(args);
+  const dias = diasDe(data.periodo, now);
+  let rotulo = "";
+  let moeda = null as ResumoFinanceiroResult["moeda"];
+  const resultado = await porDia(dias, async (dia) => {
+    const resumo = await resumoFinanceiro(identity, {
+      escopo: data.escopo,
+      periodo: { preset: "custom", inicio: dia, fim: dia },
+      comparar: "none",
+    });
+    rotulo = resumo.rotulo;
+    moeda = resumo.moeda;
+    return {
+      totais: resumo.totais ? resumo.totais.current : null,
+      totais_por_moeda: resumo.totais_por_moeda.map((total) => ({
+        moeda: total.moeda,
+        casas: total.casas,
+        atual: total.atual,
+      })),
+      casas: resumo.casas.map((casa) => ({
+        id: casa.id,
+        nome: casa.nome,
+        moeda: casa.moeda,
+        atual: casa.atual,
+      })),
+    };
+  });
+  return {
+    rotulo,
+    periodo: { inicio: dias[0], fim: dias[dias.length - 1] },
+    moeda,
+    moeda_custos_betleads: "BRL" as const,
+    ...resultado,
+  };
 }
 
 // ─── mesDaCasa ──────────────────────────────────────────────────────────────

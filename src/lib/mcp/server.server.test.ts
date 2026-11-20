@@ -129,13 +129,14 @@ afterEach(() => {
 });
 
 describe("createMcpServer", () => {
-  it("registers exactly the 10 finance tools with their annotations", async () => {
+  it("registers exactly the 11 finance tools with their annotations", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name).sort()).toEqual(
       [
         "listar_escopos",
         "resumo_financeiro",
+        "resumo_por_dia",
         "mes_da_casa",
         "metas_da_casa",
         "preparar_lancamento_dias",
@@ -147,7 +148,13 @@ describe("createMcpServer", () => {
       ].sort(),
     );
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
-    for (const name of ["listar_escopos", "resumo_financeiro", "mes_da_casa", "metas_da_casa"]) {
+    for (const name of [
+      "listar_escopos",
+      "resumo_financeiro",
+      "resumo_por_dia",
+      "mes_da_casa",
+      "metas_da_casa",
+    ]) {
       expect(byName.get(name)?.annotations?.readOnlyHint).toBe(true);
     }
     expect(byName.get("confirmar_alteracao")?.annotations?.destructiveHint).toBe(true);
@@ -191,6 +198,16 @@ describe("createMcpServer", () => {
       ok: true,
     });
     expect(typeof callLog()[0].duration_ms).toBe("number");
+  });
+
+  it("stamps an object result with calculado_em in Brasília time", async () => {
+    vi.mocked(listarEscopos).mockResolvedValue({ nivel: "read", areas: ["financeiro"] } as never);
+    const client = await connect();
+    const result = await client.callTool({ name: "listar_escopos", arguments: {} });
+
+    // System time 2026-10-24T15:00:00Z is 12:00 in Brasília.
+    expect(result.structuredContent).toMatchObject({ calculado_em: "2026-10-24 12:00:00" });
+    expect(JSON.parse(textOf(result)).calculado_em).toBe("2026-10-24 12:00:00");
   });
 
   it("wraps an array result in structuredContent and logs the house id", async () => {
@@ -360,7 +377,7 @@ describe("preparar_* tools", () => {
     });
 
     expect(result.isError).toBeFalsy();
-    expect(result.structuredContent).toEqual(preview);
+    expect(result.structuredContent).toEqual({ ...preview, calculado_em: expect.any(String) });
     const [id, action, input] = vi.mocked(createPreview).mock.calls[0];
     expect(id).toEqual(identity());
     expect(action).toBe("lancamento_dias");
@@ -582,6 +599,7 @@ describe("call log tenant id", () => {
 describe("areas (MCP do grupo)", () => {
   const FINANCE_TOOLS = [
     "resumo_financeiro",
+    "resumo_por_dia",
     "mes_da_casa",
     "metas_da_casa",
     "preparar_lancamento_dias",
@@ -618,6 +636,8 @@ describe("areas (MCP do grupo)", () => {
     expect(instructions).toContain("listar_escopos");
     expect(instructions).toContain("confirmar_alteracao");
     expect(instructions).toContain("Operação (só leitura)");
+    expect(instructions).toContain("calculado_em");
+    expect(instructions).toContain("resumo_por_dia ou visao_geral_por_dia");
   });
 
   it("an operação tool still refuses in its handler when the area is gone", async () => {

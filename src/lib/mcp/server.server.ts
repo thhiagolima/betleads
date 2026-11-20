@@ -46,6 +46,8 @@ import {
   metasDaCasaInput,
   resumoFinanceiro,
   resumoFinanceiroInput,
+  resumoPorDia,
+  resumoPorDiaInput,
 } from "./read-tools.server";
 import type { WriteActionName } from "./write-actions.server";
 
@@ -54,6 +56,11 @@ const CONFIRM_HINT =
 const MONEY_HINT =
   "Valores em dinheiro: número com ponto decimal (ex.: 12345.00), na moeda da casa (campo moeda; reais nas casas em BRL). Custos Betleads (envios, mensalidade) são sempre BRL; fora do BRL o lucro líquido e o ROI vêm null (sem câmbio), e nunca some valores de moedas diferentes.";
 const CASA_HINT = "casa: id da casa, vindo de listar_escopos.";
+
+/** Now in Brasília as "AAAA-MM-DD HH:MM:SS" (BRT is a fixed UTC-3). */
+export function agoraBrasilia(now: Date = new Date()): string {
+  return new Date(now.getTime() - 3 * 3_600_000).toISOString().slice(0, 19).replace("T", " ");
+}
 const INTERNAL_ERROR = "Erro interno.";
 
 const READ: ToolAnnotations = { readOnlyHint: true, openWorldHint: false };
@@ -326,12 +333,14 @@ async function runTool(
   try {
     await checkRateLimit(identity, tool);
     if (context.area) assertArea(identity, context.area);
-    const result = await run();
+    let result = await run();
     if (scope && context.countFromResult) {
       const casas = housesOfResult(result);
       if (casas !== undefined) scope = { ...scope, casas };
     }
     await log(true);
+    // When the numbers were read: every call reads the database right then (no cache).
+    if (isPlainObject(result)) result = { ...result, calculado_em: agoraBrasilia() };
     return {
       content: [{ type: "text", text: JSON.stringify(result) }],
       structuredContent: isPlainObject(result) ? result : { resultado: result },
@@ -347,7 +356,9 @@ async function runTool(
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 const INSTRUCTIONS_BASE =
-  "Betleads: CRM de casas de apostas. Comece sempre por listar_escopos: ele diz as áreas liberadas para o usuário (financeiro e/ou operacao) e os ids de casas e grupos que ele pode consultar em cada uma. ";
+  "Betleads: CRM de casas de apostas. Comece sempre por listar_escopos: ele diz as áreas liberadas para o usuário (financeiro e/ou operacao) e os ids de casas e grupos que ele pode consultar em cada uma. " +
+  "Atualização: cada chamada lê o banco na hora (sem cache), com os mesmos números do painel naquele momento; calculado_em (horário de Brasília) diz quando. Cadastros, FTDs, depósitos, saques e custos de envio entram assim que chegam. Os resultados de CRM (enviados, cliques, conversões) são recalculados a cada 15 minutos, o gasto de anúncios da Meta depende da sincronização com a Meta, os custos recorrentes do mês são lançados todo dia às 00h10 e o GGR depende do que a casa envia ou do lançamento manual. Ao falar de hoje, diga que o dia ainda está em andamento. " +
+  "Para um período dia a dia, use resumo_por_dia ou visao_geral_por_dia (uma chamada para até 31 dias), nunca uma chamada por dia. ";
 const INSTRUCTIONS_FINANCE =
   "Financeiro: resumo_financeiro, mes_da_casa e metas_da_casa leem; escritas têm duas etapas: preparar_* devolve uma prévia e um codigo_confirmacao; mostre a prévia e só chame confirmar_alteracao depois que o usuário aprovar. ";
 const INSTRUCTIONS_OPS =
@@ -388,6 +399,31 @@ function registerFinanceTools(server: McpServer, identity: McpIdentity) {
           scope: scopeOfArgs(args),
         },
         () => resumoFinanceiro(identity, args),
+      ),
+  );
+
+  server.registerTool(
+    "resumo_por_dia",
+    {
+      title: "Resumo financeiro dia a dia",
+      description:
+        "O mesmo que resumo_financeiro, mas quebrado por dia numa chamada só (até 31 dias): em `dias`, para cada data, os totais do dia (totais, ou totais_por_moeda com mais de uma moeda) e uma linha por casa com `atual`. Use esta ferramenta em vez de chamar resumo_financeiro uma vez por dia. Sem comparação, metas nem pendências (use resumo_financeiro). Dias que falharem vêm em dias_com_erro. " +
+        "escopo: {tipo: casa|grupo, id} ou {tipo: todas}. periodo: {preset: yesterday|7d|month} ou {inicio, fim} (AAAA-MM-DD), até 31 dias. " +
+        MONEY_HINT,
+      inputSchema: resumoPorDiaInput,
+      annotations: READ,
+    },
+    (args) =>
+      runTool(
+        identity,
+        "resumo_por_dia",
+        {
+          tenantId: args.escopo.tipo === "casa" ? args.escopo.id : null,
+          area,
+          args,
+          scope: scopeOfArgs(args),
+        },
+        () => resumoPorDia(identity, args),
       ),
   );
 

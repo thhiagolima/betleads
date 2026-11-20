@@ -25,7 +25,13 @@ import type { McpIdentity } from "../access.server";
 import { createFakeDb } from "../../sms-bulk.test-support";
 import { assertSemDadosPessoais } from "./runner.server";
 import type { CasaOps } from "./scope.server";
-import { compararCasas, kpisAtuais, VISAO_TOOLS, visaoGeral } from "./tools-visao.server";
+import {
+  compararCasas,
+  kpisAtuais,
+  VISAO_TOOLS,
+  visaoGeral,
+  visaoGeralPorDia,
+} from "./tools-visao.server";
 
 const USER = "00000000-0000-4000-8000-0000000000bb";
 const HOUSE_A = "00000000-0000-4000-8000-000000000101";
@@ -461,6 +467,50 @@ function seedComparison() {
   fake.admin.onRpc("crm_click_players_period", () => ({ data: null, error: null }));
 }
 
+describe("visao_geral_por_dia", () => {
+  it("each day equals a one-day visao_geral (without the base), in one call", async () => {
+    mocks.resolverEscopoOps.mockResolvedValue({ casas: [A, B], rotulo: "Grupo Um" });
+    const periodo = { inicio: "2026-11-15", fim: "2026-11-16" };
+
+    const porDia = await visaoGeralPorDia(identity, { escopo: { tipo: "grupo", id: GROUP }, periodo }, NOW);
+
+    expect(porDia.rotulo).toBe("Grupo Um");
+    expect(porDia.periodo).toEqual(periodo);
+    expect(porDia.dias.map((dia) => dia.data)).toEqual(["2026-11-15", "2026-11-16"]);
+    expect(porDia.dias_com_erro).toEqual([]);
+    // The base by state is a snapshot of now: never read per day.
+    expect(lifecycleCalls).toEqual([]);
+
+    for (const dia of porDia.dias) {
+      const umDia = await visaoGeral(
+        identity,
+        { escopo: { tipo: "grupo", id: GROUP }, periodo: { preset: "custom", inicio: dia.data, fim: dia.data } },
+        NOW,
+      );
+      expect(dia.casas).toEqual(
+        umDia.casas.map(({ grupo: _grupo, base_por_estado: _base, ...linha }) => linha),
+      );
+      expect(dia.casas.every((linha) => !("base_por_estado" in linha))).toBe(true);
+    }
+    assertSemDadosPessoais(porDia);
+  });
+
+  it("propagates the gate's refusal once, without querying anything", async () => {
+    mocks.resolverEscopoOps.mockRejectedValue(
+      new Error("Você não tem acesso à operação desta casa."),
+    );
+    await expect(
+      visaoGeralPorDia(
+        identity,
+        { escopo: { tipo: "casa", id: HOUSE_OTHER }, periodo: { inicio: "2026-11-15", fim: "2026-11-16" } },
+        NOW,
+      ),
+    ).rejects.toThrow("Você não tem acesso à operação desta casa.");
+    expect(mocks.resolverEscopoOps).toHaveBeenCalledTimes(1);
+    expect(dashboardCalls).toEqual([]);
+  });
+});
+
 describe("comparar_casas", () => {
   beforeEach(seedComparison);
 
@@ -535,8 +585,12 @@ describe("comparar_casas", () => {
 });
 
 describe("VISAO_TOOLS", () => {
-  it("registers visao_geral and comparar_casas", () => {
-    expect(VISAO_TOOLS.map((tool) => tool.name)).toEqual(["visao_geral", "comparar_casas"]);
+  it("registers visao_geral, visao_geral_por_dia and comparar_casas", () => {
+    expect(VISAO_TOOLS.map((tool) => tool.name)).toEqual([
+      "visao_geral",
+      "visao_geral_por_dia",
+      "comparar_casas",
+    ]);
     for (const tool of VISAO_TOOLS) {
       expect(
         tool.inputSchema.safeParse({ escopo: { tipo: "todas" }, periodo: { preset: "7d" } })

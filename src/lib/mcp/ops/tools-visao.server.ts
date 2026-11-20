@@ -50,6 +50,7 @@ import {
   type TotalPorMoeda,
 } from "./runner.server";
 import { resolverEscopoOps, type CasaOps } from "./scope.server";
+import { diasDe, periodoPorDiaInput, porDia } from "../por-dia.server";
 
 // ─── Shared ─────────────────────────────────────────────────────────────────
 
@@ -118,8 +119,8 @@ export type CrmPeriodo = {
 export type VisaoGeralCasa = CasaLinha & {
   atual: KpisCasa;
   anterior?: KpisCasa;
-  /** Snapshot of now (crm_lifecycle_snapshot), not of the period. */
-  base_por_estado: BasePorEstado;
+  /** Snapshot of now (crm_lifecycle_snapshot), not of the period; absent in visao_geral_por_dia. */
+  base_por_estado?: BasePorEstado;
   /** null when the CRM read failed (see `avisos`). */
   crm: CrmPeriodo | null;
   /** Wallet send cost of the period, always BRL. null when the read failed (see `avisos`). */
@@ -218,6 +219,7 @@ export async function visaoGeral(
   identity: McpIdentity,
   args: unknown,
   now: Date = new Date(),
+  opcoes: { semBase?: boolean } = {},
 ): Promise<VisaoGeralResult> {
   const input = visaoGeralInput.parse(args);
   const { casas, rotulo } = await resolverEscopoOps(identity.userId, input.escopo);
@@ -256,7 +258,7 @@ export async function visaoGeral(
           DASHBOARD_REQUEST_TIMEOUT_MS,
           "A casa demorou demais para responder.",
         ),
-        baseDaCasa(casa.id),
+        opcoes.semBase ? null : baseDaCasa(casa.id),
       ]);
       return { raw, base };
     }),
@@ -279,7 +281,7 @@ export async function visaoGeral(
       ...casaLinha(casa),
       atual: kpisAtuais(mapped),
       ...(comparacao ? { anterior: kpisAnteriores(resultado.raw) } : {}),
-      base_por_estado: resultado.base,
+      ...(resultado.base ? { base_por_estado: resultado.base } : {}),
       crm: crm ? (crm.get(casa.id) ?? crmVazio()) : null,
       custo_envios_brl: custo ? (custo.get(casa.id) ?? 0) : null,
     };
@@ -320,6 +322,48 @@ export async function visaoGeral(
     totais_por_moeda: totais,
     casas_com_erro: porCasaResult.casas_com_erro,
     ...(avisos.length ? { avisos } : {}),
+  };
+}
+
+// ─── visao_geral_por_dia ────────────────────────────────────────────────────
+
+export const visaoGeralPorDiaInput = z.object({
+  escopo: escopoOps,
+  periodo: periodoPorDiaInput,
+});
+
+/**
+ * visao_geral broken down by day in one call: each day is exactly a one-day
+ * visao_geral (no comparison), without the base by state (a snapshot of now,
+ * the same every day: use visao_geral for it).
+ */
+export async function visaoGeralPorDia(
+  identity: McpIdentity,
+  args: unknown,
+  now: Date = new Date(),
+) {
+  const input = visaoGeralPorDiaInput.parse(args);
+  // Permission first, so a forbidden scope fails once instead of once per day.
+  const { rotulo } = await resolverEscopoOps(identity.userId, input.escopo);
+  const dias = diasDe(input.periodo, now);
+  const resultado = await porDia(dias, async (dia) => {
+    const visao = await visaoGeral(
+      identity,
+      { escopo: input.escopo, periodo: { preset: "custom", inicio: dia, fim: dia } },
+      now,
+      { semBase: true },
+    );
+    return {
+      casas: visao.casas.map(({ grupo: _grupo, ...linha }) => linha),
+      totais_por_moeda: visao.totais_por_moeda,
+      casas_com_erro: visao.casas_com_erro,
+      ...(visao.avisos ? { avisos: visao.avisos } : {}),
+    };
+  });
+  return {
+    rotulo,
+    periodo: { inicio: dias[0], fim: dias[dias.length - 1] },
+    ...resultado,
   };
 }
 
@@ -437,6 +481,14 @@ export const VISAO_TOOLS: OpsToolDef[] = [
       "Números da operação por casa no período: cadastros, FTDs, depósitos (quantidade e valor_depositado), depositantes, saques (quantidade e valor_sacado) e ticket médio, em `atual` e, com `comparar`, em `anterior`. Também a base por estado agora (ativo, esfriando, dormindo, perdido, sem_ftd: retrato de hoje, não do período), o CRM do período (enviados, cliques, conversões diretas, receita direta) e o custo de envios em BRL (custo_envios_brl). Dinheiro na moeda de cada casa, exceto custo_envios_brl (sempre BRL); totais_por_moeda traz um total por moeda, nunca soma entre moedas. Casas que falharem vêm em casas_com_erro. Sem GGR nem lucro (use resumo_financeiro).",
     inputSchema: visaoGeralInput,
     run: (identity, args) => visaoGeral(identity, args),
+  },
+  {
+    name: "visao_geral_por_dia",
+    title: "Visão geral da operação, dia a dia",
+    description:
+      "O mesmo que visao_geral, mas quebrado por dia numa chamada só (até 31 dias): em `dias`, para cada data, uma linha por casa com `atual` (cadastros, FTDs, depósitos, valor_depositado, depositantes, saques, valor_sacado, ticket médio), o CRM do dia e custo_envios_brl, mais totais_por_moeda do dia. Use esta ferramenta em vez de chamar visao_geral uma vez por dia. Sem comparação e sem base por estado (use visao_geral). Dias que falharem vêm em dias_com_erro. periodo: {preset: yesterday|7d|month} ou {inicio, fim} (AAAA-MM-DD), até 31 dias.",
+    inputSchema: visaoGeralPorDiaInput,
+    run: (identity, args) => visaoGeralPorDia(identity, args),
   },
   {
     name: "comparar_casas",

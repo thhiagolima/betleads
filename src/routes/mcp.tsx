@@ -47,6 +47,7 @@ const EXEMPLOS_FINANCEIRO: Exemplo = {
     "Como está o financeiro das minhas casas neste mês?",
     "Qual casa deu mais lucro ontem? Compare com o mesmo dia da semana passada.",
     "Quais dias deste mês ainda estão sem lançamento de anúncios ou GGR?",
+    "Me mostre, dia a dia, os depósitos e o lucro de outubro de cada casa.",
     "Como estamos em relação às metas do mês?",
   ],
 };
@@ -65,6 +66,7 @@ const EXEMPLOS_OPERACAO: Exemplo = {
   titulo: "Operação",
   perguntas: [
     "Como foi a semana das casas do meu grupo? Cadastros, FTDs e depósitos por casa.",
+    "Monte uma tabela dia a dia dos últimos 7 dias com cadastros e FTDs de cada casa.",
     "Quais experts trouxeram mais depósito em outubro?",
     "O que o afiliado 4512 trouxe neste mês?",
     "Como foram as campanhas de SMS dos últimos 7 dias?",

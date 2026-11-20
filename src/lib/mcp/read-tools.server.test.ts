@@ -14,7 +14,13 @@ vi.mock("@/integrations/supabase/client.server", async () => {
 
 import { getFinanceDashboardFor } from "@/lib/finance-dashboard.functions";
 
-import { listarEscopos, mesDaCasa, metasDaCasa, resumoFinanceiro } from "./read-tools.server";
+import {
+  listarEscopos,
+  mesDaCasa,
+  metasDaCasa,
+  resumoFinanceiro,
+  resumoPorDia,
+} from "./read-tools.server";
 import type { McpIdentity } from "./access.server";
 import { createFakeDb } from "../sms-bulk.test-support";
 
@@ -246,6 +252,52 @@ describe("resumoFinanceiro", () => {
       resumoFinanceiro(identity(ADMIN_A), {
         escopo: { tipo: "casa", id: HOUSE_B },
         ...monthToDate,
+      }),
+    ).rejects.toThrow("Sem permissão");
+  });
+});
+
+describe("resumoPorDia", () => {
+  it("each day equals a one-day resumo_financeiro, in one call", async () => {
+    financeDayRows.push(complete(HOUSE_A, "2026-10-20", 1000, 100));
+    financeDayRows.push(complete(HOUSE_B, "2026-10-21", 500, 50));
+
+    const porDia = await resumoPorDia(identity(SUPER), {
+      escopo: { tipo: "grupo", id: G1 },
+      periodo: { inicio: "2026-10-20", fim: "2026-10-21" },
+    });
+
+    expect(porDia.periodo).toEqual({ inicio: "2026-10-20", fim: "2026-10-21" });
+    expect(porDia.dias.map((dia) => dia.data)).toEqual(["2026-10-20", "2026-10-21"]);
+    expect(porDia.dias_com_erro).toEqual([]);
+    for (const dia of porDia.dias) {
+      const umDia = await resumoFinanceiro(identity(SUPER), {
+        escopo: { tipo: "grupo", id: G1 },
+        periodo: { preset: "custom", inicio: dia.data, fim: dia.data },
+        comparar: "none",
+      });
+      expect(dia.totais).toEqual(umDia.totais?.current ?? null);
+      expect(dia.casas).toEqual(
+        umDia.casas.map((casa) => ({ id: casa.id, nome: casa.nome, moeda: casa.moeda, atual: casa.atual })),
+      );
+    }
+    expect(porDia.dias[0].totais?.depositAmount).toBe(1000);
+    expect(porDia.dias[1].totais?.depositAmount).toBe(500);
+  });
+
+  it("stops at today", async () => {
+    const porDia = await resumoPorDia(identity(SUPER), {
+      escopo: { tipo: "casa", id: HOUSE_A },
+      periodo: { inicio: "2026-10-23", fim: "2026-10-30" },
+    });
+    expect(porDia.dias.map((dia) => dia.data)).toEqual(["2026-10-23", "2026-10-24"]);
+  });
+
+  it("a house outside the caller's scope is refused", async () => {
+    await expect(
+      resumoPorDia(identity(ADMIN_A), {
+        escopo: { tipo: "casa", id: HOUSE_B },
+        periodo: { inicio: "2026-10-20", fim: "2026-10-21" },
       }),
     ).rejects.toThrow("Sem permissão");
   });
