@@ -1,5 +1,5 @@
 // SA-02 — SQL test for
-// supabase/migrations/20261231101600_claims_skip_suspended_and_ended.sql:
+// supabase/migrations/20261231101700_claims_skip_suspended_and_ended.sql:
 // the three worker claims never pick work of a suspended/canceled house, and
 // the journey claim never picks an enrollment of a journey past its ends_at.
 // Runs in an in-memory Postgres (PGlite) on minimal stubs of the tables the
@@ -15,7 +15,7 @@ const MIGRATION = readFileSync(
   resolve(
     __dirname,
     "../..",
-    "supabase/migrations/20261231101600_claims_skip_suspended_and_ended.sql",
+    "supabase/migrations/20261231101700_claims_skip_suspended_and_ended.sql",
   ),
   "utf8",
 );
