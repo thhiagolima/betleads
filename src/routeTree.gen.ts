@@ -100,6 +100,7 @@ import { Route as ApiPublicHooksPlatformAlertsRouteImport } from './routes/api/p
 import { Route as ApiPublicHooksPlatformDigestRouteImport } from './routes/api/public/hooks/platform-digest'
 import { Route as ApiPublicHooksPopupsHourlyRouteImport } from './routes/api/public/hooks/popups-hourly'
 import { Route as ApiPublicHooksRecoveryRouteImport } from './routes/api/public/hooks/recovery'
+import { Route as ApiPublicHooksSmsBalanceCheckRouteImport } from './routes/api/public/hooks/sms-balance-check'
 import { Route as ApiPublicHooksSmsRefreshStatusRouteImport } from './routes/api/public/hooks/sms-refresh-status'
 import { Route as ApiPublicHooksSmsRouteProbeRouteImport } from './routes/api/public/hooks/sms-route-probe'
 import { Route as ApiPublicHooksWebhookReplayRouteImport } from './routes/api/public/hooks/webhook-replay'
@@ -603,6 +604,12 @@ const ApiPublicHooksRecoveryRoute = ApiPublicHooksRecoveryRouteImport.update({
   path: '/api/public/hooks/recovery',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicHooksSmsBalanceCheckRoute =
+  ApiPublicHooksSmsBalanceCheckRouteImport.update({
+    id: '/api/public/hooks/sms-balance-check',
+    path: '/api/public/hooks/sms-balance-check',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksSmsRefreshStatusRoute =
   ApiPublicHooksSmsRefreshStatusRouteImport.update({
     id: '/api/public/hooks/sms-refresh-status',
@@ -851,6 +858,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/platform-digest': typeof ApiPublicHooksPlatformDigestRoute
   '/api/public/hooks/popups-hourly': typeof ApiPublicHooksPopupsHourlyRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
+  '/api/public/hooks/sms-balance-check': typeof ApiPublicHooksSmsBalanceCheckRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/sms-route-probe': typeof ApiPublicHooksSmsRouteProbeRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
@@ -971,6 +979,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/platform-digest': typeof ApiPublicHooksPlatformDigestRoute
   '/api/public/hooks/popups-hourly': typeof ApiPublicHooksPopupsHourlyRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
+  '/api/public/hooks/sms-balance-check': typeof ApiPublicHooksSmsBalanceCheckRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/sms-route-probe': typeof ApiPublicHooksSmsRouteProbeRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
@@ -1092,6 +1101,7 @@ export interface FileRoutesById {
   '/api/public/hooks/platform-digest': typeof ApiPublicHooksPlatformDigestRoute
   '/api/public/hooks/popups-hourly': typeof ApiPublicHooksPopupsHourlyRoute
   '/api/public/hooks/recovery': typeof ApiPublicHooksRecoveryRoute
+  '/api/public/hooks/sms-balance-check': typeof ApiPublicHooksSmsBalanceCheckRoute
   '/api/public/hooks/sms-refresh-status': typeof ApiPublicHooksSmsRefreshStatusRoute
   '/api/public/hooks/sms-route-probe': typeof ApiPublicHooksSmsRouteProbeRoute
   '/api/public/hooks/webhook-replay': typeof ApiPublicHooksWebhookReplayRoute
@@ -1214,6 +1224,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/platform-digest'
     | '/api/public/hooks/popups-hourly'
     | '/api/public/hooks/recovery'
+    | '/api/public/hooks/sms-balance-check'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/sms-route-probe'
     | '/api/public/hooks/webhook-replay'
@@ -1334,6 +1345,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/platform-digest'
     | '/api/public/hooks/popups-hourly'
     | '/api/public/hooks/recovery'
+    | '/api/public/hooks/sms-balance-check'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/sms-route-probe'
     | '/api/public/hooks/webhook-replay'
@@ -1454,6 +1466,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/platform-digest'
     | '/api/public/hooks/popups-hourly'
     | '/api/public/hooks/recovery'
+    | '/api/public/hooks/sms-balance-check'
     | '/api/public/hooks/sms-refresh-status'
     | '/api/public/hooks/sms-route-probe'
     | '/api/public/hooks/webhook-replay'
@@ -1556,6 +1569,7 @@ export interface RootRouteChildren {
   ApiPublicHooksPlatformDigestRoute: typeof ApiPublicHooksPlatformDigestRoute
   ApiPublicHooksPopupsHourlyRoute: typeof ApiPublicHooksPopupsHourlyRoute
   ApiPublicHooksRecoveryRoute: typeof ApiPublicHooksRecoveryRoute
+  ApiPublicHooksSmsBalanceCheckRoute: typeof ApiPublicHooksSmsBalanceCheckRoute
   ApiPublicHooksSmsRefreshStatusRoute: typeof ApiPublicHooksSmsRefreshStatusRoute
   ApiPublicHooksSmsRouteProbeRoute: typeof ApiPublicHooksSmsRouteProbeRoute
   ApiPublicHooksWebhookReplayRoute: typeof ApiPublicHooksWebhookReplayRoute
@@ -2224,6 +2238,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksRecoveryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/sms-balance-check': {
+      id: '/api/public/hooks/sms-balance-check'
+      path: '/api/public/hooks/sms-balance-check'
+      fullPath: '/api/public/hooks/sms-balance-check'
+      preLoaderRoute: typeof ApiPublicHooksSmsBalanceCheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/sms-refresh-status': {
       id: '/api/public/hooks/sms-refresh-status'
       path: '/api/public/hooks/sms-refresh-status'
@@ -2652,6 +2673,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksPlatformDigestRoute: ApiPublicHooksPlatformDigestRoute,
   ApiPublicHooksPopupsHourlyRoute: ApiPublicHooksPopupsHourlyRoute,
   ApiPublicHooksRecoveryRoute: ApiPublicHooksRecoveryRoute,
+  ApiPublicHooksSmsBalanceCheckRoute: ApiPublicHooksSmsBalanceCheckRoute,
   ApiPublicHooksSmsRefreshStatusRoute: ApiPublicHooksSmsRefreshStatusRoute,
   ApiPublicHooksSmsRouteProbeRoute: ApiPublicHooksSmsRouteProbeRoute,
   ApiPublicHooksWebhookReplayRoute: ApiPublicHooksWebhookReplayRoute,
