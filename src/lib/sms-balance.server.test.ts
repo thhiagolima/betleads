@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: {} }));
 
-import { readPanelBalance, resolveViewerEmails } from "./sms-balance.server";
+import { readPanelBalance, validateViewerIds } from "./sms-balance.server";
 
 const CONFIG = { baseUrl: "http://painel.test", usuario: "conta", senha: "segredo" };
 
@@ -78,20 +78,17 @@ describe("readPanelBalance", () => {
   });
 });
 
-describe("resolveViewerEmails", () => {
+describe("validateViewerIds", () => {
   const users = [
-    { id: "u1", email: "Ana@Casa.com" },
+    { id: "u1", email: "ana@casa.com" },
     { id: "u2", email: "bruno@casa.com" },
   ];
 
-  it("acha pelo e-mail sem diferenciar maiúsculas e tira repetidos", () => {
-    expect(resolveViewerEmails(["ana@casa.com", " BRUNO@casa.com ", "ana@casa.com", ""], users)).toEqual([
-      "u1",
-      "u2",
-    ]);
+  it("mantém a ordem e tira repetidos", () => {
+    expect(validateViewerIds(["u2", "u1", "u2"], users)).toEqual(["u2", "u1"]);
   });
 
-  it("e-mail desconhecido lança com a mensagem para a tela", () => {
-    expect(() => resolveViewerEmails(["x@y.com"], users)).toThrow('Nenhum usuário do CRM com o e-mail "x@y.com".');
+  it("usuário que não existe mais lança com a mensagem para a tela", () => {
+    expect(() => validateViewerIds(["u9"], users)).toThrow("Um dos usuários escolhidos não existe mais.");
   });
 });

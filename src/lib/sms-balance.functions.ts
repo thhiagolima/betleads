@@ -21,7 +21,7 @@ type AuthContext = { userId: string };
 
 export const saveBalanceSettingsInput = z.object({
   lowThreshold: z.number().int().min(0).max(10_000_000),
-  viewerEmails: z.array(z.string().max(320)).max(MAX_BALANCE_VIEWERS * 3),
+  viewerUserIds: z.array(z.string().uuid()).max(MAX_BALANCE_VIEWERS),
 });
 
 export type BalanceBannerData = { status: BalanceStatus; isSuperAdmin: boolean };

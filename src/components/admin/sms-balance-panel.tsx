@@ -1,15 +1,24 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, Wallet } from "lucide-react";
+import { Check, ChevronsUpDown, RefreshCw, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { formatDateTime } from "@/components/integrations/meta/meta-format";
 import { SMS_BALANCE_BANNER_KEY } from "@/components/sms-balance-banner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -18,13 +27,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import { DataCard } from "@/components/ui-premium/data-card";
 import {
   BALANCE_CHECK_INTERVAL_MINUTES,
   MAX_BALANCE_VIEWERS,
   type BalanceCheckResult,
   type BalanceStatus,
+  type BalanceUserOption,
 } from "@/lib/sms-balance";
 import {
   getSmsBalanceOverview,
@@ -62,6 +71,107 @@ function balanceText(status: BalanceStatus): { text: string; tone: keyof typeof 
   return { text: value, tone: "ok" };
 }
 
+/** Texto que a busca do seletor compara: nome, e-mail e casas. */
+export function viewerSearchText(user: BalanceUserOption): string {
+  return [user.nome, user.email, ...user.casas].join(" ");
+}
+
+/** Marca ou desmarca um usuário mantendo a ordem de escolha. */
+export function toggleViewer(value: string[], userId: string): string[] {
+  return value.includes(userId) ? value.filter((id) => id !== userId) : [...value, userId];
+}
+
+function ViewerPicker({
+  users,
+  value,
+  onChange,
+}: {
+  users: BalanceUserOption[];
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const byId = new Map(users.map((u) => [u.userId, u]));
+  const chosen = value.filter((id) => byId.has(id));
+  const full = chosen.length >= MAX_BALANCE_VIEWERS;
+
+  return (
+    <div className="space-y-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            id="sms-balance-viewers"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className="h-9 w-full justify-between gap-2"
+          >
+            <span className="truncate text-muted-foreground">
+              {chosen.length === 0
+                ? "Escolher usuários"
+                : `${chosen.length} usuário${chosen.length > 1 ? "s" : ""} escolhido${chosen.length > 1 ? "s" : ""}`}
+            </span>
+            <ChevronsUpDown aria-hidden className="h-3.5 w-3.5 shrink-0 opacity-60" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[min(26rem,calc(100vw-2rem))] p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Buscar por nome, e-mail ou casa" />
+            <CommandList>
+              <CommandEmpty>Nenhum usuário encontrado.</CommandEmpty>
+              <CommandGroup>
+                {users.map((user) => {
+                  const selected = chosen.includes(user.userId);
+                  return (
+                    <CommandItem
+                      key={user.userId}
+                      value={`${viewerSearchText(user)} ${user.userId}`}
+                      disabled={!selected && full}
+                      onSelect={() => onChange(toggleViewer(chosen, user.userId))}
+                    >
+                      <Check
+                        aria-hidden
+                        className={`mr-2 h-4 w-4 shrink-0 ${selected ? "opacity-100" : "opacity-0"}`}
+                      />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{user.nome}</div>
+                        <div className="truncate text-meta text-muted-foreground">
+                          {user.email}
+                          {user.casas.length > 0 ? ` · ${user.casas.join(", ")}` : ""}
+                        </div>
+                      </div>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      {chosen.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {chosen.map((id) => {
+            const user = byId.get(id)!;
+            return (
+              <Badge key={id} variant="secondary" className="gap-1 pr-1" title={user.email}>
+                {user.nome}
+                <button
+                  type="button"
+                  className="rounded-sm p-0.5 hover:bg-foreground/10"
+                  aria-label={`Tirar ${user.nome}`}
+                  onClick={() => onChange(chosen.filter((other) => other !== id))}
+                >
+                  <X aria-hidden className="h-3 w-3" />
+                </button>
+              </Badge>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Painel do super admin: saldo da Short Brasil lido do painel, limite do aviso e quem vê a barra. */
 export function SmsBalancePanel() {
   const fetchOverview = useServerFn(getSmsBalanceOverview);
@@ -75,12 +185,12 @@ export function SmsBalancePanel() {
   });
 
   const [thresholdText, setThresholdText] = useState("");
-  const [emailsText, setEmailsText] = useState("");
+  const [viewerIds, setViewerIds] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
   useEffect(() => {
     if (!data || dirty) return;
     setThresholdText(String(data.settings.lowThreshold));
-    setEmailsText(data.viewers.map((v) => v.email).filter(Boolean).join("\n"));
+    setViewerIds(data.settings.viewerUserIds);
   }, [data, dirty]);
 
   const refresh = () => {
@@ -97,7 +207,8 @@ export function SmsBalancePanel() {
       return saveFn({
         data: {
           lowThreshold,
-          viewerEmails: emailsText.split(/[\n,;\s]+/).map((e) => e.trim()).filter(Boolean),
+          // Quem virou super admin depois de escolhido sai da lista (já vê sempre).
+          viewerUserIds: viewerIds.filter((id) => data?.users.some((u) => u.userId === id)),
         },
       });
     },
@@ -166,7 +277,7 @@ export function SmsBalancePanel() {
       )}
 
       {data && (
-        <div className="grid gap-4 md:grid-cols-[12rem_minmax(0,1fr)_auto] md:items-end">
+        <div className="grid gap-4 md:grid-cols-[12rem_minmax(0,1fr)_auto] md:items-start">
           <div className="space-y-1.5">
             <Label htmlFor="sms-balance-threshold">Avisar com até (SMS)</Label>
             <Input
@@ -181,15 +292,13 @@ export function SmsBalancePanel() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="sms-balance-viewers">
-              Quem também vê o aviso (e-mail de login no CRM, um por linha, até {MAX_BALANCE_VIEWERS})
+              Quem também vê o aviso (usuários do CRM, até {MAX_BALANCE_VIEWERS}; super admins já veem)
             </Label>
-            <Textarea
-              id="sms-balance-viewers"
-              rows={3}
-              placeholder="pessoa@exemplo.com"
-              value={emailsText}
-              onChange={(event) => {
-                setEmailsText(event.target.value);
+            <ViewerPicker
+              users={data.users}
+              value={viewerIds}
+              onChange={(next) => {
+                setViewerIds(next);
                 setDirty(true);
               }}
             />
@@ -208,12 +317,6 @@ export function SmsBalancePanel() {
             </Button>
           </div>
         </div>
-      )}
-
-      {data && data.viewers.length > 0 && (
-        <p className="text-meta text-muted-foreground">
-          Veem o aviso além dos super admins: {data.viewers.map((v) => v.nome).join(", ")}.
-        </p>
       )}
 
       {data && data.recent.length > 0 && (

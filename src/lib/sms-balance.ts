@@ -93,6 +93,9 @@ export function computeBalanceStatus(
   return status;
 }
 
+/** Usuário do CRM que pode ser escolhido para ver o aviso (super admin já vê sempre). */
+export type BalanceUserOption = { userId: string; email: string; nome: string; casas: string[] };
+
 export type BalanceBannerKind = "empty" | "low" | "unreadable";
 
 /** Barra do topo (null = nada a avisar). */

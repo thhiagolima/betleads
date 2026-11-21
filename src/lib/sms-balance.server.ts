@@ -18,6 +18,7 @@ import {
   type BalanceCheckResult,
   type BalanceCheckRow,
   type BalanceStatus,
+  type BalanceUserOption,
 } from "./sms-balance";
 
 const db = () => supabaseAdmin as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -167,15 +168,12 @@ function displayName(user: AuthUser): string {
   return user.email ?? user.id;
 }
 
-/** E-mails da tela → ids de usuário. Lança com a mensagem para a tela. */
-export function resolveViewerEmails(raw: string[], users: AuthUser[]): string[] {
-  const byEmail = new Map(users.filter((u) => u.email).map((u) => [u.email!.toLowerCase(), u.id]));
+/** Ids escolhidos na tela, só de usuários que existem, sem repetidos. Lança com a mensagem para a tela. */
+export function validateViewerIds(raw: string[], users: AuthUser[]): string[] {
+  const known = new Set(users.map((u) => u.id));
   const ids: string[] = [];
-  for (const entry of raw) {
-    const email = entry.trim().toLowerCase();
-    if (!email) continue;
-    const id = byEmail.get(email);
-    if (!id) throw new Error(`Nenhum usuário do CRM com o e-mail "${entry.trim()}".`);
+  for (const id of raw) {
+    if (!known.has(id)) throw new Error("Um dos usuários escolhidos não existe mais. Atualize a tela.");
     if (!ids.includes(id)) ids.push(id);
   }
   if (ids.length > MAX_BALANCE_VIEWERS) throw new Error(`No máximo ${MAX_BALANCE_VIEWERS} usuários.`);
@@ -183,10 +181,10 @@ export function resolveViewerEmails(raw: string[], users: AuthUser[]): string[] 
 }
 
 export async function saveBalanceSettings(
-  input: { lowThreshold: number; viewerEmails: string[] },
+  input: { lowThreshold: number; viewerUserIds: string[] },
   userId: string,
 ): Promise<BalanceSettings> {
-  const viewerUserIds = resolveViewerEmails(input.viewerEmails, await listAuthUsers());
+  const viewerUserIds = validateViewerIds(input.viewerUserIds, await listAuthUsers());
   const updatedAt = new Date().toISOString();
   const { error } = await db()
     .from("sms_balance_settings")
@@ -221,31 +219,56 @@ export async function loadBalanceStatus(now: Date): Promise<BalanceStatus> {
   return computeBalanceStatus(await recentChecks(now, 120), settings.lowThreshold, now);
 }
 
-export type BalanceViewer = { userId: string; email: string; nome: string };
-
 export type BalanceOverview = {
   configured: boolean;
   settings: BalanceSettings;
-  viewers: BalanceViewer[];
+  /** Usuários que não são super admin, em ordem de nome. */
+  users: BalanceUserOption[];
   status: BalanceStatus;
   recent: BalanceCheckRow[];
 };
 
+async function userOptions(users: AuthUser[]): Promise<BalanceUserOption[]> {
+  const [roles, tenants] = await Promise.all([
+    db().from("user_roles").select("user_id, tenant_id, role"),
+    db().from("tenants").select("id, nome"),
+  ]);
+  if (roles.error) throw new Error(roles.error.message);
+  if (tenants.error) throw new Error(tenants.error.message);
+  const tenantName = new Map(
+    ((tenants.data ?? []) as Array<{ id: string; nome: string }>).map((t) => [t.id, t.nome]),
+  );
+  const superAdmins = new Set<string>();
+  const casas = new Map<string, Set<string>>();
+  for (const row of (roles.data ?? []) as Array<{ user_id: string; tenant_id: string | null; role: string }>) {
+    if (row.role === "super_admin") superAdmins.add(row.user_id);
+    const nome = row.tenant_id ? tenantName.get(row.tenant_id) : null;
+    if (!nome) continue;
+    const set = casas.get(row.user_id) ?? new Set<string>();
+    set.add(nome);
+    casas.set(row.user_id, set);
+  }
+  return users
+    .filter((u) => !superAdmins.has(u.id))
+    .map((u) => ({
+      userId: u.id,
+      email: u.email ?? "",
+      nome: displayName(u),
+      casas: [...(casas.get(u.id) ?? [])].sort((a, b) => a.localeCompare(b, "pt-BR")),
+    }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+}
+
 export async function loadBalanceOverview(now: Date): Promise<BalanceOverview> {
-  const [settings, rows, users] = await Promise.all([
+  const [settings, rows, authUsers] = await Promise.all([
     loadBalanceSettings(),
     recentChecks(now, 120),
     listAuthUsers(),
   ]);
-  const byId = new Map(users.map((u) => [u.id, u]));
-  const viewers = settings.viewerUserIds.map((id) => {
-    const user = byId.get(id);
-    return { userId: id, email: user?.email ?? "", nome: user ? displayName(user) : id };
-  });
   return {
     configured: panelConfig() != null,
     settings,
-    viewers,
+    users: await userOptions(authUsers),
     status: computeBalanceStatus(rows, settings.lowThreshold, now),
     recent: rows.slice(0, 20),
   };
