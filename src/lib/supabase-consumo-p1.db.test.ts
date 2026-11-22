@@ -1,5 +1,6 @@
 // Supabase consumption P1 — SQL tests for
 // supabase/migrations/20261130100000_supabase_consumo_p1.sql
+// and the shorter windows of 20261231102000_disco_retencao.sql
 // (throttled journey sweeps, nightly retention, Short.io sync pick).
 
 import { readFileSync } from "node:fs";
@@ -10,6 +11,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const MIGRATION = readFileSync(
   resolve(__dirname, "../..", "supabase/migrations/20261130100000_supabase_consumo_p1.sql"),
+  "utf8",
+);
+const RETENTION = readFileSync(
+  resolve(__dirname, "../..", "supabase/migrations/20261231102000_disco_retencao.sql"),
   "utf8",
 );
 
@@ -78,7 +83,8 @@ beforeAll(async () => {
   await db.exec(SCHEMA);
   // Applied twice: the migration must be idempotent.
   await db.exec(`begin; ${MIGRATION}; commit;`);
-  await db.exec(`begin; ${MIGRATION}; commit;`);
+  await db.exec(`begin; ${RETENTION}; commit;`);
+  await db.exec(`begin; ${RETENTION}; commit;`);
   await db.exec(`insert into tenants values ('${T}', false), ('${DEMO}', true), ('${OTHER}', false);`);
 }, 60_000);
 
@@ -160,15 +166,16 @@ describe("purge_operational_history", () => {
         ('${T}', '${LA}', now() - interval '1 hour', '{}'),
         ('${T}', '${LB}', now() - interval '10 days', '{}');
       insert into webhook_logs (id, tenant_id, created_at) values
-        ('00000000-0000-4000-8000-0000000000e1', '${T}', now() - interval '40 days'),
+        ('00000000-0000-4000-8000-0000000000e1', '${T}', now() - interval '10 days'),
+        ('00000000-0000-4000-8000-0000000000e3', '${T}', now() - interval '1 hour'),
         ('00000000-0000-4000-8000-0000000000e2', '${OTHER}', now() - interval '10 days');
       insert into financial_webhook_attempts (webhook_log_id, raw_payload, created_at) values
-        ('00000000-0000-4000-8000-0000000000e1', '{"pix": "a long raw payload"}', now() - interval '40 days'),
-        ('00000000-0000-4000-8000-0000000000e2', '{"pix": "a long raw payload"}', now() - interval '10 days');
+        ('00000000-0000-4000-8000-0000000000e1', '{"pix": "a long raw payload"}', now() - interval '10 days'),
+        ('00000000-0000-4000-8000-0000000000e3', '{"pix": "a long raw payload"}', now() - interval '1 hour');
       insert into dispatcher_runs (started_at) values (now() - interval '20 days'), (now() - interval '3 days');
       insert into link_tracking_sync_runs (started_at) values (now() - interval '10 days'), (now() - interval '1 day');
       insert into journey_events (event_type, created_at) values
-        ('old', now() - interval '100 days'), ('recent', now() - interval '10 days');
+        ('old', now() - interval '40 days'), ('recent', now() - interval '10 days');
     `);
     // Small batches so every loop runs more than once.
     const out = await one<{ r: Record<string, unknown> }>(
@@ -202,7 +209,13 @@ describe("purge_operational_history", () => {
     ).rows;
     expect(attempts).toEqual([
       { webhook_log_id: null, raw_payload: {} },
-      { webhook_log_id: "00000000-0000-4000-8000-0000000000e2", raw_payload: { pix: "a long raw payload" } },
+      { webhook_log_id: "00000000-0000-4000-8000-0000000000e3", raw_payload: { pix: "a long raw payload" } },
+    ]);
+    // OTHER's only log is 10 days old but is the house's newest: kept.
+    const logs = (await db.query<{ id: string }>(`select id from webhook_logs order by id`)).rows;
+    expect(logs.map((l) => l.id)).toEqual([
+      "00000000-0000-4000-8000-0000000000e2",
+      "00000000-0000-4000-8000-0000000000e3",
     ]);
     expect((await one<{ n: number }>(`select count(*)::int n from journey_events where event_type = 'old'`)).n).toBe(0);
     expect((await one<{ n: number }>(`select count(*)::int n from journey_events where event_type = 'recent'`)).n).toBe(1);

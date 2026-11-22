@@ -176,6 +176,35 @@ async function event(
 }
 
 /**
+ * step_deferred for holds that retry on a timer until something outside the
+ * journey changes (no balance, own account revoked). Written once per hold:
+ * skipped when the enrollment's latest event is already this deferral on the
+ * same step, so a house without balance for a day does not log one row per
+ * enrollment every retry (450k rows on 11-16).
+ */
+async function deferredEventOnce(
+  enrollment: EnrollmentRow,
+  detail: Record<string, unknown> & { reason: string; step_position: number },
+) {
+  const { data: last } = await db
+    .from("journey_events")
+    .select("event_type, detail")
+    .eq("enrollment_id", enrollment.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const lastDetail = (last?.detail ?? {}) as Record<string, unknown>;
+  if (
+    last?.event_type === "step_deferred" &&
+    lastDetail.reason === detail.reason &&
+    Number(lastDetail.step_position) === detail.step_position
+  ) {
+    return;
+  }
+  await event(enrollment, "step_deferred", detail);
+}
+
+/**
  * Writes the item's next state and gives up the claim. Fenced on claimed_by:
  * if this worker's lease expired and another worker took the item over, the
  * write is dropped (and counted) instead of clobbering the new owner's state.
@@ -1362,7 +1391,7 @@ async function holdForBalance(
   }
   // attempts intentionally unchanged.
   await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt });
-  await event(enrollment, "step_deferred", {
+  await deferredEventOnce(enrollment, {
     channel,
     step_position: Number(enrollment.current_position ?? 0),
     reason: "saldo_insuficiente",
@@ -1407,7 +1436,7 @@ async function holdForOwnAccountRevoked(
   }
   // attempts, provider_deferrals and platform_holds intentionally unchanged.
   await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt });
-  await event(enrollment, "step_deferred", {
+  await deferredEventOnce(enrollment, {
     channel,
     step_position: Number(enrollment.current_position ?? 0),
     reason: "own_account_revoked",

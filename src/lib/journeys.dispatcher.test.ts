@@ -392,6 +392,23 @@ describe("runJourneyDispatcher", () => {
     expect(alerts.notifyNoBalance).toHaveBeenCalledWith(TENANT);
   });
 
+  it("a hold without balance logs step_deferred once, not on every retry", async () => {
+    seed(["e1"]);
+    sms.sendSmsInternal.mockResolvedValue({
+      ok: false,
+      status: 402,
+      error: "Saldo insuficiente",
+      errorKind: "insufficient_balance",
+    });
+    await runJourneyDispatcher(1000);
+    seedClaimAgain();
+    const second = await runJourneyDispatcher(1000);
+    expect(second).toMatchObject({ deferredNoBalance: 1 });
+    expect(
+      fake.tables.journey_events.filter((e) => e.event_type === "step_deferred"),
+    ).toHaveLength(1);
+  });
+
   it("after a recharge the held step is sent (it was not lost)", async () => {
     seed(["e1"]);
     sms.sendSmsInternal.mockResolvedValue({

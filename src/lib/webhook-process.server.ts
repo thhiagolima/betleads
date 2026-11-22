@@ -513,7 +513,8 @@ export async function processWebhookEvent(
             provider_event_id: providerEventId,
             event_name: evento,
             parser_version: "2026-10-03",
-            raw_payload: payload,
+            // Never read; the same payload is already in webhook_logs.
+            raw_payload: {},
             normalized_event: normalizedEvent,
           })
           .select("id")
