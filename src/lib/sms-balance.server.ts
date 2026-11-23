@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { fetchWithTimeout } from "@/lib/owned-account-isolation.server";
 
 import {
+  DEFAULT_LOW_THRESHOLD,
   MAX_BALANCE_VIEWERS,
   computeBalanceStatus,
   parseShortcodeBalance,
@@ -147,7 +148,7 @@ export async function loadBalanceSettings(): Promise<BalanceSettings> {
   if (error) throw new Error(error.message);
   const row = data as { low_threshold: number; viewer_user_ids: string[] | null; updated_at: string } | null;
   return {
-    lowThreshold: row?.low_threshold ?? 1000,
+    lowThreshold: row?.low_threshold ?? DEFAULT_LOW_THRESHOLD,
     viewerUserIds: row?.viewer_user_ids ?? [],
     updatedAt: row?.updated_at ?? null,
   };

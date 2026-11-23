@@ -83,9 +83,17 @@ describe("computeBalanceStatus", () => {
     expect(balanceBanner(status)).toBe("unreadable");
   });
 
-  it("primeiras falhas logo depois de ligar ainda não acusam", () => {
-    const status = computeBalanceStatus([fail(2), fail(17)], 1000, NOW);
-    expect(status.unreadable).toBe(false);
-    expect(balanceBanner(status)).toBeNull();
+  it("sem leitura nenhuma (cron parado) acusa que não dá para ler", () => {
+    const status = computeBalanceStatus([], 20000, NOW);
+    expect(status.unreadable).toBe(true);
+    expect(balanceBanner(status)).toBe("unreadable");
+  });
+
+  it("última leitura boa mas velha (cron parado) também acusa e diz desde quando", () => {
+    const staleMin = BALANCE_STALE_AFTER_MS / 60_000;
+    const status = computeBalanceStatus([ok(staleMin + 60, 71482)], 20000, NOW);
+    expect(status.level).toBe("unknown");
+    expect(status.lastReadAt).toBe(at(staleMin + 60));
+    expect(balanceBanner(status)).toBe("unreadable");
   });
 });

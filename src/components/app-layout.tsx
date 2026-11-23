@@ -9,6 +9,7 @@ import { DemoBanner } from "@/components/demo-banner";
 import { HelpButton } from "@/components/help/help-button";
 import { ProviderAuthBanner } from "@/components/provider-auth-banner";
 import { SmsBalanceBanner } from "@/components/sms-balance-banner";
+import { SmsBalanceChip } from "@/components/sms-balance-chip";
 import { SmsRouteProbeBanner } from "@/components/sms-route-probe-banner";
 import { AccountMenu } from "@/components/shell/account-menu";
 import { MobileMenu, MobileTabBar } from "@/components/shell/mobile-nav";
@@ -104,6 +105,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="hidden min-w-0 md:block">
               <ActiveTenantSwitcher />
             </div>
+            <SmsBalanceChip />
             <RealtimeIndicator />
             <HelpButton />
             <AccountMenu role={role} />

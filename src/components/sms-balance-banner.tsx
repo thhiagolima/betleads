@@ -12,18 +12,28 @@ export const SMS_BALANCE_BANNER_KEY = ["sms-balance-banner"] as const;
 const sms = (value: number) => `${value.toLocaleString("pt-BR")} SMS`;
 
 /**
+ * Saldo para quem acompanha (super admin e usuários escolhidos no admin);
+ * null para os outros. Barra e header usam a mesma consulta. O painel é lido
+ * a cada 15 min pelo cron; a tela pergunta a cada minuto para pegar a leitura
+ * nova logo que ela chega.
+ */
+export function useSmsBalanceBanner() {
+  const fetchBanner = useServerFn(getSmsBalanceBanner);
+  return useQuery({
+    queryKey: SMS_BALANCE_BANNER_KEY,
+    queryFn: () => fetchBanner(),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+}
+
+/**
  * Barra com o saldo da conta Short Brasil padrão, lido do painel a cada 15
  * min. Aparece para o super admin e para os usuários escolhidos por ele no
  * admin (Canais); para os outros o servidor devolve null.
  */
 export function SmsBalanceBanner() {
-  const fetchBanner = useServerFn(getSmsBalanceBanner);
-  const { data } = useQuery({
-    queryKey: SMS_BALANCE_BANNER_KEY,
-    queryFn: () => fetchBanner(),
-    refetchInterval: 120_000,
-    staleTime: 60_000,
-  });
+  const { data } = useSmsBalanceBanner();
   if (!data) return null;
   const { status, isSuperAdmin } = data;
   const kind = balanceBanner(status);
@@ -40,7 +50,14 @@ export function SmsBalanceBanner() {
   ) : null;
 
   if (kind === "unreadable") {
-    if (!isSuperAdmin) return null;
+    const since = status.lastReadAt
+      ? `A última leitura foi em ${formatDateTime(status.lastReadAt)}`
+      : "Nenhuma leitura nas últimas 24 horas";
+    const cause = status.lastError
+      ? ` (erro na última tentativa: ${status.lastError})`
+      : status.lastCheckAt
+        ? ""
+        : " e a leitura automática não está rodando";
     return (
       <div className="mt-3">
         <div
@@ -49,10 +66,11 @@ export function SmsBalanceBanner() {
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <div className="leading-snug">
-            <p className="font-medium text-warning">Não estou conseguindo ler o saldo da Short Brasil</p>
+            <p className="font-medium text-warning">Saldo da Short Brasil sem leitura: o aviso de saldo baixo está parado</p>
             <p className="text-meta text-foreground/80">
-              As últimas leituras do painel falharam{status.lastError ? `: ${status.lastError}` : "."}{" "}
-              O aviso de saldo baixo fica parado até voltar a ler.{details}
+              {since}
+              {cause}. Enquanto não voltar a ler, ninguém é avisado se o saldo acabar. Confira o
+              saldo direto no painel da Short Brasil.{details}
             </p>
           </div>
         </div>

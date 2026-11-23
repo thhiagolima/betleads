@@ -4,7 +4,8 @@
 // tipos. Não importar nada `*.server.ts` aqui.
 
 export const BALANCE_CHECK_INTERVAL_MINUTES = 15;
-export const DEFAULT_LOW_THRESHOLD = 1000;
+/** ~2 h 30 de folga no pico de envio (~8 mil SMS/h em 22/11). */
+export const DEFAULT_LOW_THRESHOLD = 20000;
 export const MAX_BALANCE_VIEWERS = 30;
 /** Leitura mais velha que isso não vale como saldo atual (robô parado ou painel fora). */
 export const BALANCE_STALE_AFTER_MS = 3 * BALANCE_CHECK_INTERVAL_MINUTES * 60_000;
@@ -33,8 +34,14 @@ export type BalanceStatus = {
   lastCheckAt: string | null;
   /** Erro da última leitura quando ela falhou. */
   lastError: string | null;
-  /** Nenhuma leitura deu certo nos últimos BALANCE_STALE_AFTER_MS. */
+  /**
+   * Nenhuma leitura deu certo nos últimos BALANCE_STALE_AFTER_MS (painel
+   * fora, login recusado ou o cron parado). Vale também sem leitura nenhuma:
+   * em 23/11 o cron não existia e a barra ficou muda por 17 h sem saldo.
+   */
   unreadable: boolean;
+  /** Última leitura que deu certo, mesmo velha (para dizer desde quando não lê). */
+  lastReadAt: string | null;
 };
 
 /**
@@ -65,15 +72,15 @@ export function computeBalanceStatus(
     lastCheckAt: rows[0]?.checked_at ?? null,
     lastError: rows[0] && rows[0].result !== "ok" ? rows[0].error : null,
     unreadable: false,
+    lastReadAt: null,
   };
   const nowMs = now.getTime();
   const read = rows.filter((row) => row.result === "ok" && row.shortcode_sms != null);
   const latest = read[0];
   const fresh = latest && nowMs - new Date(latest.checked_at).getTime() <= BALANCE_STALE_AFTER_MS;
-  // Só acusa "não consigo ler" depois de um tempo: uma falha isolada do painel não é aviso.
-  status.unreadable =
-    rows.length > 0 && rows[0].result !== "ok" && !fresh &&
-    nowMs - new Date(rows[rows.length - 1].checked_at).getTime() > BALANCE_STALE_AFTER_MS;
+  status.lastReadAt = latest?.checked_at ?? null;
+  // Uma falha isolada não acusa: a leitura anterior ainda vale por BALANCE_STALE_AFTER_MS.
+  status.unreadable = !fresh;
   if (!latest || !fresh) return status;
 
   const balance = latest.shortcode_sms as number;
