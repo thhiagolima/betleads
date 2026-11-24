@@ -6,9 +6,10 @@
 // expert-lead-sheet.db.test.ts, plus deposits, click_events,
 // gamification_settings and a managed_tenant_ids() identical to production).
 // Asserts the attribution rule of refresh_expert_credits (click within the
-// window, affiliate fallback, FTD/reactivation flags; rule_version 2 of
-// 20261125100000_expert_hardening.sql: a click never takes the deposit of a
-// player whose affiliate id has another eligible owner), its range/idempotency
+// window, affiliate fallback, FTD/reactivation flags; rule_version 3 of
+// 20261231102100_expert_credits_clique_externo.sql: on a player whose
+// affiliate id has another eligible owner, a click only takes the first
+// approved deposit after it), its range/idempotency
 // behaviour, refresh_expert_credits_recent and the admin/gestor-only reads.
 
 import { readFileSync } from "node:fs";
@@ -18,6 +19,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { EXPERT_HARDENING, migrationSection } from "./migration-section.test-support";
+
+const EXPERT_CREDITS_V3 = "20261231102100_expert_credits_clique_externo.sql";
 
 const root = resolve(__dirname, "../..");
 const migration = (name: string) =>
@@ -310,8 +313,9 @@ beforeAll(async () => {
     [TENANT_A, TENANT_B, TENANT_DEMO, TENANT_W],
   );
   for (const name of MIGRATIONS) await db.exec(migration(name));
-  // rule_version 2 (20261125100000_expert_hardening.sql).
+  // rule_version 2 (20261125100000_expert_hardening.sql), then 3.
   await db.exec(migrationSection(EXPERT_HARDENING, "expert_credits_v2"));
+  await db.exec(migrationSection(EXPERT_CREDITS_V3, "expert_credits_v3"));
 
   expert1 = await newExpert(TENANT_A, "Expert Um", ["AFF-1"]);
   expert2 = await newExpert(TENANT_A, "Expert Dois", []);
@@ -350,7 +354,7 @@ describe("refresh_expert_credits — attribution", () => {
       player_id: player,
       link_dispatch_id: ld,
       click_window_hours: 72,
-      rule_version: 2,
+      rule_version: 3,
     });
     expect(Number(row?.valor)).toBe(250);
     expect(new Date(row!.click_at!).toISOString()).toBe("2026-10-01T12:00:00.000Z");
@@ -461,44 +465,76 @@ describe("refresh_expert_credits — attribution", () => {
 
     await refresh(TENANT_A);
 
-    expect(await credit(viaClick)).toMatchObject({ expert_id: expert2, via: "clique", rule_version: 2 });
+    expect(await credit(viaClick)).toMatchObject({ expert_id: expert2, via: "clique", rule_version: 3 });
   });
 
-  it("rule_version 2: another expert's click never takes the deposit of an affiliate owned by an eligible expert", async () => {
-    // AFF-1 belongs to expert1; expert2 sends a link to that player and the
-    // player clicks it: the affiliate owner keeps the deposit.
+  it("rule_version 3: another expert's click takes only the first deposit after it; the player stays with the owner", async () => {
+    // AFF-1 belongs to expert1; expert2 sends a link to that player, the
+    // player clicks it and deposits: that deposit is expert2's, the next ones
+    // go back to expert1 until expert2 gets a new click.
     const player = await newPlayer(TENANT_A, { affiliate: "AFF-1" });
     const ld = await dispatch(TENANT_A, expert2, player, "2026-10-05T10:00:00Z");
     await click(TENANT_A, ld, "2026-10-05T10:05:00Z");
-    const stolen = await deposit(TENANT_A, player, "2026-10-05T11:00:00Z");
+    const first = await deposit(TENANT_A, player, "2026-10-05T11:00:00Z");
+    // Pending deposits in between do not use up the click.
+    await deposit(TENANT_A, player, "2026-10-05T11:10:00Z", { status: "pendente" });
+    const second = await deposit(TENANT_A, player, "2026-10-05T12:00:00Z");
+    await click(TENANT_A, ld, "2026-10-06T09:00:00Z");
+    const afterNewClick = await deposit(TENANT_A, player, "2026-10-06T10:00:00Z");
     const later = await deposit(TENANT_A, player, "2026-10-15T11:00:00Z");
 
     await refresh(TENANT_A);
 
-    expect(await credit(stolen)).toMatchObject({
+    expect(await credit(first)).toMatchObject({
+      expert_id: expert2,
+      via: "clique",
+      link_dispatch_id: ld,
+      rule_version: 3,
+    });
+    expect(await credit(second)).toMatchObject({
       expert_id: expert1,
       via: "afiliado",
       link_dispatch_id: null,
       click_at: null,
-      rule_version: 2,
+      rule_version: 3,
     });
+    expect(await credit(afterNewClick)).toMatchObject({ expert_id: expert2, via: "clique" });
     expect(await credit(later)).toMatchObject({ expert_id: expert1, via: "afiliado" });
   });
 
-  it("rule_version 2: the owner's own click still credits by click, even when another expert clicked later", async () => {
+  it("rule_version 3: a deposit between another expert's click and the next deposit uses up the click", async () => {
+    // The owner's click wins the deposit right after expert2's click; the
+    // following deposit falls back to the owner's click, not expert2's.
+    const player = await newPlayer(TENANT_A, { affiliate: "AFF-1" });
+    const intruder = await dispatch(TENANT_A, expert2, player, "2026-10-08T08:00:00Z");
+    await click(TENANT_A, intruder, "2026-10-08T08:10:00Z");
+    const own = await dispatch(TENANT_A, expert1, player, "2026-10-08T08:20:00Z");
+    await click(TENANT_A, own, "2026-10-08T08:30:00Z");
+    const d1 = await deposit(TENANT_A, player, "2026-10-08T09:00:00Z");
+    const d2 = await deposit(TENANT_A, player, "2026-10-08T10:00:00Z");
+
+    await refresh(TENANT_A);
+
+    expect(await credit(d1)).toMatchObject({ expert_id: expert1, via: "clique", link_dispatch_id: own });
+    expect(await credit(d2)).toMatchObject({ expert_id: expert1, via: "clique", link_dispatch_id: own });
+  });
+
+  it("rule_version 3: the latest click takes the first deposit, the owner's click credits the next ones", async () => {
     const player = await newPlayer(TENANT_A, { affiliate: " AFF-1 " });
     const own = await dispatch(TENANT_A, expert1, player, "2026-10-06T08:00:00Z");
     await click(TENANT_A, own, "2026-10-06T08:30:00Z");
     const intruder = await dispatch(TENANT_A, expert2, player, "2026-10-06T09:00:00Z");
     await click(TENANT_A, intruder, "2026-10-06T09:30:00Z");
     const dep = await deposit(TENANT_A, player, "2026-10-06T10:00:00Z");
+    const next = await deposit(TENANT_A, player, "2026-10-06T11:00:00Z");
 
     await refresh(TENANT_A);
 
-    expect(await credit(dep)).toMatchObject({ expert_id: expert1, via: "clique", link_dispatch_id: own });
+    expect(await credit(dep)).toMatchObject({ expert_id: expert2, via: "clique", link_dispatch_id: intruder });
+    expect(await credit(next)).toMatchObject({ expert_id: expert1, via: "clique", link_dispatch_id: own });
   });
 
-  it("rule_version 2: an owner that is not eligible at the deposit time does not block the click", async () => {
+  it("rule_version 2+: an owner that is not eligible at the deposit time does not block the click", async () => {
     // Owner deactivated before the deposit.
     const off = await newExpert(TENANT_A, "Dono Desativado", ["AFF-V2-OFF"]);
     await db.query(
@@ -524,7 +560,7 @@ describe("refresh_expert_credits — attribution", () => {
     expect(await credit(d2)).toMatchObject({ expert_id: expert2, via: "clique" });
   });
 
-  it("rule_version 2 only rewrites the refreshed range: older credits keep their stored version", async () => {
+  it("a new rule_version only rewrites the refreshed range: older credits keep their stored version", async () => {
     const player = await newPlayer(TENANT_A, { affiliate: "AFF-1" });
     const ld = await dispatch(TENANT_A, expert2, player, "2026-06-01T10:00:00Z");
     await click(TENANT_A, ld, "2026-06-01T10:05:00Z");
@@ -544,7 +580,7 @@ describe("refresh_expert_credits — attribution", () => {
     await refresh(TENANT_A, "2026-10-20T00:00:00Z", ALL_TO);
 
     expect(await credit(old)).toMatchObject({ expert_id: expert2, via: "clique", rule_version: 1 });
-    expect(await credit(recent)).toMatchObject({ expert_id: expert1, via: "afiliado", rule_version: 2 });
+    expect(await credit(recent)).toMatchObject({ expert_id: expert1, via: "afiliado", rule_version: 3 });
   });
 
   it("non-approved deposits get no credit", async () => {

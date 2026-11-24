@@ -398,7 +398,7 @@ export const GLOSSARY: GlossaryTerm[] = [
     short:
       "Quantas horas depois do clique num link um depósito ainda conta como creditado por clique. Padrão: 72 horas. Configurada em Rendimento da equipe → Regras de crédito.",
     long:
-      "Um depósito feito depois da janela não é descartado: ele pode ainda ser creditado por vínculo de afiliado, se existir um. Mudar a janela recalcula só os créditos dos últimos 8 dias — depósitos mais antigos não são refeitos.",
+      "Um depósito feito depois da janela não é descartado: ele pode ainda ser creditado por vínculo de afiliado, se existir um. Se o lead pertence a outro expert pelo ID de afiliado, o clique de quem não é o dono leva só o primeiro depósito aprovado depois desse clique; o lead continua com o dono e os depósitos seguintes voltam para ele. Mudar a janela recalcula só os créditos dos últimos 8 dias — depósitos mais antigos não são refeitos.",
   },
   {
     id: "clique-x-afiliado",
