@@ -194,7 +194,7 @@ const screen: HelpScreen = {
           what: "Campo onde cola a chave copiada da Meta (aceita um texto longo, tipo senha). É pedido sem nenhuma chave conectada ainda e também ao adicionar outra chave ou trocar a de uma conexão existente.",
           roles: ["admin"],
           notes:
-            'Fica guardada de forma criptografada e não volta a aparecer depois. O painel lateral que o pede tem o título "Adicionar Usuário do Sistema" (para somar uma chave) ou "Trocar chave · <nome da chave>" (para substituir a de uma conexão existente).',
+            'Fica guardada de forma criptografada e não volta a aparecer depois. O painel lateral que o pede tem o título "Conectar outra BM ou chave" (para somar uma chave) ou "Trocar chave · <nome da chave>" (para substituir a de uma conexão existente).',
         },
         {
           anchor: "webhooks.meta.validar",
@@ -213,8 +213,8 @@ const screen: HelpScreen = {
         },
         {
           anchor: "webhooks.meta.adicionar",
-          label: "Adicionar Usuário do Sistema",
-          what: "Abre o painel lateral para conectar outra chave, somando as BMs e contas que ela alcança às que a casa já tem.",
+          label: "Conectar outra BM ou chave",
+          what: 'Abre o painel lateral para colar a chave de outro Usuário do Sistema, somando as BMs e contas que ela alcança às que a casa já tem. Se a BM nova deu acesso ao mesmo Usuário do Sistema já conectado, não precisa de chave nova: "Testar acesso" na chave existente traz as contas novas, que chegam desmarcadas.',
           roles: ["admin"],
           notes: "Aparece só depois da primeira chave conectada; some na casa de demonstração.",
         },
@@ -231,7 +231,7 @@ const screen: HelpScreen = {
           label: "Chaves conectadas",
           what: 'Um cartão por chave: nome ("Chave "<nome>""), app e trecho da chave, Usuário do Sistema, quantas BMs e contas alcança (e quantas marcadas), validade ("Não expira", "Expira em <data>" ou "Validade desconhecida") e um selo de saúde ("ok", "atenção" ou "erro").',
           notes:
-            'Uma chave com problema mostra o motivo ("A chave está com erro. Teste o acesso ou troque a chave.", "A chave expirou. Troque a chave.", "A chave expira em menos de 1 dia. Troque a chave." ou "A chave expira em N dias. Troque a chave.", e/ou "N conta(s) com erro de sincronização.") com o botão "Trocar chave" ao lado. Uma chave da integração antiga (app compartilhado) ganha o selo "Conexão antiga", e a tela mostra o aviso "Conexão antiga precisa ser substituída: A integração anterior usava o app compartilhado da plataforma. Gere uma chave no app da sua operação e conecte; os dados já importados ficam." Cada cartão tem o botão "Testar acesso" e o menu "..." com "Renomear" (até 60 caracteres), "Trocar chave" e "Desconectar". Sem nenhuma chave conectada: para o admin, mostra o guia e o campo de conectar a primeira chave; para os outros perfis, "A Meta ainda não está conectada nesta casa."\n\n"Testar acesso" mostra "Acesso testado · N conta(s) acessível(is) (N nova(s))" (a parte entre parênteses só aparece com conta nova) ou, falhando, "Não foi possível testar o acesso". "Renomear" mostra "Chave renomeada para "<nome>"" ou, falhando, "Não foi possível renomear a chave". O texto embaixo do nome da chave (quando ela está com erro, gravado pela última verificação automática) é um destes: "Conexão antiga: reconecte usando a chave de acesso do Usuário do Sistema.", "Nenhuma chave conectada alcança esta conta.", "A conta foi removida ou deixou de estar selecionada.", "A chave perdeu a permissão ads_read.", "A Meta não devolveu nenhuma conta para esta chave. Teste o acesso.", "A chave de acesso é inválida ou expirou." ou "A chave foi revogada ou expirou. Gere uma nova no Business Manager."',
+            'Uma chave com problema mostra o motivo ("A chave está com erro. Teste o acesso ou troque a chave.", "A chave expirou. Troque a chave.", "A chave expira em menos de 1 dia. Troque a chave." ou "A chave expira em N dias. Troque a chave.", e/ou "N conta(s) com erro de sincronização.") com o botão "Trocar chave" ao lado. Uma chave da integração antiga (app compartilhado) ganha o selo "Conexão antiga", e a tela mostra o aviso "Conexão antiga precisa ser substituída: A integração anterior usava o app compartilhado da plataforma. Gere uma chave no app da sua operação e conecte; os dados já importados ficam." Cada cartão tem os botões "Testar acesso", "Renomear" (até 60 caracteres), "Trocar chave" (quando a chave está com problema, ele aparece junto do aviso) e "Desconectar". Sem nenhuma chave conectada: para o admin, mostra o guia e o campo de conectar a primeira chave; para os outros perfis, "A Meta ainda não está conectada nesta casa."\n\n"Testar acesso" mostra "Acesso testado · N conta(s) acessível(is) (N nova(s))" (a parte entre parênteses só aparece com conta nova) ou, falhando, "Não foi possível testar o acesso". "Renomear" mostra "Chave renomeada para "<nome>"" ou, falhando, "Não foi possível renomear a chave". O texto embaixo do nome da chave (quando ela está com erro, gravado pela última verificação automática) é um destes: "Conexão antiga: reconecte usando a chave de acesso do Usuário do Sistema.", "Nenhuma chave conectada alcança esta conta.", "A conta foi removida ou deixou de estar selecionada.", "A chave perdeu a permissão ads_read.", "A Meta não devolveu nenhuma conta para esta chave. Teste o acesso.", "A chave de acesso é inválida ou expirou." ou "A chave foi revogada ou expirou. Gere uma nova no Business Manager."',
         },
         {
           label: 'Diálogo "Desconectar a chave "<nome>"?"',
@@ -538,7 +538,7 @@ const screen: HelpScreen = {
       },
       {
         anchor: "webhooks.meta.adicionar",
-        title: "Adicionar Usuário do Sistema",
+        title: "Conectar outra BM ou chave",
         body: "Conecte outra chave para somar mais BMs e contas.",
         articleSection: "meta",
       },

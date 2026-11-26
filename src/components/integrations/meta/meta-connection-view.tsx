@@ -197,7 +197,7 @@ export function MetaConnectionView({
                 {...tourAnchor("webhooks.meta.adicionar")}
               >
                 <Plus aria-hidden className="h-4 w-4" />
-                Adicionar Usuário do Sistema
+                Conectar outra BM ou chave
               </Button>
             </DemoDisabledTooltip>
             <DemoDisabledTooltip active={isDemo}>

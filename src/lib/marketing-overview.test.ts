@@ -141,6 +141,25 @@ describe("buildMarketingOverview", () => {
     expect(o.moneyMap.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(100, 6);
   });
 
+  it("F1: motivos e gasto sem cadastro ligado viram números; ausentes, listas vazias e zero", () => {
+    const empty = buildMarketingOverview(raw);
+    expect(empty.orphanReasons).toEqual([]);
+    expect(empty.unlinkedCampaigns).toEqual([]);
+    expect(empty.totals.spendUnlinked).toBe(0);
+
+    const o = buildMarketingOverview({
+      ...raw,
+      totals: { ...raw.totals, spendUnlinked: "60.00" },
+      orphanReasons: [{ reason: "live", players: "140", ftd: "85", revenue: "7542.00" }],
+      unlinkedCampaigns: [{ campaign: "CAMPANHA LIVE", campaign_id: "1", spend: "493.80" }],
+    } as unknown as MarketingOverviewRpc);
+    expect(o.totals.spendUnlinked).toBe(60);
+    expect(o.orphanReasons).toEqual([{ reason: "live", players: 140, ftd: 85, revenue: 7542 }]);
+    expect(o.unlinkedCampaigns).toEqual([
+      { campaign: "CAMPANHA LIVE", campaign_id: "1", spend: 493.8 },
+    ]);
+  });
+
   it("MB4-04: sem filtro o resultado traz filter null; com filtro, as contas", () => {
     expect(buildMarketingOverview(raw).filter).toBeNull();
     expect(buildMarketingOverview({ ...raw, filter: null }).filter).toBeNull();

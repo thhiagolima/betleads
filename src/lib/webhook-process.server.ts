@@ -135,7 +135,10 @@ export async function processWebhookEvent(
     const tracking = asRecord(data.tracking ?? (userEnvelope ? payload.tracking : undefined));
     const signupAttribution = asRecord(data.signupAttribution ?? data.signup_attribution);
     const subject = asRecord(payload.subject);
-    const utm = resolveUtm(data, tracking, signupAttribution);
+    // UTMs e códigos que só vêm na URL de entrada (betgreen: ?inviteCode=; casas que só
+    // ecoam a landing). Ficam por último: campo explícito do payload sempre vence.
+    const landing = landingParams(data, tracking, signupAttribution);
+    const utm = resolveUtm(data, tracking, signupAttribution, landing);
     const affiliate = asRecord(data.affiliate);
     const affiliateId =
       firstString(
@@ -148,6 +151,7 @@ export async function processWebhookEvent(
         data.inviter,
         userEnvelope ? payload.inviter : undefined,
       ) ?? null;
+    const referralCode = resolveReferralCode(payload, data, tracking, landing, affiliateId);
 
     // Looked up only when it can be written (new player, or an empty expert).
     let expertLookup: Promise<string | null> | null = null;
@@ -431,6 +435,25 @@ export async function processWebhookEvent(
         }
         if (email && !current.email) updates.email = email;
         if (telefone && !current.telefone) updates.telefone = telefone;
+      }
+
+      // Código de indicação (ESCOPO_ORIGEM_UTM U0): update à parte, só se vazio, e o erro
+      // não derruba o evento — a coluna pode ainda não existir quando o app sobe antes
+      // da migração 20261231101100.
+      if (referralCode) {
+        const { error: referralError } = await sb
+          .from("players")
+          .update({ referral_code: referralCode })
+          .eq("id", playerId)
+          .eq("tenant_id", tenantId)
+          .is("referral_code", null);
+        if (referralError) {
+          console.warn("[referral code] update skipped", {
+            tenantId,
+            playerId,
+            error: referralError.message,
+          });
+        }
       }
 
       if (affiliateId) {
@@ -830,6 +853,7 @@ export async function processWebhookEvent(
           data,
           tracking,
           signupAttribution,
+          landing,
           utm,
           capturedAt: eventIso,
         });
@@ -1334,6 +1358,7 @@ function resolveUtm(
   data: Record<string, unknown>,
   tracking: Record<string, unknown>,
   signupAttribution: Record<string, unknown>,
+  landing: Record<string, string> = {},
 ): {
   utm_source: string | null;
   utm_medium: string | null;
@@ -1351,6 +1376,7 @@ function resolveUtm(
         tracking.utmSource,
         signupAttribution.utmSource,
         signupAttribution.utm_source,
+        landing.utm_source,
       ) ?? null,
     utm_medium:
       firstString(
@@ -1360,6 +1386,7 @@ function resolveUtm(
         tracking.utmMedium,
         signupAttribution.utmMedium,
         signupAttribution.utm_medium,
+        landing.utm_medium,
       ) ?? null,
     utm_campaign:
       firstString(
@@ -1369,6 +1396,7 @@ function resolveUtm(
         tracking.utmCampaign,
         signupAttribution.utmCampaign,
         signupAttribution.utm_campaign,
+        landing.utm_campaign,
       ) ?? null,
     utm_content:
       firstString(
@@ -1378,6 +1406,7 @@ function resolveUtm(
         tracking.utmContent,
         signupAttribution.utmContent,
         signupAttribution.utm_content,
+        landing.utm_content,
       ) ?? null,
     utm_term:
       firstString(
@@ -1387,6 +1416,7 @@ function resolveUtm(
         tracking.utmTerm,
         signupAttribution.utmTerm,
         signupAttribution.utm_term,
+        landing.utm_term,
       ) ?? null,
     utm_id:
       firstString(
@@ -1396,8 +1426,67 @@ function resolveUtm(
         tracking.utmId,
         signupAttribution.utmId,
         signupAttribution.utm_id,
+        landing.utm_id,
       ) ?? null,
   };
+}
+
+const LANDING_URL_KEYS = ["landing_url", "landingUrl", "landing_page", "landingPage"] as const;
+
+/**
+ * Query string da URL de entrada do cadastro, quando a casa manda a landing:
+ * `tracking.landing_url` (envelope user), `data.trackingContext.landingUrl` (Axio),
+ * `signupAttribution.landingUrl`. A 1ª URL válida vence; chaves repetidas ficam com
+ * o 1º valor não vazio. Mais `tracking.params`, que algumas casas mandam já separado.
+ */
+export function landingParams(
+  data: Record<string, unknown>,
+  tracking: Record<string, unknown>,
+  signupAttribution: Record<string, unknown>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const put = (key: string, raw: unknown) => {
+    const value = stringFrom(raw);
+    if (value && !(key in out)) out[key] = value.slice(0, 500);
+  };
+  const trackingContext = asRecord(data.trackingContext ?? data.tracking_context);
+  const landingUrl = [tracking, trackingContext, signupAttribution, data]
+    .flatMap((source) => LANDING_URL_KEYS.map((key) => stringFrom(source[key])))
+    .find((raw) => raw && URL.canParse(raw));
+  if (landingUrl) {
+    for (const [key, value] of new URL(landingUrl).searchParams) put(key, value);
+  }
+  for (const [key, value] of Object.entries(asRecord(tracking.params))) put(key, value);
+  return out;
+}
+
+/**
+ * Código de indicação entre jogadores (betgreen `?inviteCode=`) ou `ref` solto
+ * (777). Não vira affiliate_id: este credita expert. O `ref` só conta quando não há
+ * afiliado — na 99bet/mega-sorte-7k o `ref` é o código do link do mesmo afiliado
+ * que já chega em `inviter`.
+ */
+export function resolveReferralCode(
+  payload: Record<string, unknown>,
+  data: Record<string, unknown>,
+  tracking: Record<string, unknown>,
+  landing: Record<string, string>,
+  affiliateId: string | null,
+): string | null {
+  const invite = firstString(
+    data.inviteCode,
+    data.invite_code,
+    data.referralCode,
+    data.referral_code,
+    landing.inviteCode,
+    landing.invite_code,
+    landing.referralCode,
+    landing.referral_code,
+  );
+  if (invite) return invite.slice(0, 120);
+  if (affiliateId) return null;
+  const ref = firstString(payload.ref, data.ref, tracking.ref, landing.ref);
+  return ref ? ref.slice(0, 120) : null;
 }
 
 /** O jogador já tem uma origem de aquisição gravada (primeiro toque). */
@@ -1481,22 +1570,55 @@ async function savePlayerAttribution(
     data: Record<string, unknown>;
     tracking: Record<string, unknown>;
     signupAttribution: Record<string, unknown>;
+    landing?: Record<string, string>;
     utm: ResolvedUtm;
     capturedAt: string;
   },
 ) {
+  const landing = args.landing ?? {};
   const clickIds = {
     fbclid:
-      firstString(args.data.fbclid, args.tracking.fbclid, args.signupAttribution.fbclid) ?? null,
-    gclid: firstString(args.data.gclid, args.tracking.gclid, args.signupAttribution.gclid) ?? null,
+      firstString(
+        args.data.fbclid,
+        args.tracking.fbclid,
+        args.signupAttribution.fbclid,
+        landing.fbclid,
+      ) ?? null,
+    gclid:
+      firstString(
+        args.data.gclid,
+        args.tracking.gclid,
+        args.signupAttribution.gclid,
+        landing.gclid,
+      ) ?? null,
     gbraid:
-      firstString(args.data.gbraid, args.tracking.gbraid, args.signupAttribution.gbraid) ?? null,
+      firstString(
+        args.data.gbraid,
+        args.tracking.gbraid,
+        args.signupAttribution.gbraid,
+        landing.gbraid,
+      ) ?? null,
     wbraid:
-      firstString(args.data.wbraid, args.tracking.wbraid, args.signupAttribution.wbraid) ?? null,
+      firstString(
+        args.data.wbraid,
+        args.tracking.wbraid,
+        args.signupAttribution.wbraid,
+        landing.wbraid,
+      ) ?? null,
     ttclid:
-      firstString(args.data.ttclid, args.tracking.ttclid, args.signupAttribution.ttclid) ?? null,
+      firstString(
+        args.data.ttclid,
+        args.tracking.ttclid,
+        args.signupAttribution.ttclid,
+        landing.ttclid,
+      ) ?? null,
     msclkid:
-      firstString(args.data.msclkid, args.tracking.msclkid, args.signupAttribution.msclkid) ?? null,
+      firstString(
+        args.data.msclkid,
+        args.tracking.msclkid,
+        args.signupAttribution.msclkid,
+        landing.msclkid,
+      ) ?? null,
     trackgram_click_id:
       firstString(
         args.data.trackgramClickId,

@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, Filter } from "lucide-react";
+import { Check, ChevronsUpDown, Filter, Settings2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -74,11 +74,14 @@ export function AdAccountFilter({
   accounts,
   value,
   onChange,
+  onManageAccounts,
 }: {
   accounts: MetaAccount[];
   /** `meta_ad_account_id`s escolhidos; vazio = todas. */
   value: string[];
   onChange: (next: string[]) => void;
+  /** F1-01: item fixo no rodapé que leva a Integrações → Meta Ads. */
+  onManageAccounts?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const groups = useMemo(() => adAccountGroups(accounts), [accounts]);
@@ -169,6 +172,23 @@ export function AdAccountFilter({
                 </CommandGroup>
               );
             })}
+            {onManageAccounts && (
+              <>
+                <CommandSeparator />
+                <CommandGroup>
+                  <CommandItem
+                    value="__manage__ adicionar ou remover contas bm"
+                    onSelect={() => {
+                      setOpen(false);
+                      onManageAccounts();
+                    }}
+                  >
+                    <Settings2 aria-hidden className="h-4 w-4 shrink-0" />
+                    Adicionar ou remover BMs e contas
+                  </CommandItem>
+                </CommandGroup>
+              </>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>
