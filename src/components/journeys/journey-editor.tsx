@@ -193,10 +193,10 @@ const FAMILY_OPTIONS: Option[] = [
   { value: FAMILY_NONE, label: "Sem família" },
   { value: "progressao_niveis", label: "Progressão de níveis" },
 ];
+// "exclusive" is legacy: the database treats it as Sem trava (20261231102200).
 const POLICY_OPTIONS: Option[] = [
-  { value: "coexist", label: "Permitir coexistência" },
-  { value: "pause_lower_priority", label: "Pausar a menor prioridade" },
-  { value: "exclusive", label: "Manter apenas esta família" },
+  { value: "coexist", label: "Sem trava" },
+  { value: "pause_lower_priority", label: "Com prioridade" },
 ];
 const EXIT_RULE_OPTIONS = [
   { key: "deposit", label: "Realizou depósito" },
@@ -269,12 +269,7 @@ function OptionSelect({
   const known = value === "" || options.some((option) => option.value === value);
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger
-        id={id}
-        aria-label={ariaLabel}
-        className="h-10"
-        {...anchorProps}
-      >
+      <SelectTrigger id={id} aria-label={ariaLabel} className="h-10" {...anchorProps}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -313,8 +308,16 @@ function parseWholeNumber(text: string, min: number, max: number): number | null
 }
 
 const LIMIT_FIELDS = {
-  dailyLimit: { min: 1, max: 1_000_000, error: "Informe o limite diário (número inteiro a partir de 1)." },
-  cooldownHours: { min: 0, max: 8760, error: "Informe o intervalo entre jornadas em horas (de 0 a 8760)." },
+  dailyLimit: {
+    min: 1,
+    max: 1_000_000,
+    error: "Informe o limite diário (número inteiro a partir de 1).",
+  },
+  cooldownHours: {
+    min: 0,
+    max: 8760,
+    error: "Informe o intervalo entre jornadas em horas (de 0 a 8760).",
+  },
   journeyPriority: { min: 1, max: 100, error: "Informe a prioridade (número inteiro de 1 a 100)." },
 } as const;
 
@@ -479,9 +482,7 @@ export function JourneyEditor({
     initial?.trigger_config ?? {},
   );
   const [dailyLimitText, setDailyLimitText] = useState(String(initial?.daily_limit ?? 1000));
-  const [cooldownHoursText, setCooldownHoursText] = useState(
-    String(initial?.cooldown_hours ?? 72),
-  );
+  const [cooldownHoursText, setCooldownHoursText] = useState(String(initial?.cooldown_hours ?? 72));
   const [endsAt, setEndsAt] = useState(() => toBrtInput(initial?.ends_at));
   const [holdoutPercent, setHoldoutPercent] = useState(initial?.holdout_percent ?? 0);
   const [conflictFamily, setConflictFamily] = useState(initial?.conflict_family ?? "");
@@ -504,8 +505,9 @@ export function JourneyEditor({
     LIMIT_FIELDS.journeyPriority.max,
   );
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>(
-    initial?.conflict_policy ?? "coexist",
+    initial?.conflict_policy === "pause_lower_priority" ? "pause_lower_priority" : "coexist",
   );
+  const withPriority = conflictPolicy === "pause_lower_priority";
   const [audience, setAudience] = useState(
     String(initial?.entry_rules?.audience ?? initialAudience ?? "all_active"),
   );
@@ -573,7 +575,8 @@ export function JourneyEditor({
       }
       if (dailyLimit === null) throw new Error(LIMIT_FIELDS.dailyLimit.error);
       if (cooldownHours === null) throw new Error(LIMIT_FIELDS.cooldownHours.error);
-      if (journeyPriority === null) throw new Error(LIMIT_FIELDS.journeyPriority.error);
+      if (withPriority && journeyPriority === null)
+        throw new Error(LIMIT_FIELDS.journeyPriority.error);
       steps.forEach((s, index) => {
         if (s.kind === "wait" && s.untilTime != null && !/^\d{2}:\d{2}$/.test(s.untilTime))
           throw new Error(`Informe o horário da etapa ${index + 1}.`);
@@ -611,32 +614,32 @@ export function JourneyEditor({
                   },
                 ]
               : s.content.trim() && !s.templateId
-              ? [{ step_type: "sms", config: { ...s.extra, content: s.content } }]
-              : s.templateId && s.content.trim()
-                ? [
-                    {
-                      step_type: "sms",
-                      config: {
-                        ...s.extra,
-                        template_id: s.templateId,
-                        content: s.content,
-                        template_snapshot: (() => {
-                          const template = (smsTemplates.data?.items ?? []).find(
-                            (item) => item.id === s.templateId,
-                          );
-                          return template
-                            ? {
-                                id: template.id,
-                                name: template.name,
-                                content: template.content,
-                                version: template.version,
-                              }
-                            : { id: s.templateId, content: s.content };
-                        })(),
+                ? [{ step_type: "sms", config: { ...s.extra, content: s.content } }]
+                : s.templateId && s.content.trim()
+                  ? [
+                      {
+                        step_type: "sms",
+                        config: {
+                          ...s.extra,
+                          template_id: s.templateId,
+                          content: s.content,
+                          template_snapshot: (() => {
+                            const template = (smsTemplates.data?.items ?? []).find(
+                              (item) => item.id === s.templateId,
+                            );
+                            return template
+                              ? {
+                                  id: template.id,
+                                  name: template.name,
+                                  content: template.content,
+                                  version: template.version,
+                                }
+                              : { id: s.templateId, content: s.content };
+                          })(),
+                        },
                       },
-                    },
-                  ]
-                : []
+                    ]
+                  : []
             : s.kind === "email"
               ? s.templateId
                 ? [
@@ -706,7 +709,8 @@ export function JourneyEditor({
             ends_at: fromBrtInput(endsAt),
             holdout_percent: holdoutPercent,
             conflict_family: conflictFamily || null,
-            journey_priority: journeyPriority,
+            // Sem trava hides the field; keep the saved number for a later switch.
+            journey_priority: journeyPriority ?? initial?.journey_priority ?? 4,
             conflict_policy: conflictPolicy,
             // Not edited here: resending the saved objective keeps it (the
             // schema default would reset it and turn a text edit into a revision).
@@ -757,8 +761,7 @@ export function JourneyEditor({
     shouldBlockFn: async () =>
       !(await requestConfirmation({
         title: "Sair sem salvar?",
-        description:
-          "As alterações feitas nesta jornada ainda não foram salvas e serão perdidas.",
+        description: "As alterações feitas nesta jornada ainda não foram salvas e serão perdidas.",
         confirmLabel: "Sair sem salvar",
         cancelLabel: "Continuar editando",
         destructive: true,
@@ -892,6 +895,7 @@ export function JourneyEditor({
       exit_rules: exitRules,
       conflict_family: conflictFamily || null,
       journey_priority: journeyPriority ?? initial?.journey_priority ?? 4,
+      conflict_policy: conflictPolicy,
     },
     ((otherJourneys.data?.journeys ?? []) as MapJourney[]).filter((journey) => journey.id !== id),
   );
@@ -973,7 +977,7 @@ export function JourneyEditor({
               }
               if (nextTrigger === "nivel_alterado") {
                 setConflictFamily("progressao_niveis");
-                setConflictPolicy("exclusive");
+                setConflictPolicy("coexist");
                 setJourneyPriorityText("4");
                 setExitRules((current) => ({ ...current, level_changed: true }));
               }
@@ -1225,348 +1229,356 @@ export function JourneyEditor({
           {steps.map((s, i) => {
             const isFirstOfKind = steps.findIndex((other) => other.kind === s.kind) === i;
             return (
-            <li key={s.uid} className="rounded-xl border border-border p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="min-w-0 truncate text-body font-semibold">
-                  {i + 1}. {STEP_TITLES[s.kind]}
-                </h3>
-                <div className="-my-2 flex shrink-0 items-center">
-                  <IconButton
-                    label={`Mover a etapa ${i + 1} para cima`}
-                    icon={<ArrowUp className="h-4 w-4" aria-hidden="true" />}
-                    className="text-muted-foreground"
-                    disabled={i === 0}
-                    onClick={() => move(i, -1)}
-                    {...(i === 0 ? tourAnchor("jornada.etapas.mover") : {})}
-                  />
-                  <IconButton
-                    label={`Mover a etapa ${i + 1} para baixo`}
-                    icon={<ArrowDown className="h-4 w-4" aria-hidden="true" />}
-                    className="text-muted-foreground"
-                    disabled={i === steps.length - 1}
-                    onClick={() => move(i, 1)}
-                  />
-                  <AddStepMenu
-                    isEnabled={isEnabled}
-                    onAdd={(kind) => add(kind, i + 1)}
-                    trigger={
-                      <IconButton
-                        label={`Adicionar etapa abaixo da etapa ${i + 1}`}
-                        icon={<Plus className="h-4 w-4" aria-hidden="true" />}
-                        className="text-muted-foreground"
-                        {...(i === 0 ? tourAnchor("jornada.etapas.adicionar-abaixo") : {})}
-                      />
-                    }
-                  />
-                  <IconButton
-                    label={`Remover a etapa ${i + 1}`}
-                    icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
-                    className="text-muted-foreground hover:text-destructive"
-                    onClick={() => setSteps((all) => all.filter((_, n) => n !== i))}
-                    {...(i === 0 ? tourAnchor("jornada.etapas.remover") : {})}
-                  />
-                </div>
-              </div>
-              {(s.kind === "sms" || s.kind === "email" || s.kind === "voice") &&
-              !isEnabled(s.kind) ? (
-                <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-meta text-warning">
-                  Canal desabilitado — será pulado
-                </p>
-              ) : s.kind === "wait" ? (
-                <div className="space-y-1.5">
-                  <Label id={`step-${i}-wait-mode`}>Tipo de espera</Label>
-                  <ToggleGroup
-                    type="single"
-                    size="sm"
-                    variant="outline"
-                    aria-labelledby={`step-${i}-wait-mode`}
-                    className="justify-start"
-                    value={s.untilTime != null ? "horario" : "tempo"}
-                    onValueChange={(mode) => {
-                      if (mode === "horario" && s.untilTime == null)
-                        change(i, { ...s, untilTime: "08:00", amount: "0", unit: "hours" });
-                      if (mode === "tempo" && s.untilTime != null) {
-                        const { untilTime: _untilTime, ...plain } = s;
-                        change(i, {
-                          ...plain,
-                          amount: waitStepSeconds(s) ? plain.amount : "1",
-                        });
-                      }
-                    }}
-                  >
-                    <ToggleGroupItem value="tempo" className="h-10 px-3 sm:h-8 sm:px-2">Por tempo</ToggleGroupItem>
-                    <ToggleGroupItem value="horario" className="h-10 px-3 sm:h-8 sm:px-2">Até um horário</ToggleGroupItem>
-                  </ToggleGroup>
-                  {s.untilTime != null && (
-                    <div className="space-y-1.5 pt-1">
-                      <Label htmlFor={`step-${i}-wait-time`}>Enviar a próxima etapa às</Label>
-                      <Input
-                        id={`step-${i}-wait-time`}
-                        type="time"
-                        className="h-10 w-32"
-                        value={s.untilTime}
-                        onChange={(e) => change(i, { ...s, untilTime: e.target.value })}
-                      />
-                      <p className="text-meta text-muted-foreground">
-                        Horário de Brasília. Se já passou hoje, espera até esse horário amanhã.
-                      </p>
-                    </div>
-                  )}
-                  <Label htmlFor={`step-${i}-wait`}>
-                    {s.untilTime != null
-                      ? "Antes disso, esperar pelo menos (0 = sem mínimo)"
-                      : "Tempo de espera"}
-                  </Label>
-                  <div className="flex max-w-sm gap-2">
-                    <Input
-                      id={`step-${i}-wait`}
-                      className="h-10 w-28"
-                      inputMode="decimal"
-                      value={s.amount}
-                      onChange={(e) => change(i, { ...s, amount: e.target.value })}
-                      {...(isFirstOfKind ? tourAnchor("jornada.etapas.espera-tempo") : {})}
+              <li key={s.uid} className="rounded-xl border border-border p-4">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className="min-w-0 truncate text-body font-semibold">
+                    {i + 1}. {STEP_TITLES[s.kind]}
+                  </h3>
+                  <div className="-my-2 flex shrink-0 items-center">
+                    <IconButton
+                      label={`Mover a etapa ${i + 1} para cima`}
+                      icon={<ArrowUp className="h-4 w-4" aria-hidden="true" />}
+                      className="text-muted-foreground"
+                      disabled={i === 0}
+                      onClick={() => move(i, -1)}
+                      {...(i === 0 ? tourAnchor("jornada.etapas.mover") : {})}
                     />
-                    <div className="flex-1">
-                      <OptionSelect
-                        ariaLabel="Unidade da espera"
-                        anchorProps={
-                          isFirstOfKind ? tourAnchor("jornada.etapas.espera-unidade") : undefined
-                        }
-                        value={s.unit}
-                        onChange={(unit) => change(i, { ...s, unit: unit as WaitUnit })}
-                        options={Object.entries(WAIT_UNITS).map(([value, unit]) => ({
-                          value,
-                          label: unit.label,
-                        }))}
-                      />
-                    </div>
+                    <IconButton
+                      label={`Mover a etapa ${i + 1} para baixo`}
+                      icon={<ArrowDown className="h-4 w-4" aria-hidden="true" />}
+                      className="text-muted-foreground"
+                      disabled={i === steps.length - 1}
+                      onClick={() => move(i, 1)}
+                    />
+                    <AddStepMenu
+                      isEnabled={isEnabled}
+                      onAdd={(kind) => add(kind, i + 1)}
+                      trigger={
+                        <IconButton
+                          label={`Adicionar etapa abaixo da etapa ${i + 1}`}
+                          icon={<Plus className="h-4 w-4" aria-hidden="true" />}
+                          className="text-muted-foreground"
+                          {...(i === 0 ? tourAnchor("jornada.etapas.adicionar-abaixo") : {})}
+                        />
+                      }
+                    />
+                    <IconButton
+                      label={`Remover a etapa ${i + 1}`}
+                      icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => setSteps((all) => all.filter((_, n) => n !== i))}
+                      {...(i === 0 ? tourAnchor("jornada.etapas.remover") : {})}
+                    />
                   </div>
-                  {(() => {
-                    const seconds = waitToSeconds(s.amount, s.unit);
-                    return s.untilTime == null && seconds !== null && seconds < 60 ? (
-                      <p className="text-meta text-muted-foreground">
-                        O mínimo é 1 minuto; menos que isso é salvo como 1 minuto.
-                      </p>
-                    ) : null;
-                  })()}
                 </div>
-              ) : s.kind === "sms" ? (
-                <div className="space-y-2">
+                {(s.kind === "sms" || s.kind === "email" || s.kind === "voice") &&
+                !isEnabled(s.kind) ? (
+                  <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-meta text-warning">
+                    Canal desabilitado — será pulado
+                  </p>
+                ) : s.kind === "wait" ? (
                   <div className="space-y-1.5">
-                    <Label id={`step-${i}-sms-mode`}>Tipo de envio</Label>
+                    <Label id={`step-${i}-wait-mode`}>Tipo de espera</Label>
                     <ToggleGroup
                       type="single"
                       size="sm"
                       variant="outline"
-                      aria-labelledby={`step-${i}-sms-mode`}
+                      aria-labelledby={`step-${i}-wait-mode`}
                       className="justify-start"
-                      value={s.variants ? "rodizio" : "unica"}
+                      value={s.untilTime != null ? "horario" : "tempo"}
                       onValueChange={(mode) => {
-                        if (mode === "rodizio" && !s.variants)
-                          change(i, { ...s, templateId: "", variants: [s.content, ""] });
-                        if (mode === "unica" && s.variants)
-                          change(i, { ...s, content: s.variants[0] ?? "", variants: undefined });
+                        if (mode === "horario" && s.untilTime == null)
+                          change(i, { ...s, untilTime: "08:00", amount: "0", unit: "hours" });
+                        if (mode === "tempo" && s.untilTime != null) {
+                          const { untilTime: _untilTime, ...plain } = s;
+                          change(i, {
+                            ...plain,
+                            amount: waitStepSeconds(s) ? plain.amount : "1",
+                          });
+                        }
                       }}
                     >
-                      <ToggleGroupItem value="unica" className="h-10 px-3 sm:h-8 sm:px-2">Mensagem única</ToggleGroupItem>
-                      <ToggleGroupItem value="rodizio" className="h-10 px-3 sm:h-8 sm:px-2">Rodízio de textos</ToggleGroupItem>
+                      <ToggleGroupItem value="tempo" className="h-10 px-3 sm:h-8 sm:px-2">
+                        Por tempo
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="horario" className="h-10 px-3 sm:h-8 sm:px-2">
+                        Até um horário
+                      </ToggleGroupItem>
                     </ToggleGroup>
-                    <p className="text-meta text-muted-foreground">
-                      {s.variants
-                        ? "A cada envio o CRM sorteia um destes textos. O mesmo jogador não recebe o mesmo texto duas vezes no dia enquanto houver outro disponível."
-                        : "Todo jogador recebe sempre este texto nesta etapa."}
-                    </p>
-                  </div>
-                  {s.variants ? (
-                    <div className="space-y-3">
-                      {s.variants.map((text, n) => (
-                        <div key={n} className="space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <Label htmlFor={`step-${i}-sms-variant-${n}`}>Texto {n + 1}</Label>
-                            {s.variants!.length > 2 && (
-                              <IconButton
-                                label={`Remover texto ${n + 1}`}
-                                icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
-                                onClick={() =>
-                                  change(i, {
-                                    ...s,
-                                    variants: s.variants!.filter((_, k) => k !== n),
-                                  })
-                                }
-                              />
-                            )}
-                          </div>
-                          <Textarea
-                            id={`step-${i}-sms-variant-${n}`}
-                            value={text}
-                            maxLength={1600}
-                            onChange={(event) =>
-                              change(i, {
-                                ...s,
-                                variants: s.variants!.map((item, k) =>
-                                  k === n ? event.target.value : item,
-                                ),
-                              })
-                            }
-                            placeholder={`Texto ${n + 1} do SMS`}
-                          />
-                          {!smsHasLink(text) && <SmsNoLinkNotice />}
-                        </div>
-                      ))}
-                      {s.variants.length < 20 && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => change(i, { ...s, variants: [...s.variants!, ""] })}
-                        >
-                          <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Adicionar texto
-                        </Button>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      <Label htmlFor={`step-${i}-sms`}>Usar um template (opcional)</Label>
-                      <OptionSelect
-                        id={`step-${i}-sms`}
-                        anchorProps={
-                          isFirstOfKind ? tourAnchor("jornada.etapas.sms-template") : undefined
-                        }
-                        value={s.templateId}
-                        placeholder="Escreva abaixo ou escolha um template"
-                        onChange={(templateId) => {
-                          const template = (smsTemplates.data?.items ?? []).find(
-                            (item) => item.id === templateId,
-                          );
-                          change(i, {
-                            ...s,
-                            templateId,
-                            content: template?.content ?? "",
-                            extra: smsExtraForTemplateChange(s.extra),
-                          });
-                        }}
-                        options={(smsTemplates.data?.items ?? [])
-                          .filter((template) => template.isActive || template.id === s.templateId)
-                          .map((template) => ({
-                            value: template.id,
-                            label: `${template.name} · v${template.version}`,
+                    {s.untilTime != null && (
+                      <div className="space-y-1.5 pt-1">
+                        <Label htmlFor={`step-${i}-wait-time`}>Enviar a próxima etapa às</Label>
+                        <Input
+                          id={`step-${i}-wait-time`}
+                          type="time"
+                          className="h-10 w-32"
+                          value={s.untilTime}
+                          onChange={(e) => change(i, { ...s, untilTime: e.target.value })}
+                        />
+                        <p className="text-meta text-muted-foreground">
+                          Horário de Brasília. Se já passou hoje, espera até esse horário amanhã.
+                        </p>
+                      </div>
+                    )}
+                    <Label htmlFor={`step-${i}-wait`}>
+                      {s.untilTime != null
+                        ? "Antes disso, esperar pelo menos (0 = sem mínimo)"
+                        : "Tempo de espera"}
+                    </Label>
+                    <div className="flex max-w-sm gap-2">
+                      <Input
+                        id={`step-${i}-wait`}
+                        className="h-10 w-28"
+                        inputMode="decimal"
+                        value={s.amount}
+                        onChange={(e) => change(i, { ...s, amount: e.target.value })}
+                        {...(isFirstOfKind ? tourAnchor("jornada.etapas.espera-tempo") : {})}
+                      />
+                      <div className="flex-1">
+                        <OptionSelect
+                          ariaLabel="Unidade da espera"
+                          anchorProps={
+                            isFirstOfKind ? tourAnchor("jornada.etapas.espera-unidade") : undefined
+                          }
+                          value={s.unit}
+                          onChange={(unit) => change(i, { ...s, unit: unit as WaitUnit })}
+                          options={Object.entries(WAIT_UNITS).map(([value, unit]) => ({
+                            value,
+                            label: unit.label,
                           }))}
-                      />
-                      <Label htmlFor={`step-${i}-sms-text`}>Mensagem</Label>
-                      <Textarea
-                        id={`step-${i}-sms-text`}
-                        value={s.content}
-                        maxLength={1600}
-                        // Editing the text detaches the step from its template.
-                        onChange={(event) =>
-                          change(i, {
-                            ...s,
-                            templateId: "",
-                            content: event.target.value,
-                            extra: smsExtraForTemplateChange(s.extra),
-                          })
-                        }
-                        placeholder="Texto do SMS"
-                      />
-                      {!smsHasLink(s.content) && <SmsNoLinkNotice />}
-                    </>
-                  )}
-                  <ShortenerFallbackNotice
-                    isSuccess={composerOptions.isSuccess}
-                    isError={composerOptions.isError}
-                    shortenerPending={shortenerPending}
-                    hasVerifiedDomain={shortDomains.length > 0}
-                  />
-                  <div {...(isFirstOfKind ? tourAnchor("jornada.etapas.sms-dominio") : {})}>
-                    <ShortDomainSelect
-                      domains={shortDomains}
-                      value={(s.extra?.short_domain_id as string | null | undefined) ?? null}
-                      onChange={(short_domain_id) =>
-                        change(i, { ...s, extra: { ...s.extra, short_domain_id } })
-                      }
-                    />
+                        />
+                      </div>
+                    </div>
+                    {(() => {
+                      const seconds = waitToSeconds(s.amount, s.unit);
+                      return s.untilTime == null && seconds !== null && seconds < 60 ? (
+                        <p className="text-meta text-muted-foreground">
+                          O mínimo é 1 minuto; menos que isso é salvo como 1 minuto.
+                        </p>
+                      ) : null;
+                    })()}
                   </div>
-                </div>
-              ) : s.kind === "email" ? (
-                <div className="space-y-2">
-                  <Label htmlFor={`step-${i}-email`}>Template de e-mail</Label>
-                  <OptionSelect
-                    id={`step-${i}-email`}
-                    anchorProps={
-                      isFirstOfKind ? tourAnchor("jornada.etapas.email-template") : undefined
-                    }
-                    value={s.templateId}
-                    placeholder="Selecione um template de e-mail"
-                    onChange={(templateId) => change(i, { ...s, templateId })}
-                    options={(templates.data?.items ?? [])
-                      .filter((t) => t.ativo || t.id === s.templateId)
-                      .map((t) => ({ value: t.id, label: t.nome }))}
-                  />
-                  <EmailBlockedNotice
-                    isSuccess={composerOptions.isSuccess}
-                    isError={composerOptions.isError}
-                    hasVerifiedSender={emailSenders.length > 0}
-                  />
-                  <div {...(isFirstOfKind ? tourAnchor("jornada.etapas.email-remetente") : {})}>
-                    <EmailSenderSelect
-                      senders={emailSenders}
-                      value={s.senderId}
-                      onChange={(senderId) => change(i, { ...s, senderId })}
-                    />
-                  </div>
-                  <ShortenerFallbackNotice
-                    isSuccess={composerOptions.isSuccess}
-                    isError={composerOptions.isError}
-                    shortenerPending={shortenerPending}
-                    hasVerifiedDomain={shortDomains.length > 0}
-                  />
-                  <div {...(isFirstOfKind ? tourAnchor("jornada.etapas.email-dominio") : {})}>
-                    <ShortDomainSelect
-                      domains={shortDomains}
-                      value={s.shortDomainId}
-                      onChange={(shortDomainId) => change(i, { ...s, shortDomainId })}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
+                ) : s.kind === "sms" ? (
                   <div className="space-y-2">
-                    <Label htmlFor={`step-${i}-voice`}>Áudio da ligação</Label>
-                    <OptionSelect
-                      id={`step-${i}-voice`}
-                      anchorProps={
-                        isFirstOfKind ? tourAnchor("jornada.etapas.voz-audio") : undefined
-                      }
-                      value={s.assetId}
-                      placeholder="Selecione um áudio enviado"
-                      onChange={(assetId) => change(i, { ...s, assetId })}
-                      options={voiceAssetRows.map((asset) => ({
-                        value: asset.id,
-                        label: asset.name,
-                      }))}
-                    />
-                    <label
-                      className="inline-flex h-11 cursor-pointer items-center rounded-md border border-border px-3 text-sm hover:bg-muted md:h-9"
-                      {...(isFirstOfKind ? tourAnchor("jornada.etapas.voz-upload") : {})}
-                    >
-                      <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
-                      {uploadAudio.isPending ? "Enviando…" : "Enviar novo áudio"}
-                      <input
-                        className="sr-only"
-                        type="file"
-                        accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/ogg"
-                        disabled={uploadAudio.isPending}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) uploadAudio.mutate(file);
-                          e.currentTarget.value = "";
+                    <div className="space-y-1.5">
+                      <Label id={`step-${i}-sms-mode`}>Tipo de envio</Label>
+                      <ToggleGroup
+                        type="single"
+                        size="sm"
+                        variant="outline"
+                        aria-labelledby={`step-${i}-sms-mode`}
+                        className="justify-start"
+                        value={s.variants ? "rodizio" : "unica"}
+                        onValueChange={(mode) => {
+                          if (mode === "rodizio" && !s.variants)
+                            change(i, { ...s, templateId: "", variants: [s.content, ""] });
+                          if (mode === "unica" && s.variants)
+                            change(i, { ...s, content: s.variants[0] ?? "", variants: undefined });
                         }}
+                      >
+                        <ToggleGroupItem value="unica" className="h-10 px-3 sm:h-8 sm:px-2">
+                          Mensagem única
+                        </ToggleGroupItem>
+                        <ToggleGroupItem value="rodizio" className="h-10 px-3 sm:h-8 sm:px-2">
+                          Rodízio de textos
+                        </ToggleGroupItem>
+                      </ToggleGroup>
+                      <p className="text-meta text-muted-foreground">
+                        {s.variants
+                          ? "A cada envio o CRM sorteia um destes textos. O mesmo jogador não recebe o mesmo texto duas vezes no dia enquanto houver outro disponível."
+                          : "Todo jogador recebe sempre este texto nesta etapa."}
+                      </p>
+                    </div>
+                    {s.variants ? (
+                      <div className="space-y-3">
+                        {s.variants.map((text, n) => (
+                          <div key={n} className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <Label htmlFor={`step-${i}-sms-variant-${n}`}>Texto {n + 1}</Label>
+                              {s.variants!.length > 2 && (
+                                <IconButton
+                                  label={`Remover texto ${n + 1}`}
+                                  icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
+                                  onClick={() =>
+                                    change(i, {
+                                      ...s,
+                                      variants: s.variants!.filter((_, k) => k !== n),
+                                    })
+                                  }
+                                />
+                              )}
+                            </div>
+                            <Textarea
+                              id={`step-${i}-sms-variant-${n}`}
+                              value={text}
+                              maxLength={1600}
+                              onChange={(event) =>
+                                change(i, {
+                                  ...s,
+                                  variants: s.variants!.map((item, k) =>
+                                    k === n ? event.target.value : item,
+                                  ),
+                                })
+                              }
+                              placeholder={`Texto ${n + 1} do SMS`}
+                            />
+                            {!smsHasLink(text) && <SmsNoLinkNotice />}
+                          </div>
+                        ))}
+                        {s.variants.length < 20 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => change(i, { ...s, variants: [...s.variants!, ""] })}
+                          >
+                            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Adicionar texto
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <Label htmlFor={`step-${i}-sms`}>Usar um template (opcional)</Label>
+                        <OptionSelect
+                          id={`step-${i}-sms`}
+                          anchorProps={
+                            isFirstOfKind ? tourAnchor("jornada.etapas.sms-template") : undefined
+                          }
+                          value={s.templateId}
+                          placeholder="Escreva abaixo ou escolha um template"
+                          onChange={(templateId) => {
+                            const template = (smsTemplates.data?.items ?? []).find(
+                              (item) => item.id === templateId,
+                            );
+                            change(i, {
+                              ...s,
+                              templateId,
+                              content: template?.content ?? "",
+                              extra: smsExtraForTemplateChange(s.extra),
+                            });
+                          }}
+                          options={(smsTemplates.data?.items ?? [])
+                            .filter((template) => template.isActive || template.id === s.templateId)
+                            .map((template) => ({
+                              value: template.id,
+                              label: `${template.name} · v${template.version}`,
+                            }))}
+                        />
+                        <Label htmlFor={`step-${i}-sms-text`}>Mensagem</Label>
+                        <Textarea
+                          id={`step-${i}-sms-text`}
+                          value={s.content}
+                          maxLength={1600}
+                          // Editing the text detaches the step from its template.
+                          onChange={(event) =>
+                            change(i, {
+                              ...s,
+                              templateId: "",
+                              content: event.target.value,
+                              extra: smsExtraForTemplateChange(s.extra),
+                            })
+                          }
+                          placeholder="Texto do SMS"
+                        />
+                        {!smsHasLink(s.content) && <SmsNoLinkNotice />}
+                      </>
+                    )}
+                    <ShortenerFallbackNotice
+                      isSuccess={composerOptions.isSuccess}
+                      isError={composerOptions.isError}
+                      shortenerPending={shortenerPending}
+                      hasVerifiedDomain={shortDomains.length > 0}
+                    />
+                    <div {...(isFirstOfKind ? tourAnchor("jornada.etapas.sms-dominio") : {})}>
+                      <ShortDomainSelect
+                        domains={shortDomains}
+                        value={(s.extra?.short_domain_id as string | null | undefined) ?? null}
+                        onChange={(short_domain_id) =>
+                          change(i, { ...s, extra: { ...s.extra, short_domain_id } })
+                        }
                       />
-                    </label>
+                    </div>
                   </div>
-                </div>
-              )}
-            </li>
+                ) : s.kind === "email" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor={`step-${i}-email`}>Template de e-mail</Label>
+                    <OptionSelect
+                      id={`step-${i}-email`}
+                      anchorProps={
+                        isFirstOfKind ? tourAnchor("jornada.etapas.email-template") : undefined
+                      }
+                      value={s.templateId}
+                      placeholder="Selecione um template de e-mail"
+                      onChange={(templateId) => change(i, { ...s, templateId })}
+                      options={(templates.data?.items ?? [])
+                        .filter((t) => t.ativo || t.id === s.templateId)
+                        .map((t) => ({ value: t.id, label: t.nome }))}
+                    />
+                    <EmailBlockedNotice
+                      isSuccess={composerOptions.isSuccess}
+                      isError={composerOptions.isError}
+                      hasVerifiedSender={emailSenders.length > 0}
+                    />
+                    <div {...(isFirstOfKind ? tourAnchor("jornada.etapas.email-remetente") : {})}>
+                      <EmailSenderSelect
+                        senders={emailSenders}
+                        value={s.senderId}
+                        onChange={(senderId) => change(i, { ...s, senderId })}
+                      />
+                    </div>
+                    <ShortenerFallbackNotice
+                      isSuccess={composerOptions.isSuccess}
+                      isError={composerOptions.isError}
+                      shortenerPending={shortenerPending}
+                      hasVerifiedDomain={shortDomains.length > 0}
+                    />
+                    <div {...(isFirstOfKind ? tourAnchor("jornada.etapas.email-dominio") : {})}>
+                      <ShortDomainSelect
+                        domains={shortDomains}
+                        value={s.shortDomainId}
+                        onChange={(shortDomainId) => change(i, { ...s, shortDomainId })}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor={`step-${i}-voice`}>Áudio da ligação</Label>
+                      <OptionSelect
+                        id={`step-${i}-voice`}
+                        anchorProps={
+                          isFirstOfKind ? tourAnchor("jornada.etapas.voz-audio") : undefined
+                        }
+                        value={s.assetId}
+                        placeholder="Selecione um áudio enviado"
+                        onChange={(assetId) => change(i, { ...s, assetId })}
+                        options={voiceAssetRows.map((asset) => ({
+                          value: asset.id,
+                          label: asset.name,
+                        }))}
+                      />
+                      <label
+                        className="inline-flex h-11 cursor-pointer items-center rounded-md border border-border px-3 text-sm hover:bg-muted md:h-9"
+                        {...(isFirstOfKind ? tourAnchor("jornada.etapas.voz-upload") : {})}
+                      >
+                        <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
+                        {uploadAudio.isPending ? "Enviando…" : "Enviar novo áudio"}
+                        <input
+                          className="sr-only"
+                          type="file"
+                          accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/ogg"
+                          disabled={uploadAudio.isPending}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) uploadAudio.mutate(file);
+                            e.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </li>
             );
           })}
         </ol>
@@ -1746,7 +1758,7 @@ export function JourneyEditor({
 
       <EditorSection
         title="Conflitos entre jornadas"
-        help="O que acontece quando outra jornada disputa o mesmo jogador. Na disputa, o menor número de prioridade vence."
+        help="O que acontece quando outra jornada quer falar com o mesmo jogador."
       >
         {conflictWarnings.length > 0 && (
           <ul
@@ -1768,32 +1780,7 @@ export function JourneyEditor({
               options={FAMILY_OPTIONS}
             />
           </Field>
-          <Field
-            id="journey-priority"
-            label={<Term id="prioridade-de-jornada">Prioridade (1 é a maior)</Term>}
-            hint={
-              journeyPriority === null ? (
-                <FieldError>{LIMIT_FIELDS.journeyPriority.error}</FieldError>
-              ) : undefined
-            }
-          >
-            <Input
-              id="journey-priority"
-              className="h-10"
-              type="number"
-              inputMode="numeric"
-              min={LIMIT_FIELDS.journeyPriority.min}
-              max={LIMIT_FIELDS.journeyPriority.max}
-              value={journeyPriorityText}
-              aria-invalid={journeyPriority === null || undefined}
-              {...tourAnchor("jornada.conflitos.prioridade")}
-              onChange={(event) => setJourneyPriorityText(event.target.value)}
-              onBlur={() =>
-                journeyPriority !== null && setJourneyPriorityText(String(journeyPriority))
-              }
-            />
-          </Field>
-          <Field id="conflict-policy" label="Ao competir">
+          <Field id="conflict-policy" label="Quando outra jornada fala com o jogador">
             <OptionSelect
               id="conflict-policy"
               anchorProps={tourAnchor("jornada.conflitos.ao-competir")}
@@ -1802,13 +1789,41 @@ export function JourneyEditor({
               options={POLICY_OPTIONS}
             />
           </Field>
+          {withPriority && (
+            <Field
+              id="journey-priority"
+              label={<Term id="prioridade-de-jornada">Prioridade (1 é a maior)</Term>}
+              hint={
+                journeyPriority === null ? (
+                  <FieldError>{LIMIT_FIELDS.journeyPriority.error}</FieldError>
+                ) : undefined
+              }
+            >
+              <Input
+                id="journey-priority"
+                className="h-10"
+                type="number"
+                inputMode="numeric"
+                min={LIMIT_FIELDS.journeyPriority.min}
+                max={LIMIT_FIELDS.journeyPriority.max}
+                value={journeyPriorityText}
+                aria-invalid={journeyPriority === null || undefined}
+                {...tourAnchor("jornada.conflitos.prioridade")}
+                onChange={(event) => setJourneyPriorityText(event.target.value)}
+                onBlur={() =>
+                  journeyPriority !== null && setJourneyPriorityText(String(journeyPriority))
+                }
+              />
+            </Field>
+          )}
         </div>
         <p className="text-meta text-muted-foreground">
-          {conflictFamily === "progressao_niveis"
-            ? "Ao mudar de nível, a jornada anterior é encerrada antes da entrada na nova jornada."
-            : conflictPolicy === "pause_lower_priority"
-              ? "No mesmo canal, a jornada com o menor número de prioridade segue; a outra aguarda."
-              : "Esta jornada não bloqueia outras jornadas."}
+          {withPriority
+            ? 'Se outra jornada "Com prioridade" quiser falar com o mesmo jogador no mesmo canal, a de número menor envia e a outra fica pausada até a primeira terminar.'
+            : "Envia normalmente: não pausa nenhuma outra jornada e não é pausada por nenhuma."}{" "}
+          {conflictFamily === "progressao_niveis" &&
+            "Ao mudar de nível, a jornada anterior é encerrada antes da entrada na nova jornada."}{" "}
+          Os limites de mensagens por dia e o intervalo entre jornadas valem nos dois casos.
         </p>
       </EditorSection>
 
@@ -1870,8 +1885,8 @@ function FieldError({ children }: { children: ReactNode }) {
 function SmsNoLinkNotice() {
   return (
     <p className="rounded-md border border-warning/30 bg-warning/10 p-2 text-meta text-warning">
-      Este SMS está sem link. O jogador não terá onde tocar para entrar na casa e não haverá
-      cliques para medir.
+      Este SMS está sem link. O jogador não terá onde tocar para entrar na casa e não haverá cliques
+      para medir.
     </p>
   );
 }

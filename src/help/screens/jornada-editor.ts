@@ -15,7 +15,15 @@ const screen: HelpScreen = {
   purpose:
     "Monta uma jornada automática: o gatilho que coloca o jogador dentro, quem pode entrar, as etapas de espera e mensagem, quando ela termina para o jogador e os limites que protegem a operação.",
   roles: ["admin", "gestor", "member"],
-  terms: ["gatilho", "reentrada", "grupo-de-controle", "encurtador", "ftd", "familia-de-jornadas", "prioridade-de-jornada"],
+  terms: [
+    "gatilho",
+    "reentrada",
+    "grupo-de-controle",
+    "encurtador",
+    "ftd",
+    "familia-de-jornadas",
+    "prioridade-de-jornada",
+  ],
   sections: [
     // ---------------------------------------------------------------
     // Cabeçalho e barra de ações
@@ -48,7 +56,7 @@ const screen: HelpScreen = {
           label: "Salvar",
           what: 'Grava a jornada. Numa jornada nova mostra "Jornada criada como rascunho. Ela só envia depois de ativada."; numa jornada em rascunho mostra "Rascunho salvo"; numa jornada ativa ou pausada, mudanças de texto, esperas e limites são gravadas na própria jornada e valem nos próximos envios, inclusive para quem já está nela ("Alterações salvas na jornada. Os próximos envios já saem com elas."); adicionar, remover ou trocar a ordem das etapas, ou mudar o gatilho, cria uma revisão em rascunho e mostra "Você mudou as etapas ou o gatilho, então as alterações foram para uma revisão em rascunho. A jornada ativa/pausada continua igual até você ativar a revisão."',
           notes:
-            "Durante o salvamento o texto muda para \"Salvando…\" e o botão fica desabilitado. Erros de validação (veja Erros ao salvar, nos estados) impedem o salvamento e aparecem como aviso.",
+            'Durante o salvamento o texto muda para "Salvando…" e o botão fica desabilitado. Erros de validação (veja Erros ao salvar, nos estados) impedem o salvamento e aparecem como aviso.',
         },
       ],
     },
@@ -114,7 +122,8 @@ const screen: HelpScreen = {
         {
           label: "Cadastrados sem depósito",
           what: "Quando usar: para converter quem se cadastrou e nunca fez o primeiro depósito; a jornada encerra sozinha quando ele depositar.",
-          notes: 'Aceita o campo "Só entra quem se cadastrou nas últimas (horas)" — ver Campos condicionais.',
+          notes:
+            'Aceita o campo "Só entra quem se cadastrou nas últimas (horas)" — ver Campos condicionais.',
         },
         {
           label: "7 a 14 dias sem login",
@@ -147,17 +156,20 @@ const screen: HelpScreen = {
         {
           label: "PIX gerado e não pago",
           what: "Quando usar: para lembrar quem gerou um PIX e ainda não pagou, antes que ele esqueça do depósito.",
-          notes: 'Aceita o campo "Só entra PIX gerado nas últimas (horas)" — ver Campos condicionais.',
+          notes:
+            'Aceita o campo "Só entra PIX gerado nas últimas (horas)" — ver Campos condicionais.',
         },
         {
           label: "Primeiro depósito",
           what: "Quando usar: para dar as boas-vindas e orientar os próximos passos logo depois do primeiro depósito aprovado (FTD).",
-          notes: 'Aceita o campo "Só entra quem fez o 1º depósito nas últimas (horas)" — ver Campos condicionais.',
+          notes:
+            'Aceita o campo "Só entra quem fez o 1º depósito nas últimas (horas)" — ver Campos condicionais.',
         },
         {
           label: "Saque pago",
           what: "Quando usar: para conversar com quem teve um saque aprovado — por exemplo, para incentivá-lo a continuar jogando.",
-          notes: 'Aceita o campo "Só entra saque pago nas últimas (horas)" — ver Campos condicionais.',
+          notes:
+            'Aceita o campo "Só entra saque pago nas últimas (horas)" — ver Campos condicionais.',
         },
         {
           label: "Mudou de nível",
@@ -168,11 +180,12 @@ const screen: HelpScreen = {
         {
           label: "Tempo sem atividade",
           what: 'Gatilho de "quando nada acontece": o jogador entra quando passa um tempo sem a atividade escolhida. Quando usar: para agir depois de um período de silêncio (sem login, sem jogo ou sem depósito) que não se encaixa nas faixas fixas de dias sem login.',
-          notes: "Mostra os campos Sem atividade em / Horas sem atividade — ver Campos condicionais.",
+          notes:
+            "Mostra os campos Sem atividade em / Horas sem atividade — ver Campos condicionais.",
         },
         {
           label: "Entrada manual ou API",
-          what: 'Sem gatilho automático: ninguém entra pelo evento. Quando usar: para jornadas que só recebem jogadores colocados manualmente ou por integração externa (API).',
+          what: "Sem gatilho automático: ninguém entra pelo evento. Quando usar: para jornadas que só recebem jogadores colocados manualmente ou por integração externa (API).",
         },
         {
           anchor: "jornada.gatilho.atividade",
@@ -191,8 +204,7 @@ const screen: HelpScreen = {
         },
         {
           anchor: "jornada.gatilho.idade-maxima",
-          label:
-            "Só entra quem se cadastrou / fez o 1º depósito / saque pago nas últimas (horas)",
+          label: "Só entra quem se cadastrou / fez o 1º depósito / saque pago nas últimas (horas)",
           what: "Campo condicional, só nos gatilhos Cadastrados sem depósito, Primeiro depósito e Saque pago: evita tratar um evento antigo da base como se fosse novo ao ativar a jornada. 0 tira o limite.",
           notes: "De 0 a 8.760 horas (1 ano).",
         },
@@ -244,7 +256,7 @@ const screen: HelpScreen = {
         {
           anchor: "jornada.publico.ftd",
           label: "Só quem já fez o primeiro depósito",
-          what: 'Filtro de entrada (opcional). Caixa de marcar: exige que o jogador já tenha feito o primeiro depósito (FTD) para entrar e para continuar na jornada.',
+          what: "Filtro de entrada (opcional). Caixa de marcar: exige que o jogador já tenha feito o primeiro depósito (FTD) para entrar e para continuar na jornada.",
         },
         {
           anchor: "jornada.publico.filtros",
@@ -281,13 +293,14 @@ const screen: HelpScreen = {
         {
           anchor: "jornada.etapas.adicionar-abaixo",
           label: "Adicionar etapa abaixo (ícone +)",
-          what: "Abre o mesmo menu de \"Adicionar etapa\" (Espera, SMS, E-mail ou Ligação), mas coloca a nova etapa logo abaixo desta, em vez de no fim da lista.",
+          what: 'Abre o mesmo menu de "Adicionar etapa" (Espera, SMS, E-mail ou Ligação), mas coloca a nova etapa logo abaixo desta, em vez de no fim da lista.',
         },
         {
           anchor: "jornada.etapas.espera-tempo",
           label: "Tempo de espera (etapa Aguardar)",
           what: "Quanto tempo a jornada aguarda antes de seguir para a próxima etapa. Aceita vírgula (ex.: 1,5).",
-          notes: 'Menos de 1 minuto é salvo como 1 minuto ("O mínimo é 1 minuto; menos que isso é salvo como 1 minuto."). Vazio ou zero impede salvar: "Informe o tempo de espera da etapa N."',
+          notes:
+            'Menos de 1 minuto é salvo como 1 minuto ("O mínimo é 1 minuto; menos que isso é salvo como 1 minuto."). Vazio ou zero impede salvar: "Informe o tempo de espera da etapa N."',
         },
         {
           anchor: "jornada.etapas.espera-unidade",
@@ -310,7 +323,8 @@ const screen: HelpScreen = {
           anchor: "jornada.etapas.email-template",
           label: "Template de e-mail (etapa Enviar e-mail)",
           what: "Escolhe o template de e-mail ativo que esta etapa envia.",
-          notes: "Sem remetente de e-mail verificado, aparece o aviso de e-mail bloqueado (ver estados).",
+          notes:
+            "Sem remetente de e-mail verificado, aparece o aviso de e-mail bloqueado (ver estados).",
         },
         {
           anchor: "jornada.etapas.email-remetente",
@@ -342,7 +356,7 @@ const screen: HelpScreen = {
         {
           anchor: "jornada.etapas.loop-maximo",
           label: "Repetir o loop no máximo",
-          what: 'Campo condicional: só aparece quando a jornada já termina em loop (volta a repetir as últimas etapas). Depois do número de repetições escolhido, a jornada termina de vez para o jogador.',
+          what: "Campo condicional: só aparece quando a jornada já termina em loop (volta a repetir as últimas etapas). Depois do número de repetições escolhido, a jornada termina de vez para o jogador.",
           notes: "Limite máximo definido pelo sistema (MAX_LOOPS_LIMIT).",
         },
       ],
@@ -393,8 +407,9 @@ const screen: HelpScreen = {
         {
           anchor: "jornada.limites.controle",
           label: "Grupo de controle",
-          what: 'Desligado, 5% ou 10%: a fração dos jogadores que entrarem fica sem receber mensagens, de propósito, para medir o efeito real da jornada em Resultados do CRM.',
-          notes: "Sem grupo de controle, a jornada não mede o efeito incremental — só o volume enviado.",
+          what: "Desligado, 5% ou 10%: a fração dos jogadores que entrarem fica sem receber mensagens, de propósito, para medir o efeito real da jornada em Resultados do CRM.",
+          notes:
+            "Sem grupo de controle, a jornada não mede o efeito incremental — só o volume enviado.",
         },
         {
           anchor: "jornada.limites.termino",
@@ -405,7 +420,7 @@ const screen: HelpScreen = {
         {
           anchor: "jornada.limites.termino-limpar",
           label: "Limpar (data de término)",
-          what: 'Só aparece quando há uma data preenchida. Remove a data de término, voltando a jornada a rodar sem prazo.',
+          what: "Só aparece quando há uma data preenchida. Remove a data de término, voltando a jornada a rodar sem prazo.",
         },
       ],
     },
@@ -417,29 +432,32 @@ const screen: HelpScreen = {
       id: "conflitos",
       title: "Conflitos entre jornadas",
       intro:
-        "O que acontece quando outra jornada disputa o mesmo jogador. Na disputa, o menor número de prioridade vence.",
+        'O que acontece quando outra jornada quer falar com o mesmo jogador: "Sem trava" envia sempre; "Com prioridade" disputa com as outras "Com prioridade".',
       items: [
         {
           label: "Aviso de conflito",
-          what: 'Lista de avisos (aparece só quando há algum): por exemplo "A faixa desta jornada se sobrepõe a \'<nome>\' (<faixa>): o mesmo jogador estaria nas duas. Defina a saída por tempo para encerrar onde a outra começa.", "Já existe uma jornada ativa para este nível: \'<nome>\'." ou "\'<nome>\' usa o mesmo gatilho com a mesma prioridade: quando as duas tiverem mensagem no mesmo momento, não há uma vencedora definida."',
-          notes: "São avisos, não bloqueios: a jornada pode ser salva e ativada mesmo com um aviso de conflito.",
+          what: "Lista de avisos (aparece só quando há algum): por exemplo \"A faixa desta jornada se sobrepõe a '<nome>' (<faixa>): o mesmo jogador estaria nas duas. Defina a saída por tempo para encerrar onde a outra começa.\", \"Já existe uma jornada ativa para este nível: '<nome>'.\" ou \"'<nome>' usa o mesmo gatilho com a mesma prioridade: quando as duas tiverem mensagem no mesmo momento, não há uma vencedora definida.\"",
+          notes:
+            "São avisos, não bloqueios: a jornada pode ser salva e ativada mesmo com um aviso de conflito.",
         },
         {
           anchor: "jornada.conflitos.familia",
           label: "Família",
-          what: '"Sem família" ou "Progressão de níveis". Jornadas da mesma família não rodam juntas para o mesmo jogador — a política abaixo decide o que acontece.',
+          what: '"Sem família" ou "Progressão de níveis". Na família de níveis, quando o jogador muda de nível, a jornada do nível anterior é encerrada antes de ele entrar na nova.',
         },
         {
           anchor: "jornada.conflitos.prioridade",
           label: "Prioridade (1 é a maior)",
-          what: "Número de 1 a 100. Quando duas jornadas ativas disputam o mesmo canal para o mesmo jogador, a de menor número vence.",
+          what: 'Aparece só em "Com prioridade". Número de 1 a 100. Quando duas jornadas "Com prioridade" ativas querem falar com o mesmo jogador no mesmo canal, a de menor número envia.',
           notes:
             'Campo vazio ou fora da faixa mostra "Informe a prioridade (número inteiro de 1 a 100)." e impede salvar.',
         },
         {
           anchor: "jornada.conflitos.ao-competir",
-          label: "Ao competir",
-          what: '"Permitir coexistência" (as duas enviam, sem controle entre si), "Pausar a menor prioridade" (no mesmo canal, a de maior prioridade segue; a outra aguarda) ou "Manter apenas esta família" (só a jornada da família ativa continua).',
+          label: "Quando outra jornada fala com o jogador",
+          what: '"Sem trava": a jornada envia normalmente, não pausa nenhuma outra e não é pausada por nenhuma. "Com prioridade": se outra jornada "Com prioridade" quiser falar com o mesmo jogador no mesmo canal, a de número menor envia e a outra fica pausada até a primeira terminar.',
+          notes:
+            'Nos dois modos valem o limite de mensagens por dia de cada jogador e o intervalo entre jornadas. Ao trocar para "Sem trava", quem estava pausado volta aos poucos, nos próximos minutos.',
         },
       ],
     },
@@ -512,7 +530,8 @@ const screen: HelpScreen = {
       id: "canal-desabilitado",
       title: "Canal desabilitado — será pulado",
       what: "Selo numa etapa já existente cujo canal (SMS, E-mail ou Ligação) foi desabilitado para a casa pela BetLeads. A etapa não envia nem cobra: o jogador passa direto para a próxima. Se o canal voltar a ser habilitado, a etapa volta a enviar daí em diante, sem reenviar o que foi pulado.",
-      action: "Não é preciso mexer na etapa; a jornada continua salvando normalmente. Para usar o canal de novo, fale com a BetLeads.",
+      action:
+        "Não é preciso mexer na etapa; a jornada continua salvando normalmente. Para usar o canal de novo, fale com a BetLeads.",
     },
     {
       id: "email-bloqueado-aviso",
@@ -524,7 +543,8 @@ const screen: HelpScreen = {
       id: "opcoes-de-envio-erro",
       title: "Não foi possível carregar as opções de envio.",
       what: 'Aviso dentro de uma etapa de SMS ou e-mail, quando a busca dos domínios do encurtador e dos remetentes falhou (erro de rede ou do servidor) — aparece no lugar dos avisos de "domínio não verificado", porque enquanto a busca não funcionar o editor não sabe se há ou não um domínio/remetente verificado.',
-      action: "Atualize a página para tentar carregar de novo; a etapa pode ser salva mesmo assim, mas confira o remetente e o domínio antes de ativar a jornada.",
+      action:
+        "Atualize a página para tentar carregar de novo; a etapa pode ser salva mesmo assim, mas confira o remetente e o domínio antes de ativar a jornada.",
     },
     {
       id: "erros-ao-salvar",

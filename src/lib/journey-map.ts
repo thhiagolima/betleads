@@ -12,6 +12,7 @@ export type MapJourney = {
   exit_rules?: Record<string, unknown> | null;
   conflict_family?: string | null;
   journey_priority?: number | null;
+  conflict_policy?: string | null;
   express?: boolean | null;
   holdout_percent?: number | null;
   inProgress?: number;
@@ -137,7 +138,12 @@ export function journeyConflicts(draft: MapJourney, others: MapJourney[]): strin
         continue;
       }
       if (draft.trigger_type === "inactivity") continue;
-      if ((other.journey_priority ?? 4) === (draft.journey_priority ?? 4))
+      // Only two "Com prioridade" journeys compete (20261231102200).
+      if (
+        draft.conflict_policy === "pause_lower_priority" &&
+        other.conflict_policy === "pause_lower_priority" &&
+        (other.journey_priority ?? 4) === (draft.journey_priority ?? 4)
+      )
         warnings.push(
           `"${other.name}" usa o mesmo gatilho com a mesma prioridade: quando as duas tiverem mensagem no mesmo momento, não há uma vencedora definida.`,
         );

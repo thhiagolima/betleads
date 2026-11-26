@@ -122,10 +122,34 @@ describe("journeyConflicts", () => {
       name: "PIX",
       trigger_type: "pix_gerado_nao_pago",
       journey_priority: 1,
+      conflict_policy: "pause_lower_priority",
     });
-    const draft = journey({ id: "b", trigger_type: "pix_gerado_nao_pago", journey_priority: 1 });
+    const draft = journey({
+      id: "b",
+      trigger_type: "pix_gerado_nao_pago",
+      journey_priority: 1,
+      conflict_policy: "pause_lower_priority",
+    });
     expect(journeyConflicts(draft, [pix])).toHaveLength(1);
     expect(journeyConflicts({ ...draft, journey_priority: 2 }, [pix])).toEqual([]);
     expect(journeyConflicts({ ...draft, express: true }, [pix])).toEqual([]);
+  });
+
+  it("does not warn about priority when either journey is Sem trava", () => {
+    const pix = journey({
+      id: "a",
+      name: "PIX",
+      trigger_type: "pix_gerado_nao_pago",
+      journey_priority: 1,
+      conflict_policy: "coexist",
+    });
+    const draft = journey({
+      id: "b",
+      trigger_type: "pix_gerado_nao_pago",
+      journey_priority: 1,
+      conflict_policy: "pause_lower_priority",
+    });
+    expect(journeyConflicts(draft, [pix])).toEqual([]);
+    expect(journeyConflicts({ ...draft, conflict_policy: "coexist" }, [pix])).toEqual([]);
   });
 });
