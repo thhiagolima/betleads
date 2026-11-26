@@ -404,9 +404,9 @@ describe("runJourneyDispatcher", () => {
     seedClaimAgain();
     const second = await runJourneyDispatcher(1000);
     expect(second).toMatchObject({ deferredNoBalance: 1 });
-    expect(
-      fake.tables.journey_events.filter((e) => e.event_type === "step_deferred"),
-    ).toHaveLength(1);
+    expect(fake.tables.journey_events.filter((e) => e.event_type === "step_deferred")).toHaveLength(
+      1,
+    );
   });
 
   it("after a recharge the held step is sent (it was not lost)", async () => {
@@ -533,22 +533,20 @@ describe("runJourneyDispatcher", () => {
     });
   });
 
-  it("timeout after sending: execution stays claimed (in_flight), attempt consumed, no resend for 15 min (B1)", async () => {
+  it("timeout after sending counts as sent: the enrollment moves on and nothing is resent (2026-11-26)", async () => {
     seed(["e1"]);
-    // Same rule as reserve_journey_delivery (20261015111000): a `claimed`
-    // execution of this step younger than 15 min answers `in_flight`.
     let execution = 0;
     fake.rpcs.reserve_journey_delivery_v2 = (args) => {
-      const live = fake.tables.journey_step_executions.find(
-        (e) => e.enrollment_id === args.p_enrollment_id && e.status === "claimed",
+      const done = fake.tables.journey_step_executions.find(
+        (e) => e.enrollment_id === args.p_enrollment_id && e.status === "sent",
       );
-      if (live)
+      if (done)
         return [
           {
-            execution_id: null,
+            execution_id: done.id,
             idempotency_key: null,
-            retry_at: new Date(Date.now() + 120_000).toISOString(),
-            blocked_reason: "in_flight",
+            retry_at: new Date().toISOString(),
+            blocked_reason: "already_sent",
           },
         ];
       execution++;
@@ -574,41 +572,29 @@ describe("runJourneyDispatcher", () => {
       errorKind: "outcome_unknown",
       body: "{}",
     });
-    const before = Date.now();
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ processed: 0, failed: 0, rescheduled: 1, outcomeUnknown: 1 });
-    const row = enrollment("e1");
-    expect(row).toMatchObject({ status: "waiting", attempts: 2, claimed_by: null });
-    expect(Date.parse(String(row.next_run_at))).toBeGreaterThanOrEqual(
-      before + 15 * 60_000 - 1_000,
-    );
+    expect(result).toMatchObject({ failed: 0, rescheduled: 0, outcomeUnknown: 1 });
+    expect(enrollment("e1")).toMatchObject({
+      status: "active",
+      current_position: 1,
+      attempts: 0,
+      claimed_by: null,
+    });
     expect(fake.tables.journey_step_executions).toEqual([
       expect.objectContaining({
         id: "exec-1",
-        status: "claimed",
+        status: "sent",
         error: expect.stringContaining("outcome_unknown"),
       }),
     ]);
     expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "step_outcome_unknown",
-      detail: expect.objectContaining({ attempt_consumed: true, attempts: 2 }),
+      event_type: "step_sent",
+      detail: expect.objectContaining({ outcome_unknown: true, step_position: 0 }),
     });
-
-    // Even if the item becomes due early (e.g. manual requeue), the claimed
-    // execution makes the reservation answer in_flight: nothing is resent.
-    row.next_run_at = new Date().toISOString();
-    seedClaimAgain();
-    sms.sendSmsInternal.mockClear();
-    await runJourneyDispatcher(1000);
-    expect(sms.sendSmsInternal).not.toHaveBeenCalled();
-    expect(fake.tables.journey_step_executions).toHaveLength(1);
-    expect(fake.tables.journey_events.at(-1)).toMatchObject({
-      event_type: "step_deferred",
-      detail: expect.objectContaining({ reason: "in_flight" }),
-    });
+    expect(sms.sendSmsInternal).toHaveBeenCalledTimes(1);
   });
 
-  it("outcome unknown on the last attempt fails the enrollment (never infinite)", async () => {
+  it("outcome unknown on the last attempt still counts as sent, never failed or resent", async () => {
     seed(["e1"]);
     enrollment("e1").attempts = 2; // max_attempts defaults to 3
     sms.sendSmsInternal.mockResolvedValue({
@@ -618,9 +604,9 @@ describe("runJourneyDispatcher", () => {
       errorKind: "outcome_unknown",
     });
     const result = await runJourneyDispatcher(1000);
-    expect(result).toMatchObject({ failed: 1, outcomeUnknown: 1 });
-    expect(enrollment("e1")).toMatchObject({ status: "failed", attempts: 3 });
-    expect(fake.tables.journey_step_executions[0].status).toBe("failed");
+    expect(result).toMatchObject({ failed: 0, outcomeUnknown: 1 });
+    expect(enrollment("e1")).toMatchObject({ status: "active", attempts: 0, current_position: 1 });
+    expect(fake.tables.journey_step_executions[0].status).toBe("sent");
   });
 
   it("missing provider credentials hold the item as a platform failure (no attempt consumed) and are reported", async () => {

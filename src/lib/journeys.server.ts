@@ -1460,10 +1460,10 @@ async function holdForOwnAccountRevoked(
  *           that every further failure consumes an attempt (never infinite).
  *           Missing credit no longer pauses the tenant channel (I4): the item
  *           just comes back in 15 min, so a recharge resumes sends by itself.
- * - unknown (no response, may have been accepted): possibly sent. The
- *           execution stays `claimed`, so reserve_journey_delivery answers
- *           `in_flight` for 15 min; the item waits 15 min and an attempt is
- *           consumed; at max_attempts the enrollment fails.
+ * - unknown (no response, may have been accepted): counted as sent. The
+ *           execution is marked `sent` (with the error) and the enrollment
+ *           moves to the next step; the message is never resent (2026-11-26:
+ *           resending after Short Brasil timeouts duplicated ~12k SMS).
  * - skip    (the HOUSE's wallet had no balance): holdForBalance. The step
  *           waits on the same position and is retried in 15 min, no attempt
  *           consumed; the house gets the hourly "Saldo insuficiente" alert.
@@ -1691,38 +1691,31 @@ async function handleItemFailure(row: ClaimedRow, ctx: DispatchContext, error: u
   const exhausted = decision.reason === "tenant_blocked" || attempts >= policy.maxAttempts;
 
   if (decision.kind === "unknown") {
+    // No answer from the provider (e.g. Short Brasil past 8 s): the message
+    // was most likely accepted and delivered. On 2026-11-26 resending after
+    // 15 min sent ~12k SMS two or three times, so the step now counts as sent
+    // and the enrollment moves on. Never resend a possibly sent message.
     ctx.counters.outcomeUnknown++;
-    const retryAt = new Date(Date.now() + decision.retryAfterMs).toISOString();
     const detail = `outcome_unknown: ${message}`;
-    if (exhausted) {
-      ctx.counters.failed++;
-      await finishOwnExecution(ctx, row.id, {
-        status: "failed",
-        error: detail.slice(0, 1000),
-        completed_at: nowIso(),
-      });
-      await release(enrollment, ctx, {
-        status: "failed",
-        exit_reason: detail.slice(0, 500),
-        attempts,
-      });
-      await event(enrollment, "failed", { error: message, attempts, reason: "outcome_unknown" });
-    } else {
-      ctx.counters.rescheduled++;
-      // The execution stays `claimed` (possibly sent): only the error is recorded.
-      await finishOwnExecution(ctx, row.id, { error: detail.slice(0, 1000) });
-      await release(enrollment, ctx, { status: "waiting", next_run_at: retryAt, attempts });
-      await event(enrollment, "step_outcome_unknown", {
-        error: message.slice(0, 500),
-        attempts,
-        retry_at: retryAt,
-        attempt_consumed: true,
-      });
-    }
-    console.warn("[journey dispatcher] provider outcome unknown (possibly sent)", {
+    const position = Number(enrollment.current_position ?? 0);
+    await finishOwnExecution(ctx, row.id, {
+      status: "sent",
+      error: detail.slice(0, 1000),
+      completed_at: nowIso(),
+    });
+    await release(enrollment, ctx, {
+      status: "active",
+      current_position: position + 1,
+      next_run_at: nowIso(),
+      attempts: 0,
+    });
+    await event(enrollment, "step_sent", {
+      step_position: position,
+      outcome_unknown: true,
+      error: message.slice(0, 500),
+    });
+    console.warn("[journey dispatcher] provider outcome unknown: counted as sent, not resent", {
       enrollmentId: row.id,
-      attempts,
-      failed: exhausted,
     });
     return;
   }
