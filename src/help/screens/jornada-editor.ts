@@ -45,6 +45,13 @@ const screen: HelpScreen = {
           what: "Abre o relatório desta jornada (só aparece depois da jornada já ter sido salva pelo menos uma vez).",
         },
         {
+          anchor: "jornada.excluir",
+          label: "Excluir",
+          what: 'Exclui a jornada: ela para de enviar na hora (mesmo se estiver ativa, não precisa pausar antes), os jogadores que estão nela saem e ela some da lista de Automações. Os envios, cliques e o recuperado que ela já gerou continuam nos relatórios. Antes pede confirmação no diálogo "Excluir jornada?", que diz quantos jogadores estão nela agora; ao confirmar aparece "Jornada excluída". Revisões em rascunho dela são excluídas junto. Depois de excluir, dá para criar outra jornada com o mesmo nome. Ao excluir, volta para a aba Jornadas de Automações.',
+          notes:
+            "Só aparece para o administrador da casa, depois da jornada ser salva pela primeira vez.",
+        },
+        {
           anchor: "jornada.rodape.ativar-pausar",
           label: "Ativar / Salvar e ativar / Pausar",
           what: '"Pausar" aparece numa jornada ativa e abre o diálogo de confirmação de pausa. "Ativar" aparece numa jornada pausada ou recém-criada. Numa jornada em rascunho com alterações não salvas, o texto muda para "Salvar e ativar": salva antes de abrir o diálogo de ativação. Não aparece em jornadas arquivadas nem antes da jornada ser salva pela primeira vez.',

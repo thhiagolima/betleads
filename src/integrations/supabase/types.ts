@@ -3976,6 +3976,8 @@ export type Database = {
           created_at: string;
           created_by: string | null;
           daily_limit: number;
+          deleted_at: string | null;
+          deleted_by: string | null;
           description: string | null;
           entry_rules: Json;
           exit_rules: Json;
@@ -4003,6 +4005,8 @@ export type Database = {
           created_at?: string;
           created_by?: string | null;
           daily_limit?: number;
+          deleted_at?: string | null;
+          deleted_by?: string | null;
           description?: string | null;
           entry_rules?: Json;
           exit_rules?: Json;
@@ -4030,6 +4034,8 @@ export type Database = {
           created_at?: string;
           created_by?: string | null;
           daily_limit?: number;
+          deleted_at?: string | null;
+          deleted_by?: string | null;
           description?: string | null;
           entry_rules?: Json;
           exit_rules?: Json;

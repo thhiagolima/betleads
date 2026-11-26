@@ -37,6 +37,7 @@ async function hasSavedJourney(tenantId: string): Promise<boolean> {
     .from("journeys")
     .select("id", { count: "exact", head: true })
     .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
     .neq("status", "archived");
   if (error) throw new Error(error.message);
   return (count ?? 0) > 0;

@@ -146,6 +146,7 @@ async function jornadasDaCasa(
     .from("journeys")
     .select("id,name,status,trigger_type,daily_limit,updated_at")
     .eq("tenant_id", casa.id)
+    .is("deleted_at", null)
     // Same as listJourneys: an applied revision is archived and its content
     // lives in the original journey.
     .or("revision_of.is.null,status.neq.archived");

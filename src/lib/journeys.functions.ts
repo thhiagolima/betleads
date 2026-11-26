@@ -179,7 +179,9 @@ export async function channelBaselineSteps(
 async function requireJourneyPublisher(userId: string, tenantId: string) {
   const role = await journeyRole(userId, tenantId);
   if (role !== "admin" && role !== "super_admin") {
-    throw new Error("Somente administradores podem publicar, pausar ou arquivar jornadas.");
+    throw new Error(
+      "Somente administradores podem publicar, pausar, arquivar ou excluir jornadas.",
+    );
   }
 }
 
@@ -194,6 +196,7 @@ export const listJourneys = createServerFn({ method: "GET" })
           "id,name,description,status,trigger_type,trigger_config,entry_rules,conflict_family,journey_priority,conflict_policy,express,daily_limit,cooldown_hours,ends_at,exit_rules,holdout_percent,updated_at,journey_steps(id,position,step_type,config,is_enabled)",
         )
         .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
         // An applied revision is archived (promote_journey_revision); its
         // content now lives in the original journey.
         .or("revision_of.is.null,status.neq.archived")
@@ -238,6 +241,7 @@ export const listLegacyJourneys = createServerFn({ method: "GET" })
         .from("journeys")
         .select("id,status,legacy_source_type,legacy_source_id")
         .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
         .not("legacy_source_id", "is", null),
     ]);
     if (sms.error || email.error || converted.error)
@@ -567,6 +571,7 @@ export const getJourney = createServerFn({ method: "GET" })
       .select("*")
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!journey) throw new Error("Jornada não encontrada");
@@ -622,6 +627,17 @@ export const saveJourney = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const tenantId = await tenant(context);
     await requireJourneyDraftEditor(context.userId, tenantId);
+    if (data.id) {
+      // Uma aba antiga aberta numa jornada já excluída não a ressuscita.
+      const { data: deleted } = await db
+        .from("journeys")
+        .select("id")
+        .eq("id", data.id)
+        .eq("tenant_id", tenantId)
+        .not("deleted_at", "is", null)
+        .maybeSingle();
+      if (deleted) throw new Error("Esta jornada foi excluída.");
+    }
     const input = data.journey;
     if (input.ends_at) {
       // Only a new or changed end date must be in the future: an ended journey
@@ -759,6 +775,7 @@ export const setJourneyStatus = createServerFn({ method: "POST" })
       )
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
       .maybeSingle();
     if (journeyError || !loadedJourney) throw new Error("Jornada não encontrada.");
     let journey = loadedJourney;
@@ -920,6 +937,7 @@ export const setJourneyExpress = createServerFn({ method: "POST" })
             .select("id,express,status")
             .eq("id", data.id)
             .eq("tenant_id", tenantId)
+            .is("deleted_at", null)
             .maybeSingle();
           if (error) throw new Error("Não foi possível carregar a jornada.");
           return journey ? { ...journey, express: Boolean(journey.express) } : null;
@@ -962,18 +980,52 @@ export const deleteJourney = createServerFn({ method: "POST" })
     await requireJourneyPublisher(context.userId, tenantId);
     const { data: journey, error: findError } = await db
       .from("journeys")
-      .select("id,status")
+      .select("id,status,legacy_source_type,legacy_source_id")
       .eq("id", data.id)
       .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
       .maybeSingle();
     if (findError || !journey) throw new Error("Jornada não encontrada.");
-    if (journey.status === "active") throw new Error("Desligue a jornada antes de excluí-la.");
-    const { error } = await db
+    // Exclusão lógica: um DELETE de verdade esbarra no histórico de links
+    // (link_dispatches → journey_steps) e no cascade de journey_events. A
+    // jornada é arquivada (para de enviar; o sweep de saídas encerra os
+    // inscritos) e some das telas; envios, cliques e resultados continuam.
+    // Rascunhos de revisão dela vão junto. O vínculo com a automação legada
+    // é solto para ela poder ser convertida de novo.
+    const now = new Date().toISOString();
+    const { data: removed, error } = await db
       .from("journeys")
-      .delete()
-      .eq("id", data.id)
-      .eq("tenant_id", tenantId);
+      .update({
+        status: "archived",
+        archived_at: now,
+        deleted_at: now,
+        deleted_by: context.userId,
+        legacy_source_type: null,
+        legacy_source_id: null,
+      })
+      .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
+      .or(`id.eq.${journey.id},and(revision_of.eq.${journey.id},status.eq.draft)`)
+      .select("id");
     if (error) throw new Error("Não foi possível excluir a jornada.");
+    await db.from("journey_events").insert(
+      (removed ?? []).map((row: { id: string }) => ({
+        tenant_id: tenantId,
+        journey_id: row.id,
+        event_type: "deleted",
+        actor_user_id: context.userId,
+        detail: {
+          from: row.id === journey.id ? journey.status : "draft",
+          ...(row.id !== journey.id ? { revision_of: journey.id } : {}),
+          ...(journey.legacy_source_id && row.id === journey.id
+            ? {
+                legacy_source_type: journey.legacy_source_type,
+                legacy_source_id: journey.legacy_source_id,
+              }
+            : {}),
+        },
+      })),
+    );
     return { ok: true };
   });
 
@@ -989,6 +1041,7 @@ export const enrollJourneyManually = createServerFn({ method: "POST" })
       .select("id,version,status,trigger_type,entry_rules,express")
       .eq("id", data.journeyId)
       .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
       .maybeSingle();
     if (journeyError || !journey) throw new Error("Jornada não encontrada.");
     if (journey.status !== "active" || journey.trigger_type !== "manual")

@@ -22,7 +22,6 @@ import { tourAnchor } from "@/help/anchor";
 import { Term } from "@/components/help/term";
 import {
   convertLegacyJourney,
-  deleteJourney,
   getJourneyContactLimits,
   listJourneyOperations,
   listJourneys,
@@ -38,6 +37,7 @@ import { waitStepsSpanSeconds, waitStepUntilTime } from "@/lib/journeys.shared";
 import { ENROLLMENT_STATUS_LABELS } from "@/lib/player-journeys";
 import { JourneyMapCard } from "@/components/journeys/journey-map-card";
 import { useJourneyStatusControl } from "@/components/journeys/journey-status-control";
+import { useJourneyDelete } from "@/components/journeys/use-journey-delete";
 import { FlowsTab } from "@/components/ligacoes/flows-tab";
 import { DeadLeadsPanel } from "@/components/journeys/dead-leads-panel";
 import {
@@ -191,7 +191,7 @@ export function JourneysHub() {
   const list = useServerFn(listJourneys);
   const changeExpress = useServerFn(setJourneyExpress);
   const [expressCandidate, setExpressCandidate] = useState<Journey | null>(null);
-  const removeJourney = useServerFn(deleteJourney);
+  const journeyDelete = useJourneyDelete();
   const operationsFn = useServerFn(listJourneyOperations);
   const legacyFn = useServerFn(listLegacyJourneys);
   const convertFn = useServerFn(convertLegacyJourney);
@@ -253,14 +253,6 @@ export function JourneysHub() {
             : "Envio imediato ligado."
           : "Envio imediato desligado.",
       );
-    },
-    onError: (error: Error) => toast.error(error.message),
-  });
-  const remove = useMutation({
-    mutationFn: (id: string) => removeJourney({ data: { id } }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["journeys"] });
-      toast.success("Jornada excluída");
     },
     onError: (error: Error) => toast.error(error.message),
   });
@@ -387,15 +379,6 @@ export function JourneysHub() {
       confirmLabel: "Desligar envio imediato",
     });
     if (confirmed) express.mutate({ id: journey.id, express: false });
-  };
-  const confirmDelete = async (journey: Journey) => {
-    const confirmed = await requestConfirmation({
-      title: "Excluir jornada?",
-      description: `A jornada “${journey.name}” será excluída. Esta ação não pode ser desfeita.`,
-      confirmLabel: "Excluir jornada",
-      destructive: true,
-    });
-    if (confirmed) remove.mutate(journey.id);
   };
   const confirmRetire = async (item: LegacyJourney) => {
     const confirmed = await requestConfirmation({
@@ -572,7 +555,8 @@ export function JourneysHub() {
                     isFirst={i === 0}
                     busy={statusControl.isPending}
                     expressBusy={express.isPending}
-                    removeBusy={remove.isPending}
+                    removeBusy={journeyDelete.isPending}
+                    canDelete={journeyDelete.canDelete}
                     onActivate={() => statusControl.requestActivate(journey)}
                     onPause={() =>
                       statusControl.requestPause({
@@ -586,7 +570,14 @@ export function JourneysHub() {
                         ? void confirmExpressOff(journey)
                         : setExpressCandidate(journey)
                     }
-                    onDelete={() => void confirmDelete(journey)}
+                    onDelete={() =>
+                      void journeyDelete.requestDelete({
+                        id: journey.id,
+                        name: journey.name,
+                        status: journey.status,
+                        inProgress: journeyInProgress(journey.metrics?.byStatus),
+                      })
+                    }
                   />
                 ))}
               </ul>
@@ -938,6 +929,7 @@ function JourneyRow({
   busy,
   expressBusy,
   removeBusy,
+  canDelete,
   onActivate,
   onPause,
   onExpress,
@@ -948,6 +940,7 @@ function JourneyRow({
   busy: boolean;
   expressBusy: boolean;
   removeBusy: boolean;
+  canDelete: boolean;
   onActivate: () => void;
   onPause: () => void;
   onExpress: () => void;
@@ -1089,15 +1082,20 @@ function JourneyRow({
               />
               {journey.express ? "Desligar envio imediato" : "Ligar envio imediato"}
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="min-h-11 text-destructive focus:text-destructive md:min-h-9"
-              disabled={removeBusy || active}
-              onSelect={onDelete}
-            >
-              <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
-              {active ? "Excluir (pause antes)" : "Excluir"}
-            </DropdownMenuItem>
+            {canDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="min-h-11 text-destructive focus:text-destructive md:min-h-9"
+                  disabled={removeBusy}
+                  onSelect={onDelete}
+                  {...(isFirst ? tourAnchor("automacoes.jornadas.excluir") : {})}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Excluir jornada
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

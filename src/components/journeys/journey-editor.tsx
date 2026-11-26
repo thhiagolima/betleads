@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -76,6 +76,7 @@ import {
   waitToSeconds,
 } from "./journey-editor-config";
 import { useJourneyStatusControl } from "./journey-status-control";
+import { useJourneyDelete } from "./use-journey-delete";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -423,6 +424,14 @@ export function JourneyEditor({
   const { isEnabled } = useEnabledChannels();
   const save = useServerFn(saveJourney);
   const statusControl = useJourneyStatusControl();
+  // After a delete the page leaves on its own: never ask "Sair sem salvar?".
+  const deletedRef = useRef(false);
+  const journeyDelete = useJourneyDelete({
+    onDeleted: () => {
+      deletedRef.current = true;
+      void navigate({ to: "/automacoes", hash: "jornadas" });
+    },
+  });
   const listJourneysFn = useServerFn(listJourneys);
   const otherJourneys = useQuery({
     queryKey: ["journeys"],
@@ -761,6 +770,7 @@ export function JourneyEditor({
   const blockNavigation = dirty && !mutation.isPending;
   useBlocker({
     shouldBlockFn: async () =>
+      !deletedRef.current &&
       !(await requestConfirmation({
         title: "Sair sem salvar?",
         description: "As alterações feitas nesta jornada ainda não foram salvas e serão perdidas.",
@@ -934,6 +944,24 @@ export function JourneyEditor({
                 <Link to="/jornadas/$journeyId/relatorio" params={{ journeyId: id }}>
                   Relatório
                 </Link>
+              </Button>
+            )}
+            {id && journeyDelete.canDelete && (
+              <Button
+                variant="outline"
+                className="h-11 text-destructive hover:text-destructive md:h-9"
+                disabled={journeyDelete.isPending || mutation.isPending}
+                onClick={() =>
+                  void journeyDelete.requestDelete({
+                    id,
+                    name: initial?.name ?? name,
+                    status: savedStatus,
+                    inProgress: journeyInProgress(metrics?.byStatus),
+                  })
+                }
+                {...tourAnchor("jornada.excluir")}
+              >
+                <Trash2 className="mr-1 h-4 w-4" aria-hidden="true" /> Excluir
               </Button>
             )}
             <div className="hidden items-center gap-2 md:flex">

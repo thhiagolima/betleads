@@ -151,7 +151,13 @@ const screen: HelpScreen = {
         {
           anchor: "automacoes.jornadas.menu",
           label: 'Menu "…" (mais ações)',
-          what: 'Abre um menu com "Editar" (vai para o editor da jornada), "Ligar envio imediato" / "Desligar envio imediato" e "Excluir" (ou "Excluir (pause antes)", desabilitado, quando a jornada está ativa).',
+          what: 'Abre um menu com "Editar" (vai para o editor da jornada), "Ligar envio imediato" / "Desligar envio imediato" e, para o administrador da casa, "Excluir jornada".',
+        },
+        {
+          anchor: "automacoes.jornadas.excluir",
+          label: 'Excluir jornada (no menu "…")',
+          what: 'Exclui a jornada: ela para de enviar na hora (mesmo se estiver ativa, não precisa pausar antes), os jogadores que estão nela saem e ela some da lista de Automações. Os envios, cliques e o recuperado que ela já gerou continuam nos relatórios. Antes pede confirmação no diálogo "Excluir jornada?", que diz quantos jogadores estão nela agora; ao confirmar aparece "Jornada excluída". Revisões em rascunho dela são excluídas junto. Depois de excluir, dá para criar outra jornada com o mesmo nome.',
+          notes: "Só aparece para o administrador da casa. O botão Excluir também fica no topo do editor da jornada.",
         },
         {
           label: 'Diálogo "Ligar envio imediato?"',

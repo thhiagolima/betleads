@@ -133,6 +133,7 @@ export function createOpsFakeDb() {
         filters.push((r) => compare("lt", r[col], String(v))),
         builder
       ),
+      is: (col: string, value: null) => (filters.push((r) => (r[col] ?? null) === value), builder),
       or: (expr: string) => {
         const terms = splitTop(expr).map(parseTerm);
         filters.push((row) => terms.some((t) => t(row)));
