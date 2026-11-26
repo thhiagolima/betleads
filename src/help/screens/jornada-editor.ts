@@ -166,6 +166,18 @@ const screen: HelpScreen = {
             'Aceita o campo "Só entra quem fez o 1º depósito nas últimas (horas)" — ver Campos condicionais.',
         },
         {
+          label: "Fez o 2º depósito",
+          what: 'O jogador entra no momento em que o segundo depósito dele é aprovado. Quando usar: para levar ao 3º depósito (jornada "Converter para o 3º depósito").',
+          notes:
+            'Conta os depósitos aprovados que chegaram pela integração da casa. Quem já depositava antes da integração não entra, porque o histórico dele não está completo aqui. Aceita o campo "Só entra quem fez o 2º depósito nas últimas (horas)" — ver Campos condicionais.',
+        },
+        {
+          label: "Fez o 3º depósito",
+          what: 'O jogador entra no momento em que o terceiro depósito dele é aprovado. Quando usar: para levar ao 4º depósito (jornada "Converter para o 4º depósito").',
+          notes:
+            'Mesma contagem do 2º depósito. Aceita o campo "Só entra quem fez o 3º depósito nas últimas (horas)" — ver Campos condicionais.',
+        },
+        {
           label: "Saque pago",
           what: "Quando usar: para conversar com quem teve um saque aprovado — por exemplo, para incentivá-lo a continuar jogando.",
           notes:
@@ -175,7 +187,7 @@ const screen: HelpScreen = {
           label: "Mudou de nível",
           what: "Quando usar: para parabenizar e orientar o jogador assim que ele sobe de nível de gamificação.",
           notes:
-            'Ao escolher este gatilho, o editor já marca sozinho a família "Progressão de níveis", a política "Manter apenas esta família" e a prioridade 4, e liga a saída "Mudou de nível" — ver Campos condicionais e Conflitos. Ao entrar aqui, o jogador sai automaticamente da jornada do nível anterior.',
+            'Ao escolher este gatilho, o editor já marca sozinho a família "Progressão de níveis" e "Sem trava", e liga a saída "Mudou de nível" — ver Campos condicionais e Conflitos. Ao entrar aqui, o jogador sai automaticamente da jornada do nível anterior.',
         },
         {
           label: "Tempo sem atividade",
@@ -204,8 +216,9 @@ const screen: HelpScreen = {
         },
         {
           anchor: "jornada.gatilho.idade-maxima",
-          label: "Só entra quem se cadastrou / fez o 1º depósito / saque pago nas últimas (horas)",
-          what: "Campo condicional, só nos gatilhos Cadastrados sem depósito, Primeiro depósito e Saque pago: evita tratar um evento antigo da base como se fosse novo ao ativar a jornada. 0 tira o limite.",
+          label:
+            "Só entra quem se cadastrou / fez o 1º, 2º ou 3º depósito / saque pago nas últimas (horas)",
+          what: "Campo condicional, só nos gatilhos Cadastrados sem depósito, Primeiro depósito, Fez o 2º depósito, Fez o 3º depósito e Saque pago: evita tratar um evento antigo da base como se fosse novo ao ativar a jornada. 0 tira o limite.",
           notes: "De 0 a 8.760 horas (1 ano).",
         },
       ],
@@ -559,19 +572,15 @@ const screen: HelpScreen = {
     },
   ],
 
+  // v2 (2026-11-26): "Sem trava"/"Com prioridade" e gatilhos de 2º/3º depósito.
+  tourVersion: 2,
   tours: {
     default: [
       {
         anchor: "jornada.gatilho.tipo",
         title: "O gatilho de entrada",
-        body: "Escolha o que coloca o jogador na jornada: um evento, um tempo sem atividade ou nenhum gatilho (entrada manual).",
+        body: 'Escolha o que coloca o jogador na jornada: um evento, um tempo sem atividade ou nenhum gatilho (entrada manual). Novos: "Fez o 2º depósito" e "Fez o 3º depósito", que colocam o jogador na jornada assim que o depósito é aprovado.',
         articleSection: "gatilho",
-      },
-      {
-        anchor: "jornada.identificacao.nome",
-        title: "Nome da jornada",
-        body: "Dê um nome para identificar esta jornada na lista de Automações e no relatório.",
-        articleSection: "identificacao",
       },
       {
         anchor: "jornada.publico.quem-entra",
@@ -602,6 +611,12 @@ const screen: HelpScreen = {
         title: "Grupo de controle",
         body: "Deixe uma fração dos jogadores sem mensagem para medir o efeito real da jornada.",
         articleSection: "limites",
+      },
+      {
+        anchor: "jornada.conflitos.ao-competir",
+        title: "Sem trava ou Com prioridade",
+        body: '"Sem trava": a jornada envia normalmente e não pausa nem é pausada por outra. "Com prioridade": se outra jornada "Com prioridade" quiser falar com o mesmo jogador, a de número menor envia e a outra espera.',
+        articleSection: "conflitos",
       },
       {
         anchor: "jornada.rodape.salvar",

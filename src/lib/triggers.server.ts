@@ -27,6 +27,8 @@ export type TriggerType =
   | "cashback_pago"
   | "pix_gerado_nao_pago"
   | "primeiro_deposito"
+  | "segundo_deposito"
+  | "terceiro_deposito"
   | "saque_pago"
   | "nivel_alterado";
 
@@ -68,6 +70,8 @@ export const TRIGGER_NAMES: Record<TriggerType, string> = {
   cashback_pago: "Cashback pago",
   pix_gerado_nao_pago: "PIX gerado e não pago",
   primeiro_deposito: "Primeiro depósito",
+  segundo_deposito: "Fez o 2º depósito",
+  terceiro_deposito: "Fez o 3º depósito",
   saque_pago: "Saque pago",
   nivel_alterado: "Mudou de nível",
 };
@@ -94,6 +98,8 @@ export const TRIGGER_MEANINGS: Record<TriggerType, string> = {
   cashback_pago: "Player recebeu cashback hoje (via webhook)",
   pix_gerado_nao_pago: "Gerou um PIX que permanece pendente de pagamento",
   primeiro_deposito: "Primeiro depósito aprovado do jogador",
+  segundo_deposito: "Segundo depósito aprovado do jogador",
+  terceiro_deposito: "Terceiro depósito aprovado do jogador",
   saque_pago: "Saque aprovado/pago para o jogador",
   nivel_alterado: "Jogador entrou em um novo nível de gamificação após depósito aprovado",
 };

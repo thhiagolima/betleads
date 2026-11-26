@@ -48,6 +48,7 @@ import { ownAccountPausedByRevocation, revokedOwnChannelKeys } from "./provider-
 import { STEP_TYPE_CHANNEL } from "./tenant-channels.shared";
 import {
   audienceMatches,
+  depositOrdinalField,
   inactivityBandConfig,
   journeyEntryKey,
   pickSmsVariant,
@@ -115,6 +116,8 @@ export async function matchFinancialTrigger(
       "cadastrados_sem_deposito",
       "pix_gerado_nao_pago",
       "primeiro_deposito",
+      "segundo_deposito",
+      "terceiro_deposito",
       "saque_pago",
     ].includes(journey.trigger_type)
   )
@@ -129,12 +132,17 @@ export async function matchFinancialTrigger(
     };
   }
 
-  if (journey.trigger_type === "primeiro_deposito") {
-    const firstDepositAt = String(player.ftd_em ?? "");
-    const occurredAt = Date.parse(firstDepositAt);
+  const depositField = depositOrdinalField(journey.trigger_type);
+  if (depositField) {
+    const depositAt = String(player[depositField] ?? "");
+    const occurredAt = Date.parse(depositAt);
     return {
       matches: Number.isFinite(occurredAt) && (startAt == null || occurredAt >= startAt),
-      occurrence: firstDepositAt || "missing_first_deposit",
+      occurrence:
+        depositAt ||
+        (journey.trigger_type === "primeiro_deposito"
+          ? "missing_first_deposit"
+          : `missing_${depositField}`),
     };
   }
 

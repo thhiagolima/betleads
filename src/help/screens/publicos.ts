@@ -145,6 +145,20 @@ const screen: HelpScreen = {
             "Assim que o jogador faz um segundo depósito aprovado, ele sai do público. Combina com Nível e Tempo sem depositar.",
         },
         {
+          anchor: "publicos.editor.deposito-dois",
+          label: "Já fez 2 depósitos",
+          what: "Só entram os jogadores que fizeram exatamente 2 depósitos aprovados: o 1º e mais um depois dele.",
+          notes:
+            'Assim que o jogador faz o 3º depósito, ele sai deste público. Conta os depósitos que chegaram pela integração da casa. Serve para campanhas avulsas para quem a jornada "Converter para o 3º depósito" também mira.',
+        },
+        {
+          anchor: "publicos.editor.deposito-tres",
+          label: "Já fez 3 depósitos",
+          what: "Só entram os jogadores que fizeram exatamente 3 depósitos aprovados.",
+          notes:
+            'Assim que o jogador faz o 4º depósito, ele sai deste público. Mesma contagem de "Já fez 2 depósitos".',
+        },
+        {
           anchor: "publicos.editor.deposito-nunca",
           label: "Nunca depositou",
           what: "Só entram os jogadores que nunca depositaram.",
@@ -285,6 +299,8 @@ const screen: HelpScreen = {
     },
   ],
 
+  // v2 (2026-11-26): filtros "Já fez 2 depósitos" e "Já fez 3 depósitos".
+  tourVersion: 2,
   tours: {
     default: [
       {
@@ -314,7 +330,7 @@ const screen: HelpScreen = {
       {
         anchor: "publicos.novo",
         title: "Criar um público",
-        body: "Monte um grupo com as regras que quiser. A contagem atualiza na hora, antes de salvar.",
+        body: 'Monte um grupo com as regras que quiser. A contagem atualiza na hora, antes de salvar. Novos filtros: "Já fez 2 depósitos" e "Já fez 3 depósitos".',
         articleSection: "editor",
       },
     ],

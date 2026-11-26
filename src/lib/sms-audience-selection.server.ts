@@ -154,6 +154,8 @@ const EMPTY_FACETS: ResolvedSmsAudience["facets"] = {
     depositNever: 0,
     depositYes: 0,
     depositFirstOnly: 0,
+    depositExactly2: 0,
+    depositExactly3: 0,
     registeredYesterday: 0,
     pixUnpaid: 0,
     withdrawalYes: 0,
@@ -230,6 +232,13 @@ async function rpcAudience(
     (data as { firstDepositFilter?: unknown }).firstDepositFilter !== true
   )
     throw new Error("O público Só fez o 1º depósito ainda não está disponível nesta conta.");
+  // "Já fez 2/3 depósitos": um RPC anterior à migration 20261231102400 não
+  // conhece a regra e não devolveria ninguém. Falha fechado com uma mensagem clara.
+  if (
+    (criteria.activity.deposit === "exactly_2" || criteria.activity.deposit === "exactly_3") &&
+    (data as { depositCountFilter?: unknown }).depositCountFilter !== true
+  )
+    throw new Error("Os públicos Já fez 2/3 depósitos ainda não estão disponíveis nesta conta.");
   if (
     criteria.registeredYesterday &&
     (data as { registeredYesterdayFilter?: unknown }).registeredYesterdayFilter !== true
@@ -257,7 +266,9 @@ export async function resolvePlayerIdsAudience(
     playerIds,
     affiliateIds ? "id,telefone,email,affiliate_id" : "id,telefone,email",
   );
-  const allowed = affiliateIds ? new Set(affiliateIds.map((id) => id.trim()).filter(Boolean)) : null;
+  const allowed = affiliateIds
+    ? new Set(affiliateIds.map((id) => id.trim()).filter(Boolean))
+    : null;
   const players = allowed
     ? loaded.filter((p) => allowed.has((p.affiliate_id ?? "").trim()))
     : loaded;
@@ -359,7 +370,9 @@ export async function resolveAudienceTargetsForTenant(
     playerIds,
     affiliateIds ? "id,telefone,email,affiliate_id" : "id,telefone,email",
   );
-  const allowed = affiliateIds ? new Set(affiliateIds.map((id) => id.trim()).filter(Boolean)) : null;
+  const allowed = affiliateIds
+    ? new Set(affiliateIds.map((id) => id.trim()).filter(Boolean))
+    : null;
   const players = allowed
     ? loaded.filter((p) => allowed.has((p.affiliate_id ?? "").trim()))
     : loaded;

@@ -76,6 +76,11 @@ export type HelpScreen = {
    * its id — doesn't auto-start the same tour again). Omitted: `route`.
    * Resolved by `screenTourKey` (tour-logic.ts). */
   tourRoute?: string;
+  /** Bump when the tour changes enough that everyone should see it again,
+   * including who already finished or skipped it: versions above 1 get their
+   * own progress key (`tour:<rota>@v2`), so the old "done"/"skipped" no longer
+   * applies. "Não mostrar tours automaticamente" still wins. Omitted: 1. */
+  tourVersion?: number;
   /** The query param that holds the tab, for a screen whose tabs live in
    * the query string (`/resultados?aba=origens`, `/financeiro?tab=…`)
    * instead of the hash. Omitted: the tab is the hash. Must equal the

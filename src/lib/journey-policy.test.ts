@@ -98,6 +98,8 @@ describe("entry event max age (P0.3)", () => {
   it("defaults per trigger; other triggers have no limit", () => {
     expect(eventMaxAgeHours("cadastrados_sem_deposito", {})).toBe(168);
     expect(eventMaxAgeHours("primeiro_deposito", {})).toBe(72);
+    expect(eventMaxAgeHours("segundo_deposito", {})).toBe(72);
+    expect(eventMaxAgeHours("terceiro_deposito", {})).toBe(72);
     expect(eventMaxAgeHours("saque_pago", {})).toBe(24);
     expect(eventMaxAgeHours("inactivity", {})).toBeNull();
     expect(eventMaxAgeHours("pix_gerado_nao_pago", {})).toBeNull();

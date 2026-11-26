@@ -697,6 +697,22 @@ function PublicosPage() {
                     tourProps={tourAnchor("publicos.editor.deposito-primeiro")}
                   />
                   <RuleChip
+                    label="Já fez 2 depósitos"
+                    count={facets?.activity.depositExactly2}
+                    loading={calculating}
+                    active={criteria.activity.deposit === "exactly_2"}
+                    onClick={() => setActivity("deposit", "exactly_2")}
+                    tourProps={tourAnchor("publicos.editor.deposito-dois")}
+                  />
+                  <RuleChip
+                    label="Já fez 3 depósitos"
+                    count={facets?.activity.depositExactly3}
+                    loading={calculating}
+                    active={criteria.activity.deposit === "exactly_3"}
+                    onClick={() => setActivity("deposit", "exactly_3")}
+                    tourProps={tourAnchor("publicos.editor.deposito-tres")}
+                  />
+                  <RuleChip
                     label="Nunca depositou"
                     count={facets?.activity.depositNever}
                     loading={calculating}

@@ -53,6 +53,20 @@ export function inactivityBandConfig(
 }
 
 /**
+ * "Fez o Nº depósito" triggers and the player field holding when that deposit
+ * was approved. The 2nd/3rd come from the ledger (20261231102300).
+ */
+export const DEPOSIT_ORDINAL_FIELDS = {
+  primeiro_deposito: "ftd_em",
+  segundo_deposito: "segundo_deposito_em",
+  terceiro_deposito: "terceiro_deposito_em",
+} as const;
+
+export function depositOrdinalField(triggerType: string) {
+  return (DEPOSIT_ORDINAL_FIELDS as Record<string, string | undefined>)[triggerType] ?? null;
+}
+
+/**
  * Default max age (hours) of the event that ENTERS a journey (P0.3). Without
  * it an imported base enters as new: betgreen's "Cadastrou e não depositou"
  * enrolled 5,280 players, 4,800 of them signed up 7 days to 2 months before,
@@ -61,6 +75,8 @@ export function inactivityBandConfig(
 const DEFAULT_EVENT_MAX_AGE_HOURS: Record<string, number> = {
   cadastrados_sem_deposito: 168,
   primeiro_deposito: 72,
+  segundo_deposito: 72,
+  terceiro_deposito: 72,
   saque_pago: 24,
 };
 
@@ -177,6 +193,8 @@ const EVENT_TRIGGERS = new Set([
   "saque_pago",
   "cashback_pago",
   "primeiro_deposito",
+  "segundo_deposito",
+  "terceiro_deposito",
   "cadastrados_sem_deposito",
   "lead_cadastrado",
 ]);

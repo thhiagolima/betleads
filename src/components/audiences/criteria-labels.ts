@@ -22,6 +22,8 @@ export function criteriaLabels(criteria: SmsAudienceCriteria): string[] {
   if (criteria.activity.deposit === "never") labels.push("Nunca depositou");
   if (criteria.activity.deposit === "yes") labels.push("Já depositou");
   if (criteria.activity.deposit === "first_only") labels.push("Só fez o 1º depósito");
+  if (criteria.activity.deposit === "exactly_2") labels.push("Já fez 2 depósitos");
+  if (criteria.activity.deposit === "exactly_3") labels.push("Já fez 3 depósitos");
   if (criteria.activity.pixUnpaid) labels.push("Gerou PIX e não pagou");
   if (criteria.activity.withdrawal === "yes") labels.push("Já sacou");
   if (criteria.activity.withdrawal === "never") labels.push("Nunca sacou");

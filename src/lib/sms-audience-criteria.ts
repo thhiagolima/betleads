@@ -4,7 +4,10 @@ export const smsAudienceCriteriaSchema = z.object({
   activity: z
     .object({
       // first_only: fez o 1º depósito e nenhum outro depois dele.
-      deposit: z.enum(["any", "never", "yes", "first_only"]).default("any"),
+      // exactly_2 / exactly_3: exatamente 2 / 3 depósitos aprovados.
+      deposit: z
+        .enum(["any", "never", "yes", "first_only", "exactly_2", "exactly_3"])
+        .default("any"),
       pixUnpaid: z.boolean().default(false),
       cashback: z.boolean().default(false),
       withdrawal: z.enum(["any", "yes", "never"]).default("any"),
@@ -265,6 +268,8 @@ export function describeSmsAudience(criteria: SmsAudienceCriteria) {
   if (criteria.activity.deposit === "never") parts.push("nunca depositou");
   if (criteria.activity.deposit === "first_only")
     parts.push("só fez o 1º depósito (nenhum depois dele)");
+  if (criteria.activity.deposit === "exactly_2") parts.push("já fez 2 depósitos (exatamente 2)");
+  if (criteria.activity.deposit === "exactly_3") parts.push("já fez 3 depósitos (exatamente 3)");
   if (criteria.activity.pixUnpaid) parts.push("gerou PIX e não pagou");
   if (criteria.activity.cashback) parts.push("recebeu cashback");
   if (criteria.activity.withdrawal === "yes") parts.push("já sacou");

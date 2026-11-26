@@ -22,7 +22,9 @@ export function tourFor(
  * article shares another route's progress. Every other screen keeps exactly
  * the key it always had (`tourKey(screen.route, tab)`). */
 export function screenTourKey(screen: HelpScreen, tourTab: string | null): string {
-  return tourKey(screen.tourRoute ?? screen.route, tourTab);
+  const key = tourKey(screen.tourRoute ?? screen.route, tourTab);
+  const version = screen.tourVersion ?? 1;
+  return version > 1 ? `${key}@v${version}` : key;
 }
 
 export type ShouldAutoStartInput = {

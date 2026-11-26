@@ -64,7 +64,7 @@ describe("autoStartDecision", () => {
     expect(decide({ overlayActive: true, hasSteps: false })).toBe("never");
   });
 
-  it("shouldAutoStart is exactly autoStartDecision === \"start\"", () => {
+  it('shouldAutoStart is exactly autoStartDecision === "start"', () => {
     const cases: Partial<In>[] = [
       {},
       { progress: null },
@@ -73,7 +73,8 @@ describe("autoStartDecision", () => {
       { hasSteps: false },
       { progress: { "tour:/campanhas": "done" } },
     ];
-    for (const c of cases) expect(shouldAutoStart({ ...base, ...c } as In)).toBe(decide(c) === "start");
+    for (const c of cases)
+      expect(shouldAutoStart({ ...base, ...c } as In)).toBe(decide(c) === "start");
   });
 });
 
@@ -134,9 +135,9 @@ describe("effectiveOverlayForAutoStart", () => {
   });
 
   it("still blocks the override screen while the help panel is open", () => {
-    expect(
-      effectiveOverlayForAutoStart({ ...base, isOverrideScreen: true, panelOpen: true }),
-    ).toBe(true);
+    expect(effectiveOverlayForAutoStart({ ...base, isOverrideScreen: true, panelOpen: true })).toBe(
+      true,
+    );
   });
 
   it("blocks a non-override screen while the panel is open, even without an overlay", () => {
@@ -171,7 +172,7 @@ describe("tourFor", () => {
   // Task 15), must resolve to no steps at all — the panel's "Fazer o tour
   // desta tela" relies on exactly this to stay hidden on that tab, even
   // though the screen as a whole does have a tour (on another tab).
-  it("has no steps when neither the tab nor \"default\" has a tour", () => {
+  it('has no steps when neither the tab nor "default" has a tour', () => {
     const noDefault: HelpScreen = { ...screen, tours: { links: [step("x.links.a")] } };
     expect(tourFor(noDefault, "plataforma")).toEqual({ tourTab: null, steps: [] });
     expect(tourFor({ ...screen, tours: {} }, null)).toEqual({ tourTab: null, steps: [] });
@@ -273,8 +274,23 @@ describe("screenTourKey", () => {
     const edit = (await HELP_SCREEN_LOADERS["/jornadas/$journeyId"]()).default;
     expect(edit.route).toBe("/jornadas/$journeyId");
     const novaKey = screenTourKey(nova, tourFor(nova, null).tourTab);
-    expect(novaKey).toBe("tour:/jornadas/nova");
+    // v2: the tour changed, so the key changed and it shows again.
+    expect(novaKey).toBe("tour:/jornadas/nova@v2");
     expect(screenTourKey(edit, tourFor(edit, null).tourTab)).toBe(novaKey);
+  }, 20_000);
+
+  it("a tourVersion above 1 gets its own key, so done/skipped from before no longer applies", async () => {
+    const publicos = (await HELP_SCREEN_LOADERS["/publicos"]()).default;
+    expect(publicos.tourVersion).toBe(2);
+    const key = screenTourKey(publicos, null);
+    expect(key).toBe("tour:/publicos@v2");
+    const decide = (progress: Record<string, "done" | "skipped" | "off">) =>
+      autoStartDecision({ key, progress, dialogOpen: false, overlayActive: false, hasSteps: true });
+    expect(decide({ "tour:/publicos": "skipped" })).toBe("start");
+    expect(decide({ "tour:/publicos": "done" })).toBe("start");
+    expect(decide({ [key]: "skipped" })).toBe("never");
+    expect(decide({ "prefs:auto-tours": "off" })).toBe("never");
+    expect(screenTourKey({ ...publicos, tourVersion: undefined }, null)).toBe("tour:/publicos");
   }, 20_000);
 
   it("keeps every other screen's key byte-identical to tourKey(route, tab)", async () => {
@@ -288,7 +304,9 @@ describe("screenTourKey", () => {
       const screen = (await load()).default;
       for (const tab of Object.keys(screen.tours)) {
         const tourTab = tab === "default" ? null : tab;
-        expect(screenTourKey(screen, tourTab)).toBe(tourKey(screen.route, tourTab));
+        const version = screen.tourVersion ?? 1;
+        const base = tourKey(screen.route, tourTab);
+        expect(screenTourKey(screen, tourTab)).toBe(version > 1 ? `${base}@v${version}` : base);
       }
     }
   }, 20_000);
@@ -330,12 +348,12 @@ describe("tourReadiness", () => {
     expect(
       at({ availableSteps: 2, firstAvailable: false, elapsedMs: TOUR_READY_DEADLINE_MS - 1 }),
     ).toBe("wait");
-    expect(at({ availableSteps: 1, firstAvailable: false, elapsedMs: TOUR_READY_DEADLINE_MS })).toBe(
-      "start",
-    );
-    expect(at({ availableSteps: 0, firstAvailable: false, elapsedMs: TOUR_READY_DEADLINE_MS })).toBe(
-      "giveup",
-    );
+    expect(
+      at({ availableSteps: 1, firstAvailable: false, elapsedMs: TOUR_READY_DEADLINE_MS }),
+    ).toBe("start");
+    expect(
+      at({ availableSteps: 0, firstAvailable: false, elapsedMs: TOUR_READY_DEADLINE_MS }),
+    ).toBe("giveup");
   });
 
   it('a tour with no steps is "giveup"', () => {

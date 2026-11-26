@@ -4,6 +4,7 @@ import { startJobRun, type JobRunHandle } from "./observability/job-monitor.serv
 import { captureServerException } from "./observability/sentry.server";
 import {
   audienceMatches,
+  depositOrdinalField,
   eventMaxAgeHours,
   eventYoungEnough,
   inactivityBandConfig,
@@ -77,6 +78,8 @@ export const PLAYER_MATCH_COLUMNS = [
   "status",
   "vip",
   "ftd_em",
+  "segundo_deposito_em",
+  "terceiro_deposito_em",
   "created_at",
   "updated_at",
   "total_depositado",
@@ -151,15 +154,22 @@ export function matchJourneyScanPlayer(
       occurrence: player.created_at,
     };
   }
-  if (journey.trigger_type === "primeiro_deposito") {
-    const occurredAt = Date.parse(String(player.ftd_em ?? ""));
+  const depositField = depositOrdinalField(journey.trigger_type);
+  if (depositField) {
+    const depositAt = (player as Record<string, unknown>)[depositField];
+    const occurredAt = Date.parse(String(depositAt ?? ""));
     return {
       matches:
         Number.isFinite(occurredAt) &&
-        player.ftd_em != null &&
+        depositAt != null &&
         (startAt == null || occurredAt >= startAt) &&
         eventYoungEnough(journey.trigger_type, journey.trigger_config, occurredAt),
-      occurrence: String(player.ftd_em ?? "missing_first_deposit"),
+      occurrence:
+        depositAt != null
+          ? String(depositAt)
+          : journey.trigger_type === "primeiro_deposito"
+            ? "missing_first_deposit"
+            : `missing_${depositField}`,
     };
   }
   if (journey.trigger_type === "pix_gerado_nao_pago" || journey.trigger_type === "saque_pago") {
@@ -397,7 +407,14 @@ export function crossingTimeFor(
 const EVENT_ENTRY_TRIGGERS: Record<string, readonly string[]> = {
   cadastro: ["cadastrados_sem_deposito"],
   "deposito-pendente": ["pix_gerado_nao_pago"],
-  "deposito-aprovado": ["primeiro_deposito", "quase_vip", "reativacao_em_curso", "alto_potencial"],
+  "deposito-aprovado": [
+    "primeiro_deposito",
+    "segundo_deposito",
+    "terceiro_deposito",
+    "quase_vip",
+    "reativacao_em_curso",
+    "alto_potencial",
+  ],
   "saque-aprovado": ["saque_pago"],
   "saque-concluido": ["saque_pago"],
   // last_cashback_paid_at is written before entry runs; the trigger means "paid today".

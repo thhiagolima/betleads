@@ -186,6 +186,8 @@ const ENTRY_FILTER_FIELDS: Array<{
 const EVENT_AGE_LABELS: Record<string, string> = {
   cadastrados_sem_deposito: "Só entra quem se cadastrou nas últimas (horas)",
   primeiro_deposito: "Só entra quem fez o 1º depósito nas últimas (horas)",
+  segundo_deposito: "Só entra quem fez o 2º depósito nas últimas (horas)",
+  terceiro_deposito: "Só entra quem fez o 3º depósito nas últimas (horas)",
   saque_pago: "Só entra saque pago nas últimas (horas)",
 };
 const FAMILY_NONE = "none";

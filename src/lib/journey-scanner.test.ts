@@ -91,6 +91,29 @@ describe("journey scanner eligibility", () => {
     expect(result.occurrence).toBe(recent);
   });
 
+  it.each([
+    ["segundo_deposito", "segundo_deposito_em"],
+    ["terceiro_deposito", "terceiro_deposito_em"],
+  ])("%s enters on the recent %s, like the first deposit", (trigger, field) => {
+    const nth = journey({ trigger_type: trigger });
+    const recent = new Date(Date.now() - 3600_000).toISOString();
+    expect(matchJourneyScanPlayer(nth, player({ ftd_em: recent }), new Map()).matches).toBe(false);
+    expect(
+      matchJourneyScanPlayer(nth, player({ [field]: "2026-01-10T10:00:00.000Z" }), new Map())
+        .matches,
+    ).toBe(false);
+    const result = matchJourneyScanPlayer(nth, player({ [field]: recent }), new Map());
+    expect(result.matches).toBe(true);
+    expect(result.occurrence).toBe(recent);
+    const startAfter = journey({
+      trigger_type: trigger,
+      trigger_config: { start_after: new Date().toISOString() },
+    });
+    expect(matchJourneyScanPlayer(startAfter, player({ [field]: recent }), new Map()).matches).toBe(
+      false,
+    );
+  });
+
   it("requires a financial occurrence for pending PIX journeys", () => {
     const pendingPix = journey({ trigger_type: "pix_gerado_nao_pago" });
     expect(matchJourneyScanPlayer(pendingPix, player(), new Map()).matches).toBe(false);
@@ -155,6 +178,8 @@ describe("event-driven journey entry (ENV-09)", () => {
     expect(eventEntryTriggers("cadastro")).toEqual(["cadastrados_sem_deposito"]);
     expect(eventEntryTriggers("deposito-pendente")).toEqual(["pix_gerado_nao_pago"]);
     expect(eventEntryTriggers("deposito-aprovado")).toContain("primeiro_deposito");
+    expect(eventEntryTriggers("deposito-aprovado")).toContain("segundo_deposito");
+    expect(eventEntryTriggers("deposito-aprovado")).toContain("terceiro_deposito");
     expect(eventEntryTriggers("saque-concluido")).toEqual(["saque_pago"]);
     expect(eventEntryTriggers("login")).toEqual([]);
   });
@@ -175,13 +200,28 @@ describe("event-driven journey entry (ENV-09)", () => {
     const other = "22222222-2222-4222-8222-222222222222";
     const journey = { id: "33333333-3333-4333-8333-333333333333", tenant_id: tenant };
     expect(
-      journeyInWorkerScope(journey, { tenantIds: [], journeyIds: [], allowAll: true, allowed: true }),
+      journeyInWorkerScope(journey, {
+        tenantIds: [],
+        journeyIds: [],
+        allowAll: true,
+        allowed: true,
+      }),
     ).toBe(true);
     expect(
-      journeyInWorkerScope(journey, { tenantIds: [other], journeyIds: [], allowAll: false, allowed: true }),
+      journeyInWorkerScope(journey, {
+        tenantIds: [other],
+        journeyIds: [],
+        allowAll: false,
+        allowed: true,
+      }),
     ).toBe(false);
     expect(
-      journeyInWorkerScope(journey, { tenantIds: [], journeyIds: [], allowAll: false, allowed: false }),
+      journeyInWorkerScope(journey, {
+        tenantIds: [],
+        journeyIds: [],
+        allowAll: false,
+        allowed: false,
+      }),
     ).toBe(false);
   });
 });
@@ -205,7 +245,9 @@ describe("threshold crossing (ENV-09 part 2)", () => {
         trigger_config: { field: "ultimo_deposito", hours: 48 },
       }),
     ).toEqual({ fields: ["ultimo_deposito"], hours: 48 });
-    expect(crossingSpecFor({ trigger_type: "inactivity", trigger_config: { hours: 0 } })).toBeNull();
+    expect(
+      crossingSpecFor({ trigger_type: "inactivity", trigger_config: { hours: 0 } }),
+    ).toBeNull();
     expect(
       crossingSpecFor({ trigger_type: "inactivity", trigger_config: { field: "saldo", hours: 5 } }),
     ).toBeNull();
@@ -257,7 +299,9 @@ describe("full scanner as safety net", () => {
     );
     // History (backfill) and very recent events are not late.
     expect(lateEntryPath(registration, player(), "2026-01-01T00:00:00.000Z", ctx)).toBeNull();
-    expect(lateEntryPath(registration, player(), new Date(now - 60_000).toISOString(), ctx)).toBeNull();
+    expect(
+      lateEntryPath(registration, player(), new Date(now - 60_000).toISOString(), ctx),
+    ).toBeNull();
     expect(
       lateEntryPath(registration, player(), new Date(now - 3600_000).toISOString(), {
         ...ctx,
